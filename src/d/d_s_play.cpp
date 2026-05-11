@@ -574,7 +574,8 @@ static int dScnPly_Draw(dScnPly_c* i_this) {
 
             int rt = fopScnM_ChangeReq(i_this, fpcNm_PLAY_SCENE_e,
                                         DUSK_IF_ELSE(
-                                            dusk::getSettings().game.enableFastLoads.getValue() ?
+                                            (dusk::getSettings().game.enableFastLoads.getValue() ||
+                                             dusk::getSettings().game.enableInstaLoads.getValue()) ?
                                                 fpcNm_OVERLAP0_e :
                                                 l_wipeType[wipe],
                                             l_wipeType[wipe]),
@@ -1383,10 +1384,25 @@ static int phase_2(dScnPly_c* i_this) {
 }
 
 static int phase_3(dScnPly_c* i_this) {
+    static int sInstaAudioGraceFrames = 0;
+    bool audioLoading = mDoAud_check1stDynamicWave();
+
+#if TARGET_PC
+    if (dusk::getSettings().game.enableInstaLoads.getValue()) {
+        if (audioLoading && sInstaAudioGraceFrames < 1) {
+            sInstaAudioGraceFrames++;
+            return cPhs_INIT_e;
+        }
+    } else {
+        sInstaAudioGraceFrames = 0;
+    }
+#endif
+
     if ((i_this->sceneCommand != NULL && !i_this->sceneCommand->sync()) ||
         DUSK_IF_ELSE(!dusk::getSettings().game.enableFastLoads.getValue() &&
-                         mDoAud_check1stDynamicWave(),
-                     mDoAud_check1stDynamicWave()))
+                         !dusk::getSettings().game.enableInstaLoads.getValue() &&
+                         audioLoading,
+                     audioLoading))
     {
         return cPhs_INIT_e;
     }
@@ -1394,6 +1410,8 @@ static int phase_3(dScnPly_c* i_this) {
     if (i_this->field_0x1d0 != NULL && !i_this->field_0x1d0->sync()) {
         return cPhs_INIT_e;
     }
+
+    sInstaAudioGraceFrames = 0;
 
     #if VERSION == VERSION_SHIELD_DEBUG
     dBgp_c::createShare();

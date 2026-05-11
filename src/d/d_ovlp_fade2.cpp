@@ -10,14 +10,33 @@
 #include "d/d_s_play.h"
 #include "m_Do/m_Do_audio.h"
 #include "m_Do/m_Do_graphic.h"
+#include "m_Do/m_Do_Reset.h"
 #if TARGET_PC
 #include "dusk/settings.h"
 #endif
 
 static const int kFastFadeFrames = 20;
+static const int kFastFadeInFrames = 25;
+static const int kInstaFadeFrames = 1;
+static const int kInstaFadeInFrames = 1;
 
 static bool dOvlpFd2_isFastLoad() {
-    return DUSK_IF_ELSE(dusk::getSettings().game.enableFastLoads.getValue(), false);
+    return DUSK_IF_ELSE((dusk::getSettings().game.enableFastLoads.getValue() ||
+                         dusk::getSettings().game.enableInstaLoads.getValue()) &&
+                            !mDoRst::isReset(),
+                        false);
+}
+
+static int dOvlpFd2_getFadeFrames() {
+    return DUSK_IF_ELSE(dusk::getSettings().game.enableInstaLoads.getValue() ? kInstaFadeFrames :
+                                                                                kFastFadeFrames,
+                        kFastFadeFrames);
+}
+
+static int dOvlpFd2_getFadeInFrames() {
+    return DUSK_IF_ELSE(dusk::getSettings().game.enableInstaLoads.getValue() ? kInstaFadeInFrames :
+                                                                                kFastFadeInFrames,
+                        kFastFadeInFrames);
 }
 
 void dOvlpFd2_dlst_c::draw() {
@@ -161,7 +180,7 @@ void dOvlpFd2_c::execFadeOut() {
 
     if (mTimer < 0) {
         if (++mTimer == 0) {
-            mDoGph_gInf_c::startFadeOut(dOvlpFd2_isFastLoad() ? kFastFadeFrames : 16);
+            mDoGph_gInf_c::startFadeOut(dOvlpFd2_isFastLoad() ? dOvlpFd2_getFadeFrames() : 16);
             mTimer = dOvlpFd2_isFastLoad() ? 1 : TREG_S(1) + 20;
         }
     } else {
@@ -175,7 +194,7 @@ void dOvlpFd2_c::execFadeOut() {
 void dOvlpFd2_c::execNextSnap() {
     if (cLib_calcTimer<s8>(&mTimer) == 0) {
         if (!JFWDisplay::getManager()->getFader()->startFadeIn(dOvlpFd2_isFastLoad() ?
-                                                                    kFastFadeFrames :
+                                                                    dOvlpFd2_getFadeInFrames() :
                                                                     16))
         {
             field_0x110 += field_0x112;

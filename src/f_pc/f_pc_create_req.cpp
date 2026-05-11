@@ -12,8 +12,13 @@
 #include "f_pc/f_pc_executor.h"
 #include "f_pc/f_pc_layer.h"
 #include "f_pc/f_pc_debug_sv.h"
+#include "f_pc/f_pc_create_tag.h"
 #include <cstdio>
 #include "dusk/logging.h"
+
+#if TARGET_PC
+#include "dusk/settings.h"
+#endif
 
 BOOL fpcCtRq_isCreatingByID(create_tag* i_createTag, fpc_ProcID* i_id) {
     fpc_ProcID id = ((create_request*)i_createTag->base.mpTagData)->id;
@@ -124,6 +129,35 @@ int fpcCtRq_Handler() {
 #if DEBUG
     if (g_fpcDbSv_service[3] != NULL) {
         g_fpcDbSv_service[3](&g_fpcCtTg_Queue.mSize);
+    }
+#endif
+#if TARGET_PC
+    if (dusk::getSettings().game.enableFastLoads.getValue() ||
+        dusk::getSettings().game.enableInstaLoads.getValue())
+    {
+        int result = 1;
+        int unchangedPasses = 0;
+        int maxPasses = dusk::getSettings().game.enableInstaLoads.getValue() ? 4096 : 64;
+        int maxUnchangedPasses = dusk::getSettings().game.enableInstaLoads.getValue() ? 512 : 16;
+
+        for (int i = 0; i < maxPasses && g_fpcCtTg_Queue.mSize > 0; i++) {
+            int beforeSize = g_fpcCtTg_Queue.mSize;
+            result = fpcCtIt_Method((fpcCtIt_MethodFunc)fpcCtRq_Do, NULL);
+            if (!result) {
+                return result;
+            }
+
+            if (g_fpcCtTg_Queue.mSize == beforeSize) {
+                unchangedPasses++;
+                if (unchangedPasses >= maxUnchangedPasses) {
+                    break;
+                }
+            } else {
+                unchangedPasses = 0;
+            }
+        }
+
+        return result;
     }
 #endif
     return fpcCtIt_Method((fpcCtIt_MethodFunc)fpcCtRq_Do, NULL);

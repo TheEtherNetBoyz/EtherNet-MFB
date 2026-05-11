@@ -1475,7 +1475,10 @@ void dComIfGp_setNextStage(char const* i_stage, s16 i_point, s8 i_roomNo, s8 i_l
     }
 
 #if TARGET_PC
-    if (dusk::getSettings().game.enableFastLoads.getValue() && !mDoRst::isReset()) {
+    if ((dusk::getSettings().game.enableFastLoads.getValue() ||
+         dusk::getSettings().game.enableInstaLoads.getValue()) &&
+        !mDoRst::isReset())
+    {
         wipe_speed = 1;
     }
 #endif

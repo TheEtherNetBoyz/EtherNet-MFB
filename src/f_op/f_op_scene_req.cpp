@@ -24,7 +24,8 @@ static cPhs_Step fopScnRq_phase_Execute(scene_request_class* i_sceneReq) {
 
     if (ret == cPhs_NEXT_e && i_sceneReq->fade_request != NULL &&
 #if TARGET_PC
-        dusk::getSettings().game.enableFastLoads.getValue() &&
+        (dusk::getSettings().game.enableFastLoads.getValue() ||
+         dusk::getSettings().game.enableInstaLoads.getValue()) &&
 #endif
         i_sceneReq->create_request.name == fpcNm_PLAY_SCENE_e &&
         i_sceneReq->create_request.node_proc.node != NULL &&

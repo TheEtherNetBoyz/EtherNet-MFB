@@ -104,6 +104,7 @@ struct UserSettings {
         ConfigVar<bool> fastTears;
         ConfigVar<bool> no2ndFishForCat;
         ConfigVar<bool> enableFastLoads;
+        ConfigVar<bool> enableInstaLoads;
         ConfigVar<bool> instantSaves;
         ConfigVar<bool> instantText;
         ConfigVar<bool> sunsSong;

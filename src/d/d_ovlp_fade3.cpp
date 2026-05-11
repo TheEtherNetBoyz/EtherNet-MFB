@@ -11,14 +11,33 @@
 #include "d/d_s_play.h"
 #include "m_Do/m_Do_audio.h"
 #include "m_Do/m_Do_graphic.h"
+#include "m_Do/m_Do_Reset.h"
 #if TARGET_PC
 #include "dusk/settings.h"
 #endif
 
 static const int kFastFadeFrames = 20;
+static const int kFastFadeInFrames = 25;
+static const int kInstaFadeFrames = 1;
+static const int kInstaFadeInFrames = 1;
 
 static bool dOvlpFd3_isFastLoad() {
-    return DUSK_IF_ELSE(dusk::getSettings().game.enableFastLoads.getValue(), false);
+    return DUSK_IF_ELSE((dusk::getSettings().game.enableFastLoads.getValue() ||
+                         dusk::getSettings().game.enableInstaLoads.getValue()) &&
+                            !mDoRst::isReset(),
+                        false);
+}
+
+static int dOvlpFd3_getFadeFrames() {
+    return DUSK_IF_ELSE(dusk::getSettings().game.enableInstaLoads.getValue() ? kInstaFadeFrames :
+                                                                                kFastFadeFrames,
+                        kFastFadeFrames);
+}
+
+static int dOvlpFd3_getFadeInFrames() {
+    return DUSK_IF_ELSE(dusk::getSettings().game.enableInstaLoads.getValue() ? kInstaFadeInFrames :
+                                                                                kFastFadeInFrames,
+                        kFastFadeInFrames);
 }
 
 void dDlst_snapShot_c::draw() {
@@ -147,7 +166,7 @@ dOvlpFd3_c::dOvlpFd3_c() {
 
     dCam_getBody()->Stop();
     mDoGph_gInf_c::startFadeOut(dOvlpFd3_isFastLoad() ?
-                                    kFastFadeFrames :
+                                    dOvlpFd3_getFadeFrames() :
                                     XREG_S(3) + (field_0x11f >> 1) + 90);
 }
 
@@ -177,7 +196,7 @@ void dOvlpFd3_c::execFadeOut() {
 
     if (mTimer < 0) {
         if (++mTimer == 0) {
-            mDoGph_gInf_c::startFadeOut(dOvlpFd3_isFastLoad() ? kFastFadeFrames :
+            mDoGph_gInf_c::startFadeOut(dOvlpFd3_isFastLoad() ? dOvlpFd3_getFadeFrames() :
                                                                     XREG_S(1) + 75);
             mTimer = dOvlpFd3_isFastLoad() ? 1 : XREG_S(2) + 90;
             mDoAud_setFadeOutStart(0);
@@ -190,7 +209,7 @@ void dOvlpFd3_c::execFadeOut() {
 void dOvlpFd3_c::execNextSnap() {
     if (cLib_calcTimer(&mTimer) == 0) {
         if (!JFWDisplay::getManager()->getFader()->startFadeIn(dOvlpFd3_isFastLoad() ?
-                                                                    kFastFadeFrames :
+                                                                    dOvlpFd3_getFadeInFrames() :
                                                                     XREG_S(4) + 26))
         {
             mDoAud_setFadeInStart(0);

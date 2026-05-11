@@ -860,6 +860,8 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Tears of Light dropped by Shadow Insects pop out faster like the HD version.");
         addOption("Fast Loads", getSettings().game.enableFastLoads,
             "Shortens area transition waits and fades.");
+        addOption("Insta Loads", getSettings().game.enableInstaLoads,
+            "Experimental near-instant area transitions.");
         config_bool_select(leftPane, rightPane, getSettings().game.autoSave,
             {
                 .key = "Autosave",

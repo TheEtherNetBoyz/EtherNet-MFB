@@ -23,11 +23,34 @@ public:
 };
 
 static const int kFastFadeFrames = 20;
+static const int kFastFadeInFrames = 25;
+static const int kInstaFadeFrames = 1;
+static const int kInstaFadeInFrames = 1;
 static const int kStartLoadBeforeFadeDoneFrames = 2;
 
 static bool dOvlpFd_isFastLoad() {
-    return DUSK_IF_ELSE(dusk::getSettings().game.enableFastLoads.getValue() && !mDoRst::isReset(),
+    return DUSK_IF_ELSE((dusk::getSettings().game.enableFastLoads.getValue() ||
+                         dusk::getSettings().game.enableInstaLoads.getValue()) &&
+                            !mDoRst::isReset(),
                         false);
+}
+
+static int dOvlpFd_getFadeFrames() {
+    return DUSK_IF_ELSE(dusk::getSettings().game.enableInstaLoads.getValue() ? kInstaFadeFrames :
+                                                                               kFastFadeFrames,
+                        kFastFadeFrames);
+}
+
+static int dOvlpFd_getFadeInFrames() {
+    return DUSK_IF_ELSE(dusk::getSettings().game.enableInstaLoads.getValue() ? kInstaFadeInFrames :
+                                                                               kFastFadeInFrames,
+                        kFastFadeInFrames);
+}
+
+static int dOvlpFd_getDoneFrames() {
+    return DUSK_IF_ELSE(dusk::getSettings().game.enableInstaLoads.getValue() ? 0 :
+                                                                               kStartLoadBeforeFadeDoneFrames,
+                        kStartLoadBeforeFadeDoneFrames);
 }
 
 static int dOvlpFd_Draw(overlap1_class* i_this) {
@@ -45,7 +68,8 @@ static void dOvlpFd_startFadeIn(int param_0) {
 
 static int dOvlpFd_FadeOut(overlap1_class* i_this) {
     bool fastLoad = dOvlpFd_isFastLoad();
-    int var_r31 = fastLoad ? kFastFadeFrames : i_this->field_0xd4;
+    int fastFadeFrames = dOvlpFd_getFadeInFrames();
+    int var_r31 = fastLoad ? fastFadeFrames : i_this->field_0xd4;
 
     if (i_this->field_0xcc == 0) {
         mDoAud_setFadeInStart(0);
@@ -62,8 +86,8 @@ static int dOvlpFd_FadeOut(overlap1_class* i_this) {
             dOvlpFd_startFadeIn(0);
             i_this->field_0xcc = 1;
         } else {
-            dOvlpFd_startFadeIn(kFastFadeFrames);
-            i_this->field_0xcc = kFastFadeFrames;
+            dOvlpFd_startFadeIn(fastFadeFrames);
+            i_this->field_0xcc = fastFadeFrames;
         }
     }
 
@@ -93,7 +117,8 @@ static int dOvlpFd_Wait(overlap1_class* i_this) {
 
 static int dOvlpFd_FadeIn(overlap1_class* i_this) {
     bool fastLoad = dOvlpFd_isFastLoad();
-    int var_r30 = fastLoad ? kFastFadeFrames : 30;
+    int fastFadeFrames = dOvlpFd_getFadeFrames();
+    int var_r30 = fastLoad ? fastFadeFrames : 30;
 
     if (i_this->field_0xd0 == 0) {
         if (fpcM_GetProfName(i_this) == fpcNm_OVERLAP0_e || fpcM_GetProfName(i_this) == fpcNm_OVERLAP7_e)
@@ -110,16 +135,16 @@ static int dOvlpFd_FadeIn(overlap1_class* i_this) {
         } else if (fpcM_GetProfName(i_this) == fpcNm_OVERLAP10_e ||
                    fpcM_GetProfName(i_this) == fpcNm_OVERLAP11_e)
         {
-            i_this->field_0xd0 = fastLoad ? kFastFadeFrames : 1;
+            i_this->field_0xd0 = fastLoad ? fastFadeFrames : 1;
         } else {
-            i_this->field_0xd0 = fastLoad ? kFastFadeFrames : 30;
+            i_this->field_0xd0 = fastLoad ? fastFadeFrames : 30;
         }
 
         i_this->field_0xd4 = var_r30;
         mDoAud_setFadeOutStart(0);
     }
 
-    if (--i_this->field_0xd0 == kStartLoadBeforeFadeDoneFrames && fastLoad) {
+    if (--i_this->field_0xd0 == dOvlpFd_getDoneFrames() && fastLoad) {
         fopOvlpM_Done(i_this);
     }
 

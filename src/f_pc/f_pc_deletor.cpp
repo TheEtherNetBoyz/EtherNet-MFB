@@ -12,6 +12,10 @@
 #include "f_pc/f_pc_debug_sv.h"
 #include "JSystem/JUtility/JUTAssert.h"
 
+#if TARGET_PC
+#include "dusk/settings.h"
+#endif
+
 BOOL fpcDt_IsComplete() {
     return fpcDtTg_IsEmpty();
 }
@@ -37,6 +41,28 @@ void fpcDt_Handler() {
 #if DEBUG
     if (g_fpcDbSv_service[6] != NULL) {
         g_fpcDbSv_service[6](&g_fpcDtTg_Queue.mSize);
+    }
+#endif
+#if TARGET_PC
+    if (dusk::getSettings().game.enableInstaLoads.getValue()) {
+        int unchangedPasses = 0;
+
+        for (int i = 0; i < 4096 && g_fpcDtTg_Queue.mSize > 0; i++) {
+            int beforeSize = g_fpcDtTg_Queue.mSize;
+            cLsIt_Method(&g_fpcDtTg_Queue, (cNdIt_MethodFunc)fpcDtTg_Do,
+                         (void*)fpcDt_deleteMethod);
+
+            if (g_fpcDtTg_Queue.mSize == beforeSize) {
+                unchangedPasses++;
+                if (unchangedPasses >= 512) {
+                    break;
+                }
+            } else {
+                unchangedPasses = 0;
+            }
+        }
+
+        return;
     }
 #endif
     cLsIt_Method(&g_fpcDtTg_Queue, (cNdIt_MethodFunc)fpcDtTg_Do, (void*)fpcDt_deleteMethod);

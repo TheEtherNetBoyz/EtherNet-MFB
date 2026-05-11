@@ -41,6 +41,7 @@ UserSettings g_userSettings = {
         .fastTears {"game.fastTears", false},
         .no2ndFishForCat {"game.no2ndFishForCat", false},
         .enableFastLoads {"game.enableFastLoads", false},
+        .enableInstaLoads {"game.enableInstaLoads", false},
         .instantSaves {"game.instantSaves", false},
         .instantText {"game.instantText", false},
         .sunsSong {"game.sunsSong", false},
@@ -167,6 +168,7 @@ void registerSettings() {
     Register(g_userSettings.game.fastTears);
     Register(g_userSettings.game.no2ndFishForCat);
     Register(g_userSettings.game.enableFastLoads);
+    Register(g_userSettings.game.enableInstaLoads);
     Register(g_userSettings.game.instantSaves);
     Register(g_userSettings.game.instantText);
     Register(g_userSettings.game.sunsSong);

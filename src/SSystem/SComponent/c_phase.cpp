@@ -49,7 +49,9 @@ int cPhs_Next(request_of_phase_process_class* phase) {
 
 int cPhs_Do(request_of_phase_process_class* phase, void* data) {
 #if TARGET_PC
-    if (!dusk::getSettings().game.enableFastLoads.getValue()) {
+    if (!dusk::getSettings().game.enableFastLoads.getValue() &&
+        !dusk::getSettings().game.enableInstaLoads.getValue())
+    {
         cPhs__Handler* handler = phase->mpHandlerTable;
 
         if (handler) {

@@ -107,7 +107,9 @@ int fpcNdRq_DoPhase(node_create_request* i_request) {
 
 int fpcNdRq_Execute(node_create_request* i_request) {
 #if TARGET_PC
-    if (!dusk::getSettings().game.enableFastLoads.getValue()) {
+    if (!dusk::getSettings().game.enableFastLoads.getValue() &&
+        !dusk::getSettings().game.enableInstaLoads.getValue())
+    {
         int result = fpcNdRq_DoPhase(i_request);
         switch (result) {
         case cPhs_INIT_e:
@@ -126,8 +128,10 @@ int fpcNdRq_Execute(node_create_request* i_request) {
 
     int result;
 
-    // allow multiple execution passes per frame
-    for (int i = 0; i < 8; i++) {
+    int maxPasses = DUSK_IF_ELSE(dusk::getSettings().game.enableInstaLoads.getValue() ? 4096 : 8, 1);
+
+    // Allow more creation work per frame on PC so area transitions spend fewer frames on black.
+    for (int i = 0; i < maxPasses; i++) {
         result = fpcNdRq_DoPhase(i_request);
 
         switch (result) {

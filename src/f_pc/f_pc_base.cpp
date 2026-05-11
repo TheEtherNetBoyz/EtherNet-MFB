@@ -170,7 +170,9 @@ base_process_class* fpcBs_Create(s16 i_profname, fpc_ProcID i_procID, void* i_ap
 
 int fpcBs_SubCreate(base_process_class* i_proc) {
 #if TARGET_PC
-    if (!dusk::getSettings().game.enableFastLoads.getValue()) {
+    if (!dusk::getSettings().game.enableFastLoads.getValue() &&
+        !dusk::getSettings().game.enableInstaLoads.getValue())
+    {
         switch (fpcMtd_Create(i_proc->methods, i_proc)) {
         case cPhs_NEXT_e:
         case cPhs_COMPLEATE_e:
@@ -195,8 +197,10 @@ int fpcBs_SubCreate(base_process_class* i_proc) {
 
     int ret = cPhs_INIT_e;
 
-    // only allow a few immediate NEXT transitions
-    for (int i = 0; i < 4; i++) {
+    int maxPasses = DUSK_IF_ELSE(dusk::getSettings().game.enableInstaLoads.getValue() ? 4096 : 4, 4);
+
+    // Only allow a bounded number of immediate NEXT transitions.
+    for (int i = 0; i < maxPasses; i++) {
         ret = fpcMtd_Create(i_proc->methods, i_proc);
 
         switch (ret) {
