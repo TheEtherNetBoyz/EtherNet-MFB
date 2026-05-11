@@ -25,6 +25,7 @@
 
 namespace aurora::gx {
 extern bool enableLodBias;
+extern bool experimentalPerformanceBoost;
 }
 
 namespace dusk {
@@ -79,6 +80,7 @@ namespace dusk {
                     config::Save();
                 }
                 ImGui::Checkbox("Enable LOD Bias", &aurora::gx::enableLodBias);
+                ImGui::Checkbox("Experimental Performance Boost", &aurora::gx::experimentalPerformanceBoost);
                 ImGui::EndMenu();
             }
 
