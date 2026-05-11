@@ -12,10 +12,33 @@
 #include "m_Do/m_Do_main.h"
 #include "tracy/Tracy.hpp"
 
+#if TARGET_PC
+#include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_scancode.h>
+#endif
+
 JUTGamePad* mDoCPd_c::m_gamePad[4];
 
 interface_of_controller_pad mDoCPd_c::m_cpadInfo[4];
 interface_of_controller_pad mDoCPd_c::m_debugCpadInfo[4];
+
+#if TARGET_PC
+static bool sCtrlRResetHeld = false;
+
+static void checkCtrlRSoftReset() {
+    int keyCount = 0;
+    const bool* keys = SDL_GetKeyboardState(&keyCount);
+    const bool hasKeys = keyCount > SDL_SCANCODE_R && keyCount > SDL_SCANCODE_RCTRL;
+    const bool comboHeld = hasKeys && keys[SDL_SCANCODE_R] &&
+                           (keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL]);
+
+    if (sCtrlRResetHeld && !comboHeld && !mDoRst::isReset()) {
+        mDoRst_resetCallBack(-1, NULL);
+    }
+
+    sCtrlRResetHeld = comboHeld;
+}
+#endif
 
 void mDoCPd_c::create() {
     #if PLATFORM_GCN || PLATFORM_SHIELD
@@ -65,6 +88,10 @@ void mDoCPd_c::read() {
             mDoRst::off3ButtonReset();
         }
     }
+
+#if TARGET_PC
+    checkCtrlRSoftReset();
+#endif
 
 #if DEBUG
     if (m_gamePad[3]) {
