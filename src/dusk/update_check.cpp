@@ -105,6 +105,8 @@ bool is_identifier_list(std::string_view value) {
 std::string_view trim_git_describe_suffix(std::string_view value) {
     if (value.ends_with("-dirty")) {
         value.remove_suffix(6);
+    } else if (value.ends_with("-mfb")) {
+        value.remove_suffix(4);
     }
     if (is_numeric_identifier(value)) {
         return {};

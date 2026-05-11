@@ -29,6 +29,10 @@ extern bool experimentalPerformanceBoost;
 }
 
 namespace dusk {
+extern bool g_skipWorldPostEffects;
+}
+
+namespace dusk {
     ImGuiMenuTools::ImGuiMenuTools() {}
 
     void ImGuiMenuTools::draw() {
@@ -81,6 +85,7 @@ namespace dusk {
                 }
                 ImGui::Checkbox("Enable LOD Bias", &aurora::gx::enableLodBias);
                 ImGui::Checkbox("Experimental Performance Boost", &aurora::gx::experimentalPerformanceBoost);
+                ImGui::Checkbox("Skip World Post Effects", &g_skipWorldPostEffects);
                 ImGui::EndMenu();
             }
 
@@ -152,6 +157,40 @@ namespace dusk {
             ImGui::Separator();
 
             ImGuiStringViewText(fmt::format(FMT_STRING("Backend: {}\n"), backend_name(aurora_get_backend())));
+
+            ImGui::Separator();
+
+            const auto& painter = lastPainterDebugInfo;
+            ImGuiStringViewText(fmt::format(FMT_STRING("Window num:        {}\n"), painter.windowNum));
+            ImGuiStringViewText(fmt::format(FMT_STRING("Pause flag:        {}\n"), painter.pauseFlag ? "yes" : "no"));
+            ImGuiStringViewText(
+                fmt::format(FMT_STRING("UI tick pending:   {}\n"), painter.uiTickPending ? "yes" : "no"));
+            ImGuiStringViewText(
+                fmt::format(FMT_STRING("Camera window:     {}\n"), painter.hasCameraWindow ? "yes" : "no"));
+            ImGuiStringViewText(fmt::format(FMT_STRING("Camera:            {}\n"), painter.hasCamera ? "yes" : "no"));
+            ImGuiStringViewText(
+                fmt::format(FMT_STRING("World post effects:{}\n"), painter.ranWorldPostEffects ? "ran" : "skipped"));
+            ImGuiStringViewText(fmt::format(FMT_STRING("2D draw:           {}\n"), painter.drew2D ? "yes" : "no"));
+            ImGuiStringViewText(
+                fmt::format(FMT_STRING("No-camera 2D:      {}\n"), painter.drewNoCamera2D ? "yes" : "no"));
+
+            ImGui::Separator();
+
+            constexpr const char* phaseNames[] = {
+                "Copy2D/setup",
+                "Sky/BG",
+                "Opaque",
+                "Translucent",
+                "Post/effects",
+                "Mirror/copy",
+                "2D/UI",
+            };
+            for (int i = 0; i < 7; ++i) {
+                const auto& phase = painter.phaseStats[i];
+                const auto phaseTotal = phase.lastVertSize + phase.lastUniformSize + phase.lastIndexSize +
+                                        phase.lastStorageSize + phase.lastTextureUploadSize;
+                ImGuiStringViewText(fmt::format(FMT_STRING("{:<13} {}\n"), phaseNames[i], BytesToString(phaseTotal)));
+            }
 
             ImGui::Separator();
 

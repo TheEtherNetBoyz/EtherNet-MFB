@@ -28,12 +28,12 @@ if (GIT_FOUND)
             OUTPUT_VARIABLE DUSK_WC_REVISION
             OUTPUT_STRIP_TRAILING_WHITESPACE)
     # defines DUSK_WC_DESCRIBE
-    execute_process(WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} COMMAND ${GIT_EXECUTABLE} describe --tags --long --dirty --match "v*"
+    execute_process(WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} COMMAND ${GIT_EXECUTABLE} describe --tags --long --dirty=-mfb --match "v*"
             OUTPUT_VARIABLE DUSK_WC_DESCRIBE
             OUTPUT_STRIP_TRAILING_WHITESPACE)
 
     # remove the git hash, then collapse a clean "-0" suffix only
-    string(REGEX REPLACE "-[^-]+(-dirty|)$" "\\1" DUSK_WC_DESCRIBE "${DUSK_WC_DESCRIBE}")
+    string(REGEX REPLACE "-[^-]+(-mfb|)$" "\\1" DUSK_WC_DESCRIBE "${DUSK_WC_DESCRIBE}")
     string(REGEX REPLACE "-0$" "" DUSK_WC_DESCRIBE "${DUSK_WC_DESCRIBE}")
 
     # defines DUSK_WC_BRANCH
@@ -51,9 +51,9 @@ endif ()
 if (DUSK_WC_DESCRIBE MATCHES "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)([-+].*)?$")
     set(DUSK_SHORT_VERSION_STRING "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}")
     set(DUSK_VERSION_TWEAK "0")
-    if (DUSK_WC_DESCRIBE MATCHES "^v[0-9]+\\.[0-9]+\\.[0-9]+-([0-9]+)(-dirty)?$")
+    if (DUSK_WC_DESCRIBE MATCHES "^v[0-9]+\\.[0-9]+\\.[0-9]+-([0-9]+)(-mfb)?$")
         set(DUSK_VERSION_TWEAK "${CMAKE_MATCH_1}")
-    elseif (DUSK_WC_DESCRIBE MATCHES "^v[0-9]+\\.[0-9]+\\.[0-9]+-[0-9A-Za-z.-]+-([0-9]+)(-dirty)?$")
+    elseif (DUSK_WC_DESCRIBE MATCHES "^v[0-9]+\\.[0-9]+\\.[0-9]+-[0-9A-Za-z.-]+-([0-9]+)(-mfb)?$")
         set(DUSK_VERSION_TWEAK "${CMAKE_MATCH_1}")
     endif ()
     set(DUSK_VERSION_STRING "${DUSK_SHORT_VERSION_STRING}.${DUSK_VERSION_TWEAK}")
