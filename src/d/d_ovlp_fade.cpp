@@ -11,7 +11,9 @@
 #include "m_Do/m_Do_audio.h"
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_Reset.h"
+#if TARGET_PC
 #include "dusk/settings.h"
+#endif
 
 class overlap1_class : public overlap_task_class {
 public:
@@ -24,11 +26,8 @@ static const int kFastFadeFrames = 20;
 static const int kStartLoadBeforeFadeDoneFrames = 2;
 
 static bool dOvlpFd_isFastLoad() {
-#if TARGET_PC
-    return dusk::getSettings().game.enableFastLoads.getValue() && !mDoRst::isReset();
-#else
-    return false;
-#endif
+    return DUSK_IF_ELSE(dusk::getSettings().game.enableFastLoads.getValue() && !mDoRst::isReset(),
+                        false);
 }
 
 static int dOvlpFd_Draw(overlap1_class* i_this) {

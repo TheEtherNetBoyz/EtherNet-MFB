@@ -22,7 +22,9 @@
 #include "m_Do/m_Do_Reset.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_graphic.h"
+#if TARGET_PC
 #include "dusk/settings.h"
+#endif
 #include <cstdio>
 #include <cstring>
 

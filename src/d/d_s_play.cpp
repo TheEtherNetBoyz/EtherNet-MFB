@@ -27,7 +27,9 @@
 #include "m_Do/m_Do_machine.h"
 #include "d/actor/d_a_suspend.h"
 #include "d/actor/d_a_ykgr.h"
+#if TARGET_PC
 #include "dusk/settings.h"
+#endif
 #include "JSystem/JHostIO/JORFile.h"
 #include "JSystem/JHostIO/JORServer.h"
 #include "JSystem/JKernel/JKRExpHeap.h"
@@ -570,15 +572,13 @@ static int dScnPly_Draw(dScnPly_c* i_this) {
             }
             #endif
 
-#if TARGET_PC
             int rt = fopScnM_ChangeReq(i_this, fpcNm_PLAY_SCENE_e,
-                                        dusk::getSettings().game.enableFastLoads.getValue() ?
-                                            fpcNm_OVERLAP0_e :
-                                            l_wipeType[wipe],
+                                        DUSK_IF_ELSE(
+                                            dusk::getSettings().game.enableFastLoads.getValue() ?
+                                                fpcNm_OVERLAP0_e :
+                                                l_wipeType[wipe],
+                                            l_wipeType[wipe]),
                                         5);
-#else
-            int rt = fopScnM_ChangeReq(i_this, fpcNm_PLAY_SCENE_e, l_wipeType[wipe], 5);
-#endif
 
             int hour = dKy_getdaytime_hour();
             BOOL isDaytime = (hour >= 6 && hour < 18) ? FALSE : TRUE;
@@ -1383,13 +1383,11 @@ static int phase_2(dScnPly_c* i_this) {
 }
 
 static int phase_3(dScnPly_c* i_this) {
-    if ((i_this->sceneCommand != NULL && !i_this->sceneCommand->sync())
-#if TARGET_PC
-        || (!dusk::getSettings().game.enableFastLoads.getValue() && mDoAud_check1stDynamicWave())
-#else
-        || mDoAud_check1stDynamicWave()
-#endif
-    ) {
+    if ((i_this->sceneCommand != NULL && !i_this->sceneCommand->sync()) ||
+        DUSK_IF_ELSE(!dusk::getSettings().game.enableFastLoads.getValue() &&
+                         mDoAud_check1stDynamicWave(),
+                     mDoAud_check1stDynamicWave()))
+    {
         return cPhs_INIT_e;
     }
 

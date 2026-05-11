@@ -7,7 +7,9 @@
 #include "f_op/f_op_overlap_req.h"
 #include "f_pc/f_pc_manager.h"
 #include "m_Do/m_Do_Reset.h"
+#if TARGET_PC
 #include "dusk/settings.h"
+#endif
 
 #include "dusk/imgui/ImGuiMenuGame.hpp"
 

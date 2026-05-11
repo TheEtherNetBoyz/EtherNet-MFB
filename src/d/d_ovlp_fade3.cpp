@@ -11,16 +11,14 @@
 #include "d/d_s_play.h"
 #include "m_Do/m_Do_audio.h"
 #include "m_Do/m_Do_graphic.h"
+#if TARGET_PC
 #include "dusk/settings.h"
+#endif
 
 static const int kFastFadeFrames = 20;
 
 static bool dOvlpFd3_isFastLoad() {
-#if TARGET_PC
-    return dusk::getSettings().game.enableFastLoads.getValue();
-#else
-    return false;
-#endif
+    return DUSK_IF_ELSE(dusk::getSettings().game.enableFastLoads.getValue(), false);
 }
 
 void dDlst_snapShot_c::draw() {
