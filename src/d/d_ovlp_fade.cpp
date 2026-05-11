@@ -11,6 +11,7 @@
 #include "m_Do/m_Do_audio.h"
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_Reset.h"
+#include "dusk/settings.h"
 
 class overlap1_class : public overlap_task_class {
 public:
@@ -21,6 +22,14 @@ public:
 
 static const int kFastFadeFrames = 20;
 static const int kStartLoadBeforeFadeDoneFrames = 2;
+
+static bool dOvlpFd_isFastLoad() {
+#if TARGET_PC
+    return dusk::getSettings().game.enableFastLoads.getValue() && !mDoRst::isReset();
+#else
+    return false;
+#endif
+}
 
 static int dOvlpFd_Draw(overlap1_class* i_this) {
     return 1;
@@ -36,12 +45,13 @@ static void dOvlpFd_startFadeIn(int param_0) {
 }
 
 static int dOvlpFd_FadeOut(overlap1_class* i_this) {
-    int var_r31 = mDoRst::isReset() ? i_this->field_0xd4 : kFastFadeFrames;
+    bool fastLoad = dOvlpFd_isFastLoad();
+    int var_r31 = fastLoad ? kFastFadeFrames : i_this->field_0xd4;
 
     if (i_this->field_0xcc == 0) {
         mDoAud_setFadeInStart(0);
 
-        if (mDoRst::isReset() && fpcM_GetProfName(i_this) == fpcNm_OVERLAP11_e) {
+        if (!fastLoad && fpcM_GetProfName(i_this) == fpcNm_OVERLAP11_e) {
             i_this->field_0xcc = 10;
         } else if (fpcM_GetProfName(i_this) == fpcNm_OVERLAP11_e) {
             dOvlpFd_startFadeIn(var_r31);
@@ -49,7 +59,7 @@ static int dOvlpFd_FadeOut(overlap1_class* i_this) {
         } else if (fpcM_GetProfName(i_this) != fpcNm_OVERLAP6_e) {
             dOvlpFd_startFadeIn(var_r31);
             i_this->field_0xcc = var_r31;
-        } else if (mDoRst::isReset()) {
+        } else if (!fastLoad) {
             dOvlpFd_startFadeIn(0);
             i_this->field_0xcc = 1;
         } else {
@@ -58,9 +68,7 @@ static int dOvlpFd_FadeOut(overlap1_class* i_this) {
         }
     }
 
-    if (mDoRst::isReset() && fpcM_GetProfName(i_this) == fpcNm_OVERLAP11_e &&
-        i_this->field_0xcc == 7)
-    {
+    if (!fastLoad && fpcM_GetProfName(i_this) == fpcNm_OVERLAP11_e && i_this->field_0xcc == 7) {
         dOvlpFd_startFadeIn(7);
     }
 
@@ -85,12 +93,13 @@ static int dOvlpFd_Wait(overlap1_class* i_this) {
 }
 
 static int dOvlpFd_FadeIn(overlap1_class* i_this) {
-    int var_r30 = mDoRst::isReset() ? 30 : kFastFadeFrames;
+    bool fastLoad = dOvlpFd_isFastLoad();
+    int var_r30 = fastLoad ? kFastFadeFrames : 30;
 
     if (i_this->field_0xd0 == 0) {
         if (fpcM_GetProfName(i_this) == fpcNm_OVERLAP0_e || fpcM_GetProfName(i_this) == fpcNm_OVERLAP7_e)
         {
-            if (mDoRst::isReset() && dComIfGp_isEnableNextStage() == 1) {
+            if (!fastLoad && dComIfGp_isEnableNextStage() == 1) {
                 var_r30 = dComIfGp_getNextStageWipeSpeed();
             }
 
@@ -102,23 +111,23 @@ static int dOvlpFd_FadeIn(overlap1_class* i_this) {
         } else if (fpcM_GetProfName(i_this) == fpcNm_OVERLAP10_e ||
                    fpcM_GetProfName(i_this) == fpcNm_OVERLAP11_e)
         {
-            i_this->field_0xd0 = mDoRst::isReset() ? 1 : kFastFadeFrames;
+            i_this->field_0xd0 = fastLoad ? kFastFadeFrames : 1;
         } else {
-            i_this->field_0xd0 = mDoRst::isReset() ? 30 : kFastFadeFrames;
+            i_this->field_0xd0 = fastLoad ? kFastFadeFrames : 30;
         }
 
         i_this->field_0xd4 = var_r30;
         mDoAud_setFadeOutStart(0);
     }
 
-    if (--i_this->field_0xd0 == kStartLoadBeforeFadeDoneFrames && !mDoRst::isReset()) {
+    if (--i_this->field_0xd0 == kStartLoadBeforeFadeDoneFrames && fastLoad) {
         fopOvlpM_Done(i_this);
     }
 
     if (i_this->field_0xd0 == 0) {
         dOvlpFd_execute_f = dOvlpFd_Wait;
         mDoGph_gInf_c::startFadeOut(0);
-        if (mDoRst::isReset()) {
+        if (!fastLoad) {
             fopOvlpM_Done(i_this);
         }
     }

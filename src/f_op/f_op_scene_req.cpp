@@ -10,6 +10,10 @@
 #include "f_pc/f_pc_executor.h"
 #include "f_pc/f_pc_manager.h"
 
+#if TARGET_PC
+#include "dusk/settings.h"
+#endif
+
 static cPhs_Step fopScnRq_phase_ClearOverlap(scene_request_class* i_sceneReq) {
     return fopOvlpM_ClearOfReq() == 1 ? cPhs_NEXT_e : cPhs_INIT_e;
     UNUSED(i_sceneReq);
@@ -19,6 +23,9 @@ static cPhs_Step fopScnRq_phase_Execute(scene_request_class* i_sceneReq) {
     cPhs_Step ret = (cPhs_Step)fpcNdRq_Execute(&i_sceneReq->create_request);
 
     if (ret == cPhs_NEXT_e && i_sceneReq->fade_request != NULL &&
+#if TARGET_PC
+        dusk::getSettings().game.enableFastLoads.getValue() &&
+#endif
         i_sceneReq->create_request.name == fpcNm_PLAY_SCENE_e &&
         i_sceneReq->create_request.node_proc.node != NULL &&
         fpcM_GetName(i_sceneReq->create_request.node_proc.node) == fpcNm_PLAY_SCENE_e)

@@ -858,6 +858,8 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Quicker climbing on ladders and vines like the HD version.");
         addOption("Faster Tears of Light", getSettings().game.fastTears,
             "Tears of Light dropped by Shadow Insects pop out faster like the HD version.");
+        addOption("Fast Loads", getSettings().game.enableFastLoads,
+            "Shortens area transition waits and fades.");
         config_bool_select(leftPane, rightPane, getSettings().game.autoSave,
             {
                 .key = "Autosave",

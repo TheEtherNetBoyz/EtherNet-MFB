@@ -11,8 +11,17 @@
 #include "d/d_s_play.h"
 #include "m_Do/m_Do_audio.h"
 #include "m_Do/m_Do_graphic.h"
+#include "dusk/settings.h"
 
 static const int kFastFadeFrames = 20;
+
+static bool dOvlpFd3_isFastLoad() {
+#if TARGET_PC
+    return dusk::getSettings().game.enableFastLoads.getValue();
+#else
+    return false;
+#endif
+}
 
 void dDlst_snapShot_c::draw() {
     GXSetTexCopySrc(0, 0, FB_WIDTH, FB_HEIGHT);
@@ -139,7 +148,9 @@ dOvlpFd3_c::dOvlpFd3_c() {
     }
 
     dCam_getBody()->Stop();
-    mDoGph_gInf_c::startFadeOut(kFastFadeFrames);
+    mDoGph_gInf_c::startFadeOut(dOvlpFd3_isFastLoad() ?
+                                    kFastFadeFrames :
+                                    XREG_S(3) + (field_0x11f >> 1) + 90);
 }
 
 void dOvlpFd3_c::execFirstSnap() {
@@ -147,7 +158,7 @@ void dOvlpFd3_c::execFirstSnap() {
         if (cLib_calcTimer(&mTimer) == 0) {
             setExecute(&dOvlpFd3_c::execFadeOut);
             fopOvlpM_Done(this);
-            mTimer = 0;
+            mTimer = dOvlpFd3_isFastLoad() ? 0 : 0xFF;
         }
 
         dComIfGp_setWindowNum(0);
@@ -168,8 +179,9 @@ void dOvlpFd3_c::execFadeOut() {
 
     if (mTimer < 0) {
         if (++mTimer == 0) {
-            mDoGph_gInf_c::startFadeOut(kFastFadeFrames);
-            mTimer = 1;
+            mDoGph_gInf_c::startFadeOut(dOvlpFd3_isFastLoad() ? kFastFadeFrames :
+                                                                    XREG_S(1) + 75);
+            mTimer = dOvlpFd3_isFastLoad() ? 1 : XREG_S(2) + 90;
             mDoAud_setFadeOutStart(0);
         }
     } else {
@@ -179,7 +191,10 @@ void dOvlpFd3_c::execFadeOut() {
 
 void dOvlpFd3_c::execNextSnap() {
     if (cLib_calcTimer(&mTimer) == 0) {
-        if (!JFWDisplay::getManager()->getFader()->startFadeIn(kFastFadeFrames)) {
+        if (!JFWDisplay::getManager()->getFader()->startFadeIn(dOvlpFd3_isFastLoad() ?
+                                                                    kFastFadeFrames :
+                                                                    XREG_S(4) + 26))
+        {
             mDoAud_setFadeInStart(0);
             field_0x110 += field_0x112;
 

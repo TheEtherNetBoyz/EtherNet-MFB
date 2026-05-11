@@ -19,6 +19,7 @@
 #include "dusk/logging.h"
 
 #if TARGET_PC
+#include "dusk/settings.h"
 #include "f_pc/f_pc_name.h"
 
 static const char* getProcName(s16 id) {
@@ -168,6 +169,30 @@ base_process_class* fpcBs_Create(s16 i_profname, fpc_ProcID i_procID, void* i_ap
 }
 
 int fpcBs_SubCreate(base_process_class* i_proc) {
+#if TARGET_PC
+    if (!dusk::getSettings().game.enableFastLoads.getValue()) {
+        switch (fpcMtd_Create(i_proc->methods, i_proc)) {
+        case cPhs_NEXT_e:
+        case cPhs_COMPLEATE_e:
+            fpcBs_DeleteAppend(i_proc);
+            i_proc->state.create_phase = cPhs_NEXT_e;
+            return cPhs_NEXT_e;
+        case cPhs_INIT_e:
+        case cPhs_LOADING_e:
+            i_proc->state.init_state = 1;
+            i_proc->state.create_phase = cPhs_INIT_e;
+            return cPhs_INIT_e;
+        case cPhs_UNK3_e:
+            i_proc->state.create_phase = cPhs_UNK3_e;
+            return cPhs_UNK3_e;
+        case cPhs_ERROR_e:
+        default:
+            i_proc->state.create_phase = cPhs_ERROR_e;
+            return cPhs_ERROR_e;
+        }
+    }
+#endif
+
     int ret = cPhs_INIT_e;
 
     // only allow a few immediate NEXT transitions

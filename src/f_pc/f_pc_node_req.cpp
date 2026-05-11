@@ -15,6 +15,10 @@
 #include <cstdio>
 #include "dusk/logging.h"
 
+#if TARGET_PC
+#include "dusk/settings.h"
+#endif
+
 void fpcNdRq_RequestQTo(node_create_request* i_request) {
     fpcLy_CreatedMesg(i_request->layer);
     fpcLy_CancelQTo(&i_request->method_tag);
@@ -102,6 +106,24 @@ int fpcNdRq_DoPhase(node_create_request* i_request) {
 }
 
 int fpcNdRq_Execute(node_create_request* i_request) {
+#if TARGET_PC
+    if (!dusk::getSettings().game.enableFastLoads.getValue()) {
+        int result = fpcNdRq_DoPhase(i_request);
+        switch (result) {
+        case cPhs_INIT_e:
+        case cPhs_LOADING_e:
+            return cPhs_INIT_e;
+        case cPhs_COMPLEATE_e:
+            return cPhs_NEXT_e;
+        case cPhs_ERROR_e:
+        case cPhs_UNK3_e:
+            return cPhs_UNK3_e;
+        default:
+            return result;
+        }
+    }
+#endif
+
     int result;
 
     // allow multiple execution passes per frame

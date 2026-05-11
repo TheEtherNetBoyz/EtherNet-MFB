@@ -22,6 +22,7 @@
 #include "m_Do/m_Do_Reset.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_graphic.h"
+#include "dusk/settings.h"
 #include <cstdio>
 #include <cstring>
 
@@ -1472,7 +1473,7 @@ void dComIfGp_setNextStage(char const* i_stage, s16 i_point, s8 i_roomNo, s8 i_l
     }
 
 #if TARGET_PC
-    if (!mDoRst::isReset()) {
+    if (dusk::getSettings().game.enableFastLoads.getValue() && !mDoRst::isReset()) {
         wipe_speed = 1;
     }
 #endif

@@ -10,8 +10,17 @@
 #include "d/d_s_play.h"
 #include "m_Do/m_Do_audio.h"
 #include "m_Do/m_Do_graphic.h"
+#include "dusk/settings.h"
 
 static const int kFastFadeFrames = 20;
+
+static bool dOvlpFd2_isFastLoad() {
+#if TARGET_PC
+    return dusk::getSettings().game.enableFastLoads.getValue();
+#else
+    return false;
+#endif
+}
 
 void dOvlpFd2_dlst_c::draw() {
     GXSetViewport(0.0f, 0.0f, FB_WIDTH, FB_HEIGHT, 0.0f, 1.0f);
@@ -117,7 +126,7 @@ void dOvlpFd2_dlst_c::draw() {
 dOvlpFd2_c::dOvlpFd2_c() {
     setExecute(&dOvlpFd2_c::execFirstSnap);
     dComIfGp_2dShowOff();
-    mTimer = 1;
+    mTimer = dOvlpFd2_isFastLoad() ? 1 : 2;
 }
 
 void dOvlpFd2_c::execFirstSnap() {
@@ -125,7 +134,7 @@ void dOvlpFd2_c::execFirstSnap() {
         if (cLib_calcTimer<s8>(&mTimer) == 0) {
             setExecute(&dOvlpFd2_c::execFadeOut);
             fopOvlpM_Done(this);
-            mTimer = 0;
+            mTimer = dOvlpFd2_isFastLoad() ? 0 : -12;
         }
 
         dComIfGp_setWindowNum(0);
@@ -147,15 +156,15 @@ void dOvlpFd2_c::execFadeOut() {
                 fopOvlpM_SceneIsStart();
                 setExecute(&dOvlpFd2_c::execNextSnap);
                 field_0x110 = -0x4000;
-                mTimer = 1;
+                mTimer = dOvlpFd2_isFastLoad() ? 1 : 15;
             }
         }
     }
 
     if (mTimer < 0) {
         if (++mTimer == 0) {
-            mDoGph_gInf_c::startFadeOut(kFastFadeFrames);
-            mTimer = 1;
+            mDoGph_gInf_c::startFadeOut(dOvlpFd2_isFastLoad() ? kFastFadeFrames : 16);
+            mTimer = dOvlpFd2_isFastLoad() ? 1 : TREG_S(1) + 20;
         }
     } else {
         cLib_calcTimer<s8>(&mTimer);
@@ -167,7 +176,10 @@ void dOvlpFd2_c::execFadeOut() {
 
 void dOvlpFd2_c::execNextSnap() {
     if (cLib_calcTimer<s8>(&mTimer) == 0) {
-        if (!JFWDisplay::getManager()->getFader()->startFadeIn(kFastFadeFrames)) {
+        if (!JFWDisplay::getManager()->getFader()->startFadeIn(dOvlpFd2_isFastLoad() ?
+                                                                    kFastFadeFrames :
+                                                                    16))
+        {
             field_0x110 += field_0x112;
             field_0x11c = 0;
 

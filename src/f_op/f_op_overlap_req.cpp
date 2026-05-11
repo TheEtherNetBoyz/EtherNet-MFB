@@ -7,6 +7,7 @@
 #include "f_op/f_op_overlap_req.h"
 #include "f_pc/f_pc_manager.h"
 #include "m_Do/m_Do_Reset.h"
+#include "dusk/settings.h"
 
 #include "dusk/imgui/ImGuiMenuGame.hpp"
 
@@ -171,8 +172,15 @@ int fopOvlpReq_Is_PeektimeLimit(overlap_request_class* i_overlapReq) {
 
 void fopOvlpReq_SetPeektime(overlap_request_class* i_overlapReq, u16 i_peektime) {
     if (i_peektime <= 0x7FFF) {
-        i_overlapReq->peektime =
-            (mDoRst::isReset() && i_peektime == 30) ? i_peektime : (i_peektime > 1 ? 1 : i_peektime);
+#if TARGET_PC
+        if (dusk::getSettings().game.enableFastLoads.getValue()) {
+            i_overlapReq->peektime =
+                (mDoRst::isReset() && i_peektime == 30) ? i_peektime :
+                                                          (i_peektime > 1 ? 1 : i_peektime);
+            return;
+        }
+#endif
+        i_overlapReq->peektime = i_peektime;
     }
 }
 
