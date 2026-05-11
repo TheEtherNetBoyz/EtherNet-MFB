@@ -12,6 +12,8 @@
 #include "m_Do/m_Do_audio.h"
 #include "m_Do/m_Do_graphic.h"
 
+static const int kFastFadeFrames = 20;
+
 void dDlst_snapShot_c::draw() {
     GXSetTexCopySrc(0, 0, FB_WIDTH, FB_HEIGHT);
 #if TARGET_PC
@@ -137,7 +139,7 @@ dOvlpFd3_c::dOvlpFd3_c() {
     }
 
     dCam_getBody()->Stop();
-    mDoGph_gInf_c::startFadeOut(XREG_S(3) + (field_0x11f >> 1) + 90);
+    mDoGph_gInf_c::startFadeOut(kFastFadeFrames);
 }
 
 void dOvlpFd3_c::execFirstSnap() {
@@ -145,7 +147,7 @@ void dOvlpFd3_c::execFirstSnap() {
         if (cLib_calcTimer(&mTimer) == 0) {
             setExecute(&dOvlpFd3_c::execFadeOut);
             fopOvlpM_Done(this);
-            mTimer = 0xFF;
+            mTimer = 0;
         }
 
         dComIfGp_setWindowNum(0);
@@ -166,8 +168,8 @@ void dOvlpFd3_c::execFadeOut() {
 
     if (mTimer < 0) {
         if (++mTimer == 0) {
-            mDoGph_gInf_c::startFadeOut(XREG_S(1) + 75);
-            mTimer = XREG_S(2) + 90;
+            mDoGph_gInf_c::startFadeOut(kFastFadeFrames);
+            mTimer = 1;
             mDoAud_setFadeOutStart(0);
         }
     } else {
@@ -177,7 +179,7 @@ void dOvlpFd3_c::execFadeOut() {
 
 void dOvlpFd3_c::execNextSnap() {
     if (cLib_calcTimer(&mTimer) == 0) {
-        if (!JFWDisplay::getManager()->getFader()->startFadeIn(XREG_S(4) + 26)) {
+        if (!JFWDisplay::getManager()->getFader()->startFadeIn(kFastFadeFrames)) {
             mDoAud_setFadeInStart(0);
             field_0x110 += field_0x112;
 

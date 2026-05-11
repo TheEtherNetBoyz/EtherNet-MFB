@@ -569,7 +569,11 @@ static int dScnPly_Draw(dScnPly_c* i_this) {
             }
             #endif
 
+#if TARGET_PC
+            int rt = fopScnM_ChangeReq(i_this, fpcNm_PLAY_SCENE_e, fpcNm_OVERLAP0_e, 5);
+#else
             int rt = fopScnM_ChangeReq(i_this, fpcNm_PLAY_SCENE_e, l_wipeType[wipe], 5);
+#endif
 
             int hour = dKy_getdaytime_hour();
             BOOL isDaytime = (hour >= 6 && hour < 18) ? FALSE : TRUE;
@@ -1374,7 +1378,7 @@ static int phase_2(dScnPly_c* i_this) {
 }
 
 static int phase_3(dScnPly_c* i_this) {
-    if ((i_this->sceneCommand != NULL && !i_this->sceneCommand->sync()) || mDoAud_check1stDynamicWave()) {
+    if (i_this->sceneCommand != NULL && !i_this->sceneCommand->sync()) {
         return cPhs_INIT_e;
     }
 

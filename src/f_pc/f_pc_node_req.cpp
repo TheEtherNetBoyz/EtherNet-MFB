@@ -102,19 +102,28 @@ int fpcNdRq_DoPhase(node_create_request* i_request) {
 }
 
 int fpcNdRq_Execute(node_create_request* i_request) {
-    int result = fpcNdRq_DoPhase(i_request);
-    switch (result) {
-    case cPhs_INIT_e:
-    case cPhs_LOADING_e:
-        return cPhs_INIT_e;
-    case cPhs_COMPLEATE_e:
-        return cPhs_NEXT_e;
-    case cPhs_ERROR_e:
-    case cPhs_UNK3_e:
-        return cPhs_UNK3_e;
-    default:
-        return result;
+    int result;
+
+    // allow multiple execution passes per frame
+    for (int i = 0; i < 8; i++) {
+        result = fpcNdRq_DoPhase(i_request);
+
+        switch (result) {
+        case cPhs_COMPLEATE_e:
+            return cPhs_NEXT_e;
+
+        case cPhs_ERROR_e:
+        case cPhs_UNK3_e:
+            return cPhs_UNK3_e;
+
+        case cPhs_INIT_e:
+        case cPhs_LOADING_e:
+        default:
+            break;
+        }
     }
+
+    return cPhs_INIT_e;
 }
 
 int fpcNdRq_Delete(node_create_request* i_request) {

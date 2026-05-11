@@ -1471,6 +1471,12 @@ void dComIfGp_setNextStage(char const* i_stage, s16 i_point, s8 i_roomNo, s8 i_l
         break;
     }
 
+#if TARGET_PC
+    if (!mDoRst::isReset()) {
+        wipe_speed = 1;
+    }
+#endif
+
     g_dComIfG_gameInfo.play.setNextStage(i_stage, i_roomNo, i_point, i_layer, i_wipe, wipe_speed);
     g_dComIfG_gameInfo.info.getRestart().setLastSceneInfo(i_lastSpeed, i_lastMode, i_lastAngle);
     if (i_setPoint) {

@@ -17,6 +17,7 @@ std::unordered_map<uintptr_t, clock::time_point> s_interval_last_sample;
 
 constexpr clock::duration kSimPeriodDuration =
     std::chrono::duration_cast<clock::duration>(std::chrono::duration<float>(sim_pace()));
+constexpr clock::duration kPresentationDelay = kSimPeriodDuration / 2;
 constexpr clock::duration kAbnormalGapResetThreshold = std::chrono::milliseconds(250);
 constexpr int kMaxSimTicksPerFrame = 2;
 
@@ -57,14 +58,14 @@ MainLoopPacer advance_main_loop() {
     }
 
     if (frame_gap > kAbnormalGapResetThreshold) {
-        s_current_snapshot_time = now - kSimPeriodDuration;
+        s_current_snapshot_time = now - kPresentationDelay;
         out.sim_ticks_to_run = 0;
         return out;
     }
 
     int sim_ticks_to_run = 0;
     clock::time_point projected_snapshot_time = s_current_snapshot_time;
-    const clock::time_point render_time = now - kSimPeriodDuration;
+    const clock::time_point render_time = now - kPresentationDelay;
     while (sim_ticks_to_run < kMaxSimTicksPerFrame && projected_snapshot_time < render_time) {
         projected_snapshot_time += kSimPeriodDuration;
         sim_ticks_to_run++;

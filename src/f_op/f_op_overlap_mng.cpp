@@ -56,8 +56,9 @@ int fopOvlpM_IsPeek() {
 
 int fopOvlpM_IsDone() {
     if (l_fopOvlpM_overlap[0] != NULL) {
-        return cReq_Is_Done(&l_fopOvlpM_overlap[0]->base);
+        return l_fopOvlpM_overlap[0]->base.flag1 == 1;
     }
+
     return FALSE;
 }
 

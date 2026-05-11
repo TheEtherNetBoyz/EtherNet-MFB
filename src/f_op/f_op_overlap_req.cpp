@@ -6,6 +6,7 @@
 #include "SSystem/SComponent/c_request.h"
 #include "f_op/f_op_overlap_req.h"
 #include "f_pc/f_pc_manager.h"
+#include "m_Do/m_Do_Reset.h"
 
 #include "dusk/imgui/ImGuiMenuGame.hpp"
 
@@ -135,7 +136,9 @@ overlap_request_class* fopOvlpReq_Request(overlap_request_class* i_overlapReq, s
 }
 
 int fopOvlpReq_Handler(overlap_request_class* i_overlapReq) {
-    switch (cPhs_Do(&i_overlapReq->phase_req, i_overlapReq)) {
+    int result = cPhs_Do(&i_overlapReq->phase_req, i_overlapReq);
+
+    switch (result) {
     case cPhs_NEXT_e:
         return fopOvlpReq_Handler(i_overlapReq);
     case cPhs_INIT_e:
@@ -168,7 +171,8 @@ int fopOvlpReq_Is_PeektimeLimit(overlap_request_class* i_overlapReq) {
 
 void fopOvlpReq_SetPeektime(overlap_request_class* i_overlapReq, u16 i_peektime) {
     if (i_peektime <= 0x7FFF) {
-        i_overlapReq->peektime = i_peektime;
+        i_overlapReq->peektime =
+            (mDoRst::isReset() && i_peektime == 30) ? i_peektime : (i_peektime > 1 ? 1 : i_peektime);
     }
 }
 

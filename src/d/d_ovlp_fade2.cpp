@@ -11,6 +11,8 @@
 #include "m_Do/m_Do_audio.h"
 #include "m_Do/m_Do_graphic.h"
 
+static const int kFastFadeFrames = 20;
+
 void dOvlpFd2_dlst_c::draw() {
     GXSetViewport(0.0f, 0.0f, FB_WIDTH, FB_HEIGHT, 0.0f, 1.0f);
     GXSetScissor(0, 0, FB_WIDTH, FB_HEIGHT);
@@ -115,7 +117,7 @@ void dOvlpFd2_dlst_c::draw() {
 dOvlpFd2_c::dOvlpFd2_c() {
     setExecute(&dOvlpFd2_c::execFirstSnap);
     dComIfGp_2dShowOff();
-    mTimer = 2;
+    mTimer = 1;
 }
 
 void dOvlpFd2_c::execFirstSnap() {
@@ -123,7 +125,7 @@ void dOvlpFd2_c::execFirstSnap() {
         if (cLib_calcTimer<s8>(&mTimer) == 0) {
             setExecute(&dOvlpFd2_c::execFadeOut);
             fopOvlpM_Done(this);
-            mTimer = -12;
+            mTimer = 0;
         }
 
         dComIfGp_setWindowNum(0);
@@ -145,15 +147,15 @@ void dOvlpFd2_c::execFadeOut() {
                 fopOvlpM_SceneIsStart();
                 setExecute(&dOvlpFd2_c::execNextSnap);
                 field_0x110 = -0x4000;
-                mTimer = 15;
+                mTimer = 1;
             }
         }
     }
 
     if (mTimer < 0) {
         if (++mTimer == 0) {
-            mDoGph_gInf_c::startFadeOut(16);
-            mTimer = TREG_S(1) + 20;
+            mDoGph_gInf_c::startFadeOut(kFastFadeFrames);
+            mTimer = 1;
         }
     } else {
         cLib_calcTimer<s8>(&mTimer);
@@ -165,7 +167,7 @@ void dOvlpFd2_c::execFadeOut() {
 
 void dOvlpFd2_c::execNextSnap() {
     if (cLib_calcTimer<s8>(&mTimer) == 0) {
-        if (!JFWDisplay::getManager()->getFader()->startFadeIn(16)) {
+        if (!JFWDisplay::getManager()->getFader()->startFadeIn(kFastFadeFrames)) {
             field_0x110 += field_0x112;
             field_0x11c = 0;
 
