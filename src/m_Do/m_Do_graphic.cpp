@@ -36,13 +36,7 @@
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_machine.h"
 #include "m_Do/m_Do_main.h"
-#include "dusk/dusk.h"
 #include "tracy/Tracy.hpp"
-
-namespace dusk {
-bool g_skipWorldPostEffects = false;
-PainterDebugInfo lastPainterDebugInfo{};
-}
 
 #if PLATFORM_WII || PLATFORM_SHIELD
 #include <revolution/sc.h>
@@ -2071,34 +2065,10 @@ static void drawItem3D() {
 int mDoGph_Painter() {
     ZoneScoped;
 
-    dusk::PainterDebugInfo painterDebug{};
-    painterDebug.windowNum = dComIfGp_getWindowNum();
-    painterDebug.pauseFlag = dComIfGp_isPauseFlag();
-#ifdef TARGET_PC
-    painterDebug.uiTickPending = dusk::frame_interp::get_ui_tick_pending();
-#else
-    painterDebug.uiTickPending = true;
-#endif
-
-    auto phaseBaseStats = *aurora_get_current_stats();
-    auto recordPhaseStats = [&](int phase) {
-        const auto currentStats = *aurora_get_current_stats();
-        AuroraStats delta{};
-        delta.drawCallCount = currentStats.drawCallCount - phaseBaseStats.drawCallCount;
-        delta.mergedDrawCallCount = currentStats.mergedDrawCallCount - phaseBaseStats.mergedDrawCallCount;
-        delta.lastVertSize = currentStats.lastVertSize - phaseBaseStats.lastVertSize;
-        delta.lastUniformSize = currentStats.lastUniformSize - phaseBaseStats.lastUniformSize;
-        delta.lastIndexSize = currentStats.lastIndexSize - phaseBaseStats.lastIndexSize;
-        delta.lastStorageSize = currentStats.lastStorageSize - phaseBaseStats.lastStorageSize;
-        delta.lastTextureUploadSize = currentStats.lastTextureUploadSize - phaseBaseStats.lastTextureUploadSize;
-        painterDebug.phaseStats[phase] = delta;
-        phaseBaseStats = currentStats;
-    };
-
     // Diagnostic: log windowNum to track game state machine progress
     static bool sDiagLoggedWindow = false;
     if (!sDiagLoggedWindow) {
-        int wn = painterDebug.windowNum;
+        int wn = dComIfGp_getWindowNum();
         // DuskLog.debug("mDoGph_Painter: windowNum={}", wn);
         if (wn != 0) sDiagLoggedWindow = true;
     }
@@ -2144,7 +2114,6 @@ int mDoGph_Painter() {
 
     dComIfGp_setCurrentGrafPort(&ortho);
     GX_DEBUG_GROUP(dComIfGd_drawCopy2D);
-    recordPhaseStats(0);
 
     #if DEBUG
     // "↓↓↓↓↓↓↓↓↓↓ CPU time measuring start ↓↓↓↓↓↓↓↓↓↓"
@@ -2155,13 +2124,11 @@ int mDoGph_Painter() {
     #endif
 
     if (dComIfGp_getWindowNum() != 0) {
-        painterDebug.hasCameraWindow = true;
         dDlst_window_c* window_p = dComIfGp_getWindow(0);
         int camera_id = window_p->getCameraID();
         camera_process_class* camera_p = dComIfGp_getCamera(camera_id);
 
         if (camera_p != NULL) {
-            painterDebug.hasCamera = true;
             #if DEBUG
             fapGm_HIO_c::startCpuTimer();
             #endif
@@ -2276,7 +2243,6 @@ int mDoGph_Painter() {
             if (fapGmHIO_getParticle()) {
                 GX_DEBUG_GROUP(dComIfGp_particle_drawNormalPri0_B, &draw_info);
             }
-            recordPhaseStats(1);
 
             #if DEBUG
             // "drawing up to Terrain (Opaque)"
@@ -2315,7 +2281,6 @@ int mDoGph_Painter() {
 #endif
 
             GX_DEBUG_GROUP(dComIfGd_drawOpaListPacket);
-            recordPhaseStats(2);
 
             #if DEBUG
             // "drawing up to special-use drawing (Opaque) except J3D (Rendering)"
@@ -2348,7 +2313,6 @@ int mDoGph_Painter() {
             } else {
                 GX_DEBUG_GROUP(dComIfGd_drawXluListDark);
             }
-            recordPhaseStats(3);
 
             #if DEBUG
             // "drawing up to Object (Translucent)"
@@ -2367,8 +2331,7 @@ int mDoGph_Painter() {
             }
 #endif
 
-            if (!dComIfGp_isPauseFlag() && !dusk::g_skipWorldPostEffects) {
-                painterDebug.ranWorldPostEffects = true;
+            if (!dComIfGp_isPauseFlag()) {
                 #if DEBUG
                 fapGm_HIO_c::startCpuTimer();
                 #endif
@@ -2609,10 +2572,7 @@ int mDoGph_Painter() {
                 // "color fade draw (Rendering)"
                 fapGm_HIO_c::stopCpuTimer("カラーフェード描画（レンダリング）");
                 #endif
-            } else {
-                painterDebug.skippedWorldPostEffects = true;
             }
-            recordPhaseStats(4);
         }
     }
 
@@ -2668,7 +2628,6 @@ int mDoGph_Painter() {
         mDoGph_drawFilterQuad(1, 1);
     }
     #endif
-    recordPhaseStats(5);
 
     GXSetClipMode(GX_CLIP_ENABLE);
 #if TARGET_PC
@@ -2689,7 +2648,6 @@ int mDoGph_Painter() {
     #endif
 
     if (fapGmHIO_get2Ddraw()) {
-        painterDebug.drew2D = true;
         Mtx m4;
         cMtx_copy(j3dSys.getViewMtx(), m4);
 
@@ -2732,11 +2690,9 @@ int mDoGph_Painter() {
 
         GX_DEBUG_GROUP(dComIfGp_particle_draw2DmenuFore, &draw_info3);
         j3dSys.setViewMtx(m4);
-        recordPhaseStats(6);
     } else {
         // No camera window active — still draw 2D display lists
         // (needed for logo scene, which has no 3D camera)
-        painterDebug.drewNoCamera2D = true;
         static int sElseLogCount = 0;
         if (sElseLogCount < 10) {
             DuskLog.debug("mDoGph_Painter else: drawing 2D lists (frame {})", sElseLogCount);
@@ -2746,7 +2702,6 @@ int mDoGph_Painter() {
         dComIfGd_draw2DOpa();
         dComIfGd_draw2DOpaTop();
         dComIfGd_draw2DXlu();
-        recordPhaseStats(6);
     }
 
     #if DEBUG
@@ -2766,7 +2721,6 @@ int mDoGph_Painter() {
 #endif
 
     mDoGph_gInf_c::endRender();
-    dusk::lastPainterDebugInfo = painterDebug;
 
     #if WIDESCREEN_SUPPORT
     mDoGph_gInf_c::offWideZoom();

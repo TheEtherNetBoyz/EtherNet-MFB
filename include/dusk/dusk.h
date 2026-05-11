@@ -8,21 +8,7 @@
 extern AuroraInfo auroraInfo;
 
 namespace dusk {
-    struct PainterDebugInfo {
-        int windowNum = 0;
-        bool pauseFlag = false;
-        bool uiTickPending = false;
-        bool hasCameraWindow = false;
-        bool hasCamera = false;
-        bool ranWorldPostEffects = false;
-        bool skippedWorldPostEffects = false;
-        bool drew2D = false;
-        bool drewNoCamera2D = false;
-        AuroraStats phaseStats[7]{};
-    };
-
     extern AuroraStats lastFrameAuroraStats;
-    extern PainterDebugInfo lastPainterDebugInfo;
     extern float frameUsagePct;
 }
 
