@@ -746,6 +746,20 @@ static int dScnPly_Execute(dScnPly_c* i_this) {
     dStage_roomControl_c::offNoChangeRoom();
     dStage_roomControl_c::setRoomReadId(0xFF);
 
+#if TARGET_PC
+    if (dusk::getSettings().game.enableFastLoads.getValue() &&
+        !dusk::getSettings().game.enableInstaLoads.getValue() &&
+        mDoAud_zelAudio_c::isBgmSet() && !mDoAud_check1stDynamicWave())
+    {
+        mDoAud_setFadeInStart(0);
+        mDoAud_sceneBgmStart();
+        Z2GetAudioMgr()->bgmAllUnMute(0);
+        Z2GetAudioMgr()->seMoveVolumeAll(1.0f, 0);
+        mDoAud_load2ndDynamicWave();
+        mDoAud_zelAudio_c::offBgmSet();
+    }
+#endif
+
     if (!fopOvlpM_IsPeek()) {
         if (mDoAud_zelAudio_c::isBgmSet()) {
             mDoAud_sceneBgmStart();
@@ -1387,8 +1401,7 @@ static int phase_3(dScnPly_c* i_this) {
     bool audioLoading = mDoAud_check1stDynamicWave();
 
     if ((i_this->sceneCommand != NULL && !i_this->sceneCommand->sync()) ||
-        DUSK_IF_ELSE(!dusk::getSettings().game.enableFastLoads.getValue() &&
-                         !dusk::getSettings().game.enableInstaLoads.getValue() &&
+        DUSK_IF_ELSE(!dusk::getSettings().game.enableInstaLoads.getValue() &&
                          audioLoading,
                      audioLoading))
     {

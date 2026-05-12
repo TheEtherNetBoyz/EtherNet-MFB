@@ -858,10 +858,28 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Quicker climbing on ladders and vines like the HD version.");
         addOption("Faster Tears of Light", getSettings().game.fastTears,
             "Tears of Light dropped by Shadow Insects pop out faster like the HD version.");
-        addOption("Fast Loads", getSettings().game.enableFastLoads,
-            "Shortens area transition waits and fades.");
-        addOption("Insta Loads", getSettings().game.enableInstaLoads,
-            "Experimental near-instant area transitions.");
+        config_bool_select(leftPane, rightPane, getSettings().game.enableFastLoads,
+            {
+                .key = "Fast Loads",
+                .helpText = "Shortens area transition waits and fades.",
+                .onChange = [](bool value) {
+                    if (value) {
+                        getSettings().game.enableInstaLoads.setValue(false);
+                        config::Save();
+                    }
+                },
+            });
+        config_bool_select(leftPane, rightPane, getSettings().game.enableInstaLoads,
+            {
+                .key = "Insta Loads",
+                .helpText = "Experimental near-instant area transitions.",
+                .onChange = [](bool value) {
+                    if (value) {
+                        getSettings().game.enableFastLoads.setValue(false);
+                        config::Save();
+                    }
+                },
+            });
         config_bool_select(leftPane, rightPane, getSettings().game.autoSave,
             {
                 .key = "Autosave",

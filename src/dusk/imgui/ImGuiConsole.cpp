@@ -13,6 +13,8 @@
 #include "ImGuiEngine.hpp"
 #include "JSystem/JUtility/JUTGamePad.h"
 #include "SDL3/SDL_mouse.h"
+#include "SDL3/SDL_events.h"
+#include "SDL3/SDL_scancode.h"
 #include "dusk/audio/DuskAudioSystem.h"
 #include "dusk/config.hpp"
 #include "dusk/dusk.h"
@@ -26,6 +28,7 @@
 #include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_main.h"
 #include "tracy/Tracy.hpp"
+#include <dolphin/vi.h>
 
 #if _WIN32
 #define NOMINMAX
@@ -234,11 +237,27 @@ namespace dusk {
     ImGuiConsole::ImGuiConsole() {}
 
     void ImGuiConsole::HandleSDLEvent(const SDL_Event& event) {
-        (void)event;
+        if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+            event.key.scancode == SDL_SCANCODE_GRAVE)
+        {
+            m_isHidden = !m_isHidden;
+        }
     }
 
     void ImGuiConsole::UpdateSettings() {
         getTransientSettings().skipFrameRateLimit = getSettings().game.enableTurboKeybind && ImGui::IsKeyDown(ImGuiKey_Tab);
+
+        static int sFrameBufferScaleApplyFrames = 0;
+        static int sLastFrameBufferScale = getSettings().game.internalResolutionScale.getValue();
+        int frameBufferScale = getSettings().game.internalResolutionScale.getValue();
+        if (frameBufferScale != sLastFrameBufferScale) {
+            sLastFrameBufferScale = frameBufferScale;
+            sFrameBufferScaleApplyFrames = 8;
+        }
+        if (sFrameBufferScaleApplyFrames > 0) {
+            VISetFrameBufferScale(static_cast<float>(frameBufferScale));
+            sFrameBufferScaleApplyFrames--;
+        }
 
         if (dusk::frame_interp::get_ui_tick_pending() && mDoMain::developmentMode == 1 && (mDoCPd_c::getHold(PAD_1) & (PAD_TRIGGER_R | PAD_TRIGGER_L)) == (PAD_TRIGGER_R | PAD_TRIGGER_L) && mDoCPd_c::getTrigY(PAD_1)) {
             getTransientSettings().moveLinkActive = !getTransientSettings().moveLinkActive;
@@ -260,11 +279,7 @@ namespace dusk {
         }
 
         if (ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_F1)) {
-            if (getSettings().backend.enableAdvancedSettings) {
-                m_isHidden = !m_isHidden;
-            } else {
-                m_isHidden = true;
-            }
+            m_isHidden = !m_isHidden;
         }
         
         bool showMenu = !m_isHidden;
