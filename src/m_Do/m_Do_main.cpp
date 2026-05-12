@@ -291,9 +291,12 @@ void main01(void) {
 
             dusk::frame_interp::begin_frame(true, false,
                                             dusk::game_clock::sample_interpolation_step());
-            if (dMeter2Info_getWindowStatus() == 2) {
+            static int sLastWindowStatus = -1;
+            const int windowStatus = dMeter2Info_getWindowStatus();
+            if (windowStatus != sLastWindowStatus && (windowStatus == 2 || sLastWindowStatus == 2)) {
                 dusk::frame_interp::request_presentation_sync();
             }
+            sLastWindowStatus = windowStatus;
             dusk::frame_interp::interpolate();
             dusk::frame_interp::begin_presentation_camera();
             // run draw functions for anything specially marked to handle interp

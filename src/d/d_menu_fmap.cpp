@@ -21,6 +21,9 @@
 #include "d/d_msg_object.h"
 #include "d/d_msg_scrn_explain.h"
 #include "d/d_stage.h"
+#if TARGET_PC
+#include "dusk/frame_interpolation.h"
+#endif
 #include "dusk/memory.h"
 #include "f_op/f_op_msg_mng.h"
 
@@ -530,6 +533,9 @@ void dMenu_Fmap_c::_move() {
 void dMenu_Fmap_c::_draw() {
     if (mpDraw2DBack != NULL && mpDraw2DTop != NULL) {
         if (field_0x305) {
+#if TARGET_PC
+            mpDraw2DBack->applyPresentationInterpolation();
+#endif
             mpMenuFmapMap->setRendering(mpWorldData, mStartStageNo,
                                         mpDraw2DBack->getRenderingPosX(),
                                         mpDraw2DBack->getRenderingPosZ(),
@@ -1717,6 +1723,12 @@ bool dMenu_Fmap_c::isOpen() {
     s16 undisplay_frame_num = (s16)g_fmapHIO.mUndisplayFrameNum;
     if (mDisplayFrame == 0) {
         init = true;
+#if TARGET_PC
+        if (mpDraw2DBack != NULL) {
+            mpDraw2DBack->resetPresentationInterpolation();
+        }
+        dusk::frame_interp::request_presentation_sync();
+#endif
     }
     mDisplayFrame++;
     f32 ratio = (f32)mDisplayFrame / (f32)display_frame_num;
@@ -1962,8 +1974,16 @@ void dMenu_Fmap_c::talkButton() {
 }
 
 void dMenu_Fmap_c::setProcess(u8 i_process) {
+    const bool processChanged = mProcess != i_process;
     mPrevProcess = mProcess;
     mProcess = i_process;
+#if TARGET_PC
+    if (processChanged) {
+        if (mpDraw2DBack != NULL) {
+            mpDraw2DBack->primePresentationInterpolation();
+        }
+    }
+#endif
 }
 
 void dMenu_Fmap_c::setFlash(u8 i_stageNo, bool param_1) {

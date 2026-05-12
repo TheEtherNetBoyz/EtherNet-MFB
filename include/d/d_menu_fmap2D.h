@@ -83,6 +83,10 @@ public:
 
     #if TARGET_PC
     void fMapBackWide();
+    bool applyPresentationInterpolation();
+    void restorePresentationInterpolation();
+    void primePresentationInterpolation();
+    void resetPresentationInterpolation();
     #endif
 
     virtual void draw();

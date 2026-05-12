@@ -19,6 +19,288 @@
 #include "d/actor/d_a_midna.h"
 #include "dusk/frame_interpolation.h"
 #include <cstring>
+#if TARGET_PC
+#include <unordered_map>
+
+namespace {
+struct FmapControlInterp {
+    f32 prevX = 0.0f;
+    f32 prevY = 0.0f;
+    f32 prevZoom = 0.0f;
+    f32 prevMapZoom = 0.0f;
+    f32 prevStageX = 0.0f;
+    f32 prevStageZ = 0.0f;
+    f32 prevFa8 = 0.0f;
+    f32 prevFb8 = 0.0f;
+    f32 prevFd0 = 0.0f;
+    f32 prevFd4 = 0.0f;
+    f32 prevFd8 = 0.0f;
+    f32 prevFdc = 0.0f;
+    f32 prev11a4 = 0.0f;
+    f32 prev11a8 = 0.0f;
+    f32 prev11ac = 0.0f;
+    f32 prev11b0 = 0.0f;
+    f32 prevF0c[8] = {};
+    f32 prevF2c[8] = {};
+    f32 prevF4c[8] = {};
+    f32 prevF6c[8] = {};
+    f32 currX = 0.0f;
+    f32 currY = 0.0f;
+    f32 currZoom = 0.0f;
+    f32 currMapZoom = 0.0f;
+    f32 currStageX = 0.0f;
+    f32 currStageZ = 0.0f;
+    f32 currFa8 = 0.0f;
+    f32 currFb8 = 0.0f;
+    f32 currFd0 = 0.0f;
+    f32 currFd4 = 0.0f;
+    f32 currFd8 = 0.0f;
+    f32 currFdc = 0.0f;
+    f32 curr11a4 = 0.0f;
+    f32 curr11a8 = 0.0f;
+    f32 curr11ac = 0.0f;
+    f32 curr11b0 = 0.0f;
+    f32 currF0c[8] = {};
+    f32 currF2c[8] = {};
+    f32 currF4c[8] = {};
+    f32 currF6c[8] = {};
+    u32 lastRecordFrame = 0;
+    bool initialized = false;
+};
+
+struct FmapPresentationBackup {
+    f32 controlX = 0.0f;
+    f32 controlY = 0.0f;
+    f32 zoom = 0.0f;
+    f32 mapZoom = 0.0f;
+    f32 stageX = 0.0f;
+    f32 stageZ = 0.0f;
+    f32 renderingPosX = 0.0f;
+    f32 renderingPosZ = 0.0f;
+    f32 renderingScale = 0.0f;
+    f32 f98 = 0.0f;
+    f32 fa8 = 0.0f;
+    f32 fb8 = 0.0f;
+    f32 fd0 = 0.0f;
+    f32 fd4 = 0.0f;
+    f32 fd8 = 0.0f;
+    f32 fdc = 0.0f;
+    f32 f11a4 = 0.0f;
+    f32 f11a8 = 0.0f;
+    f32 f11ac = 0.0f;
+    f32 f11b0 = 0.0f;
+    f32 f0c[8] = {};
+    f32 f2c[8] = {};
+    f32 f4c[8] = {};
+    f32 f6c[8] = {};
+    bool active = false;
+};
+
+static std::unordered_map<const dMenu_Fmap2DBack_c*, FmapControlInterp> s_fmapControlInterp;
+static std::unordered_map<dMenu_Fmap2DBack_c*, FmapPresentationBackup> s_fmapPresentationBackup;
+
+static bool getFmapPresentationBackup(dMenu_Fmap2DBack_c* map, FmapPresentationBackup* out) {
+    auto it = s_fmapPresentationBackup.find(map);
+    if (it == s_fmapPresentationBackup.end() || !it->second.active) {
+        return false;
+    }
+
+    *out = it->second;
+    return true;
+}
+
+struct FmapLayerCompensation {
+    f32 scale = 1.0f;
+    f32 offsetX = 0.0f;
+    f32 offsetY = 0.0f;
+};
+
+static bool getFmapLayerCompensation(dMenu_Fmap2DBack_c* map, f32 alpha, f32 spotAlpha,
+                                     f32 renderingScale, f32 renderingPosX,
+                                     f32 renderingPosZ, FmapLayerCompensation* out) {
+    (void)alpha;
+    (void)spotAlpha;
+    if (renderingScale == 0.0f) {
+        return false;
+    }
+
+    FmapPresentationBackup backup;
+    if (!getFmapPresentationBackup(map, &backup)) {
+        return false;
+    }
+
+    const f32 scale = backup.renderingScale / renderingScale;
+    if (scale < 0.25f || scale > 4.0f) {
+        return false;
+    }
+
+    out->scale = scale;
+    out->offsetX = (backup.renderingPosX - renderingPosX) / renderingScale;
+    out->offsetY = (backup.renderingPosZ - renderingPosZ) / renderingScale;
+    return true;
+}
+
+static void copyFmapArray(f32* dst, const f32* src) {
+    for (int i = 0; i < 8; i++) {
+        dst[i] = src[i];
+    }
+}
+
+static void recordFmapControlSample(const dMenu_Fmap2DBack_c* map, f32 x, f32 y, f32 zoom,
+                                    f32 mapZoom, f32 stageX, f32 stageZ, const f32* f0c,
+                                    const f32* f2c, const f32* f4c, const f32* f6c, f32 fa8,
+                                    f32 fb8, f32 fd0, f32 fd4, f32 fd8, f32 fdc, f32 f11a4,
+                                    f32 f11a8, f32 f11ac, f32 f11b0) {
+    FmapControlInterp& interp = s_fmapControlInterp[map];
+    if (!interp.initialized) {
+        interp.prevX = interp.currX = x;
+        interp.prevY = interp.currY = y;
+        interp.prevZoom = interp.currZoom = zoom;
+        interp.prevMapZoom = interp.currMapZoom = mapZoom;
+        interp.prevStageX = interp.currStageX = stageX;
+        interp.prevStageZ = interp.currStageZ = stageZ;
+        interp.prevFa8 = interp.currFa8 = fa8;
+        interp.prevFb8 = interp.currFb8 = fb8;
+        interp.prevFd0 = interp.currFd0 = fd0;
+        interp.prevFd4 = interp.currFd4 = fd4;
+        interp.prevFd8 = interp.currFd8 = fd8;
+        interp.prevFdc = interp.currFdc = fdc;
+        interp.prev11a4 = interp.curr11a4 = f11a4;
+        interp.prev11a8 = interp.curr11a8 = f11a8;
+        interp.prev11ac = interp.curr11ac = f11ac;
+        interp.prev11b0 = interp.curr11b0 = f11b0;
+        copyFmapArray(interp.prevF0c, f0c);
+        copyFmapArray(interp.currF0c, f0c);
+        copyFmapArray(interp.prevF2c, f2c);
+        copyFmapArray(interp.currF2c, f2c);
+        copyFmapArray(interp.prevF4c, f4c);
+        copyFmapArray(interp.currF4c, f4c);
+        copyFmapArray(interp.prevF6c, f6c);
+        copyFmapArray(interp.currF6c, f6c);
+        interp.lastRecordFrame = g_Counter.mCounter0;
+        interp.initialized = true;
+        return;
+    }
+
+    if (interp.lastRecordFrame != g_Counter.mCounter0) {
+        interp.prevX = interp.currX;
+        interp.prevY = interp.currY;
+        interp.prevZoom = interp.currZoom;
+        interp.prevMapZoom = interp.currMapZoom;
+        interp.prevStageX = interp.currStageX;
+        interp.prevStageZ = interp.currStageZ;
+        interp.prevFa8 = interp.currFa8;
+        interp.prevFb8 = interp.currFb8;
+        interp.prevFd0 = interp.currFd0;
+        interp.prevFd4 = interp.currFd4;
+        interp.prevFd8 = interp.currFd8;
+        interp.prevFdc = interp.currFdc;
+        interp.prev11a4 = interp.curr11a4;
+        interp.prev11a8 = interp.curr11a8;
+        interp.prev11ac = interp.curr11ac;
+        interp.prev11b0 = interp.curr11b0;
+        copyFmapArray(interp.prevF0c, interp.currF0c);
+        copyFmapArray(interp.prevF2c, interp.currF2c);
+        copyFmapArray(interp.prevF4c, interp.currF4c);
+        copyFmapArray(interp.prevF6c, interp.currF6c);
+        interp.lastRecordFrame = g_Counter.mCounter0;
+    }
+
+    interp.currX = x;
+    interp.currY = y;
+    interp.currZoom = zoom;
+    interp.currMapZoom = mapZoom;
+    interp.currStageX = stageX;
+    interp.currStageZ = stageZ;
+    interp.currFa8 = fa8;
+    interp.currFb8 = fb8;
+    interp.currFd0 = fd0;
+    interp.currFd4 = fd4;
+    interp.currFd8 = fd8;
+    interp.currFdc = fdc;
+    interp.curr11a4 = f11a4;
+    interp.curr11a8 = f11a8;
+    interp.curr11ac = f11ac;
+    interp.curr11b0 = f11b0;
+    copyFmapArray(interp.currF0c, f0c);
+    copyFmapArray(interp.currF2c, f2c);
+    copyFmapArray(interp.currF4c, f4c);
+    copyFmapArray(interp.currF6c, f6c);
+}
+
+static bool getFmapControlInterp(const dMenu_Fmap2DBack_c* map, FmapControlInterp* out) {
+    auto it = s_fmapControlInterp.find(map);
+    if (it == s_fmapControlInterp.end() || !it->second.initialized ||
+        !dusk::frame_interp::is_enabled() || dusk::frame_interp::is_sim_frame())
+    {
+        return false;
+    }
+
+    const f32 step = dusk::frame_interp::get_interpolation_step();
+    out->currX = it->second.prevX + (it->second.currX - it->second.prevX) * step;
+    out->currY = it->second.prevY + (it->second.currY - it->second.prevY) * step;
+    out->currZoom = it->second.prevZoom + (it->second.currZoom - it->second.prevZoom) * step;
+    out->currMapZoom =
+        it->second.prevMapZoom + (it->second.currMapZoom - it->second.prevMapZoom) * step;
+    out->currStageX =
+        it->second.prevStageX + (it->second.currStageX - it->second.prevStageX) * step;
+    out->currStageZ =
+        it->second.prevStageZ + (it->second.currStageZ - it->second.prevStageZ) * step;
+    out->currFa8 = it->second.prevFa8 + (it->second.currFa8 - it->second.prevFa8) * step;
+    out->currFb8 = it->second.prevFb8 + (it->second.currFb8 - it->second.prevFb8) * step;
+    out->currFd0 = it->second.prevFd0 + (it->second.currFd0 - it->second.prevFd0) * step;
+    out->currFd4 = it->second.prevFd4 + (it->second.currFd4 - it->second.prevFd4) * step;
+    out->currFd8 = it->second.prevFd8 + (it->second.currFd8 - it->second.prevFd8) * step;
+    out->currFdc = it->second.prevFdc + (it->second.currFdc - it->second.prevFdc) * step;
+    out->curr11a4 = it->second.prev11a4 + (it->second.curr11a4 - it->second.prev11a4) * step;
+    out->curr11a8 = it->second.prev11a8 + (it->second.curr11a8 - it->second.prev11a8) * step;
+    out->curr11ac = it->second.prev11ac + (it->second.curr11ac - it->second.prev11ac) * step;
+    out->curr11b0 = it->second.prev11b0 + (it->second.curr11b0 - it->second.prev11b0) * step;
+    for (int i = 0; i < 8; i++) {
+        out->currF0c[i] = it->second.prevF0c[i] + (it->second.currF0c[i] - it->second.prevF0c[i]) * step;
+        out->currF2c[i] = it->second.prevF2c[i] + (it->second.currF2c[i] - it->second.prevF2c[i]) * step;
+        out->currF4c[i] = it->second.prevF4c[i] + (it->second.currF4c[i] - it->second.prevF4c[i]) * step;
+        out->currF6c[i] = it->second.prevF6c[i] + (it->second.currF6c[i] - it->second.prevF6c[i]) * step;
+    }
+    return true;
+}
+
+static void primeFmapControlInterp(const dMenu_Fmap2DBack_c* map, f32 x, f32 y, f32 zoom,
+                                   f32 mapZoom, f32 stageX, f32 stageZ, const f32* f0c,
+                                   const f32* f2c, const f32* f4c, const f32* f6c, f32 fa8,
+                                   f32 fb8, f32 fd0, f32 fd4, f32 fd8, f32 fdc, f32 f11a4,
+                                   f32 f11a8, f32 f11ac, f32 f11b0) {
+    FmapControlInterp& interp = s_fmapControlInterp[map];
+    interp.prevX = interp.currX = x;
+    interp.prevY = interp.currY = y;
+    interp.prevZoom = interp.currZoom = zoom;
+    interp.prevMapZoom = interp.currMapZoom = mapZoom;
+    interp.prevStageX = interp.currStageX = stageX;
+    interp.prevStageZ = interp.currStageZ = stageZ;
+    interp.prevFa8 = interp.currFa8 = fa8;
+    interp.prevFb8 = interp.currFb8 = fb8;
+    interp.prevFd0 = interp.currFd0 = fd0;
+    interp.prevFd4 = interp.currFd4 = fd4;
+    interp.prevFd8 = interp.currFd8 = fd8;
+    interp.prevFdc = interp.currFdc = fdc;
+    interp.prev11a4 = interp.curr11a4 = f11a4;
+    interp.prev11a8 = interp.curr11a8 = f11a8;
+    interp.prev11ac = interp.curr11ac = f11ac;
+    interp.prev11b0 = interp.curr11b0 = f11b0;
+    copyFmapArray(interp.prevF0c, f0c);
+    copyFmapArray(interp.currF0c, f0c);
+    copyFmapArray(interp.prevF2c, f2c);
+    copyFmapArray(interp.currF2c, f2c);
+    copyFmapArray(interp.prevF4c, f4c);
+    copyFmapArray(interp.currF4c, f4c);
+    copyFmapArray(interp.prevF6c, f6c);
+    copyFmapArray(interp.currF6c, f6c);
+    interp.lastRecordFrame = g_Counter.mCounter0;
+    interp.initialized = true;
+}
+
+}  // namespace
+#endif
 
 #if TARGET_PC
 void dMenu_Fmap2DBack_c::fMapBackWide() {
@@ -26,6 +308,120 @@ void dMenu_Fmap2DBack_c::fMapBackWide() {
     mpBaseScreen->translate(mDoGph_gInf_c::getSafeMinXF(), 0.0f);
     mpBackScreen->scale(mDoGph_gInf_c::hudAspectScaleUp, 1.0f);
     mpBackScreen->translate(mDoGph_gInf_c::getSafeMinXF(), 0.0f);
+}
+
+bool dMenu_Fmap2DBack_c::applyPresentationInterpolation() {
+    FmapControlInterp interpState;
+    if (!getFmapControlInterp(this, &interpState)) {
+        return false;
+    }
+
+    FmapPresentationBackup& backup = s_fmapPresentationBackup[this];
+    if (!backup.active) {
+        backup.controlX = control_xpos;
+        backup.controlY = control_ypos;
+        backup.zoom = mZoom;
+        backup.mapZoom = mMapZoomRate;
+        backup.stageX = mStageTransX;
+        backup.stageZ = mStageTransZ;
+        backup.renderingPosX = mRenderingPosX;
+        backup.renderingPosZ = mRenderingPosZ;
+        backup.renderingScale = mRenderingScale;
+        backup.f98 = field_0xf98;
+        backup.fa8 = field_0xfa8;
+        backup.fb8 = field_0xfb8;
+        backup.fd0 = field_0xfd0;
+        backup.fd4 = field_0xfd4;
+        backup.fd8 = field_0xfd8;
+        backup.fdc = field_0xfdc;
+        backup.f11a4 = field_0x11a4;
+        backup.f11a8 = field_0x11a8;
+        backup.f11ac = field_0x11ac;
+        backup.f11b0 = field_0x11b0;
+        for (int i = 0; i < 8; i++) {
+            backup.f0c[i] = field_0xf0c[i];
+            backup.f2c[i] = field_0xf2c[i];
+            backup.f4c[i] = field_0xf4c[i];
+            backup.f6c[i] = field_0xf6c[i];
+        }
+        backup.active = true;
+    }
+
+    control_xpos = interpState.currX;
+    control_ypos = interpState.currY;
+    mZoom = interpState.currZoom;
+    mMapZoomRate = interpState.currMapZoom;
+    mStageTransX = interpState.currStageX;
+    mStageTransZ = interpState.currStageZ;
+    field_0xfa8 = interpState.currFa8;
+    field_0xfb8 = interpState.currFb8;
+    field_0xfd0 = interpState.currFd0;
+    field_0xfd4 = interpState.currFd4;
+    field_0xfd8 = interpState.currFd8;
+    field_0xfdc = interpState.currFdc;
+    field_0x11a4 = interpState.curr11a4;
+    field_0x11a8 = interpState.curr11a8;
+    field_0x11ac = interpState.curr11ac;
+    field_0x11b0 = interpState.curr11b0;
+    for (int i = 0; i < 8; i++) {
+        field_0xf0c[i] = interpState.currF0c[i];
+        field_0xf2c[i] = interpState.currF2c[i];
+        field_0xf4c[i] = interpState.currF4c[i];
+        field_0xf6c[i] = interpState.currF6c[i];
+    }
+    calcRenderingScale();
+    calcRenderingPos();
+    return true;
+}
+
+void dMenu_Fmap2DBack_c::restorePresentationInterpolation() {
+    auto it = s_fmapPresentationBackup.find(this);
+    if (it == s_fmapPresentationBackup.end() || !it->second.active) {
+        return;
+    }
+
+    FmapPresentationBackup& backup = it->second;
+    control_xpos = backup.controlX;
+    control_ypos = backup.controlY;
+    mZoom = backup.zoom;
+    mMapZoomRate = backup.mapZoom;
+    mStageTransX = backup.stageX;
+    mStageTransZ = backup.stageZ;
+    mRenderingPosX = backup.renderingPosX;
+    mRenderingPosZ = backup.renderingPosZ;
+    mRenderingScale = backup.renderingScale;
+    field_0xf98 = backup.f98;
+    field_0xfa8 = backup.fa8;
+    field_0xfb8 = backup.fb8;
+    field_0xfd0 = backup.fd0;
+    field_0xfd4 = backup.fd4;
+    field_0xfd8 = backup.fd8;
+    field_0xfdc = backup.fdc;
+    field_0x11a4 = backup.f11a4;
+    field_0x11a8 = backup.f11a8;
+    field_0x11ac = backup.f11ac;
+    field_0x11b0 = backup.f11b0;
+    for (int i = 0; i < 8; i++) {
+        field_0xf0c[i] = backup.f0c[i];
+        field_0xf2c[i] = backup.f2c[i];
+        field_0xf4c[i] = backup.f4c[i];
+        field_0xf6c[i] = backup.f6c[i];
+    }
+    backup.active = false;
+}
+
+void dMenu_Fmap2DBack_c::primePresentationInterpolation() {
+    primeFmapControlInterp(this, control_xpos, control_ypos, mZoom, mMapZoomRate, mStageTransX,
+                           mStageTransZ, field_0xf0c, field_0xf2c, field_0xf4c, field_0xf6c,
+                           field_0xfa8, field_0xfb8, field_0xfd0, field_0xfd4, field_0xfd8,
+                           field_0xfdc, field_0x11a4, field_0x11a8, field_0x11ac,
+                           field_0x11b0);
+    s_fmapPresentationBackup.erase(this);
+}
+
+void dMenu_Fmap2DBack_c::resetPresentationInterpolation() {
+    s_fmapControlInterp.erase(this);
+    s_fmapPresentationBackup.erase(this);
 }
 #endif
 
@@ -278,6 +674,7 @@ dMenu_Fmap2DBack_c::~dMenu_Fmap2DBack_c() {
 void dMenu_Fmap2DBack_c::draw() {
     #if TARGET_PC
     fMapBackWide();
+    bool restoreInterpState = applyPresentationInterpolation();
     #endif
 
     calcBlink();
@@ -363,7 +760,44 @@ void dMenu_Fmap2DBack_c::draw() {
         moveLightDropAnime();
     }
     setCenterPosX(field_0x11dc, 1);
+
+#if TARGET_PC
+    f32 backupIconX[128];
+    f32 backupIconY[128];
+    bool restoreIconPositions = false;
+    FmapLayerCompensation iconCompensation;
+    if (getFmapLayerCompensation(this, mAlphaRate, mSpotTextureFadeAlpha, mRenderingScale,
+                                 mRenderingPosX, mRenderingPosZ, &iconCompensation)) {
+        const f32 centerX = mTransX + getMapScissorAreaCenterPosX();
+        const f32 centerY = mTransZ + getMapScissorAreaCenterPosY();
+        for (u16 i = 0; i < mIconNum; i++) {
+            backupIconX[i] = mIconInfo[i].pos_x;
+            backupIconY[i] = mIconInfo[i].pos_y;
+            const f32 absX = mTransX + mIconInfo[i].pos_x;
+            const f32 absY = mTransZ + mIconInfo[i].pos_y;
+            mIconInfo[i].pos_x =
+                (centerX + (absX - centerX) * iconCompensation.scale +
+                 iconCompensation.offsetX) -
+                mTransX;
+            mIconInfo[i].pos_y =
+                (centerY + (absY - centerY) * iconCompensation.scale +
+                 iconCompensation.offsetY) -
+                mTransZ;
+        }
+        restoreIconPositions = true;
+    }
+#endif
+
     drawIcon(mTransX, mTransZ, mAlphaRate, field_0xfa8 * mSpotTextureFadeAlpha);
+
+#if TARGET_PC
+    if (restoreIconPositions) {
+        for (u16 i = 0; i < mIconNum; i++) {
+            mIconInfo[i].pos_x = backupIconX[i];
+            mIconInfo[i].pos_y = backupIconY[i];
+        }
+    }
+#endif
 
     if (g_fmapHIO.mRangeCheck && !g_fmapHIO.mRangeCheckDrawPriority) {
         drawDebugRegionArea();
@@ -407,9 +841,19 @@ void dMenu_Fmap2DBack_c::draw() {
             }
         }
 
+        f32 cursorAngle = field_0x11e0;
+#ifdef TARGET_PC
+        if (dusk::frame_interp::is_enabled() && !dusk::frame_interp::is_sim_frame()) {
+            cursorAngle -= g_fmapHIO.mCursorSpeed * dusk::frame_interp::get_interpolation_step();
+            if (cursorAngle < 0.0f) {
+                cursorAngle += 360.0f;
+            }
+        }
+#endif
+
         mpPointParent->getPanePtr()->rotate(mpPointParent->getSizeX() / 2.0f,
                                             mpPointParent->getSizeY() / 2.0f, ROTATE_Z,
-                                            field_0x11e0);
+                                            cursorAngle);
 
         if (g_fmapHIO.mCursorDebugON) {
             mpPointParent->scale(g_fmapHIO.mCursorScale, g_fmapHIO.mCursorScale);
@@ -454,6 +898,12 @@ void dMenu_Fmap2DBack_c::draw() {
     mpBackTex->draw(mTransX + mDoGph_gInf_c::getMinXF(),
                     mTransZ + mDoGph_gInf_c::getMinYF(), mDoGph_gInf_c::getWidthF(),
                     mDoGph_gInf_c::getHeightF(), false, false, false);
+
+#if TARGET_PC
+    if (restoreInterpState) {
+        restorePresentationInterpolation();
+    }
+#endif
 }
 
 void dMenu_Fmap2DBack_c::setRegionTexData(u8 i_areaType, ResTIMG* i_timg, f32 i_originX,
@@ -776,6 +1226,14 @@ void dMenu_Fmap2DBack_c::zoomMapCalc(f32 i_zoom) {
     field_0xfb8 =
         ((mRegionMapSizeX[mRegionCursor] + (i_zoom * (getMapAreaSizeX() - mRegionMapSizeX[mRegionCursor]))) /
          getMapAreaSizeX());
+
+#if TARGET_PC
+    recordFmapControlSample(this, control_xpos, control_ypos, mZoom, mMapZoomRate, mStageTransX,
+                            mStageTransZ, field_0xf0c, field_0xf2c, field_0xf4c,
+                            field_0xf6c, field_0xfa8, field_0xfb8, field_0xfd0, field_0xfd4,
+                            field_0xfd8, field_0xfdc, field_0x11a4, field_0x11a8, field_0x11ac,
+                            field_0x11b0);
+#endif
 }
 
 void dMenu_Fmap2DBack_c::zoomMapCalc2(f32 param_0) {
@@ -855,6 +1313,14 @@ void dMenu_Fmap2DBack_c::zoomMapCalc2(f32 param_0) {
         field_0x11a4 = 0.0f;
         field_0x11a8 = 0.0f;
     }
+
+#if TARGET_PC
+    recordFmapControlSample(this, control_xpos, control_ypos, mZoom, mMapZoomRate, mStageTransX,
+                            mStageTransZ, field_0xf0c, field_0xf2c, field_0xf4c,
+                            field_0xf6c, field_0xfa8, field_0xfb8, field_0xfd0, field_0xfd4,
+                            field_0xfd8, field_0xfdc, field_0x11a4, field_0x11a8, field_0x11ac,
+                            field_0x11b0);
+#endif
 }
 
 void dMenu_Fmap2DBack_c::zoomMapCalcHIO() {
@@ -904,6 +1370,13 @@ void dMenu_Fmap2DBack_c::zoomMapCalcHIO() {
         }
 
         scrollCalc(1.0f);
+#if TARGET_PC
+        recordFmapControlSample(this, control_xpos, control_ypos, mZoom, mMapZoomRate, mStageTransX,
+                                mStageTransZ, field_0xf0c, field_0xf2c, field_0xf4c,
+                                field_0xf6c, field_0xfa8, field_0xfb8, field_0xfd0, field_0xfd4,
+                                field_0xfd8, field_0xfdc, field_0x11a4, field_0x11a8,
+                                field_0x11ac, field_0x11b0);
+#endif
     }
 }
 
@@ -1034,6 +1507,14 @@ void dMenu_Fmap2DBack_c::allmap_move2(STControl* param_0) {
     if (mArrowPos3DZ + control_ypos > sp3C) {
         control_ypos = sp3C - mArrowPos3DZ;
     }
+
+#if TARGET_PC
+    recordFmapControlSample(this, control_xpos, control_ypos, mZoom, mMapZoomRate, mStageTransX,
+                            mStageTransZ, field_0xf0c, field_0xf2c, field_0xf4c,
+                            field_0xf6c, field_0xfa8, field_0xfb8, field_0xfd0, field_0xfd4,
+                            field_0xfd8, field_0xfdc, field_0x11a4, field_0x11a8, field_0x11ac,
+                            field_0x11b0);
+#endif
 
     calcRenderingScale();
     calcRenderingPos();
@@ -1444,14 +1925,32 @@ void dMenu_Fmap2DBack_c::stageTextureDraw() {
         mpSpotTexture->setAlpha(mAlphaRate * 255.0f * field_0xfa8 * mSpotTextureFadeAlpha);
     }
 
+    f32 drawX = mTransX + getMapScissorAreaLX();
+    f32 drawY = mTransZ + getMapScissorAreaLY();
+    f32 drawW = getMapScissorAreaSizeRealX();
+    f32 drawH = getMapScissorAreaSizeRealY();
+
 #if TARGET_PC
-    JUTPalette* pPalette = mpSpotTexture->getTexture(0)->getPalette();
-    pPalette->dataUploaded();
+    FmapLayerCompensation compensation;
+    if (getFmapLayerCompensation(this, mAlphaRate, mSpotTextureFadeAlpha, mRenderingScale,
+                                 mRenderingPosX, mRenderingPosZ, &compensation)) {
+        const f32 centerX = mTransX + getMapScissorAreaCenterPosX();
+        const f32 centerY = mTransZ + getMapScissorAreaCenterPosY();
+        drawW *= compensation.scale;
+        drawH *= compensation.scale;
+        drawX = centerX - (drawW * 0.5f) + compensation.offsetX;
+        drawY = centerY - (drawH * 0.5f) + compensation.offsetY;
+    }
+
+    JUTTexture* texture = mpSpotTexture->getTexture(0);
+    JUTPalette* pPalette = texture->getPalette();
+    if (pPalette != NULL) {
+        pPalette->dataUploaded();
+        texture->initTexObj(static_cast<GXTlut>(texture->getTlutName()));
+    }
 #endif
 
-    mpSpotTexture->draw(mTransX + getMapScissorAreaLX(), mTransZ + getMapScissorAreaLY(),
-                        getMapScissorAreaSizeRealX(), getMapScissorAreaSizeRealY(), false, false,
-                        false);
+    mpSpotTexture->draw(drawX, drawY, drawW, drawH, false, false, false);
 }
 
 void dMenu_Fmap2DBack_c::worldGridDraw() {
@@ -1936,6 +2435,14 @@ void dMenu_Fmap2DBack_c::regionMapMove(STControl* i_stick) {
         control_ypos = max_y - mArrowPos3DZ;
     }
 
+#if TARGET_PC
+    recordFmapControlSample(this, control_xpos, control_ypos, mZoom, mMapZoomRate, mStageTransX,
+                            mStageTransZ, field_0xf0c, field_0xf2c, field_0xf4c,
+                            field_0xf6c, field_0xfa8, field_0xfb8, field_0xfd0, field_0xfd4,
+                            field_0xfd8, field_0xfdc, field_0x11a4, field_0x11a8, field_0x11ac,
+                            field_0x11b0);
+#endif
+
     calcRenderingScale();
     calcRenderingPos();
 
@@ -2030,6 +2537,14 @@ void dMenu_Fmap2DBack_c::stageMapMove(STControl* i_stick, u8 param_1, bool param
     field_0xfdc = mStageTransZ - field_0xfd4;
     control_xpos = mStageTransX + (field_0x11b4 - mArrowPos3DX);
     control_ypos = mStageTransZ + (field_0x11b8 - mArrowPos3DZ);
+
+#if TARGET_PC
+    recordFmapControlSample(this, control_xpos, control_ypos, mZoom, mMapZoomRate, mStageTransX,
+                            mStageTransZ, field_0xf0c, field_0xf2c, field_0xf4c,
+                            field_0xf6c, field_0xfa8, field_0xfb8, field_0xfd0, field_0xfd4,
+                            field_0xfd8, field_0xfdc, field_0x11a4, field_0x11a8, field_0x11ac,
+                            field_0x11b0);
+#endif
 
     calcRenderingScale();
     calcRenderingPos();

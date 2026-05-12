@@ -646,7 +646,7 @@ void dMenu_Ring_c::_draw() {
         f32 simX = 0.0f;
         f32 simY = 0.0f;
         bool restoreSimPos = false;
-        if (dusk::frame_interp::is_enabled() && mAlphaRate >= 1.0f) {
+        if (dusk::frame_interp::is_enabled() && mAlphaRate > 0.0f) {
             simX = mpDrawCursor->getPositionX();
             simY = mpDrawCursor->getPositionY();
 

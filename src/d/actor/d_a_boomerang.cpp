@@ -13,6 +13,9 @@
 #include "d/actor/d_a_mirror.h"
 #include "Z2AudioLib/Z2Instances.h"
 #include "SSystem/SComponent/c_math.h"
+#if TARGET_PC
+#include "dusk/frame_interpolation.h"
+#endif
 
 int daBoomerang_sight_c::createHeap() {
     void* tmpData;
@@ -156,6 +159,43 @@ static const u32 l_lockSeFlg[BOOMERANG_LOCK_MAX] = {
     Z2SE_SY_BOOM_LOCK_ON_4,
     Z2SE_SY_BOOM_LOCK_ON_5,
 };
+
+#if TARGET_PC
+namespace {
+struct BoomerangSightInterp {
+    f32 prevX[6] = {};
+    f32 prevY[6] = {};
+    f32 currX[6] = {};
+    f32 currY[6] = {};
+    bool initialized[6] = {};
+};
+
+static BoomerangSightInterp s_boomerangSightInterp;
+
+static void recordBoomerangSightSample(int index, f32 x, f32 y) {
+    BoomerangSightInterp& interp = s_boomerangSightInterp;
+    if (!interp.initialized[index]) {
+        interp.prevX[index] = interp.currX[index] = x;
+        interp.prevY[index] = interp.currY[index] = y;
+        interp.initialized[index] = true;
+        return;
+    }
+
+    const f32 dx = x - interp.currX[index];
+    const f32 dy = y - interp.currY[index];
+    if (dx * dx + dy * dy > 2500.0f) {
+        interp.prevX[index] = interp.currX[index] = x;
+        interp.prevY[index] = interp.currY[index] = y;
+        return;
+    }
+
+    interp.prevX[index] = interp.currX[index];
+    interp.prevY[index] = interp.currY[index];
+    interp.currX[index] = x;
+    interp.currY[index] = y;
+}
+}  // namespace
+#endif
 
 void daBoomerang_sight_c::initialize() {
     m_cursorYellowAllPane = m_cursorYellowScrn->search(MULTI_CHAR('n_all'));
@@ -340,6 +380,11 @@ void daBoomerang_sight_c::setSight(const cXyz* i_pos, int i_no) {
         mDoLib_project(&m_pos[i_no], &proj);
         m_proj_posX[i_no] = proj.x;
         m_proj_posY[i_no] = proj.y;
+#if TARGET_PC
+        if (dusk::frame_interp::is_sim_frame()) {
+            recordBoomerangSightSample(i_no, m_proj_posX[i_no], m_proj_posY[i_no]);
+        }
+#endif
     }
 }
 
@@ -357,11 +402,22 @@ void daBoomerang_sight_c::draw() {
 
     for (int i = 0; i < 6; i++, alpha_p++) {
         if (*alpha_p != 0) {
-            m_cursorYellowBck->setFrame(field_0x98[i]);
-            m_cursorYellowBpk->setFrame(field_0x98[i] > 21.0f ? 21.0f : field_0x98[i]);
+            f32 frame98 = field_0x98[i];
+            f32 frameB0 = field_0xb0[i];
+#if TARGET_PC
+            if (dusk::frame_interp::is_enabled() && !dusk::frame_interp::is_sim_frame()) {
+                const f32 step = dusk::frame_interp::get_interpolation_step();
+                const f32 frameRate = i == 5 ? 0.9f : 1.1f;
+                frame98 += frameRate * step;
+                frameB0 += frameRate * step;
+            }
+#endif
+
+            m_cursorYellowBck->setFrame(frame98);
+            m_cursorYellowBpk->setFrame(frame98 > 21.0f ? 21.0f : frame98);
 
             if (i == 5) {
-                m_cursorYellow2Brk->setFrame(field_0xb0[i]);
+                m_cursorYellow2Brk->setFrame(frameB0);
                 cursor0_pane = m_cursorYellow0Pane;
                 cursor1_pane = m_cursorYellow1Pane;
                 cursor2_pane = m_cursorYellow2Pane;
@@ -369,7 +425,7 @@ void daBoomerang_sight_c::draw() {
                 cursorAll_pane = m_cursorYellowAllPane;
                 var_f31 = 80.0f;
             } else if (i == 0 && m_redSight) {
-                m_cursorRed2Brk->setFrame(field_0xb0[i]);
+                m_cursorRed2Brk->setFrame(frameB0);
                 cursor0_pane = m_cursorRed0Pane;
                 cursor1_pane = m_cursorRed1Pane;
                 cursor2_pane = m_cursorRed2Pane;
@@ -377,7 +433,7 @@ void daBoomerang_sight_c::draw() {
                 cursorAll_pane = m_cursorRedAllPane;
                 var_f31 = 35.0f;
             } else {
-                m_cursorOrange2Brk->setFrame(field_0xb0[i]);
+                m_cursorOrange2Brk->setFrame(frameB0);
                 cursor0_pane = m_cursorOrange0Pane;
                 cursor1_pane = m_cursorOrange1Pane;
                 cursor2_pane = m_cursorOrange2Pane;
@@ -388,12 +444,27 @@ void daBoomerang_sight_c::draw() {
 
             screen->animation();
             cursorAll_pane->scale(0.6f, 0.6f);
-            cursorAll_pane->translate(m_proj_posX[i], m_proj_posY[i]);
+
+            f32 drawX = m_proj_posX[i];
+            f32 drawY = m_proj_posY[i];
+#if TARGET_PC
+            if (dusk::frame_interp::is_enabled() && !dusk::frame_interp::is_sim_frame() &&
+                s_boomerangSightInterp.initialized[i])
+            {
+                const f32 step = dusk::frame_interp::get_interpolation_step();
+                drawX = s_boomerangSightInterp.prevX[i] +
+                        (s_boomerangSightInterp.currX[i] - s_boomerangSightInterp.prevX[i]) * step;
+                drawY = s_boomerangSightInterp.prevY[i] +
+                        (s_boomerangSightInterp.currY[i] - s_boomerangSightInterp.prevY[i]) * step;
+            }
+#endif
+
+            cursorAll_pane->translate(drawX, drawY);
             field_0x98[i] = field_0x98[i];
 
-            if (!(field_0x98[i] < 15.0f)) {
-                if (field_0x98[i] < 21.0f) {
-                    var_f30 = var_f31 * (field_0x98[i] - 15.0f) * 0.16666667f;
+            if (!(frame98 < 15.0f)) {
+                if (frame98 < 21.0f) {
+                    var_f30 = var_f31 * (frame98 - 15.0f) * 0.16666667f;
                 } else if (i == 5) {
                     var_f30 = var_f31 * (*alpha_p * 0.00390625f + 0.5f);
                 } else {
@@ -473,16 +544,35 @@ int daBoomerang_c::draw() {
         }
     }
 
+#if TARGET_PC
+    Mtx interpMtx;
+    if (dusk::frame_interp::lookup_replacement(mp_boomModel, interpMtx)) {
+        mp_boomModel->setBaseTRMtx(interpMtx);
+    }
+#endif
+
     g_env_light.settingTevStruct(0, &current.pos, &tevStr);
     g_env_light.setLightTevColorType_MAJI(mp_boomModel, &tevStr);
     mDoExt_modelUpdateDL(mp_boomModel);
     daMirror_c::entry(mp_boomModel);
 
     if (fopAcM_GetParam(this) != 0) {
+#if TARGET_PC
+        if (dusk::frame_interp::lookup_replacement(mp_shippuModel, interpMtx)) {
+            mp_shippuModel->setBaseTRMtx(interpMtx);
+        }
+#endif
+
         g_env_light.setLightTevColorType_MAJI(mp_shippuModel, &tevStr);
         mDoExt_modelEntryDL(mp_shippuModel);
         daMirror_c::entry(mp_shippuModel);
     } else if (dComIfGp_checkPlayerStatus0(0, 0x80000)) {
+#if TARGET_PC
+        if (dusk::frame_interp::lookup_replacement(mp_setboomEfModel, interpMtx)) {
+            mp_setboomEfModel->setBaseTRMtx(interpMtx);
+        }
+#endif
+
         g_env_light.setLightTevColorType_MAJI(mp_setboomEfModel, &tevStr);
         mDoExt_modelUpdateDL(mp_setboomEfModel);
     }
@@ -641,17 +731,27 @@ void daBoomerang_c::setKeepMatrix() {
     mDoMtx_stack_c::XYZrotM(cM_deg2s(-4.0f), cM_deg2s(39.0f), cM_deg2s(-9.0f));
     mp_boomModel->setBaseTRMtx(mDoMtx_stack_c::get());
     mp_shippuModel->setBaseTRMtx(player->getLeftItemMatrix());
+#if TARGET_PC
+    dusk::frame_interp::record_final_mtx(mp_boomModel->getBaseTRMtx(), mp_boomModel);
+    dusk::frame_interp::record_final_mtx(mp_shippuModel->getBaseTRMtx(), mp_shippuModel);
+#endif
 
     mDoMtx_stack_c::multVecZero(&current.pos);
     daAlink_c::simpleAnmPlay(m_waitEffBtk);
 
     mp_setboomEfModel->setBaseTRMtx(player->getLeftItemMatrix());
+#if TARGET_PC
+    dusk::frame_interp::record_final_mtx(mp_setboomEfModel->getBaseTRMtx(), mp_setboomEfModel);
+#endif
 }
 
 void daBoomerang_c::setMoveMatrix() {
     mDoMtx_stack_c::transS(current.pos);
     mDoMtx_stack_c::ZXYrotM(shape_angle);
     mp_shippuModel->setBaseTRMtx(mDoMtx_stack_c::get());
+#if TARGET_PC
+    dusk::frame_interp::record_final_mtx(mp_shippuModel->getBaseTRMtx(), mp_shippuModel);
+#endif
 
     daAlink_c::simpleAnmPlay(m_windBtk);
 
@@ -670,6 +770,9 @@ void daBoomerang_c::setMoveMatrix() {
     mDoMtx_stack_c::XrotM(0x7FFF);
 
     mp_boomModel->setBaseTRMtx(mDoMtx_stack_c::get());
+#if TARGET_PC
+    dusk::frame_interp::record_final_mtx(mp_boomModel->getBaseTRMtx(), mp_boomModel);
+#endif
 }
 
 void daBoomerang_c::setRotAngle() {
