@@ -261,6 +261,9 @@ static TransientSettings g_transientSettings = {
     },
     .skipFrameRateLimit = false,
     .forceThirtyFpsLimit = false,
+    .moveLinkActive = false,
+    .stateShareLoadActive = false,
+    .practiceMenuInputCapture = false,
 };
 
 TransientSettings& getTransientSettings() {

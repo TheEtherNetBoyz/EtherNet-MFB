@@ -233,6 +233,7 @@ struct TransientSettings {
     bool forceThirtyFpsLimit;
     bool moveLinkActive;
     bool stateShareLoadActive;
+    bool practiceMenuInputCapture;
 };
 
 TransientSettings& getTransientSettings();

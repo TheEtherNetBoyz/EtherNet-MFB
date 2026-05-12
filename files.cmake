@@ -1460,6 +1460,8 @@ set(DUSK_FILES
         src/dusk/imgui/ImGuiStubLog.cpp
         src/dusk/imgui/ImGuiMapLoader.cpp
         src/dusk/imgui/ImGuiSaveEditor.cpp
+        src/dusk/imgui/ImGuiPracticeSaves.hpp
+        src/dusk/imgui/ImGuiPracticeSaves.cpp
         src/dusk/imgui/ImGuiStateShare.hpp
         src/dusk/imgui/ImGuiStateShare.cpp
         src/dusk/ui/achievements.cpp

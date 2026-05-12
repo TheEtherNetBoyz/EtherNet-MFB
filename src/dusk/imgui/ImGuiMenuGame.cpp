@@ -236,6 +236,8 @@ namespace dusk {
             MenuCheckbox("Hide TV Settings Screen", s.game.hideTvSettingsScreen);
             MenuCheckbox("Pause On Focus Lost", s.game.pauseOnFocusLost);
             MenuCheckbox("Recording Mode", s.game.recordingMode);
+            MenuCheckbox("Check For Updates", s.backend.checkForUpdates);
+            MenuCheckbox("Skip Pre-Launch UI", s.backend.skipPreLaunchUI);
             ImGui::Separator();
             MenuCheckbox("Speedrun Mode", s.game.speedrunMode);
             MenuCheckbox("LiveSplit", s.game.liveSplitEnabled);
@@ -323,13 +325,6 @@ namespace dusk {
             ImGui::EndDisabled();
         }
 
-        void DrawTechnicalMenu() {
-            auto& s = getSettings();
-            MenuCheckbox("Advanced Settings", s.backend.enableAdvancedSettings);
-            MenuCheckbox("Show Pipeline Compilation", s.backend.showPipelineCompilation);
-            MenuCheckbox("Check For Updates", s.backend.checkForUpdates);
-            MenuCheckbox("Skip Pre-Launch UI", s.backend.skipPreLaunchUI);
-        }
     }
 
     void ImGuiMenuGame::draw() {
@@ -350,14 +345,6 @@ namespace dusk {
                 DrawMiscMenu();
                 ImGui::EndMenu();
             }
-            ImGui::EndMenu();
-        }
-
-        if (ImGui::BeginMenu("Enhancements")) {
-            if (ImGui::BeginMenu("Graphics")) {
-                DrawGraphicsMenu();
-                ImGui::EndMenu();
-            }
             if (ImGui::BeginMenu("Input")) {
                 DrawInputMenu();
                 ImGui::EndMenu();
@@ -369,13 +356,13 @@ namespace dusk {
             ImGui::EndMenu();
         }
 
-        if (ImGui::BeginMenu("Audio")) {
-            DrawAudioMenu();
+        if (ImGui::BeginMenu("Graphics")) {
+            DrawGraphicsMenu();
             ImGui::EndMenu();
         }
 
-        if (ImGui::BeginMenu("Technical")) {
-            DrawTechnicalMenu();
+        if (ImGui::BeginMenu("Audio")) {
+            DrawAudioMenu();
             ImGui::EndMenu();
         }
     }

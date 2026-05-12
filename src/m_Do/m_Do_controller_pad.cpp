@@ -24,6 +24,9 @@ interface_of_controller_pad mDoCPd_c::m_debugCpadInfo[4];
 
 #if TARGET_PC
 static bool sCtrlRResetHeld = false;
+static constexpr u32 kPracticeMenuInputMask = PAD_BUTTON_UP | PAD_BUTTON_DOWN | PAD_BUTTON_LEFT |
+                                              PAD_BUTTON_RIGHT | PAD_BUTTON_A | PAD_BUTTON_B |
+                                              PAD_TRIGGER_L | PAD_TRIGGER_R;
 
 static void checkCtrlRSoftReset() {
     int keyCount = 0;
@@ -37,6 +40,17 @@ static void checkCtrlRSoftReset() {
     }
 
     sCtrlRResetHeld = comboHeld;
+}
+
+static void clearPracticeMenuInput(interface_of_controller_pad* interface) {
+    interface->mButtonFlags &= ~kPracticeMenuInputMask;
+    interface->mPressedButtonFlags &= ~kPracticeMenuInputMask;
+    interface->mTriggerLeft = 0.0f;
+    interface->mTriggerRight = 0.0f;
+    interface->mHoldLockL = false;
+    interface->mTrigLockL = false;
+    interface->mHoldLockR = false;
+    interface->mTrigLockR = false;
 }
 #endif
 
@@ -116,6 +130,11 @@ void mDoCPd_c::read() {
         } else {
             convert(interface, *pad);
             LRlockCheck(interface);
+#if TARGET_PC
+            if (i == PAD_1 && dusk::getTransientSettings().practiceMenuInputCapture) {
+                clearPracticeMenuInput(interface);
+            }
+#endif
         }
 #if DEBUG
         cLib_memSet(interface2, 0, sizeof(interface_of_controller_pad));

@@ -31,6 +31,10 @@ extern bool enableLodBias;
 namespace dusk {
     ImGuiMenuTools::ImGuiMenuTools() {}
 
+    void ImGuiMenuTools::togglePracticeSaves() {
+        m_showPracticeSaves = !m_showPracticeSaves;
+    }
+
     void ImGuiMenuTools::draw() {
         if (ImGui::BeginMenu("Tools")) {
             if (!dusk::IsGameLaunched) {
@@ -40,6 +44,7 @@ namespace dusk {
             ImGui::BeginDisabled(getSettings().game.speedrunMode);
 
             ImGui::MenuItem("Save Editor", hotkeys::SHOW_SAVE_EDITOR, &m_showSaveEditor);
+            ImGui::MenuItem("Practice Saves", nullptr, &m_showPracticeSaves);
             ImGui::MenuItem("Map Loader", hotkeys::SHOW_MAP_LOADER, &m_showMapLoader);
             ImGui::MenuItem("State Share", hotkeys::SHOW_STATE_SHARE, &m_showStateShare);
 
@@ -64,6 +69,10 @@ namespace dusk {
 
         if (ImGui::BeginMenu("Debug")) {
             ImGui::BeginDisabled(getSettings().game.speedrunMode);
+
+            config::ImGuiMenuItem("Advanced Settings", nullptr, getSettings().backend.enableAdvancedSettings);
+            config::ImGuiMenuItem("Show Pipeline Compilation", nullptr, getSettings().backend.showPipelineCompilation);
+            ImGui::Separator();
 
             bool developmentMode = mDoMain::developmentMode == 1;
             if (ImGui::Checkbox("Development Mode", &developmentMode)) {

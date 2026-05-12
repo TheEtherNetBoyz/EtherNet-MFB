@@ -7,6 +7,7 @@
 
 #include "imgui.h"
 #include "ImGuiSaveEditor.hpp"
+#include "ImGuiPracticeSaves.hpp"
 #include "ImGuiStateShare.hpp"
 
 namespace dusk {
@@ -15,6 +16,7 @@ namespace dusk {
         ImGuiMenuTools();
         void draw();
         void afterDraw();
+        void togglePracticeSaves();
 
 		void ShowDebugOverlay();
 		void ShowCameraOverlay();
@@ -26,6 +28,7 @@ namespace dusk {
         void ShowPlayerInfo();
         void ShowAudioDebug();
         void ShowSaveEditor();
+        void ShowPracticeSaves();
         void ShowStateShare();
         void ShowInputViewer();
         void ShowActorSpawner();
@@ -65,6 +68,9 @@ namespace dusk {
 
 		bool m_showSaveEditor = false;
         ImGuiSaveEditor m_saveEditor;
+
+        bool m_showPracticeSaves = false;
+        ImGuiPracticeSaves m_practiceSaves;
 
         bool m_showStateShare = false;
         ImGuiStateShare m_stateShare;
