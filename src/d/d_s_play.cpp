@@ -1401,7 +1401,8 @@ static int phase_3(dScnPly_c* i_this) {
     bool audioLoading = mDoAud_check1stDynamicWave();
 
     if ((i_this->sceneCommand != NULL && !i_this->sceneCommand->sync()) ||
-        DUSK_IF_ELSE(!dusk::getSettings().game.enableInstaLoads.getValue() &&
+        DUSK_IF_ELSE(!dusk::getSettings().game.enableFastLoads.getValue() &&
+                         !dusk::getSettings().game.enableInstaLoads.getValue() &&
                          audioLoading,
                      audioLoading))
     {

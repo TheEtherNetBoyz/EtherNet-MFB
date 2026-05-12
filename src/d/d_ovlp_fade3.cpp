@@ -18,8 +18,8 @@
 
 static const int kFastFadeFrames = 20;
 static const int kFastFadeInFrames = 25;
-static const int kInstaFadeFrames = 1;
-static const int kInstaFadeInFrames = 1;
+static const int kInstaFadeFrames = 12;
+static const int kInstaFadeInFrames = 10;
 
 static bool dOvlpFd3_isFastLoad() {
     return DUSK_IF_ELSE((dusk::getSettings().game.enableFastLoads.getValue() ||
@@ -28,15 +28,19 @@ static bool dOvlpFd3_isFastLoad() {
                         false);
 }
 
+static bool dOvlpFd3_isInstaLoad() {
+    return DUSK_IF_ELSE(dusk::getSettings().game.enableInstaLoads.getValue() &&
+                            !mDoRst::isReset(),
+                        false);
+}
+
 static int dOvlpFd3_getFadeFrames() {
-    return DUSK_IF_ELSE(dusk::getSettings().game.enableInstaLoads.getValue() ? kInstaFadeFrames :
-                                                                                kFastFadeFrames,
+    return DUSK_IF_ELSE(dOvlpFd3_isInstaLoad() ? kInstaFadeFrames : kFastFadeFrames,
                         kFastFadeFrames);
 }
 
 static int dOvlpFd3_getFadeInFrames() {
-    return DUSK_IF_ELSE(dusk::getSettings().game.enableInstaLoads.getValue() ? kInstaFadeInFrames :
-                                                                                kFastFadeInFrames,
+    return DUSK_IF_ELSE(dOvlpFd3_isInstaLoad() ? kInstaFadeInFrames : kFastFadeInFrames,
                         kFastFadeInFrames);
 }
 
