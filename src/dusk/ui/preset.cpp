@@ -13,6 +13,7 @@ namespace {
 void applyPresetClassic() {
     auto& s = getSettings();
     s.video.lockAspectRatio.setValue(true);
+    s.video.forcedAspectRatio.setValue(AspectRatioMode::Off);
     s.game.bloomMode.setValue(BloomMode::Classic);
     s.game.enableAchievementToasts.setValue(false);
     s.game.enableControllerToasts.setValue(false);

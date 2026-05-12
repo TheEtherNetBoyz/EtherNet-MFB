@@ -32,6 +32,13 @@ enum class GyroMode : u8 {
     Mouse = 1,
 };
 
+enum class AspectRatioMode : int {
+    Off = 0,
+    Ratio16x9 = 1,
+    Ratio21x9 = 2,
+    Ratio3x2 = 3,
+};
+
 namespace config {
 template <>
 struct ConfigEnumRange<BloomMode> {
@@ -56,6 +63,12 @@ struct ConfigEnumRange<GyroMode> {
     static constexpr auto min = GyroMode::Sensor;
     static constexpr auto max = GyroMode::Mouse;
 };
+
+template <>
+struct ConfigEnumRange<AspectRatioMode> {
+    static constexpr auto min = AspectRatioMode::Off;
+    static constexpr auto max = AspectRatioMode::Ratio3x2;
+};
 }
 
 // Persistent user settings
@@ -68,6 +81,7 @@ struct UserSettings {
         ConfigVar<bool> enableFullscreen;
         ConfigVar<bool> enableVsync;
         ConfigVar<bool> lockAspectRatio;
+        ConfigVar<AspectRatioMode> forcedAspectRatio;
         ConfigVar<bool> enableFpsOverlay;
         ConfigVar<int> fpsOverlayCorner;
     } video;

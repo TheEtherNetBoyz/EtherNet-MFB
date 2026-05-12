@@ -10,6 +10,7 @@
 #include "dusk/settings.h"
 #include "dusk/audio/DuskDsp.hpp"
 #include "m_Do/m_Do_main.h"
+#include <dolphin/gx/GXAurora.h>
 #include <dolphin/vi.h>
 
 namespace dusk {
@@ -97,6 +98,54 @@ namespace dusk {
             ImGui::SetNextItemWidth(150.0f);
             if (ImGui::SliderFloat("##BloomMultiplier", &copy, 0.0f, 3.0f, "%.2f")) {
                 value.setValue(copy);
+                config::Save();
+            }
+        }
+
+        void ApplyAspectRatioSettings() {
+            switch (getSettings().video.forcedAspectRatio.getValue()) {
+            case AspectRatioMode::Ratio16x9:
+                AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
+                AuroraSetForcedAspectRatio(16, 9);
+                break;
+            case AspectRatioMode::Ratio21x9:
+                AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
+                AuroraSetForcedAspectRatio(21, 9);
+                break;
+            case AspectRatioMode::Ratio3x2:
+                AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
+                AuroraSetForcedAspectRatio(3, 2);
+                break;
+            case AspectRatioMode::Off:
+            default:
+                AuroraSetForcedAspectRatio(0, 0);
+                AuroraSetViewportPolicy(getSettings().video.lockAspectRatio.getValue() ?
+                                            AURORA_VIEWPORT_FIT :
+                                            AURORA_VIEWPORT_STRETCH);
+                break;
+            }
+        }
+
+        int AspectRatioModeIndex() {
+            if (getSettings().video.forcedAspectRatio.getValue() != AspectRatioMode::Off) {
+                return static_cast<int>(getSettings().video.forcedAspectRatio.getValue()) + 1;
+            }
+
+            return getSettings().video.lockAspectRatio.getValue() ? 1 : 0;
+        }
+
+        void ForcedAspectRatioControl() {
+            int copy = AspectRatioModeIndex();
+            const char* items[] = {"Off", "4:3", "16:9", "21:9", "3:2"};
+            ImGui::TextUnformatted("Force Aspect Ratio");
+            ImGui::SameLine(170.0f);
+            ImGui::SetNextItemWidth(150.0f);
+            if (ImGui::Combo("##ForceAspectRatio", &copy, items, IM_ARRAYSIZE(items))) {
+                getSettings().video.lockAspectRatio.setValue(copy == 1);
+                getSettings().video.forcedAspectRatio.setValue(copy <= 1 ?
+                                                                   AspectRatioMode::Off :
+                                                                   static_cast<AspectRatioMode>(copy - 1));
+                ApplyAspectRatioSettings();
                 config::Save();
             }
         }
@@ -201,6 +250,7 @@ namespace dusk {
             ImGui::Separator();
             InternalResolutionSlider();
             ShadowResolutionSlider();
+            ForcedAspectRatioControl();
             BloomModeControl();
             BloomMultiplierSlider();
         }

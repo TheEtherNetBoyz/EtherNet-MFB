@@ -8,6 +8,7 @@ UserSettings g_userSettings = {
         .enableFullscreen {"video.enableFullscreen", false},
         .enableVsync {"video.enableVsync", true},
         .lockAspectRatio {"video.lockAspectRatio", false},
+        .forcedAspectRatio {"video.forcedAspectRatio", AspectRatioMode::Off},
         .enableFpsOverlay {"game.enableFpsOverlay", false},
         .fpsOverlayCorner {"game.fpsOverlayCorner", 0},
     },
@@ -142,6 +143,7 @@ void registerSettings() {
     Register(g_userSettings.video.enableFullscreen);
     Register(g_userSettings.video.enableVsync);
     Register(g_userSettings.video.lockAspectRatio);
+    Register(g_userSettings.video.forcedAspectRatio);
     Register(g_userSettings.video.enableFpsOverlay);
     Register(g_userSettings.video.fpsOverlayCorner);
 

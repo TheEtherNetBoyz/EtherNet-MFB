@@ -545,6 +545,24 @@ int game_main(int argc, char* argv[]) {
     } else {
         AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
     }
+    switch (dusk::getSettings().video.forcedAspectRatio.getValue()) {
+    case dusk::AspectRatioMode::Ratio16x9:
+        AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
+        AuroraSetForcedAspectRatio(16, 9);
+        break;
+    case dusk::AspectRatioMode::Ratio21x9:
+        AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
+        AuroraSetForcedAspectRatio(21, 9);
+        break;
+    case dusk::AspectRatioMode::Ratio3x2:
+        AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
+        AuroraSetForcedAspectRatio(3, 2);
+        break;
+    case dusk::AspectRatioMode::Off:
+    default:
+        AuroraSetForcedAspectRatio(0, 0);
+        break;
+    }
     VISetFrameBufferScale(dusk::getSettings().game.internalResolutionScale.getValue());
 
     dusk::audio::SetMasterVolume(dusk::getSettings().audio.masterVolume / 100.0f);

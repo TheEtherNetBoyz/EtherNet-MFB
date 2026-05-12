@@ -22,6 +22,7 @@
 #include "ui.hpp"
 
 #include <aurora/lib/window.hpp>
+#include <dolphin/gx/GXAurora.h>
 #include <SDL3/SDL_filesystem.h>
 
 #if DUSK_ENABLE_SENTRY_NATIVE
@@ -309,6 +310,56 @@ constexpr std::array kFrameRateLimitNames = {
     "480 FPS",
     "Unlocked",
 };
+
+constexpr std::array kAspectRatioModeNames = {
+    "Off",
+    "4:3",
+    "16:9",
+    "21:9",
+    "3:2",
+};
+
+void apply_aspect_ratio_settings() {
+    switch (getSettings().video.forcedAspectRatio.getValue()) {
+    case AspectRatioMode::Ratio16x9:
+        AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
+        AuroraSetForcedAspectRatio(16, 9);
+        break;
+    case AspectRatioMode::Ratio21x9:
+        AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
+        AuroraSetForcedAspectRatio(21, 9);
+        break;
+    case AspectRatioMode::Ratio3x2:
+        AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
+        AuroraSetForcedAspectRatio(3, 2);
+        break;
+    case AspectRatioMode::Off:
+    default:
+        AuroraSetForcedAspectRatio(0, 0);
+        AuroraSetViewportPolicy(getSettings().video.lockAspectRatio.getValue() ?
+                                    AURORA_VIEWPORT_FIT :
+                                    AURORA_VIEWPORT_STRETCH);
+        break;
+    }
+}
+
+int aspect_ratio_mode_index() {
+    if (getSettings().video.forcedAspectRatio.getValue() != AspectRatioMode::Off) {
+        return static_cast<int>(getSettings().video.forcedAspectRatio.getValue()) + 1;
+    }
+
+    return getSettings().video.lockAspectRatio.getValue() ? 1 : 0;
+}
+
+void set_aspect_ratio_mode_index(int index) {
+    index = std::clamp(index, 0, static_cast<int>(kAspectRatioModeNames.size()) - 1);
+    getSettings().video.lockAspectRatio.setValue(index == 1);
+    getSettings().video.forcedAspectRatio.setValue(index <= 1 ?
+                                                       AspectRatioMode::Off :
+                                                       static_cast<AspectRatioMode>(index - 1));
+    apply_aspect_ratio_settings();
+    config::Save();
+}
 
 int frame_rate_limit_index() {
     if (!getSettings().game.enableFrameInterpolation.getValue()) {
@@ -647,15 +698,29 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .helpText = "Synchronizes the frame rate to your monitor's refresh rate.",
                 .onChange = [](bool value) { aurora_enable_vsync(value); },
             });
-        config_bool_select(leftPane, rightPane, getSettings().video.lockAspectRatio,
-            {
-                .key = "Lock 4:3 Aspect Ratio",
-                .helpText = "Lock the game's aspect ratio to the original.",
-                .onChange =
-                    [](bool value) {
-                        AuroraSetViewportPolicy(
-                            value ? AURORA_VIEWPORT_FIT : AURORA_VIEWPORT_STRETCH);
+        leftPane.register_control(
+            leftPane.add_select_button({
+                .key = "Force Aspect Ratio",
+                .getValue = [] { return Rml::String{kAspectRatioModeNames[aspect_ratio_mode_index()]}; },
+                .isModified =
+                    [] {
+                        return getSettings().video.lockAspectRatio.getValue() !=
+                                   getSettings().video.lockAspectRatio.getDefaultValue() ||
+                               getSettings().video.forcedAspectRatio.getValue() !=
+                                   getSettings().video.forcedAspectRatio.getDefaultValue();
                     },
+            }),
+            rightPane, [](Pane& pane) {
+                for (int i = 0; i < static_cast<int>(kAspectRatioModeNames.size()); ++i) {
+                    pane.add_button({
+                        .text = kAspectRatioModeNames[i],
+                        .isSelected = [i] { return aspect_ratio_mode_index() == i; },
+                    }).on_pressed([i] {
+                        mDoAud_seStartMenu(kSoundItemChange);
+                        set_aspect_ratio_mode_index(i);
+                    });
+                }
+                pane.add_text("Force the rendered game to a specific display aspect ratio.");
             });
         config_bool_select(leftPane, rightPane, getSettings().game.pauseOnFocusLost,
             {
