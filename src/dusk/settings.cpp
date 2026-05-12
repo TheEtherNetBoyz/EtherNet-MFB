@@ -260,6 +260,7 @@ static TransientSettings g_transientSettings = {
         .drawRange = 100.0f,
     },
     .skipFrameRateLimit = false,
+    .forceThirtyFpsLimit = false,
 };
 
 TransientSettings& getTransientSettings() {

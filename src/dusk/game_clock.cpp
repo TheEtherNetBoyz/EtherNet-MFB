@@ -27,6 +27,10 @@ constexpr clock::duration kAbnormalGapResetThreshold = std::chrono::milliseconds
 constexpr int kMaxSimTicksPerFrame = 2;
 
 int selected_frame_rate_limit() {
+    if (dusk::getTransientSettings().forceThirtyFpsLimit) {
+        return 30;
+    }
+
     if (dusk::getTransientSettings().skipFrameRateLimit) {
         return 0;
     }
@@ -76,7 +80,8 @@ MainLoopPacer advance_main_loop() {
     MainLoopPacer out{};
     out.presentation_dt_seconds = presentation_dt;
 
-    const bool should_interpolate = dusk::getSettings().game.enableFrameInterpolation &&
+    const bool should_interpolate = !dusk::getTransientSettings().forceThirtyFpsLimit &&
+                                    dusk::getSettings().game.enableFrameInterpolation &&
                                     !dusk::getTransientSettings().skipFrameRateLimit;
     out.is_interpolating = should_interpolate;
     out.sim_pace = sim_pace();

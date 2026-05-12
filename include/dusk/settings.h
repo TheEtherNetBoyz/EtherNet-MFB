@@ -230,6 +230,7 @@ struct CollisionViewSettings {
 struct TransientSettings {
     CollisionViewSettings collisionView;
     bool skipFrameRateLimit;
+    bool forceThirtyFpsLimit;
     bool moveLinkActive;
     bool stateShareLoadActive;
 };
