@@ -30,6 +30,7 @@ private:
     std::string m_statusMsg;
     std::optional<dSv_info_c>  m_pendingInfo;
     std::optional<dSv_save_c>  m_pendingSavedata;
+    std::optional<u8> m_pendingVibration;
     int m_renamingIndex = -1;
     char m_renameBuffer[128] = {};
     bool m_loaded = false;

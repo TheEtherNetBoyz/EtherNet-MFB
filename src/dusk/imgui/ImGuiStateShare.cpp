@@ -139,15 +139,19 @@ bool ImGuiStateShare::applyEncodedState(const std::string& encoded, const std::s
     memcpy(&pkt, raw.data(), sizeof(pkt));
     pkt.stageName[7] = '\0';
 
+    const u8 vibration = dComIfGs_getOptVibration();
     if (isFull) {
         memcpy(&g_dComIfG_gameInfo.info, raw.data() + sizeof(pkt), sizeof(dSv_info_c));
+        g_dComIfG_gameInfo.info.getPlayer().getConfig().setVibration(vibration);
         m_pendingInfo = g_dComIfG_gameInfo.info;
         m_pendingSavedata.reset();
     } else {
         memcpy(&g_dComIfG_gameInfo.info.mSavedata, raw.data() + sizeof(pkt), sizeof(dSv_save_c));
+        g_dComIfG_gameInfo.info.mSavedata.getPlayer().getConfig().setVibration(vibration);
         m_pendingSavedata = g_dComIfG_gameInfo.info.mSavedata;
         m_pendingInfo.reset();
     }
+    m_pendingVibration = vibration;
 
     s16 spawnPoint = pkt.startPoint == -4 ? -1 : pkt.startPoint;
     if (spawnPoint == -1) {
@@ -179,6 +183,11 @@ void ImGuiStateShare::tickPendingApply() {
     } else {
         g_dComIfG_gameInfo.info.mSavedata = *m_pendingSavedata;
         m_pendingSavedata.reset();
+    }
+    if (m_pendingVibration.has_value()) {
+        dComIfGs_setOptVibration(*m_pendingVibration);
+        dComIfGp_setNowVibration(*m_pendingVibration);
+        m_pendingVibration.reset();
     }
     dComIfGp_offOxygenShowFlag();
     dComIfGp_setMaxOxygen(600);

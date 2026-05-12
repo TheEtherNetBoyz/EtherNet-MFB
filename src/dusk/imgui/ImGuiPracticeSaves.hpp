@@ -59,6 +59,7 @@ private:
     std::array<std::vector<PracticeSaveEntry>, static_cast<int>(SaveCategory::Count)> m_saves;
     std::string m_statusMsg;
     std::optional<dSv_save_c> m_pendingSavedata;
+    std::optional<u8> m_pendingVibration;
     MainCategory m_mainCategory = MainCategory::Practice;
     SaveCategory m_saveCategory = SaveCategory::Any;
     bool m_focusSaveList = false;

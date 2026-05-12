@@ -269,7 +269,10 @@ bool ImGuiPracticeSaves::loadPracticeSave(const PracticeSaveEntry& entry) {
             return false;
         }
 
+        const u8 vibration = dComIfGs_getOptVibration();
+        save.getPlayer().getConfig().setVibration(vibration);
         m_pendingSavedata = save;
+        m_pendingVibration = vibration;
         m_loadInProgress = true;
         m_loadPeekSeen = false;
         getTransientSettings().stateShareLoadActive = true;
@@ -561,6 +564,11 @@ void ImGuiPracticeSaves::drawGenericPanel() {
 void ImGuiPracticeSaves::tickPendingApply() {
     if (m_pendingSavedata.has_value() && !dComIfGp_isEnableNextStage()) {
         g_dComIfG_gameInfo.info.mSavedata = *m_pendingSavedata;
+        if (m_pendingVibration.has_value()) {
+            dComIfGs_setOptVibration(*m_pendingVibration);
+            dComIfGp_setNowVibration(*m_pendingVibration);
+            m_pendingVibration.reset();
+        }
         m_pendingSavedata.reset();
 
         dComIfGs_getSave(g_dComIfG_gameInfo.info.getDan().mStageNo);
