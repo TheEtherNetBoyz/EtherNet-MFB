@@ -101,6 +101,48 @@ namespace dusk {
             }
         }
 
+        constexpr int kFrameRateLimitValues[] = {30, 60, 120, 240, 360, 480, 0};
+        constexpr const char* kFrameRateLimitNames[] = {
+            "30 FPS",
+            "60 FPS",
+            "120 FPS",
+            "240 FPS",
+            "360 FPS",
+            "480 FPS",
+            "Unlocked",
+        };
+
+        int FrameRateLimitIndex() {
+            auto& s = getSettings();
+            if (!s.game.enableFrameInterpolation.getValue()) {
+                return 0;
+            }
+
+            const int limit = s.game.frameRateLimit.getValue();
+            for (int i = 1; i < IM_ARRAYSIZE(kFrameRateLimitValues); ++i) {
+                if (kFrameRateLimitValues[i] == limit) {
+                    return i;
+                }
+            }
+            return IM_ARRAYSIZE(kFrameRateLimitValues) - 1;
+        }
+
+        void FrameRateLimitSlider() {
+            auto& s = getSettings();
+            int index = FrameRateLimitIndex();
+
+            ImGui::TextUnformatted("Frame Rate Limit");
+            ImGui::SameLine(170.0f);
+            ImGui::SetNextItemWidth(150.0f);
+            if (ImGui::SliderInt("##FrameRateLimit", &index, 0,
+                    IM_ARRAYSIZE(kFrameRateLimitValues) - 1, kFrameRateLimitNames[index]))
+            {
+                s.game.enableFrameInterpolation.setValue(index != 0);
+                s.game.frameRateLimit.setValue(index == 0 ? 0 : kFrameRateLimitValues[index]);
+                config::Save();
+            }
+        }
+
         void DrawGameGeneralMenu() {
             auto& s = getSettings();
             MenuCheckbox("Mirror Mode", s.game.enableMirrorMode);
@@ -152,7 +194,7 @@ namespace dusk {
 
         void DrawGraphicsMenu() {
             auto& s = getSettings();
-            MenuCheckbox("Frame Interpolation", s.game.enableFrameInterpolation);
+            FrameRateLimitSlider();
             MenuCheckbox("Depth of Field", s.game.enableDepthOfField);
             MenuCheckbox("Map Background", s.game.enableMapBackground);
             MenuCheckbox("Disable Water Refraction", s.game.disableWaterRefraction);

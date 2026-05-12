@@ -18,6 +18,8 @@ void applyPresetClassic() {
     s.game.enableControllerToasts.setValue(false);
     s.game.enableFastLoads.setValue(false);
     s.game.enableInstaLoads.setValue(false);
+    s.game.enableFrameInterpolation.setValue(false);
+    s.game.frameRateLimit.setValue(0);
     s.game.internalResolutionScale.setValue(1);
     s.game.shadowResolutionMultiplier.setValue(1);
     s.game.hideTvSettingsScreen.setValue(false);
@@ -45,6 +47,7 @@ void applyPresetDusk() {
     s.game.instantSaves.setValue(true);
     s.game.midnasLamentNonStop.setValue(true);
     s.game.enableFrameInterpolation.setValue(true);
+    s.game.frameRateLimit.setValue(0);
     s.game.sunsSong.setValue(true);
     s.game.bloomMode.setValue(BloomMode::Dusk);
     s.game.internalResolutionScale.setValue(0);

@@ -1,5 +1,10 @@
 #include "dusk/game_clock.h"
 
+#include "dusk/logging.h"
+#include "dusk/main.h"
+#include "dusk/settings.h"
+#include "dusk/time.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -12,6 +17,7 @@ using clock = std::chrono::steady_clock;
 bool s_initialized = false;
 clock::time_point s_previous_sample{};
 clock::time_point s_current_snapshot_time{};
+Limiter s_frame_limiter;
 
 std::unordered_map<uintptr_t, clock::time_point> s_interval_last_sample;
 
@@ -20,22 +26,47 @@ constexpr clock::duration kSimPeriodDuration =
 constexpr clock::duration kAbnormalGapResetThreshold = std::chrono::milliseconds(250);
 constexpr int kMaxSimTicksPerFrame = 2;
 
+int selected_frame_rate_limit() {
+    if (dusk::getTransientSettings().skipFrameRateLimit) {
+        return 0;
+    }
+
+    if (!dusk::getSettings().game.enableFrameInterpolation) {
+        return 30;
+    }
+
+    return dusk::getSettings().game.frameRateLimit.getValue();
+}
+
+void apply_frame_rate_limit() {
+    const int limit = selected_frame_rate_limit();
+    if (limit <= 0) {
+        s_frame_limiter.Reset();
+        return;
+    }
+
+    s_frame_limiter.Sleep(1'000'000'000ULL / static_cast<Limiter::duration_t>(limit));
+}
+
 void ensure_initialized() {
     if (s_initialized) {
         return;
     }
     s_previous_sample = clock::now();
     s_current_snapshot_time = s_previous_sample;
+    s_frame_limiter.Reset();
     s_initialized = true;
 }
 
 void reset_frame_timer() {
     s_previous_sample = clock::now();
     s_current_snapshot_time = s_previous_sample - kSimPeriodDuration;
+    s_frame_limiter.Reset();
 }
 
 MainLoopPacer advance_main_loop() {
     ensure_initialized();
+    apply_frame_rate_limit();
 
     const clock::time_point now = clock::now();
     const clock::duration frame_gap = now - s_previous_sample;

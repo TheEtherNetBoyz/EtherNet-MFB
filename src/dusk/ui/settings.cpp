@@ -299,6 +299,38 @@ const Rml::String kUnlockFramerateHelpText =
     "Uses inter-frame interpolation to enable higher frame rates.<br/><br/>May introduce minor "
     "visual artifacts or animation glitches.";
 
+constexpr std::array kFrameRateLimitValues = {30, 60, 120, 240, 360, 480, 0};
+constexpr std::array kFrameRateLimitNames = {
+    "30 FPS",
+    "60 FPS",
+    "120 FPS",
+    "240 FPS",
+    "360 FPS",
+    "480 FPS",
+    "Unlocked",
+};
+
+int frame_rate_limit_index() {
+    if (!getSettings().game.enableFrameInterpolation.getValue()) {
+        return 0;
+    }
+
+    const int limit = getSettings().game.frameRateLimit.getValue();
+    for (int i = 1; i < static_cast<int>(kFrameRateLimitValues.size()); ++i) {
+        if (kFrameRateLimitValues[i] == limit) {
+            return i;
+        }
+    }
+    return static_cast<int>(kFrameRateLimitValues.size()) - 1;
+}
+
+void set_frame_rate_limit_index(int index) {
+    index = std::clamp(index, 0, static_cast<int>(kFrameRateLimitValues.size()) - 1);
+    getSettings().game.enableFrameInterpolation.setValue(index != 0);
+    getSettings().game.frameRateLimit.setValue(index == 0 ? 0 : kFrameRateLimitValues[index]);
+    config::Save();
+}
+
 int float_setting_percent(ConfigVar<float>& var) {
     return static_cast<int>(var.getValue() * 100.0f + 0.5f);
 }
@@ -725,10 +757,29 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             }, mPrelaunch);
 
         leftPane.add_section("Rendering");
-        config_bool_select(leftPane, rightPane, getSettings().game.enableFrameInterpolation,
-            {
-                .key = "Unlock Framerate",
-                .helpText = kUnlockFramerateHelpText,
+        leftPane.register_control(
+            leftPane.add_select_button({
+                .key = "Frame Rate Limit",
+                .getValue = [] { return Rml::String{kFrameRateLimitNames[frame_rate_limit_index()]}; },
+                .isModified =
+                    [] {
+                        return getSettings().game.enableFrameInterpolation.getValue() !=
+                                   getSettings().game.enableFrameInterpolation.getDefaultValue() ||
+                               getSettings().game.frameRateLimit.getValue() !=
+                                   getSettings().game.frameRateLimit.getDefaultValue();
+                    },
+            }),
+            rightPane, [](Pane& pane) {
+                for (int i = 0; i < static_cast<int>(kFrameRateLimitNames.size()); ++i) {
+                    pane.add_button({
+                        .text = kFrameRateLimitNames[i],
+                        .isSelected = [i] { return frame_rate_limit_index() == i; },
+                    }).on_pressed([i] {
+                        mDoAud_seStartMenu(kSoundItemChange);
+                        set_frame_rate_limit_index(i);
+                    });
+                }
+                pane.add_text(kUnlockFramerateHelpText);
             });
         config_bool_select(leftPane, rightPane, getSettings().game.enableDepthOfField,
             {

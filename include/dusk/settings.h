@@ -123,6 +123,7 @@ struct UserSettings {
         ConfigVar<float> bloomMultiplier;
         ConfigVar<bool> disableWaterRefraction;
         ConfigVar<bool> enableFrameInterpolation;
+        ConfigVar<int> frameRateLimit;
         ConfigVar<int> internalResolutionScale;
         ConfigVar<int> shadowResolutionMultiplier;
         ConfigVar<bool> enableDepthOfField;
