@@ -25,6 +25,7 @@
 #include "c/c_dylink.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_debug_pad.h"
+#include "d/d_meter2_info.h"
 #include "d/d_s_logo.h"
 #include "d/d_s_menu.h"
 #include "d/d_s_play.h"
@@ -290,6 +291,9 @@ void main01(void) {
 
             dusk::frame_interp::begin_frame(true, false,
                                             dusk::game_clock::sample_interpolation_step());
+            if (dMeter2Info_getWindowStatus() == 2) {
+                dusk::frame_interp::request_presentation_sync();
+            }
             dusk::frame_interp::interpolate();
             dusk::frame_interp::begin_presentation_camera();
             // run draw functions for anything specially marked to handle interp
