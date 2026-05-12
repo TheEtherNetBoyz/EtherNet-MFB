@@ -4,14 +4,27 @@
  */
 
 #include "f_op/f_op_scene_req.h"
+#include "d/d_com_inf_game.h"
 #include "f_op/f_op_overlap_mng.h"
 #include "f_op/f_op_scene.h"
 #include "f_op/f_op_scene_pause.h"
 #include "f_pc/f_pc_executor.h"
 #include "f_pc/f_pc_manager.h"
+#include <cstring>
 
 #if TARGET_PC
 #include "dusk/settings.h"
+#include "m_Do/m_Do_Reset.h"
+#endif
+
+#if TARGET_PC
+static bool fopScnRq_isDmn07VanillaFastLoad() {
+    return dusk::getSettings().game.enableFastLoads.getValue() &&
+           !dusk::getSettings().game.enableInstaLoads.getValue() &&
+           !mDoRst::isReset() &&
+           strcmp(dComIfGp_getStartStageName(), "D_MN07") == 0 &&
+           strcmp(dComIfGp_getNextStageName(), "D_MN07") == 0;
+}
 #endif
 
 static cPhs_Step fopScnRq_phase_ClearOverlap(scene_request_class* i_sceneReq) {
@@ -26,6 +39,7 @@ static cPhs_Step fopScnRq_phase_Execute(scene_request_class* i_sceneReq) {
 #if TARGET_PC
         (dusk::getSettings().game.enableFastLoads.getValue() ||
          dusk::getSettings().game.enableInstaLoads.getValue()) &&
+        !fopScnRq_isDmn07VanillaFastLoad() &&
 #endif
         i_sceneReq->create_request.name == fpcNm_PLAY_SCENE_e &&
         i_sceneReq->create_request.node_proc.node != NULL &&

@@ -14,6 +14,7 @@
 #if TARGET_PC
 #include "dusk/settings.h"
 #endif
+#include <cstring>
 
 class overlap1_class : public overlap_task_class {
 public:
@@ -26,12 +27,22 @@ static const int kFastFadeFrames = 20;
 static const int kFastFadeInFrames = 25;
 static const int kInstaFadeFrames = 12;
 static const int kInstaFadeInFrames = 10;
-static const int kStartLoadBeforeFadeDoneFrames = 2;
+static const int kInstaBlackFadeInFrames = 13;
+static const int kFastStartLoadBeforeFadeDoneFrames = 1;
+
+static bool dOvlpFd_isDmn07VanillaFastLoad() {
+    return DUSK_IF_ELSE(dusk::getSettings().game.enableFastLoads.getValue() &&
+                            !dusk::getSettings().game.enableInstaLoads.getValue() &&
+                            !mDoRst::isReset() &&
+                            strcmp(dComIfGp_getStartStageName(), "D_MN07") == 0 &&
+                            strcmp(dComIfGp_getNextStageName(), "D_MN07") == 0,
+                        false);
+}
 
 static bool dOvlpFd_isFastLoad() {
     return DUSK_IF_ELSE((dusk::getSettings().game.enableFastLoads.getValue() ||
                          dusk::getSettings().game.enableInstaLoads.getValue()) &&
-                            !mDoRst::isReset(),
+                            !mDoRst::isReset() && !dOvlpFd_isDmn07VanillaFastLoad(),
                         false);
 }
 
@@ -47,14 +58,23 @@ static int dOvlpFd_getFadeFrames() {
 }
 
 static int dOvlpFd_getFadeInFrames() {
-    return DUSK_IF_ELSE(dOvlpFd_isInstaLoad() ? kInstaFadeInFrames : kFastFadeInFrames,
+    u8 wipe = dComIfGp_getNextStageWipe();
+    int hour = dKy_getdaytime_hour();
+    BOOL isDaytime = (hour >= 6 && hour < 18) ? FALSE : TRUE;
+    bool whiteWipe = wipe == 1 || wipe == 2 || wipe == 7 || wipe == 17 || wipe == 21 ||
+                     ((wipe == 8 || wipe == 10 || wipe == 18) && isDaytime) ||
+                     ((wipe == 9 || wipe == 11 || wipe == 19) && !isDaytime);
+
+    return DUSK_IF_ELSE(dOvlpFd_isInstaLoad() ?
+                            (whiteWipe ? kInstaFadeInFrames : kInstaBlackFadeInFrames) :
+                            kFastFadeInFrames,
                         kFastFadeInFrames);
 }
 
 static int dOvlpFd_getDoneFrames() {
     return DUSK_IF_ELSE(dOvlpFd_isInstaLoad() ? kInstaFadeFrames - 1 :
-                                                kStartLoadBeforeFadeDoneFrames,
-                        kStartLoadBeforeFadeDoneFrames);
+                                                kFastStartLoadBeforeFadeDoneFrames,
+                        kFastStartLoadBeforeFadeDoneFrames);
 }
 
 static int dOvlpFd_Draw(overlap1_class* i_this) {

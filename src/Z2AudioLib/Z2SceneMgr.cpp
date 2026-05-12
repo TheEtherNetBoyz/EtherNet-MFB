@@ -11,8 +11,36 @@
 #include "Z2AudioLib/Z2SoundObjMgr.h"
 #include "Z2AudioLib/Z2StatusMgr.h"
 #include "d/d_com_inf_game.h"
+#if TARGET_PC
+#include "dusk/settings.h"
+#include "m_Do/m_Do_Reset.h"
+#endif
 #include <cstring>
 #include "Z2AudioLib/SpotName.h"
+
+#if TARGET_PC
+static bool z2IsAcceleratedLoadAudio() {
+    return (dusk::getSettings().game.enableFastLoads.getValue() ||
+            dusk::getSettings().game.enableInstaLoads.getValue()) &&
+           !mDoRst::isReset();
+}
+#endif
+
+static u32 z2FastLoadAudioFrames(u32 frames) {
+#if TARGET_PC
+    return z2IsAcceleratedLoadAudio() ? 0 : frames;
+#else
+    return frames;
+#endif
+}
+
+static u32 z2FastLoadAudioFadeFrames(u32 frames) {
+#if TARGET_PC
+    return z2IsAcceleratedLoadAudio() ? 6 : frames;
+#else
+    return frames;
+#endif
+}
 
 Z2SceneMgr::Z2SceneMgr() : JASGlobalInstance<Z2SceneMgr>(true) {
     sceneNum = -1;
@@ -61,10 +89,10 @@ void Z2SceneMgr::setSceneExist(bool isSceneExist) {
         } else if (requestDemoWave == 0x7F) {
             Z2GetSeMgr()->seMoveVolumeAll(0.0f, 0);
         } else {
-            seMgr->getCategory(9)->getParams()->moveVolume(1.0f, 33);
+            seMgr->getCategory(9)->getParams()->moveVolume(1.0f, z2FastLoadAudioFadeFrames(33));
         }
     } else {
-        seMgr->getCategory(9)->getParams()->moveVolume(0.0f, 180);
+        seMgr->getCategory(9)->getParams()->moveVolume(0.0f, z2FastLoadAudioFadeFrames(180));
     }
 }
 
@@ -72,10 +100,11 @@ void Z2SceneMgr::setFadeOutStart(u8 fadeType) {
     OS_REPORT("[Z2SceneMgr::setFadeOutStart] fadeType = %d\n", fadeType);
 
     setSceneExist(false);
-    Z2GetSeqMgr()->bgmAllMute(33,  3.0f / 10.0f);
-    Z2GetSeMgr()->seMoveVolumeAll(0.0f, 33);
+    u32 fadeFrames = z2FastLoadAudioFadeFrames(33);
+    Z2GetSeqMgr()->bgmAllMute(fadeFrames,  3.0f / 10.0f);
+    Z2GetSeMgr()->seMoveVolumeAll(0.0f, fadeFrames);
     Z2GetSeqMgr()->setBattleBgmOff(true);
-    load1stWait = 40;
+    load1stWait = z2FastLoadAudioFrames(40);
     timer = -1;
 }
 
@@ -85,7 +114,7 @@ void Z2SceneMgr::setFadeInStart(u8 fadeType) {
     if (requestDemoWave == 0x7f) {
         Z2GetSeMgr()->seMoveVolumeAll(0.0f, 0);
     } else {
-        Z2GetSeMgr()->seMoveVolumeAll(1.0f, 33);
+        Z2GetSeMgr()->seMoveVolumeAll(1.0f, z2FastLoadAudioFadeFrames(33));
 
         if (requestDemoWave == 0x85) {
             Z2GetSoundMgr()->getSeMgr()->getCategory(9)->getParams()->moveVolume(0.0f, 0);
@@ -96,7 +125,7 @@ void Z2SceneMgr::setFadeInStart(u8 fadeType) {
     Z2GetStatusMgr()->menuOut();
 
     if (!field_0x1a) {
-        Z2GetSeqMgr()->bgmAllUnMute(33);
+        Z2GetSeqMgr()->bgmAllUnMute(z2FastLoadAudioFadeFrames(33));
     }
 
     inGame = true;
@@ -1775,9 +1804,13 @@ void Z2SceneMgr::_load1stWaveInner_1() {
     }
 
     if (field_0x1a && Z2GetSeqMgr()->checkBgmPlaying()) {
-        OS_REPORT("[Z2SceneMgr::load1stDynamicWave]bgm StopCount = %d\n", 15);
-        Z2GetSeqMgr()->bgmStop(15, 0);
-        load1stWait = -15;
+        s8 bgmStopFrames = z2FastLoadAudioFrames(15);
+        OS_REPORT("[Z2SceneMgr::load1stDynamicWave]bgm StopCount = %d\n", bgmStopFrames);
+        Z2GetSeqMgr()->bgmStop(bgmStopFrames, 0);
+        load1stWait = -bgmStopFrames;
+        if (load1stWait == 0) {
+            _load1stWaveInner_2();
+        }
     } else {
         _load1stWaveInner_2();
     }

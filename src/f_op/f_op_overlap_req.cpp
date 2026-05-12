@@ -4,6 +4,7 @@
  */
 
 #include "SSystem/SComponent/c_request.h"
+#include "d/d_com_inf_game.h"
 #include "f_op/f_op_overlap_req.h"
 #include "f_pc/f_pc_manager.h"
 #include "m_Do/m_Do_Reset.h"
@@ -12,8 +13,19 @@
 #endif
 
 #include "dusk/imgui/ImGuiMenuGame.hpp"
+#include <cstring>
 
 void fopOvlpReq_SetPeektime(overlap_request_class*, u16);
+
+#if TARGET_PC
+static bool fopOvlpReq_isDmn07VanillaFastLoad() {
+    return dusk::getSettings().game.enableFastLoads.getValue() &&
+           !dusk::getSettings().game.enableInstaLoads.getValue() &&
+           !mDoRst::isReset() &&
+           strcmp(dComIfGp_getStartStageName(), "D_MN07") == 0 &&
+           strcmp(dComIfGp_getNextStageName(), "D_MN07") == 0;
+}
+#endif
 
 static int fopOvlpReq_phase_Done(overlap_request_class* i_overlapReq) {
     if (fpcM_Delete(i_overlapReq->overlap_task) == 1) {
@@ -175,8 +187,9 @@ int fopOvlpReq_Is_PeektimeLimit(overlap_request_class* i_overlapReq) {
 void fopOvlpReq_SetPeektime(overlap_request_class* i_overlapReq, u16 i_peektime) {
     if (i_peektime <= 0x7FFF) {
 #if TARGET_PC
-        if (dusk::getSettings().game.enableFastLoads.getValue() ||
-            dusk::getSettings().game.enableInstaLoads.getValue())
+        if ((dusk::getSettings().game.enableFastLoads.getValue() ||
+             dusk::getSettings().game.enableInstaLoads.getValue()) &&
+            !fopOvlpReq_isDmn07VanillaFastLoad())
         {
             i_overlapReq->peektime =
                 (mDoRst::isReset() && i_peektime == 30) ? i_peektime :

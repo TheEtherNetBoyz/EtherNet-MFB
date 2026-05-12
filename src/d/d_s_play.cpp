@@ -572,12 +572,24 @@ static int dScnPly_Draw(dScnPly_c* i_this) {
             }
             #endif
 
+            bool useFastLoadOverlap = DUSK_IF_ELSE(
+                (dusk::getSettings().game.enableFastLoads.getValue() ||
+                 dusk::getSettings().game.enableInstaLoads.getValue()),
+                false);
+#if TARGET_PC
+            if (useFastLoadOverlap &&
+                dusk::getSettings().game.enableFastLoads.getValue() &&
+                !dusk::getSettings().game.enableInstaLoads.getValue() &&
+                strcmp(dComIfGp_getStartStageName(), "D_MN07") == 0 &&
+                strcmp(dComIfGp_getNextStageName(), "D_MN07") == 0)
+            {
+                useFastLoadOverlap = false;
+            }
+#endif
+
             int rt = fopScnM_ChangeReq(i_this, fpcNm_PLAY_SCENE_e,
                                         DUSK_IF_ELSE(
-                                            (dusk::getSettings().game.enableFastLoads.getValue() ||
-                                             dusk::getSettings().game.enableInstaLoads.getValue()) ?
-                                                fpcNm_OVERLAP0_e :
-                                                l_wipeType[wipe],
+                                            useFastLoadOverlap ? fpcNm_OVERLAP0_e : l_wipeType[wipe],
                                             l_wipeType[wipe]),
                                         5);
 
@@ -1398,7 +1410,23 @@ static int phase_2(dScnPly_c* i_this) {
 }
 
 static int phase_3(dScnPly_c* i_this) {
+    static int sFastLoadAudioFrames = 0;
     bool audioLoading = mDoAud_check1stDynamicWave();
+
+#if TARGET_PC
+    bool fastLoadsAudioWait = dusk::getSettings().game.enableFastLoads.getValue() &&
+                              !dusk::getSettings().game.enableInstaLoads.getValue() &&
+                              !mDoRst::isReset();
+
+    if (fastLoadsAudioWait && audioLoading && sFastLoadAudioFrames < 6) {
+        sFastLoadAudioFrames++;
+        return cPhs_INIT_e;
+    }
+
+    if (!fastLoadsAudioWait || !audioLoading) {
+        sFastLoadAudioFrames = 0;
+    }
+#endif
 
     if ((i_this->sceneCommand != NULL && !i_this->sceneCommand->sync()) ||
         DUSK_IF_ELSE(!dusk::getSettings().game.enableFastLoads.getValue() &&
