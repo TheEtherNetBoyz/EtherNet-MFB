@@ -7652,6 +7652,7 @@ bool dCamera_c::freeCamera() {
     if (!mCamParam.mManualMode) {
         mCamParam.freeXAngle = mViewCache.mDirection.mAzimuth.Degree();
         mCamParam.freeYAngle = mViewCache.mDirection.mInclination.Degree();
+        mCamParam.freeDistance = mViewCache.mDirection.R();
     }
 
     cXyz camMovement = {mPadInfo.mCStick.mLastPosX, mPadInfo.mCStick.mLastPosY, 0.0f};
@@ -7675,11 +7676,27 @@ bool dCamera_c::freeCamera() {
     }
 
     f32 minYAngle = -30.0f;
-    f32 maxAngle = 50.0f;
+    f32 maxAngle = 38.0f;
 
     mCamParam.freeYAngle = std::clamp(mCamParam.freeYAngle, minYAngle, maxAngle);
+
+    f32 distanceRatio = (mCamParam.freeYAngle - minYAngle) / (maxAngle - minYAngle);
+    distanceRatio = powf(distanceRatio, 0.72f);
+    f32 cDownDistance = mCamParam.Val(mCamStyle, 9);
+
+    if (cDownDistance <= 0.0f) {
+        cDownDistance = mViewCache.mDirection.R();
+    }
+
+    f32 farDistance = cDownDistance;
+    f32 nearDistance = farDistance * 0.45f;
+    f32 targetDistance = nearDistance + (farDistance - nearDistance) * distanceRatio;
+
+    mCamParam.freeDistance += (targetDistance - mCamParam.freeDistance) * 0.1f;
+
     mViewCache.mDirection.mAzimuth = cSAngle(mCamParam.freeXAngle);
     mViewCache.mDirection.mInclination = cSAngle(mCamParam.freeYAngle);
+    mViewCache.mDirection.R(mCamParam.freeDistance);
 
     cXyz finalEye = mViewCache.mCenter + mViewCache.mDirection.Xyz();
     mViewCache.mEye = finalEye;

@@ -147,6 +147,7 @@ public:
     /* 0x24 */ u8 mManualMode;
     /* 0x25 */ f32 freeXAngle;
     /* 0x29 */ f32 freeYAngle;
+    /* 0x2D */ f32 freeDistance;
 #endif
 
     u32 Id(s32 i_style) { return mCamStyleData[i_style].field_0x0; }

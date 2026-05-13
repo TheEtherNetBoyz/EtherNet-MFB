@@ -260,6 +260,13 @@ dCamParam_c::dCamParam_c(s32 i_styleID) {
     mMapToolArg0 = 0xFF;
     mMapToolArg1 = 0xFF;
     mMapToolArg2 = -1;
+
+#if TARGET_PC
+    mManualMode = 0;
+    freeXAngle = 0.0f;
+    freeYAngle = 0.0f;
+    freeDistance = 0.0f;
+#endif
 }
 
 dCamParam_c::~dCamParam_c() {
