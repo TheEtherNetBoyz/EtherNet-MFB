@@ -210,6 +210,7 @@ void reset_for_speedrun_mode() {
     getSettings().backend.enableAdvancedSettings.setSpeedrunValue(false);
     getSettings().game.recordingMode.setSpeedrunValue(false);
     getSettings().game.debugFlyCam.setSpeedrunValue(false);
+    getSettings().game.moveLink.setSpeedrunValue(false);
 }
 
 void clear_speedrun_overrides() {

@@ -202,6 +202,7 @@ struct UserSettings {
         ConfigVar<bool> speedrunMode;
         ConfigVar<bool> liveSplitEnabled;
         ConfigVar<bool> showSpeedrunRTATimer;
+        ConfigVar<bool> moveLink;
         ConfigVar<bool> recordingMode;
         ConfigVar<bool> showInputViewer;
         ConfigVar<bool> showInputViewerGyro;

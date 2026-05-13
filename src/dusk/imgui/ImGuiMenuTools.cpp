@@ -94,6 +94,8 @@ namespace dusk {
             s.backend.enableAdvancedSettings.setSpeedrunValue(false);
             s.game.recordingMode.setSpeedrunValue(false);
             s.game.debugFlyCam.setSpeedrunValue(false);
+            s.game.moveLink.setSpeedrunValue(false);
+            getTransientSettings().moveLinkActive = false;
         }
 
         void RestoreFromSpeedrunMode() {
@@ -488,6 +490,7 @@ namespace dusk {
             ImGui::MenuItem("Save Editor", hotkeys::SHOW_SAVE_EDITOR, &m_showSaveEditor);
             ImGui::MenuItem("Practice Saves", nullptr, &m_showPracticeSaves);
             ImGui::MenuItem("State Share", hotkeys::SHOW_STATE_SHARE, &m_showStateShare);
+            MenuCheckbox("Move Link", getSettings().game.moveLink);
 
             ImGui::EndDisabled();
 
