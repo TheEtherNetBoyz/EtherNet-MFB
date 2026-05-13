@@ -381,7 +381,6 @@ namespace dusk {
 
             ImGui::MenuItem("Save Editor", hotkeys::SHOW_SAVE_EDITOR, &m_showSaveEditor);
             ImGui::MenuItem("Practice Saves", nullptr, &m_showPracticeSaves);
-            ImGui::MenuItem("Map Loader", hotkeys::SHOW_MAP_LOADER, &m_showMapLoader);
             ImGui::MenuItem("State Share", hotkeys::SHOW_STATE_SHARE, &m_showStateShare);
 
             ImGui::EndDisabled();
@@ -389,9 +388,6 @@ namespace dusk {
             if (!dusk::IsGameLaunched) {
                 ImGui::EndDisabled();
             }
-
-            ImGui::Separator();
-            ImGui::Checkbox("Show Input Viewer", &m_showInputViewer);
 
 #if DUSK_CAN_OPEN_DATA_FOLDER
             ImGui::Separator();

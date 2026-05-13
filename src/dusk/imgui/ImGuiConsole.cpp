@@ -15,6 +15,7 @@
 #include "SDL3/SDL_mouse.h"
 #include "SDL3/SDL_events.h"
 #include "SDL3/SDL_scancode.h"
+#include "dusk/action_bindings.h"
 #include "dusk/audio/DuskAudioSystem.h"
 #include "dusk/config.hpp"
 #include "dusk/data.hpp"
@@ -253,7 +254,8 @@ namespace dusk {
     }
 
     void ImGuiConsole::UpdateSettings() {
-        getTransientSettings().skipFrameRateLimit = getSettings().game.enableTurboKeybind && ImGui::IsKeyDown(ImGuiKey_Tab);
+        getTransientSettings().skipFrameRateLimit = getSettings().game.enableTurboKeybind &&
+            (ImGui::IsKeyDown(ImGuiKey_Tab) || getActionBindHoldAnyPort(ActionBinds::TURBO_SPEED_BUTTON));
 
         static int sFrameBufferScaleApplyFrames = 0;
         static int sLastFrameBufferScale = getSettings().game.internalResolutionScale.getValue();
@@ -284,6 +286,12 @@ namespace dusk {
             getSettings().video.enableFullscreen.setValue(!getSettings().video.enableFullscreen);
             VISetWindowFullscreen(getSettings().video.enableFullscreen);
             config::Save();
+        }
+
+        if (getSettings().game.enableResetKeybind && ImGui::GetIO().KeyCtrl &&
+            ImGui::IsKeyPressed(ImGuiKey_R) && !fpcM_SearchByName(fpcNm_LOGO_SCENE_e))
+        {
+            JUTGamePad::C3ButtonReset::sResetSwitchPushing = true;
         }
 
         if (ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_F1)) {
@@ -382,7 +390,6 @@ namespace dusk {
             m_menuTools.ShowProcessManager();
             m_menuTools.ShowHeapOverlay();
             m_menuTools.ShowStubLog();
-            m_menuTools.ShowMapLoader();
             m_menuTools.ShowBloomWindow();
             m_menuTools.ShowPlayerInfo();
             m_menuTools.ShowAudioDebug();
