@@ -319,6 +319,7 @@ namespace dusk {
             MenuCheckbox("Depth of Field", s.game.enableDepthOfField);
             MenuCheckbox("Map Background", s.game.enableMapBackground);
             MenuCheckbox("Disable Water Refraction", s.game.disableWaterRefraction);
+            MenuCheckbox("Disable Cutscene Pillarboxing", s.game.disableCutscenePillarboxing);
             ImGui::Separator();
             InternalResolutionSlider();
             ShadowResolutionSlider();
