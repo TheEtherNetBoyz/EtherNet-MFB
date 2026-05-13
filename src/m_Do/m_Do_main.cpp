@@ -575,7 +575,7 @@ int game_main(int argc, char* argv[]) {
         break;
     case dusk::AspectRatioMode::Ratio21x9:
         AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
-        AuroraSetForcedAspectRatio(21, 9);
+        AuroraSetForcedAspectRatio(43, 18);
         break;
     case dusk::AspectRatioMode::Ratio3x2:
         AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);

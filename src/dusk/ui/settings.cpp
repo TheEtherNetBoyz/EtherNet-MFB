@@ -345,7 +345,7 @@ void apply_aspect_ratio_settings() {
         break;
     case AspectRatioMode::Ratio21x9:
         AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
-        AuroraSetForcedAspectRatio(21, 9);
+        AuroraSetForcedAspectRatio(43, 18);
         break;
     case AspectRatioMode::Ratio3x2:
         AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
