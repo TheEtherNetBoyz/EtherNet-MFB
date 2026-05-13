@@ -36,7 +36,17 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cstdint>
 #include <filesystem>
+
+namespace aurora::webgpu {
+enum class PresentScalingFilter : uint8_t {
+    Linear,
+    SharpBilinear,
+};
+
+void set_present_scaling_filter(PresentScalingFilter filter) noexcept;
+}  // namespace aurora::webgpu
 
 namespace dusk::ui {
 namespace {
@@ -600,6 +610,13 @@ void add_speedrun_disabled_option(Pane& leftPane, Pane& rightPane, ConfigVar<boo
     });
 }
 
+void apply_present_scaling_filter() {
+    aurora::webgpu::set_present_scaling_filter(
+        getSettings().game.enableSharpBilinearScaling ?
+            aurora::webgpu::PresentScalingFilter::SharpBilinear :
+            aurora::webgpu::PresentScalingFilter::Linear);
+}
+
 SelectButton& config_percent_select(Pane& leftPane, Pane& rightPane, ConfigVar<float>& var,
     Rml::String key, Rml::String helpText, int min, int max, int step = 5,
     std::function<bool()> isDisabled = {}) {
@@ -1043,6 +1060,13 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                     });
                 }
                 pane.add_text(kUnlockFramerateHelpText);
+            });
+        config_bool_select(leftPane, rightPane, getSettings().game.enableSharpBilinearScaling,
+            {
+                .key = "Sharp Bilinear Scaling",
+                .helpText =
+                    "Use sharp bilinear filtering when scaling the game frame to the window.",
+                .onChange = [](bool) { apply_present_scaling_filter(); },
             });
         config_bool_select(leftPane, rightPane, getSettings().game.enableDepthOfField,
             {

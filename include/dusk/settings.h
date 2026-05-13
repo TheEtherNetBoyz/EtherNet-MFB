@@ -143,6 +143,7 @@ struct UserSettings {
         ConfigVar<int> frameRateLimit;
         ConfigVar<int> internalResolutionScale;
         ConfigVar<int> shadowResolutionMultiplier;
+        ConfigVar<bool> enableSharpBilinearScaling;
         ConfigVar<bool> enableDepthOfField;
         ConfigVar<bool> enableMapBackground;
         ConfigVar<bool> disableCutscenePillarboxing;

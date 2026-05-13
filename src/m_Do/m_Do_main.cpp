@@ -41,6 +41,7 @@
 #include "m_Do/m_Do_printf.h"
 #include "m_Do/m_Do_ext2.h"
 #include "SSystem/SComponent/c_counter.h"
+#include <cstdint>
 #include <cstring>
 
 #include <filesystem>
@@ -93,6 +94,15 @@
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #endif
+
+namespace aurora::webgpu {
+enum class PresentScalingFilter : uint8_t {
+    Linear,
+    SharpBilinear,
+};
+
+void set_present_scaling_filter(PresentScalingFilter filter) noexcept;
+}  // namespace aurora::webgpu
 
 #if DUSK_ENABLE_SENTRY_NATIVE
 #include "dusk/ui/reporting.hpp"
@@ -573,6 +583,10 @@ int game_main(int argc, char* argv[]) {
         config.allowTextureReplacements = true;
         config.allowTextureDumps = false;
         auroraInfo = aurora_initialize(argc, argv, &config);
+        aurora::webgpu::set_present_scaling_filter(
+            dusk::getSettings().game.enableSharpBilinearScaling ?
+                aurora::webgpu::PresentScalingFilter::SharpBilinear :
+                aurora::webgpu::PresentScalingFilter::Linear);
     }
 
 #ifdef DUSK_DISCORD
