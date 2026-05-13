@@ -35,10 +35,92 @@
 #endif
 
 #include <algorithm>
+#include <charconv>
 #include <filesystem>
 
 namespace dusk::ui {
 namespace {
+
+class FloatButton : public BaseStringButton {
+public:
+    struct Props {
+        Rml::String key;
+        std::function<float()> getValue;
+        std::function<void(float)> setValue;
+        std::function<bool()> isDisabled;
+        std::function<bool()> isModified;
+        float min = 0.0f;
+        float max = 1.0f;
+        float step = 0.1f;
+    };
+
+    FloatButton(Rml::Element* parent, Props props)
+        : BaseStringButton(parent, {.key = std::move(props.key), .type = "number"}),
+          mGetValue(std::move(props.getValue)), mSetValue(std::move(props.setValue)),
+          mIsDisabled(std::move(props.isDisabled)), mIsModified(std::move(props.isModified)),
+          mMin(props.min), mMax(props.max), mStep(props.step) {}
+
+    bool modified() const override {
+        if (mIsModified) {
+            return mIsModified();
+        }
+        return BaseStringButton::modified();
+    }
+
+    bool disabled() const override {
+        if (mIsDisabled) {
+            return mIsDisabled();
+        }
+        return BaseStringButton::disabled();
+    }
+
+protected:
+    Rml::String format_value() override {
+        return fmt::format("{:.1f}", mGetValue());
+    }
+
+    Rml::String input_value() override {
+        return fmt::format("{:.1f}", mGetValue());
+    }
+
+    void set_value(Rml::String value) override {
+        if (!mSetValue) {
+            return;
+        }
+
+        float parsedValue = 0.0f;
+        const char* begin = value.data();
+        const char* end = begin + value.size();
+        const auto result = std::from_chars(begin, end, parsedValue);
+        if (result.ec != std::errc() || result.ptr != end) {
+            return;
+        }
+
+        mSetValue(std::clamp(parsedValue, mMin, mMax));
+    }
+
+    bool handle_nav_command(NavCommand cmd) override {
+        if (!is_editing() && (cmd == NavCommand::Left || cmd == NavCommand::Right)) {
+            const float newValue = std::clamp(
+                mGetValue() + (cmd == NavCommand::Right ? mStep : -mStep), mMin, mMax);
+            if (newValue != mGetValue()) {
+                mSetValue(newValue);
+                mDoAud_seStartMenu(kSoundItemChange);
+            }
+            return true;
+        }
+        return BaseStringButton::handle_nav_command(cmd);
+    }
+
+private:
+    std::function<float()> mGetValue;
+    std::function<void(float)> mSetValue;
+    std::function<bool()> mIsDisabled;
+    std::function<bool()> mIsModified;
+    float mMin;
+    float mMax;
+    float mStep;
+};
 
 constexpr std::array kLanguageNames = {
     "English",
@@ -543,6 +625,31 @@ SelectButton& config_percent_select(Pane& leftPane, Pane& rightPane, ConfigVar<f
     return button;
 }
 
+SelectButton& config_level_select(Pane& leftPane, Pane& rightPane, ConfigVar<float>& var,
+    Rml::String key, Rml::String helpText, std::function<bool()> isDisabled = {}) {
+    auto& button = leftPane.add_child<FloatButton>(FloatButton::Props{
+        .key = std::move(key),
+        .getValue = [&var] {
+            return std::clamp(var.getValue(), 1.0f, 10.0f);
+        },
+        .setValue =
+            [&var](float value) {
+                var.setValue(std::clamp(value, 1.0f, 10.0f));
+                config::Save();
+            },
+        .isDisabled = std::move(isDisabled),
+        .isModified = [&var] { return var.getValue() != var.getDefaultValue(); },
+        .min = 1.0f,
+        .max = 10.0f,
+        .step = 0.1f,
+    });
+    leftPane.register_control(button, rightPane, [helpText = std::move(helpText)](Pane& pane) {
+        pane.clear();
+        pane.add_text(helpText);
+    });
+    return button;
+}
+
 template <typename T>
 void graphics_tuner_control(Window& window, Pane& leftPane, Pane& rightPane, ConfigVar<T>& var,
     const GraphicsTunerProps& props, bool prelaunch) {
@@ -989,9 +1096,25 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         addOption("Invert Camera Y Axis", getSettings().game.invertCameraYAxis,
             "Invert vertical camera movement when Free Camera is enabled.",
             [] { return !getSettings().game.freeCamera; });
-        config_percent_select(leftPane, rightPane, getSettings().game.freeCameraSensitivity,
-            "Free Camera Sensitivity", "Adjusts twin-stick camera sensitivity.", 50, 200, 5,
-            [] { return !getSettings().game.freeCamera; });
+        addOption("Custom Camera Speeds", getSettings().game.enableCameraSpeedControls,
+            "Enable camera speed controls. When disabled, all camera speeds use the default value.");
+        config_level_select(leftPane, rightPane, getSettings().game.regularCameraSensitivityLevel,
+            "Camera Speed", "Adjusts horizontal C-Stick camera rotation speed.",
+            [] {
+                return !getSettings().game.enableCameraSpeedControls ||
+                       getSettings().game.freeCamera;
+            });
+        config_level_select(leftPane, rightPane, getSettings().game.freeCameraSensitivityLevel,
+            "Freecam Speed",
+            "Adjusts free camera movement speed.",
+            [] {
+                return !getSettings().game.enableCameraSpeedControls ||
+                       !getSettings().game.freeCamera;
+            });
+        config_level_select(leftPane, rightPane, getSettings().game.aimingCameraSensitivityLevel,
+            "Aiming Speed",
+            "Adjusts stick and gyro sensitivity while aiming items or using first person camera.",
+            [] { return !getSettings().game.enableCameraSpeedControls; });
         addOption("Invert First Person X Axis", getSettings().game.invertFirstPersonXAxis,
             "Invert horizontal movement while aiming with items or first person camera. Applies only to the control stick (the gyroscope can be inverted in Input settings).");
         addOption("Invert First Person Y Axis", getSettings().game.invertFirstPersonYAxis,

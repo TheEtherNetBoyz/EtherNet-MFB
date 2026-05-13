@@ -90,6 +90,10 @@ UserSettings g_userSettings = {
         .invertFirstPersonXAxis {"game.invertFirstPersonXAxis", false},
         .invertFirstPersonYAxis {"game.invertFirstPersonYAxis", false},
         .freeCameraSensitivity {"game.freeCameraSensitivity", 1.0f},
+        .enableCameraSpeedControls {"game.enableCameraSpeedControls", false},
+        .aimingCameraSensitivityLevel {"game.aimingCameraSensitivityLevel", 5.0f},
+        .freeCameraSensitivityLevel {"game.freeCameraSensitivityLevel", 5.0f},
+        .regularCameraSensitivityLevel {"game.regularCameraSensitivityLevel", 5.0f},
         .debugFlyCam {"game.debugFlyCam", false},
         .debugFlyCamLockEvents {"game.debugFlyCamLockEvents", true},
         .allowBackgroundInput {"game.allowBackgroundInput", true},
@@ -220,6 +224,10 @@ void registerSettings() {
     Register(g_userSettings.game.invertFirstPersonXAxis);
     Register(g_userSettings.game.invertFirstPersonYAxis);
     Register(g_userSettings.game.freeCameraSensitivity);
+    Register(g_userSettings.game.enableCameraSpeedControls);
+    Register(g_userSettings.game.aimingCameraSensitivityLevel);
+    Register(g_userSettings.game.freeCameraSensitivityLevel);
+    Register(g_userSettings.game.regularCameraSensitivityLevel);
     Register(g_userSettings.game.minimalHUD);
     Register(g_userSettings.game.pauseOnFocusLost);
     Register(g_userSettings.game.enableDiscordPresence);

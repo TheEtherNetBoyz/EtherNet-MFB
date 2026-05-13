@@ -162,12 +162,18 @@ namespace dusk {
         }
 
         void SliderFloatItem(const char* label, ConfigVar<float>& value, float min, float max,
-                             const char* format = "%.2f") {
+                             const char* format = "%.2f", bool enabled = true) {
             float copy = value.getValue();
             ImGui::SetNextItemWidth(160.0f);
+            if (!enabled) {
+                ImGui::BeginDisabled();
+            }
             if (ImGui::SliderFloat(label, &copy, min, max, format)) {
                 value.setValue(copy);
                 config::Save();
+            }
+            if (!enabled) {
+                ImGui::EndDisabled();
             }
         }
 
@@ -373,7 +379,13 @@ namespace dusk {
             if (ImGui::BeginMenu("Input")) {
                 MenuCheckbox("Allow Background Input", s.game.allowBackgroundInput);
                 MenuCheckbox("Free Camera", s.game.freeCamera);
-                SliderFloatItem("Free Camera Sensitivity", s.game.freeCameraSensitivity, 0.1f, 5.0f);
+                MenuCheckbox("Custom Camera Speeds", s.game.enableCameraSpeedControls);
+                SliderFloatItem("Camera Speed", s.game.regularCameraSensitivityLevel, 1.0f, 10.0f, "%.1f",
+                    s.game.enableCameraSpeedControls && !s.game.freeCamera);
+                SliderFloatItem("Freecam Speed", s.game.freeCameraSensitivityLevel, 1.0f, 10.0f, "%.1f",
+                    s.game.enableCameraSpeedControls && s.game.freeCamera);
+                SliderFloatItem("Aiming Speed", s.game.aimingCameraSensitivityLevel, 1.0f, 10.0f, "%.1f",
+                    s.game.enableCameraSpeedControls);
                 ImGui::Separator();
                 MenuCheckbox("Invert Camera X Axis", s.game.invertCameraXAxis);
                 MenuCheckbox("Invert Camera Y Axis", s.game.invertCameraYAxis);

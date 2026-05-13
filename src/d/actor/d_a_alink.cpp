@@ -56,6 +56,7 @@
 #include "dusk/frame_interpolation.h"
 #include "dusk/settings.h"
 #include "res/Object/Alink.h"
+#include <algorithm>
 #include <cstring>
 #endif
 

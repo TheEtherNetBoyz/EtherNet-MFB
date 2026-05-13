@@ -20,6 +20,7 @@
 #include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_lib.h"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -50,6 +51,15 @@ static f32 limitf(f32 value, f32 min, f32 max) {
 static inline f32 rangef(f32 value1, f32 value2, f32 ratio) {
     return value1 + (value2 - value1) * ratio;
 }
+
+#if TARGET_PC
+static f32 sensitivityLevelToMultiplier(f32 level) {
+    if (!dusk::getSettings().game.enableCameraSpeedControls) {
+        return 1.0f;
+    }
+    return std::clamp(level, 1.0f, 10.0f) / 5.0f;
+}
+#endif
 
 inline static bool is_player(fopAc_ac_c* actor) {
     return fopAcM_GetName(actor) == fpcNm_ALINK_e || fopAcM_GetName(actor) == fpcNm_ALINK_e;
@@ -4469,6 +4479,9 @@ bool dCamera_c::chaseCamera(s32 param_0) {
     bool sp11 = false;
     f32 sp140 = 0.05f;
     f32 last_pos_x = mPadInfo.mCStick.mLastPosX;
+#if TARGET_PC
+    last_pos_x = std::clamp(last_pos_x * sensitivityLevelToMultiplier(dusk::getSettings().game.regularCameraSensitivityLevel), -1.0f, 1.0f);
+#endif
     f32 sp138 = fabsf(last_pos_x);
     f32 sp134 = mPadInfo.mCStick.mLastPosY;
     f32 sp130 = fabsf(sp134);
@@ -5091,6 +5104,9 @@ bool dCamera_c::lockonCamera(s32 param_0) {
     if (mCamParam.Flag(param_0, 0x40)) {
         sp158 = 0.0f;
     }
+#if TARGET_PC
+    sp158 = std::clamp(sp158 * sensitivityLevelToMultiplier(dusk::getSettings().game.regularCameraSensitivityLevel), -1.0f, 1.0f);
+#endif
 
     if (mPadInfo.mCStick.mLastPosY > mCamSetup.mCStick.SwTHH()) {
         if (mCStickUpLatch != 1) {
@@ -7666,8 +7682,9 @@ bool dCamera_c::freeCamera() {
         mCamParam.mManualMode = 1;
         camMovement = camMovement.normalize();
         camMovement.y *= dusk::getSettings().game.invertCameraYAxis ? 1.0f : -1.0f;
-        mCamParam.freeXAngle += camMovement.x * magnitude * dusk::getSettings().game.freeCameraSensitivity * 5.0f;
-        mCamParam.freeYAngle += camMovement.y * magnitude * dusk::getSettings().game.freeCameraSensitivity * 5.0f;
+        f32 sensitivity = sensitivityLevelToMultiplier(dusk::getSettings().game.freeCameraSensitivityLevel);
+        mCamParam.freeXAngle += camMovement.x * magnitude * sensitivity * 5.0f;
+        mCamParam.freeYAngle += camMovement.y * magnitude * sensitivity * 5.0f;
     }
 
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
@@ -9591,6 +9608,11 @@ bool dCamera_c::manualCamera(s32 param_0) {
     } else {
         sp98[1] = dCamMath::rationalBezierRatio(mPadInfo.mCStick.mLastPosY * 1.3333334f, 2.0f);
     }
+#if TARGET_PC
+    f32 aimingSensitivity = sensitivityLevelToMultiplier(dusk::getSettings().game.aimingCameraSensitivityLevel);
+    sp98[0] *= aimingSensitivity;
+    sp98[1] *= aimingSensitivity;
+#endif
 
     UnkManualCameraParam sp188;
     sp188.r = sp188.v = sp188.fov = sp188.u = val27;

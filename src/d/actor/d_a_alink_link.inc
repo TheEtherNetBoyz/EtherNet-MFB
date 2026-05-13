@@ -112,6 +112,11 @@ BOOL daAlink_c::setBodyAngleToCamera() {
         s16 sp8;
         if (checkInputOnR()) {
             f32 var_f31 = 512.0f * mMoveValue * mMoveValue;
+#if TARGET_PC
+            if (dusk::getSettings().game.enableCameraSpeedControls) {
+                var_f31 *= std::clamp(static_cast<f32>(dusk::getSettings().game.aimingCameraSensitivityLevel), 1.0f, 10.0f) / 5.0f;
+            }
+#endif
             if (checkWolfEyeUp()) {
                 var_f31 *= 0.6f;
             }
@@ -144,6 +149,9 @@ BOOL daAlink_c::setBodyAngleToCamera() {
             f32 gy_yaw = 0.f;
             f32 gy_pitch = 0.f;
             dusk::gyro::getAimDeltas(gy_yaw, gy_pitch);
+            if (dusk::getSettings().game.enableCameraSpeedControls) {
+                gyro_scale *= std::clamp(static_cast<f32>(dusk::getSettings().game.aimingCameraSensitivityLevel), 1.0f, 10.0f) / 5.0f;
+            }
 
             shape_angle.y = shape_angle.y + cM_rad2s(gy_yaw * gyro_scale);
             sp8 = sp8 + cM_rad2s(gy_pitch * gyro_scale);
