@@ -16,7 +16,10 @@
 #include "d/d_com_inf_game.h"
 #include "dusk/data.hpp"
 #include "dusk/dusk.h"
+#include "dusk/livesplit.h"
 #include "dusk/main.h"
+#include "dusk/ui/menu_bar.hpp"
+#include "dusk/ui/ui.hpp"
 #include "m_Do/m_Do_main.h"
 
 #include <aurora/lib/internal.hpp>
@@ -38,6 +41,102 @@ namespace dusk {
     namespace {
         bool MenuCheckbox(const char* label, ConfigVar<bool>& value, bool enabled = true) {
             return config::ImGuiMenuItem(label, nullptr, value, enabled);
+        }
+
+        void RefreshRmlMenuBar() {
+            for (auto& doc : ui::get_document_stack()) {
+                if (dynamic_cast<ui::MenuBar*>(doc.get())) {
+                    doc = std::make_unique<ui::MenuBar>();
+                    break;
+                }
+            }
+        }
+
+        void ClearSpeedrunOverrides() {
+            config::EnumerateRegistered([](config::ConfigVarBase& cvar) {
+                cvar.clearSpeedrunOverride();
+            });
+        }
+
+        void ResetForSpeedrunMode() {
+            auto& s = getSettings();
+            mDoMain::developmentMode = -1;
+
+            s.game.enableTurboKeybind.setSpeedrunValue(false);
+
+            s.game.damageMultiplier.setSpeedrunValue(1);
+            s.game.instantDeath.setSpeedrunValue(false);
+            s.game.noHeartDrops.setSpeedrunValue(false);
+            s.game.autoSave.setSpeedrunValue(false);
+            s.game.sunsSong.setSpeedrunValue(false);
+
+            s.game.infiniteHearts.setSpeedrunValue(false);
+            s.game.infiniteArrows.setSpeedrunValue(false);
+            s.game.infiniteSeeds.setSpeedrunValue(false);
+            s.game.infiniteBombs.setSpeedrunValue(false);
+            s.game.infiniteOil.setSpeedrunValue(false);
+            s.game.infiniteOxygen.setSpeedrunValue(false);
+            s.game.infiniteRupees.setSpeedrunValue(false);
+            s.game.enableIndefiniteItemDrops.setSpeedrunValue(false);
+            s.game.moonJump.setSpeedrunValue(false);
+            s.game.superClawshot.setSpeedrunValue(false);
+            s.game.alwaysGreatspin.setSpeedrunValue(false);
+            s.game.enableFastIronBoots.setSpeedrunValue(false);
+            s.game.canTransformAnywhere.setSpeedrunValue(false);
+            s.game.fastRoll.setSpeedrunValue(false);
+            s.game.fastSpinner.setSpeedrunValue(false);
+            s.game.freeMagicArmor.setSpeedrunValue(false);
+            s.game.invincibleEnemies.setSpeedrunValue(false);
+
+            s.game.pauseOnFocusLost.setSpeedrunValue(false);
+            aurora_set_pause_on_focus_lost(false);
+
+            s.backend.enableAdvancedSettings.setSpeedrunValue(false);
+            s.game.recordingMode.setSpeedrunValue(false);
+            s.game.debugFlyCam.setSpeedrunValue(false);
+        }
+
+        void RestoreFromSpeedrunMode() {
+            ClearSpeedrunOverrides();
+            aurora_set_pause_on_focus_lost(getSettings().game.pauseOnFocusLost.getValue());
+        }
+
+        bool SpeedrunModeCheckbox() {
+            auto& s = getSettings();
+            bool copy = s.game.speedrunMode.getValue();
+            if (!ImGui::MenuItem("Speedrun Mode", nullptr, &copy)) {
+                return false;
+            }
+
+            s.game.speedrunMode.setValue(copy);
+            if (copy) {
+                ResetForSpeedrunMode();
+            } else {
+                RestoreFromSpeedrunMode();
+                if (s.game.liveSplitEnabled) {
+                    speedrun::disconnectLiveSplit();
+                }
+            }
+            RefreshRmlMenuBar();
+            config::Save();
+            return true;
+        }
+
+        bool LiveSplitCheckbox() {
+            auto& s = getSettings();
+            bool copy = s.game.liveSplitEnabled.getValue();
+            if (!ImGui::MenuItem("LiveSplit", nullptr, &copy, !IsMobile && s.game.speedrunMode)) {
+                return false;
+            }
+
+            s.game.liveSplitEnabled.setValue(copy);
+            if (copy) {
+                speedrun::connectLiveSplit();
+            } else {
+                speedrun::disconnectLiveSplit();
+            }
+            config::Save();
+            return true;
         }
 
         void LoadModeCheckbox(const char* label, ConfigVar<bool>& value, ConfigVar<bool>& other) {
@@ -264,8 +363,9 @@ namespace dusk {
                 MenuCheckbox("Check For Updates", s.backend.checkForUpdates);
                 MenuCheckbox("Skip Pre-Launch UI", s.backend.skipPreLaunchUI);
                 ImGui::Separator();
-                MenuCheckbox("Speedrun Mode", s.game.speedrunMode);
-                MenuCheckbox("LiveSplit", s.game.liveSplitEnabled);
+                SpeedrunModeCheckbox();
+                LiveSplitCheckbox();
+                MenuCheckbox("Show RTA", s.game.showSpeedrunRTATimer, s.game.speedrunMode);
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Input")) {
@@ -293,6 +393,7 @@ namespace dusk {
                 ImGui::BeginDisabled(s.game.speedrunMode);
                 MenuCheckbox("Infinite Hearts", s.game.infiniteHearts);
                 MenuCheckbox("Infinite Arrows", s.game.infiniteArrows);
+                MenuCheckbox("Infinite Seeds", s.game.infiniteSeeds);
                 MenuCheckbox("Infinite Bombs", s.game.infiniteBombs);
                 MenuCheckbox("Infinite Oil", s.game.infiniteOil);
                 MenuCheckbox("Infinite Oxygen", s.game.infiniteOxygen);
@@ -304,8 +405,10 @@ namespace dusk {
                 MenuCheckbox("Always Greatspin", s.game.alwaysGreatspin);
                 MenuCheckbox("Fast Iron Boots", s.game.enableFastIronBoots);
                 MenuCheckbox("Transform Anywhere", s.game.canTransformAnywhere);
+                MenuCheckbox("Fast Roll", s.game.fastRoll);
                 MenuCheckbox("Fast Spinner", s.game.fastSpinner);
                 MenuCheckbox("Free Magic Armor", s.game.freeMagicArmor);
+                MenuCheckbox("Invincible Enemies", s.game.invincibleEnemies);
                 ImGui::EndDisabled();
                 ImGui::EndMenu();
             }
@@ -313,6 +416,11 @@ namespace dusk {
 
         void DrawGraphicsMenu() {
             auto& s = getSettings();
+            if (MenuCheckbox("Enable VSync", s.video.enableVsync)) {
+                aurora_enable_vsync(s.video.enableVsync.getValue());
+            }
+            MenuCheckbox("Show FPS Counter", s.video.enableFpsOverlay);
+            ImGui::Separator();
             FrameRateLimitSlider();
             MenuCheckbox("Depth of Field", s.game.enableDepthOfField);
             MenuCheckbox("Map Background", s.game.enableMapBackground);
@@ -382,6 +490,11 @@ namespace dusk {
             ImGui::MenuItem("State Share", hotkeys::SHOW_STATE_SHARE, &m_showStateShare);
 
             ImGui::EndDisabled();
+
+            ImGui::Separator();
+            config::ImGuiMenuItem("Show Input Viewer", nullptr, getSettings().game.showInputViewer);
+            config::ImGuiMenuItem("Show Gyro Input Viewer", nullptr,
+                getSettings().game.showInputViewerGyro, getSettings().game.showInputViewer);
 
             if (!dusk::IsGameLaunched) {
                 ImGui::EndDisabled();
