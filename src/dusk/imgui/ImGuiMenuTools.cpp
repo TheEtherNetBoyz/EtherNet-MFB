@@ -287,8 +287,6 @@ namespace dusk {
                 SliderFloatItem("Gyro Deadband", s.game.gyroDeadband, 0.0f, 0.5f);
                 MenuCheckbox("Invert Gyro Pitch", s.game.gyroInvertPitch);
                 MenuCheckbox("Invert Gyro Yaw", s.game.gyroInvertYaw);
-                ImGui::Separator();
-                MenuCheckbox("Turbo Key", s.game.enableTurboKeybind);
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Cheats")) {
@@ -388,6 +386,10 @@ namespace dusk {
             if (!dusk::IsGameLaunched) {
                 ImGui::EndDisabled();
             }
+
+            ImGui::Separator();
+            config::ImGuiMenuItem("Turbo Speed Key", hotkeys::TURBO,
+                getSettings().game.enableTurboKeybind, !getSettings().game.speedrunMode);
 
 #if DUSK_CAN_OPEN_DATA_FOLDER
             ImGui::Separator();

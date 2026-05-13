@@ -1066,8 +1066,8 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Invert horizontal gyro aiming.", [] { return !gyro_enabled(); });
 
         leftPane.add_section("Tools");
-        addOption("Turbo Key", getSettings().game.enableTurboKeybind,
-            "Hold Tab to increase game speed by up to 4x.",
+        addOption("Turbo Speed Key", getSettings().game.enableTurboKeybind,
+            "Hold Tab to temporarily disable the frame rate limit.",
             [] { return getSettings().game.speedrunMode; });
         addOption("Reset Key (" + Rml::String{hotkeys::DO_RESET} + ")",
             getSettings().game.enableResetKeybind,
