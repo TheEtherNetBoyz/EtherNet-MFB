@@ -332,9 +332,9 @@ constexpr std::array kFrameRateLimitNames = {
 constexpr std::array kAspectRatioModeNames = {
     "Off",
     "4:3",
+    "3:2",
     "16:9",
     "21:9",
-    "3:2",
 };
 
 void apply_aspect_ratio_settings() {
@@ -362,8 +362,16 @@ void apply_aspect_ratio_settings() {
 }
 
 int aspect_ratio_mode_index() {
-    if (getSettings().video.forcedAspectRatio.getValue() != AspectRatioMode::Off) {
-        return static_cast<int>(getSettings().video.forcedAspectRatio.getValue()) + 1;
+    switch (getSettings().video.forcedAspectRatio.getValue()) {
+    case AspectRatioMode::Ratio3x2:
+        return 2;
+    case AspectRatioMode::Ratio16x9:
+        return 3;
+    case AspectRatioMode::Ratio21x9:
+        return 4;
+    case AspectRatioMode::Off:
+    default:
+        break;
     }
 
     return getSettings().video.lockAspectRatio.getValue() ? 1 : 0;
@@ -372,9 +380,20 @@ int aspect_ratio_mode_index() {
 void set_aspect_ratio_mode_index(int index) {
     index = std::clamp(index, 0, static_cast<int>(kAspectRatioModeNames.size()) - 1);
     getSettings().video.lockAspectRatio.setValue(index == 1);
-    getSettings().video.forcedAspectRatio.setValue(index <= 1 ?
-                                                       AspectRatioMode::Off :
-                                                       static_cast<AspectRatioMode>(index - 1));
+    switch (index) {
+    case 2:
+        getSettings().video.forcedAspectRatio.setValue(AspectRatioMode::Ratio3x2);
+        break;
+    case 3:
+        getSettings().video.forcedAspectRatio.setValue(AspectRatioMode::Ratio16x9);
+        break;
+    case 4:
+        getSettings().video.forcedAspectRatio.setValue(AspectRatioMode::Ratio21x9);
+        break;
+    default:
+        getSettings().video.forcedAspectRatio.setValue(AspectRatioMode::Off);
+        break;
+    }
     apply_aspect_ratio_settings();
     config::Save();
 }
