@@ -18,6 +18,23 @@
 #endif
 
 #if TARGET_PC
+static bool l_titleToFileSelectVanillaFastLoad;
+
+bool fopScnRq_IsTitleToFileSelectVanillaFastLoad() {
+    return l_titleToFileSelectVanillaFastLoad;
+}
+
+static bool fopScnRq_isTitleToFileSelectVanillaFastLoad(s16 i_procName, s16 i_fadename,
+                                                        u16 i_peektime) {
+    return (dusk::getSettings().game.enableFastLoads.getValue() ||
+               dusk::getSettings().game.enableInstaLoads.getValue()) &&
+           !mDoRst::isReset() &&
+           i_procName == fpcNm_NAME_SCENE_e &&
+           i_fadename == fpcNm_OVERLAP0_e &&
+           i_peektime == 5 &&
+           fpcM_SearchByName(fpcNm_TITLE_e) != NULL;
+}
+
 static bool fopScnRq_isDmn07VanillaFastLoad() {
     return dusk::getSettings().game.enableFastLoads.getValue() &&
            !dusk::getSettings().game.enableInstaLoads.getValue() &&
@@ -40,6 +57,7 @@ static cPhs_Step fopScnRq_phase_Execute(scene_request_class* i_sceneReq) {
         (dusk::getSettings().game.enableFastLoads.getValue() ||
          dusk::getSettings().game.enableInstaLoads.getValue()) &&
         !fopScnRq_isDmn07VanillaFastLoad() &&
+        !fopScnRq_IsTitleToFileSelectVanillaFastLoad() &&
 #endif
         i_sceneReq->create_request.name == fpcNm_PLAY_SCENE_e &&
         i_sceneReq->create_request.node_proc.node != NULL &&
@@ -72,6 +90,9 @@ static cPhs_Step fopScnRq_phase_Done(scene_request_class* i_sceneReq) {
     }
 
     l_fopScnRq_IsUsingOfOverlap = FALSE;
+#if TARGET_PC
+    l_titleToFileSelectVanillaFastLoad = false;
+#endif
     return cPhs_NEXT_e;
 }
 
@@ -101,6 +122,9 @@ static int fopScnRq_Cancel(scene_request_class* i_sceneReq) {
     if (i_sceneReq->fade_request != NULL && !fopOvlpM_Cancel()) {
         return 0;
     } else {
+#if TARGET_PC
+        l_titleToFileSelectVanillaFastLoad = false;
+#endif
         return 1;
     }
 }
@@ -160,10 +184,18 @@ fpc_ProcID fopScnRq_Request(int i_reqType, scene_class* i_scene, s16 i_procName,
         return fpcM_ERROR_PROCESS_ID_e;
     }
 
+#if TARGET_PC
+    l_titleToFileSelectVanillaFastLoad =
+        fopScnRq_isTitleToFileSelectVanillaFastLoad(i_procName, i_fadename, i_peektime);
+#endif
+
     if (i_fadename != 0x7FFF) {
         phase_handler = fadeFase;
         fade_req = fopScnRq_FadeRequest(i_fadename, i_peektime);
         if (fade_req == NULL) {
+#if TARGET_PC
+            l_titleToFileSelectVanillaFastLoad = false;
+#endif
             fpcNdRq_Delete(&req->create_request);
             return fpcM_ERROR_PROCESS_ID_e;
         }

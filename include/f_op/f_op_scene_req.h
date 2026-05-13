@@ -17,4 +17,8 @@ fpc_ProcID fopScnRq_Request(int i_reqType, scene_class* i_scene, s16 i_procName,
 s32 fopScnRq_ReRequest(fpc_ProcID i_requestId, s16 i_procName, void* i_data);
 int fopScnRq_Handler();
 
+#if TARGET_PC
+bool fopScnRq_IsTitleToFileSelectVanillaFastLoad();
+#endif
+
 #endif

@@ -6,6 +6,7 @@
 #include "SSystem/SComponent/c_request.h"
 #include "d/d_com_inf_game.h"
 #include "f_op/f_op_overlap_req.h"
+#include "f_op/f_op_scene_req.h"
 #include "f_pc/f_pc_manager.h"
 #include "m_Do/m_Do_Reset.h"
 #if TARGET_PC
@@ -189,7 +190,8 @@ void fopOvlpReq_SetPeektime(overlap_request_class* i_overlapReq, u16 i_peektime)
 #if TARGET_PC
         if ((dusk::getSettings().game.enableFastLoads.getValue() ||
              dusk::getSettings().game.enableInstaLoads.getValue()) &&
-            !fopOvlpReq_isDmn07VanillaFastLoad())
+            !fopOvlpReq_isDmn07VanillaFastLoad() &&
+            !fopScnRq_IsTitleToFileSelectVanillaFastLoad())
         {
             i_overlapReq->peektime =
                 (mDoRst::isReset() && i_peektime == 30) ? i_peektime :
