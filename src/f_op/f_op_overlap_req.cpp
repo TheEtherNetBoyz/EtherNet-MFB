@@ -12,7 +12,7 @@
 #include "dusk/settings.h"
 #endif
 
-#include "dusk/imgui/ImGuiMenuGame.hpp"
+#include "dusk/speedrun.h"
 #include <cstring>
 
 void fopOvlpReq_SetPeektime(overlap_request_class*, u16);

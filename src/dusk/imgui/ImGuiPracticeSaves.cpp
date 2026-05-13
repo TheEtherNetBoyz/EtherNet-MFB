@@ -395,7 +395,9 @@ void ImGuiPracticeSaves::handleController(bool& open) {
                 return;
             }
             if (accept(PAD_BUTTON_A, 0.22) && !m_loadInProgress && !getTransientSettings().stateShareLoadActive) {
-                loadPracticeSave(currentSaves()[m_selectedSave]);
+                if (loadPracticeSave(currentSaves()[m_selectedSave])) {
+                    open = false;
+                }
                 return;
             }
         }
@@ -442,7 +444,7 @@ void ImGuiPracticeSaves::drawCategoryList() {
     ImGui::EndChild();
 }
 
-void ImGuiPracticeSaves::drawPracticePanel() {
+void ImGuiPracticeSaves::drawPracticePanel(bool& open) {
     const bool canLoad = dusk::IsGameLaunched && !m_loadInProgress && !getTransientSettings().stateShareLoadActive;
 
     ImGui::BeginChild("##gz_practice_panel", ImVec2(560.0f, 0.0f), true);
@@ -473,12 +475,18 @@ void ImGuiPracticeSaves::drawPracticePanel() {
         const auto& save = saves[i];
         ImGui::PushID(i);
         const bool selected = m_focusSaveList && i == m_selectedSave;
-        if (ImGui::Selectable(save.name.c_str(), selected, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(310.0f, 0.0f))) {
+        if (!canLoad) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Selectable(save.name.c_str(), selected, 0, ImVec2(0.0f, 0.0f))) {
             m_selectedSave = i;
             m_focusSaveList = true;
-            if (ImGui::IsMouseDoubleClicked(0) && canLoad) {
-                loadPracticeSave(save);
+            if (canLoad && loadPracticeSave(save)) {
+                open = false;
             }
+        }
+        if (!canLoad) {
+            ImGui::EndDisabled();
         }
         if (!save.description.empty() && ImGui::IsItemHovered()) {
             ImGui::SetTooltip("%s", save.description.c_str());
@@ -486,18 +494,6 @@ void ImGuiPracticeSaves::drawPracticePanel() {
         if (selected && m_scrollSelectedSave) {
             ImGui::SetScrollHereY(0.5f);
             m_scrollSelectedSave = false;
-        }
-
-        ImGui::SameLine();
-        if (!canLoad) {
-            ImGui::BeginDisabled();
-        }
-        if (ImGui::Button("Load##practice_save_load")) {
-            m_selectedSave = i;
-            loadPracticeSave(save);
-        }
-        if (!canLoad) {
-            ImGui::EndDisabled();
         }
         ImGui::PopID();
     }
@@ -623,7 +619,7 @@ void ImGuiPracticeSaves::draw(bool& open) {
     ImGui::SameLine();
 
     if (m_mainCategory == MainCategory::Practice) {
-        drawPracticePanel();
+        drawPracticePanel(open);
     } else {
         drawGenericPanel();
     }

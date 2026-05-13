@@ -51,7 +51,7 @@ private:
     void handleController(bool& open);
     void consumeControllerInput();
     void drawCategoryList();
-    void drawPracticePanel();
+    void drawPracticePanel(bool& open);
     void drawGenericPanel();
     std::vector<PracticeSaveEntry>& currentSaves();
     const std::vector<PracticeSaveEntry>& currentSaves() const;

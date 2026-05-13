@@ -173,29 +173,47 @@ AuroraBackend configured_backend() {
 void reset_for_speedrun_mode() {
     mDoMain::developmentMode = -1;
 
-    getSettings().game.damageMultiplier.setValue(1);
-    getSettings().game.instantDeath.setValue(false);
-    getSettings().game.noHeartDrops.setValue(false);
+    getSettings().game.enableTurboKeybind.setSpeedrunValue(false);
 
-    getSettings().game.infiniteHearts.setValue(false);
-    getSettings().game.infiniteArrows.setValue(false);
-    getSettings().game.infiniteBombs.setValue(false);
-    getSettings().game.infiniteOil.setValue(false);
-    getSettings().game.infiniteOxygen.setValue(false);
-    getSettings().game.infiniteRupees.setValue(false);
-    getSettings().game.enableIndefiniteItemDrops.setValue(false);
+    getSettings().game.damageMultiplier.setSpeedrunValue(1);
+    getSettings().game.instantDeath.setSpeedrunValue(false);
+    getSettings().game.noHeartDrops.setSpeedrunValue(false);
+    getSettings().game.autoSave.setSpeedrunValue(false);
+    getSettings().game.sunsSong.setSpeedrunValue(false);
 
-    getSettings().game.moonJump.setValue(false);
-    getSettings().game.superClawshot.setValue(false);
-    getSettings().game.alwaysGreatspin.setValue(false);
-    getSettings().game.enableFastIronBoots.setValue(false);
-    getSettings().game.canTransformAnywhere.setValue(false);
-    getSettings().game.fastSpinner.setValue(false);
-    getSettings().game.freeMagicArmor.setValue(false);
+    getSettings().game.infiniteHearts.setSpeedrunValue(false);
+    getSettings().game.infiniteArrows.setSpeedrunValue(false);
+    getSettings().game.infiniteBombs.setSpeedrunValue(false);
+    getSettings().game.infiniteOil.setSpeedrunValue(false);
+    getSettings().game.infiniteOxygen.setSpeedrunValue(false);
+    getSettings().game.infiniteRupees.setSpeedrunValue(false);
+    getSettings().game.enableIndefiniteItemDrops.setSpeedrunValue(false);
+    getSettings().game.moonJump.setSpeedrunValue(false);
+    getSettings().game.superClawshot.setSpeedrunValue(false);
+    getSettings().game.alwaysGreatspin.setSpeedrunValue(false);
+    getSettings().game.enableFastIronBoots.setSpeedrunValue(false);
+    getSettings().game.canTransformAnywhere.setSpeedrunValue(false);
+    getSettings().game.fastRoll.setSpeedrunValue(false);
+    getSettings().game.fastSpinner.setSpeedrunValue(false);
+    getSettings().game.freeMagicArmor.setSpeedrunValue(false);
 
-    getSettings().game.enableTurboKeybind.setValue(false);
-    getSettings().game.debugFlyCam.setValue(false);
-    getSettings().game.autoSave.setValue(false);
+    getSettings().game.pauseOnFocusLost.setSpeedrunValue(false);
+    aurora_set_pause_on_focus_lost(false);
+
+    getSettings().backend.enableAdvancedSettings.setSpeedrunValue(false);
+    getSettings().game.recordingMode.setSpeedrunValue(false);
+    getSettings().game.debugFlyCam.setSpeedrunValue(false);
+}
+
+void clear_speedrun_overrides() {
+    config::EnumerateRegistered([](config::ConfigVarBase& cvar) {
+        cvar.clearSpeedrunOverride();
+    });
+}
+
+void restore_from_speedrun_mode() {
+    clear_speedrun_overrides();
+    aurora_set_pause_on_focus_lost(getSettings().game.pauseOnFocusLost.getValue());
 }
 
 std::filesystem::path normalized_display_path(const std::filesystem::path& path) {
@@ -426,6 +444,15 @@ SelectButton& config_bool_select(
             pane.add_rml(helpText);
         });
     return button;
+}
+
+void add_speedrun_disabled_option(Pane& leftPane, Pane& rightPane, ConfigVar<bool>& var,
+    const Rml::String& key, const Rml::String& helpText) {
+    config_bool_select(leftPane, rightPane, var, {
+        .key = key,
+        .helpText = helpText,
+        .isDisabled = [] { return getSettings().game.speedrunMode; },
+    });
 }
 
 SelectButton& config_percent_select(Pane& leftPane, Pane& rightPane, ConfigVar<float>& var,
@@ -725,7 +752,9 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         config_bool_select(leftPane, rightPane, getSettings().game.pauseOnFocusLost,
             {
                 .key = "Pause on Focus Lost",
-                .isDisabled = [] { return IsMobile; },
+                .helpText = "Pause the game when window focus is lost.",
+                .onChange = [](bool value) { aurora_set_pause_on_focus_lost(value); },
+                .isDisabled = [] { return IsMobile || getSettings().game.speedrunMode; },
             });
         leftPane.register_control(
             leftPane.add_select_button({
@@ -1057,12 +1086,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         };
         auto addSpeedrunDisabledOption = [&](const Rml::String& key, ConfigVar<bool>& value,
                                              const Rml::String& helpText) {
-            config_bool_select(leftPane, rightPane, value,
-                {
-                    .key = key,
-                    .helpText = helpText,
-                    .isDisabled = [] { return getSettings().game.speedrunMode; },
-                });
+            add_speedrun_disabled_option(leftPane, rightPane, value, key, helpText);
         };
 
         leftPane.add_section("General");
@@ -1141,6 +1165,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .key = "Autosave",
                 .helpText = "Autosaves the game when going to a new area, opening a dungeon door, "
                             "or getting a new item.",
+                .isDisabled = [] { return getSettings().game.speedrunMode; },
             });
         addOption("Instant Saves", getSettings().game.instantSaves,
             "Skips the delay when writing to the Memory Card.");
@@ -1155,7 +1180,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Link will not recoil when his sword hits walls.");
         addOption("No 2nd Fish for Cat", getSettings().game.no2ndFishForCat,
             "Skip needing to catch a second fish for Sera's cat.");
-        addOption("Sun's Song (R+X)", getSettings().game.sunsSong,
+        addSpeedrunDisabledOption("Sun's Song (R+X)", getSettings().game.sunsSong,
             "Allows Wolf Link to howl and change the time of day.");
         addOption("Quick Transform (R+Y)", getSettings().game.enableQuickTransform,
             "Transform instantly by pressing R and Y simultaneously.");
@@ -1166,12 +1191,29 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .key = "Speedrun Mode",
                 .helpText =
                     "Enables speedrunning options while restricting certain gameplay modifiers.",
-                .onChange = [](bool) { reset_for_speedrun_mode(); },
+                .onChange =
+                    [](bool enabled) {
+                        if (enabled) {
+                            reset_for_speedrun_mode();
+                        } else {
+                            restore_from_speedrun_mode();
+                            if (getSettings().game.liveSplitEnabled) {
+                                speedrun::disconnectLiveSplit();
+                            }
+                        }
+                        for (auto& doc : get_document_stack()) {
+                            if (dynamic_cast<MenuBar*>(doc.get())) {
+                                doc = std::make_unique<MenuBar>();
+                                break;
+                            }
+                        }
+                    },
             });
         config_bool_select(leftPane, rightPane, getSettings().game.liveSplitEnabled,
             {
                 .key = "LiveSplit Connection",
-                .helpText = "Connect to LiveSplit server on localhost:16834.",
+                .helpText = "Connect to LiveSplit server on localhost:16834. For this to work you must right click LiveSplit, and turn on Control -> Start TCP Server."
+                " To see IGT in LiveSplit you must change your comparison to Game Time.",
                 .onChange =
                     [](bool enabled) {
                         if (enabled) {
@@ -1180,6 +1222,12 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                             speedrun::disconnectLiveSplit();
                         }
                     },
+                .isDisabled = [] { return IsMobile || !getSettings().game.speedrunMode; },
+            });
+        config_bool_select(leftPane, rightPane, getSettings().game.showSpeedrunRTATimer,
+            {
+                .key = "Show RTA",
+                .helpText = "Display the RTA timer. IGT is always visible.",
                 .isDisabled = [] { return !getSettings().game.speedrunMode; },
             });
     });
@@ -1190,12 +1238,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
 
         auto addCheat = [&](const Rml::String& key, ConfigVar<bool>& value,
                             const Rml::String& helpText) {
-            config_bool_select(leftPane, rightPane, value,
-                {
-                    .key = key,
-                    .helpText = helpText,
-                    .isDisabled = [] { return getSettings().game.speedrunMode; },
-                });
+            add_speedrun_disabled_option(leftPane, rightPane, value, key, helpText);
         };
 
         leftPane.add_section("Resources");
@@ -1222,6 +1265,8 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Speeds up movement while wearing the Iron Boots.");
         addCheat("Can Transform Anywhere", getSettings().game.canTransformAnywhere,
             "Allows transforming even if NPCs are looking.");
+        addCheat("Fast Roll", getSettings().game.fastRoll,
+            "Makes Link's roll animation and movement twice as fast.");
         addCheat("Fast Spinner", getSettings().game.fastSpinner,
             "Speeds up Spinner movement while holding R.");
         addCheat("Free Magic Armor", getSettings().game.freeMagicArmor,
@@ -1346,12 +1391,6 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .helpText = "Checks GitHub releases for a new Dusklight version on startup.<br/><br/>"
                             "No personal information is transmitted or collected.",
             });
-        config_bool_select(leftPane, rightPane, getSettings().game.pauseOnFocusLost,
-            {
-                .key = "Pause On Focus Lost",
-                .helpText = "Pause the game when window focus is lost.",
-                .onChange = [](bool value) { aurora_set_pause_on_focus_lost(value); },
-            });
         config_bool_select(leftPane, rightPane, getSettings().backend.enableAdvancedSettings,
             {
                 .key = "Enable Advanced Settings",
@@ -1368,6 +1407,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                             }
                         }
                     },
+                .isDisabled = [] { return getSettings().game.speedrunMode; },
             });
 
         leftPane.add_section("Game");
@@ -1376,12 +1416,9 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .key = "Skip TV Settings Screen",
                 .helpText = "Skips the TV calibration screen shown when loading a save.",
             });
-        config_bool_select(leftPane, rightPane, getSettings().game.recordingMode,
-            {
-                .key = "Recording Mode",
-                .helpText = "Disables the game HUD and all background music.<br/><br/>Useful for "
-                            "recording footage.",
-            });
+        add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.recordingMode,
+            "Recording Mode",
+            "Disables the game HUD and all background music.<br/><br/>Useful for recording footage.");
     });
 }
 
