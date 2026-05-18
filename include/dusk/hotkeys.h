@@ -19,7 +19,7 @@ constexpr const char* SHOW_DEBUG_CAMERA = "F9";
 constexpr const char* SHOW_AUDIO_DEBUG = "F10";
 
 constexpr const char* TOGGLE_FULLSCREEN = "F11";
-constexpr const char* TOGGLE_THIRTY_FPS = "F12";
+constexpr const char* TOGGLE_THIRTY_FPS = "\\";
 
 constexpr const char* TURBO = "Tab";
 

@@ -246,7 +246,7 @@ namespace dusk {
         }
 
         if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
-            event.key.scancode == SDL_SCANCODE_F12)
+            event.key.scancode == SDL_SCANCODE_BACKSLASH)
         {
             getTransientSettings().forceThirtyFpsLimit = !getTransientSettings().forceThirtyFpsLimit;
             DuskToast(getTransientSettings().forceThirtyFpsLimit ? "30 FPS cap enabled" : "FPS cap restored", 1.5f);
