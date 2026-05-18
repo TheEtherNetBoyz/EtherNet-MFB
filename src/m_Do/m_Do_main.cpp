@@ -299,7 +299,11 @@ void main01(void) {
                                             dusk::game_clock::sample_interpolation_step());
             static int sLastWindowStatus = -1;
             const int windowStatus = dMeter2Info_getWindowStatus();
-            if (windowStatus != sLastWindowStatus && (windowStatus == 2 || sLastWindowStatus == 2)) {
+            const auto isCaptureMenuStatus = [](int status) {
+                return status == 2 || status == 3 || status == 4 || status == 5 || status == 10;
+            };
+            if (windowStatus != sLastWindowStatus &&
+                (isCaptureMenuStatus(windowStatus) || isCaptureMenuStatus(sLastWindowStatus))) {
                 dusk::frame_interp::request_presentation_sync();
             }
             sLastWindowStatus = windowStatus;
