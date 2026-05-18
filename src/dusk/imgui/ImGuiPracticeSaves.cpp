@@ -6,16 +6,20 @@
 
 #include "d/d_com_inf_game.h"
 #include "d/d_kankyo.h"
+#include "d/actor/d_a_player.h"
 #include "dusk/io.hpp"
 #include "dusk/main.h"
 #include "dusk/settings.h"
+#include "f_op/f_op_actor_mng.h"
 #include "f_op/f_op_overlap_mng.h"
+#include "f_pc/f_pc_name.h"
 #include "m_Do/m_Do_controller_pad.h"
 
 #include <algorithm>
 #include <array>
 #include <cstring>
 #include <filesystem>
+#include <vector>
 
 namespace dusk {
 
@@ -29,6 +33,7 @@ constexpr size_t kDescriptionOffset = 32;
 constexpr size_t kDescriptionSize = 64;
 constexpr size_t kFilenameOffset = 96;
 constexpr size_t kFilenameSize = 32;
+constexpr size_t kPlacementOffset = 128;
 
 struct SaveCategoryInfo {
     const char* label;
@@ -167,6 +172,86 @@ uint32_t read_be32(const u8* data) {
            static_cast<uint32_t>(data[3]);
 }
 
+s16 read_be16(const u8* data) {
+    return static_cast<s16>((static_cast<u16>(data[0]) << 8) |
+                            static_cast<u16>(data[1]));
+}
+
+float read_be_float(const u8* data) {
+    uint32_t raw = read_be32(data);
+    float value = 0.0f;
+    std::memcpy(&value, &raw, sizeof(value));
+    return value;
+}
+
+enum class PracticeSaveCallback : int {
+    None,
+    OrdonGateClip,
+    SetupHugo,
+};
+
+PracticeSaveCallback player_init_callback(ImGuiPracticeSaves::SaveCategory category, int index) {
+    switch (category) {
+    case ImGuiPracticeSaves::SaveCategory::Any:
+        if (index == 0) {
+            return PracticeSaveCallback::OrdonGateClip;
+        }
+        if (index == 4) {
+            return PracticeSaveCallback::SetupHugo;
+        }
+        break;
+    case ImGuiPracticeSaves::SaveCategory::NoSq:
+        if (index == 1) {
+            return PracticeSaveCallback::SetupHugo;
+        }
+        break;
+    case ImGuiPracticeSaves::SaveCategory::AllDungeons:
+        if (index == 3) {
+            return PracticeSaveCallback::SetupHugo;
+        }
+        break;
+    default:
+        break;
+    }
+    return PracticeSaveCallback::None;
+}
+
+void apply_ordon_gate_clip_callback() {
+    auto* rock = fopAcM_searchFromName("stoneB", 0xFFFFFFFF, 0x00FF6511);
+    if (rock != nullptr) {
+        rock->current.pos = cXyz(400.0f, 307.8f, -11365.0f);
+        rock->old.pos = rock->current.pos;
+        rock->shape_angle.y = 0x16F8;
+    }
+}
+
+void apply_hugo_callback() {
+    auto* hugo = fopAcM_SearchByName(fpcNm_E_RD_e);
+    if (hugo != nullptr) {
+        const cXyz pos(-289.9785f, 401.54f, -18533.078f);
+        hugo->current.pos = pos;
+        hugo->old.pos = pos;
+        hugo->home.pos = pos;
+        hugo->speed.set(0.0f, 0.0f, 0.0f);
+        hugo->speedF = 0.0f;
+        hugo->current.angle.y = 0x16F8;
+        hugo->shape_angle.y = 0x16F8;
+        hugo->home.angle.y = 0x16F8;
+    }
+}
+
+void apply_player_init_callback(PracticeSaveCallback callback) {
+    switch (callback) {
+    case PracticeSaveCallback::OrdonGateClip:
+        apply_ordon_gate_clip_callback();
+        break;
+    case PracticeSaveCallback::SetupHugo:
+        apply_hugo_callback();
+        break;
+    default:
+        break;
+    }
+}
 std::string read_fixed_string(const u8* data, size_t maxLen) {
     size_t len = 0;
     while (len < maxLen && data[len] != 0) {
@@ -242,6 +327,18 @@ void ImGuiPracticeSaves::loadCategoryMetadata(SaveCategory category) {
             save.name = read_fixed_string(entry + kNameOffset, kNameSize);
             save.description = read_fixed_string(entry + kDescriptionOffset, kDescriptionSize);
             save.filename = read_fixed_string(entry + kFilenameOffset, kFilenameSize);
+            save.index = static_cast<int>(i);
+            const u8 setFlags = entry[kPlacementOffset];
+            if ((setFlags & 1) != 0) {
+                const u8* placement = entry + kPlacementOffset;
+                const s16 angle = read_be16(placement + 2);
+                save.placement = PracticeSavePlacement{
+                    cXyz(read_be_float(placement + 4),
+                         read_be_float(placement + 8),
+                         read_be_float(placement + 12)),
+                    angle,
+                };
+            }
             if (!save.name.empty() && !save.filename.empty()) {
                 saves.push_back(std::move(save));
             }
@@ -271,8 +368,15 @@ bool ImGuiPracticeSaves::loadPracticeSave(const PracticeSaveEntry& entry) {
 
         const u8 vibration = dComIfGs_getOptVibration();
         save.getPlayer().getConfig().setVibration(vibration);
+
+        // Install the save before the stage request so room actors spawn against the practice state.
+        g_dComIfG_gameInfo.info.mSavedata = save;
         m_pendingSavedata = save;
         m_pendingVibration = vibration;
+        m_pendingPlacement = entry.placement;
+        m_pendingPlayerInitCallback = static_cast<int>(player_init_callback(m_saveCategory, entry.index));
+        m_pendingPlacementFrames = 0;
+        m_pendingPlayerInitFrames = 0;
         m_loadInProgress = true;
         m_loadPeekSeen = false;
         getTransientSettings().stateShareLoadActive = true;
@@ -574,7 +678,34 @@ void ImGuiPracticeSaves::tickPendingApply() {
         dComIfGp_setOxygen(600);
     }
 
+    auto applyPendingPlacement = [this]() {
+        if (dComIfGp_isEnableNextStage()) {
+            return;
+        }
+
+        if (m_pendingPlacementFrames > 0) {
+            if (m_pendingPlacement.has_value()) {
+                if (auto* player = daPy_getPlayerActorClass()) {
+                    player->setPlayerPosAndAngle(&m_pendingPlacement->pos, m_pendingPlacement->angle, 0);
+                }
+            }
+
+            m_pendingPlacementFrames--;
+            if (m_pendingPlacementFrames == 0) {
+                m_pendingPlacement.reset();
+            }
+        }
+
+        if (m_pendingPlayerInitFrames > 0) {
+            apply_player_init_callback(static_cast<PracticeSaveCallback>(m_pendingPlayerInitCallback));
+            m_pendingPlayerInitFrames--;
+            if (m_pendingPlayerInitFrames == 0) {
+                m_pendingPlayerInitCallback = static_cast<int>(PracticeSaveCallback::None);
+            }
+        }
+    };
     if (!m_loadInProgress) {
+        applyPendingPlacement();
         return;
     }
 
@@ -583,8 +714,12 @@ void ImGuiPracticeSaves::tickPendingApply() {
     } else if (m_loadPeekSeen) {
         m_loadInProgress = false;
         m_loadPeekSeen = false;
+        m_pendingPlacementFrames = m_pendingPlacement.has_value() ? 20 : 0;
+        m_pendingPlayerInitFrames = (m_pendingPlayerInitCallback != static_cast<int>(PracticeSaveCallback::None)) ? 60 : 0;
         getTransientSettings().stateShareLoadActive = false;
     }
+
+    applyPendingPlacement();
 }
 
 void ImGuiPracticeSaves::draw(bool& open) {

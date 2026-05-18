@@ -15,10 +15,17 @@ public:
     void draw(bool& open);
     void suppressControllerInput();
 
+    struct PracticeSavePlacement {
+        cXyz pos;
+        s16 angle;
+    };
+
     struct PracticeSaveEntry {
         std::string name;
         std::string description;
         std::string filename;
+        int index = 0;
+        std::optional<PracticeSavePlacement> placement;
     };
 
     enum class MainCategory : int {
@@ -60,6 +67,9 @@ private:
     std::string m_statusMsg;
     std::optional<dSv_save_c> m_pendingSavedata;
     std::optional<u8> m_pendingVibration;
+    std::optional<PracticeSavePlacement> m_pendingPlacement;
+    int m_pendingPlayerInitFrames = 0;
+    int m_pendingPlayerInitCallback = 0;
     MainCategory m_mainCategory = MainCategory::Practice;
     SaveCategory m_saveCategory = SaveCategory::Any;
     bool m_focusSaveList = false;
@@ -70,6 +80,7 @@ private:
     bool m_loaded = false;
     bool m_loadInProgress = false;
     bool m_loadPeekSeen = false;
+    int m_pendingPlacementFrames = 0;
 };
 
 }
