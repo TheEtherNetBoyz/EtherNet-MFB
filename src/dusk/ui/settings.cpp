@@ -39,15 +39,6 @@
 #include <cstdint>
 #include <filesystem>
 
-namespace aurora::webgpu {
-enum class PresentScalingFilter : uint8_t {
-    Linear,
-    SharpBilinear,
-};
-
-void set_present_scaling_filter(PresentScalingFilter filter) noexcept;
-}  // namespace aurora::webgpu
-
 namespace dusk::ui {
 namespace {
 
@@ -445,6 +436,8 @@ const Rml::String kInternalResolutionHelpText =
 const Rml::String kShadowResolutionHelpText =
     "Configure the shadow-map resolution. Higher values improve shadow quality but increase GPU "
     "and memory usage.";
+const Rml::String kResamplerHelpText =
+    "Configure the sampling method used when scaling the internal resolution for final presentation.";
 const Rml::String kBloomHelpText =
     "Configure the post-processing bloom effect. Classic uses the original bloom pass; Dusklight uses "
     "a higher-quality bloom pass.";
@@ -608,13 +601,6 @@ void add_speedrun_disabled_option(Pane& leftPane, Pane& rightPane, ConfigVar<boo
         .helpText = helpText,
         .isDisabled = [] { return getSettings().game.speedrunMode; },
     });
-}
-
-void apply_present_scaling_filter() {
-    aurora::webgpu::set_present_scaling_filter(
-        getSettings().game.enableSharpBilinearScaling ?
-            aurora::webgpu::PresentScalingFilter::SharpBilinear :
-            aurora::webgpu::PresentScalingFilter::Linear);
 }
 
 SelectButton& config_percent_select(Pane& leftPane, Pane& rightPane, ConfigVar<float>& var,
@@ -1015,6 +1001,15 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .valueMax = 8,
                 .defaultValue = 1,
             }, mPrelaunch);
+        graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.resampler,
+            GraphicsTunerProps{
+                .option = GraphicsOption::Resampler,
+                .title = "Output Resampling",
+                .helpText = kResamplerHelpText,
+                .valueMin = static_cast<int>(Resampler::Bilinear),
+                .valueMax = static_cast<int>(Resampler::Area),
+                .defaultValue = static_cast<int>(Resampler::Bilinear),
+            }, mPrelaunch);
 
         leftPane.add_section("Post-Processing");
         graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.bloomMode,
@@ -1037,6 +1032,12 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             }, mPrelaunch);
 
         leftPane.add_section("Rendering");
+        config_bool_select(leftPane, rightPane, getSettings().game.enableTextureReplacements,
+            {
+                .key = "Use Texture Pack",
+                .helpText = "Enable installed texture replacements.",
+                .onChange = [](bool value) { aurora_set_texture_replacements_enabled(value); },
+            });
         leftPane.register_control(
             leftPane.add_select_button({
                 .key = "Frame Rate Limit",
@@ -1060,13 +1061,6 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                     });
                 }
                 pane.add_text(kUnlockFramerateHelpText);
-            });
-        config_bool_select(leftPane, rightPane, getSettings().game.enableSharpBilinearScaling,
-            {
-                .key = "Sharp Bilinear Scaling",
-                .helpText =
-                    "Use sharp bilinear filtering when scaling the game frame to the window.",
-                .onChange = [](bool) { apply_present_scaling_filter(); },
             });
         config_bool_select(leftPane, rightPane, getSettings().game.enableDepthOfField,
             {

@@ -36,15 +36,6 @@ namespace aurora::gx {
 extern bool enableLodBias;
 }
 
-namespace aurora::webgpu {
-enum class PresentScalingFilter : uint8_t {
-    Linear,
-    SharpBilinear,
-};
-
-void set_present_scaling_filter(PresentScalingFilter filter) noexcept;
-}  // namespace aurora::webgpu
-
 namespace dusk {
     ImGuiMenuTools::ImGuiMenuTools() {}
 
@@ -52,14 +43,6 @@ namespace dusk {
         bool MenuCheckbox(const char* label, ConfigVar<bool>& value, bool enabled = true) {
             return config::ImGuiMenuItem(label, nullptr, value, enabled);
         }
-
-        void ApplyPresentScalingFilter() {
-            aurora::webgpu::set_present_scaling_filter(
-                getSettings().game.enableSharpBilinearScaling ?
-                    aurora::webgpu::PresentScalingFilter::SharpBilinear :
-                    aurora::webgpu::PresentScalingFilter::Linear);
-        }
-
         void RefreshRmlMenuBar() {
             for (auto& doc : ui::get_document_stack()) {
                 if (dynamic_cast<ui::MenuBar*>(doc.get())) {
@@ -451,9 +434,6 @@ namespace dusk {
                 aurora_enable_vsync(s.video.enableVsync.getValue());
             }
             MenuCheckbox("Show FPS Counter", s.video.enableFpsOverlay);
-            if (MenuCheckbox("Sharp Bilinear Scaling", s.game.enableSharpBilinearScaling)) {
-                ApplyPresentScalingFilter();
-            }
             ImGui::Separator();
             FrameRateLimitSlider();
             MenuCheckbox("Depth of Field", s.game.enableDepthOfField);

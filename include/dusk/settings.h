@@ -15,6 +15,11 @@ enum class BloomMode : int {
     Dusk = 2,
 };
 
+enum class Resampler : int {
+    Bilinear = 0,
+    Area = 1,
+};
+
 enum class GameLanguage : u8 {
     English = OS_LANGUAGE_ENGLISH,
     German = OS_LANGUAGE_GERMAN,
@@ -49,6 +54,12 @@ struct ConfigEnumRange<BloomMode> {
 };
 
 template <>
+struct ConfigEnumRange<Resampler> {
+    static constexpr auto min = Resampler::Bilinear;
+    static constexpr auto max = Resampler::Area;
+};
+
+template <>
 struct ConfigEnumRange<GameLanguage> {
     static constexpr auto min = GameLanguage::English;
     static constexpr auto max = GameLanguage::Italian;
@@ -71,7 +82,7 @@ struct ConfigEnumRange<AspectRatioMode> {
     static constexpr auto min = AspectRatioMode::Off;
     static constexpr auto max = AspectRatioMode::Ratio3x2;
 };
-}
+}  // namespace config
 
 // Persistent user settings
 
@@ -139,11 +150,12 @@ struct UserSettings {
         ConfigVar<BloomMode> bloomMode;
         ConfigVar<float> bloomMultiplier;
         ConfigVar<bool> disableWaterRefraction;
+        ConfigVar<bool> enableTextureReplacements;
         ConfigVar<bool> enableFrameInterpolation;
         ConfigVar<int> frameRateLimit;
         ConfigVar<int> internalResolutionScale;
         ConfigVar<int> shadowResolutionMultiplier;
-        ConfigVar<bool> enableSharpBilinearScaling;
+        ConfigVar<Resampler> resampler;
         ConfigVar<bool> enableDepthOfField;
         ConfigVar<bool> enableMapBackground;
         ConfigVar<bool> disableCutscenePillarboxing;
