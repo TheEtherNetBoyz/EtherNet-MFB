@@ -102,6 +102,7 @@ void configure_path_options(sentry_options_t* options) {
 }  // namespace
 
 void initialize() {
+    return;
 #if DUSK_ENABLE_SENTRY_NATIVE
     if (g_sentryInitialized || disabled_by_env()) {
         return;

@@ -234,6 +234,8 @@ std::optional<DiscVerificationResult> take_finished_disc_verification() {
 }
 
 void begin_update_check() {
+    return;
+
     if (!getSettings().backend.checkForUpdates.getValue()) {
         return;
     }

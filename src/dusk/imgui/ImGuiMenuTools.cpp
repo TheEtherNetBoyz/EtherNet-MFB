@@ -369,7 +369,6 @@ namespace dusk {
                 MenuCheckbox("Hide TV Settings Screen", s.game.hideTvSettingsScreen);
                 MenuCheckbox("Pause On Focus Lost", s.game.pauseOnFocusLost);
                 MenuCheckbox("Recording Mode", s.game.recordingMode);
-                MenuCheckbox("Check For Updates", s.backend.checkForUpdates);
                 MenuCheckbox("Skip Pre-Launch UI", s.backend.skipPreLaunchUI);
                 ImGui::Separator();
                 SpeedrunModeCheckbox();
