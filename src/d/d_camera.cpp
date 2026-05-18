@@ -33,6 +33,7 @@
 #include "dusk/frame_interpolation.h"
 #include "dusk/logging.h"
 #include "dusk/action_bindings.h"
+#include "dusk/settings.h"
 #include "imgui.h"
 #endif
 

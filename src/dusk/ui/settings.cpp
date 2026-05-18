@@ -35,7 +35,7 @@
 #endif
 
 #include <algorithm>
-#include <charconv>
+#include <cstdlib>
 #include <cstdint>
 #include <filesystem>
 
@@ -92,8 +92,9 @@ protected:
         float parsedValue = 0.0f;
         const char* begin = value.data();
         const char* end = begin + value.size();
-        const auto result = std::from_chars(begin, end, parsedValue);
-        if (result.ec != std::errc() || result.ptr != end) {
+        char* parseEnd = nullptr;
+        parsedValue = std::strtof(begin, &parseEnd);
+        if (parseEnd == begin || parseEnd != end) {
             return;
         }
 
