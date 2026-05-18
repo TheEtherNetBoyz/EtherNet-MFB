@@ -7,8 +7,10 @@
 #include "d/d_com_inf_game.h"
 #include "d/d_kankyo.h"
 #include "d/actor/d_a_player.h"
+#include "dusk/config.hpp"
 #include "dusk/io.hpp"
 #include "dusk/main.h"
+#include "dusk/map_loader_definitions.h"
 #include "dusk/settings.h"
 #include "f_op/f_op_actor_mng.h"
 #include "f_op/f_op_overlap_mng.h"
@@ -19,6 +21,8 @@
 #include <array>
 #include <cstring>
 #include <filesystem>
+#include <functional>
+#include <iterator>
 #include <vector>
 
 namespace dusk {
@@ -61,27 +65,6 @@ constexpr std::array kMainCategoryNames = {
     "warping",
 };
 
-constexpr std::array kCheatRows = {
-    "disable item timer",
-    "disable walls",
-    "fast bonk recovery",
-    "fast movement",
-    "infinite air",
-    "infinite arrows",
-    "infinite bombs",
-    "infinite hearts",
-    "infinite oil",
-    "infinite rupees",
-    "infinite slingshot",
-    "invincible link",
-    "invincible enemies",
-    "moon jump",
-    "no sinking in sand",
-    "super clawshot",
-    "transform anywhere",
-    "unrestricted items",
-};
-
 constexpr std::array kFlagRows = {
     "general",
     "dungeon",
@@ -113,48 +96,6 @@ constexpr std::array kMemoryRows = {
     "poke value",
     "heap info",
     "actor list",
-};
-
-constexpr std::array kSceneRows = {
-    "time",
-    "weather",
-    "reload room",
-    "event bits",
-    "audio",
-    "hide actors",
-    "show collision",
-};
-
-constexpr std::array kSettingsRows = {
-    "boot to menu",
-    "cursor type",
-    "display mode",
-    "drop shadow",
-    "menu pauses game",
-    "menu sfx",
-    "reload type",
-    "state streaming",
-    "swap equips",
-    "theme",
-};
-
-constexpr std::array kToolRows = {
-    "checkers",
-    "displays",
-    "link debug info",
-    "position",
-    "angle",
-    "speed",
-    "load timer",
-};
-
-constexpr std::array kWarpRows = {
-    "type",
-    "stage",
-    "room",
-    "spawn",
-    "layer",
-    "execute",
 };
 
 int category_index(ImGuiPracticeSaves::SaveCategory category) {
@@ -291,6 +232,444 @@ constexpr u32 kPracticeMenuControllerMask = PAD_BUTTON_UP | PAD_BUTTON_DOWN | PA
                                             PAD_BUTTON_RIGHT | PAD_BUTTON_A | PAD_BUTTON_B |
                                             PAD_TRIGGER_L | PAD_TRIGGER_R;
 
+struct GzWarpState {
+    int region = 0;
+    int map = 0;
+    int room = 0;
+    int spawn = 0;
+    int layer = -1;
+};
+
+int s_gzToolsTab = 1;
+int s_gzSceneTab = 0;
+GzWarpState s_gzWarpState;
+int s_gzDrawRow = 0;
+int s_gzSelectedRow = -1;
+bool s_gzPanelFocused = false;
+bool s_gzScrollSelectedRow = false;
+
+void clamp_gz_warp_state(GzWarpState& state) {
+    if (gameRegions.empty()) {
+        state.region = state.map = state.room = state.spawn = 0;
+        state.layer = std::clamp(state.layer, -1, 14);
+        return;
+    }
+    state.region = std::clamp(state.region, 0, static_cast<int>(gameRegions.size()) - 1);
+    const auto& region = gameRegions[state.region];
+    state.map = region.maps.empty() ? 0 : std::clamp(state.map, 0, static_cast<int>(region.maps.size()) - 1);
+    if (region.maps.empty()) {
+        state.room = state.spawn = 0;
+        return;
+    }
+    const auto& map = region.maps[state.map];
+    state.room = map.mapRooms.empty() ? 0 : std::clamp(state.room, 0, static_cast<int>(map.mapRooms.size()) - 1);
+    if (map.mapRooms.empty()) {
+        state.spawn = 0;
+        return;
+    }
+    const auto& room = map.mapRooms[state.room];
+    state.spawn = room.roomPoints.empty() ? 0 : std::clamp(state.spawn, 0, static_cast<int>(room.roomPoints.size()) - 1);
+    state.layer = std::clamp(state.layer, -1, 14);
+}
+
+int gz_generic_row_count(ImGuiPracticeSaves::MainCategory category) {
+    switch (category) {
+    case ImGuiPracticeSaves::MainCategory::Cheats: return 18;
+    case ImGuiPracticeSaves::MainCategory::Tools:
+        if (s_gzToolsTab == 0) return 7;
+        if (s_gzToolsTab == 1) return 7;
+        return 3;
+    case ImGuiPracticeSaves::MainCategory::Scene:
+        if (s_gzSceneTab == 0) return 3;
+        if (s_gzSceneTab == 1) return 1;
+        return 2;
+    case ImGuiPracticeSaves::MainCategory::Settings: return 16;
+    case ImGuiPracticeSaves::MainCategory::Warping: return 6;
+    case ImGuiPracticeSaves::MainCategory::Flags: return static_cast<int>(kFlagRows.size());
+    case ImGuiPracticeSaves::MainCategory::Inventory: return static_cast<int>(kInventoryRows.size());
+    case ImGuiPracticeSaves::MainCategory::Memory: return static_cast<int>(kMemoryRows.size());
+    default: return 0;
+    }
+}
+
+int sorted_adjacent_index(int count, int current, int delta, const std::function<bool(int, int)>& less) {
+    if (count <= 0) {
+        return 0;
+    }
+
+    current = std::clamp(current, 0, count - 1);
+    std::vector<int> indices;
+    indices.reserve(count);
+    for (int i = 0; i < count; i++) {
+        indices.push_back(i);
+    }
+
+    std::sort(indices.begin(), indices.end(), less);
+    const auto it = std::find(indices.begin(), indices.end(), current);
+    int pos = it == indices.end() ? 0 : static_cast<int>(std::distance(indices.begin(), it));
+    pos = (pos + (delta < 0 ? -1 : 1) + count) % count;
+    return indices[pos];
+}
+
+bool alphabetical_less(const char* a, const char* b) {
+    return std::strcmp(a != nullptr ? a : "", b != nullptr ? b : "") < 0;
+}
+
+void gz_set_bool(ConfigVar<bool>& value, bool enabled = true) {
+    if (!enabled) return;
+    value.setValue(!value.getValue());
+    config::Save();
+}
+
+void gz_activate_generic_row(ImGuiPracticeSaves::MainCategory category, int row) {
+    auto& s = getSettings();
+    const bool cheatsEnabled = !s.game.speedrunMode;
+    switch (category) {
+    case ImGuiPracticeSaves::MainCategory::Cheats:
+        switch (row) {
+        case 0: gz_set_bool(s.game.enableIndefiniteItemDrops, cheatsEnabled); break;
+        case 4: gz_set_bool(s.game.infiniteOxygen, cheatsEnabled); break;
+        case 5: gz_set_bool(s.game.infiniteArrows, cheatsEnabled); break;
+        case 6: gz_set_bool(s.game.infiniteBombs, cheatsEnabled); break;
+        case 7: gz_set_bool(s.game.infiniteHearts, cheatsEnabled); break;
+        case 8: gz_set_bool(s.game.infiniteOil, cheatsEnabled); break;
+        case 9: gz_set_bool(s.game.infiniteRupees, cheatsEnabled); break;
+        case 10: gz_set_bool(s.game.infiniteSeeds, cheatsEnabled); break;
+        case 12: gz_set_bool(s.game.invincibleEnemies, cheatsEnabled); break;
+        case 13: gz_set_bool(s.game.moonJump, cheatsEnabled); break;
+        case 15: gz_set_bool(s.game.superClawshot, cheatsEnabled); break;
+        case 16: gz_set_bool(s.game.canTransformAnywhere, cheatsEnabled); break;
+        default: break;
+        }
+        break;
+    case ImGuiPracticeSaves::MainCategory::Tools:
+        if (s_gzToolsTab == 1) {
+            if (row == 1) gz_set_bool(s.game.showSpeedrunRTATimer, s.game.speedrunMode);
+            if (row == 2) gz_set_bool(s.game.showInputViewer);
+        } else if (s_gzToolsTab == 2) {
+            if (row == 0) gz_set_bool(s.game.freeCamera);
+            if (row == 1) gz_set_bool(s.game.moveLink, !s.game.speedrunMode);
+        }
+        break;
+    case ImGuiPracticeSaves::MainCategory::Warping:
+        if (row == 5 && dusk::IsGameLaunched) {
+            clamp_gz_warp_state(s_gzWarpState);
+            const auto& region = gameRegions[s_gzWarpState.region];
+            const auto& map = region.maps[s_gzWarpState.map];
+            const auto& room = map.mapRooms[s_gzWarpState.room];
+            dComIfGp_setNextStage(map.mapFile, room.roomPoints[s_gzWarpState.spawn], room.roomNo, s_gzWarpState.layer);
+        }
+        break;
+    default: break;
+    }
+}
+
+void gz_adjust_generic_row(ImGuiPracticeSaves::MainCategory category, int row, int delta) {
+    if (category == ImGuiPracticeSaves::MainCategory::Tools) {
+        s_gzToolsTab = (s_gzToolsTab + delta + 3) % 3;
+        return;
+    }
+    if (category == ImGuiPracticeSaves::MainCategory::Scene) {
+        s_gzSceneTab = (s_gzSceneTab + delta + 3) % 3;
+        return;
+    }
+    if (category != ImGuiPracticeSaves::MainCategory::Warping) return;
+    clamp_gz_warp_state(s_gzWarpState);
+    switch (row) {
+    case 0:
+        s_gzWarpState.region = sorted_adjacent_index(static_cast<int>(gameRegions.size()), s_gzWarpState.region, delta, [](int a, int b) {
+            return alphabetical_less(gameRegions[a].regionName, gameRegions[b].regionName);
+        });
+        s_gzWarpState.map = s_gzWarpState.room = s_gzWarpState.spawn = 0;
+        break;
+    case 1: {
+        const auto& region = gameRegions[s_gzWarpState.region];
+        s_gzWarpState.map = sorted_adjacent_index(static_cast<int>(region.maps.size()), s_gzWarpState.map, delta, [&](int a, int b) {
+            return alphabetical_less(region.maps[a].mapName, region.maps[b].mapName);
+        });
+        s_gzWarpState.room = s_gzWarpState.spawn = 0;
+        break;
+    }
+    case 2: {
+        const auto& region = gameRegions[s_gzWarpState.region];
+        const auto& map = region.maps[s_gzWarpState.map];
+        s_gzWarpState.room = sorted_adjacent_index(static_cast<int>(map.mapRooms.size()), s_gzWarpState.room, delta, [&](int a, int b) {
+            return map.mapRooms[a].roomNo < map.mapRooms[b].roomNo;
+        });
+        s_gzWarpState.spawn = 0;
+        break;
+    }
+    case 3: {
+        const auto& region = gameRegions[s_gzWarpState.region];
+        const auto& map = region.maps[s_gzWarpState.map];
+        const auto& room = map.mapRooms[s_gzWarpState.room];
+        s_gzWarpState.spawn = sorted_adjacent_index(static_cast<int>(room.roomPoints.size()), s_gzWarpState.spawn, delta, [&](int a, int b) {
+            return room.roomPoints[a] < room.roomPoints[b];
+        });
+        break;
+    }
+    case 4:
+        s_gzWarpState.layer += delta;
+        if (s_gzWarpState.layer > 14) s_gzWarpState.layer = -1;
+        if (s_gzWarpState.layer < -1) s_gzWarpState.layer = 14;
+        break;
+    default: break;
+    }
+    clamp_gz_warp_state(s_gzWarpState);
+}
+
+bool gz_begin_row() {
+    const int row = s_gzDrawRow++;
+    const bool selected = s_gzPanelFocused && row == s_gzSelectedRow;
+    if (selected) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.1f, 0.9f, 0.1f, 1.0f));
+    return selected;
+}
+
+void gz_end_row(bool selected) {
+    if (selected && s_gzScrollSelectedRow) ImGui::SetScrollHereY(0.5f);
+    if (selected) ImGui::PopStyleColor();
+}
+
+bool gz_config_checkbox(const char* label, ConfigVar<bool>& value, bool enabled = true) {
+    bool copy = value.getValue();
+    const bool selected = gz_begin_row();
+    if (!enabled) ImGui::BeginDisabled();
+    const bool changed = ImGui::Checkbox(label, &copy);
+    if (!enabled) ImGui::EndDisabled();
+    gz_end_row(selected);
+    if (changed) {
+        value.setValue(copy);
+        config::Save();
+        return true;
+    }
+    return false;
+}
+
+void gz_disabled_checkbox(const char* label) {
+    bool off = false;
+    const bool selected = gz_begin_row();
+    ImGui::BeginDisabled();
+    ImGui::Checkbox(label, &off);
+    ImGui::EndDisabled();
+    gz_end_row(selected);
+}
+
+void gz_disabled_button(const char* label) {
+    const bool selected = gz_begin_row();
+    ImGui::BeginDisabled();
+    ImGui::Button(label, ImVec2(160.0f, 0.0f));
+    ImGui::EndDisabled();
+    gz_end_row(selected);
+}
+
+void draw_gz_cheats_panel() {
+    auto& s = getSettings();
+    const bool enabled = !s.game.speedrunMode;
+    ImGui::BeginChild("##gz_cheats_panel", ImVec2(560.0f, 0.0f), true);
+    if (!enabled) {
+        ImGui::TextDisabled("Disabled while Speedrun Mode is active.");
+    }
+    gz_config_checkbox("disable item timer", s.game.enableIndefiniteItemDrops, enabled);
+    gz_disabled_checkbox("disable walls");
+    gz_disabled_checkbox("fast bonk recovery");
+    gz_disabled_checkbox("fast movement");
+    gz_config_checkbox("infinite air", s.game.infiniteOxygen, enabled);
+    gz_config_checkbox("infinite arrows", s.game.infiniteArrows, enabled);
+    gz_config_checkbox("infinite bombs", s.game.infiniteBombs, enabled);
+    gz_config_checkbox("infinite hearts", s.game.infiniteHearts, enabled);
+    gz_config_checkbox("infinite lantern oil", s.game.infiniteOil, enabled);
+    gz_config_checkbox("infinite rupees", s.game.infiniteRupees, enabled);
+    gz_config_checkbox("infinite slingshot seeds", s.game.infiniteSeeds, enabled);
+    gz_disabled_checkbox("invincible link");
+    gz_config_checkbox("invincible enemies", s.game.invincibleEnemies, enabled);
+    gz_config_checkbox("moon jump", s.game.moonJump, enabled);
+    gz_disabled_checkbox("no sinking in sand");
+    gz_config_checkbox("super clawshot", s.game.superClawshot, enabled);
+    gz_config_checkbox("transform anywhere", s.game.canTransformAnywhere, enabled);
+    gz_disabled_checkbox("unrestricted items");
+    ImGui::EndChild();
+}
+
+void draw_gz_tools_panel() {
+    auto& s = getSettings();
+    int& tab = s_gzToolsTab;
+    const char* tabs[] = {"checkers", "displays", "link"};
+    ImGui::BeginChild("##gz_tools_panel", ImVec2(560.0f, 0.0f), true);
+    for (int i = 0; i < IM_ARRAYSIZE(tabs); i++) {
+        if (i > 0) ImGui::SameLine();
+        if (ImGui::Selectable(tabs[i], tab == i, 0, ImVec2(ImGui::CalcTextSize(tabs[i]).x + 12.0f, 0.0f))) {
+            tab = i;
+        }
+    }
+    ImGui::Separator();
+
+    if (tab == 0) {
+        gz_disabled_checkbox("coro td");
+        gz_disabled_checkbox("ebmb");
+        gz_disabled_checkbox("elevator escape");
+        gz_disabled_checkbox("gorge void");
+        gz_disabled_checkbox("ladder freezard cancel");
+        gz_disabled_checkbox("rolls");
+        gz_disabled_checkbox("universal map delay");
+    } else if (tab == 1) {
+        gz_disabled_checkbox("a/b mash rate");
+        gz_config_checkbox("in-game timer", s.game.showSpeedrunRTATimer, s.game.speedrunMode);
+        gz_config_checkbox("input viewer", s.game.showInputViewer);
+        gz_disabled_checkbox("link debug info");
+        gz_disabled_checkbox("load timer");
+        gz_disabled_checkbox("stage info");
+        gz_disabled_checkbox("timer");
+    } else {
+        gz_config_checkbox("free cam", s.game.freeCamera);
+        gz_config_checkbox("move link", s.game.moveLink, !s.game.speedrunMode);
+        gz_disabled_checkbox("teleport");
+    }
+    ImGui::EndChild();
+}
+
+void draw_gz_scene_panel() {
+    int& tab = s_gzSceneTab;
+    const char* tabs[] = {"environment", "viewers", "audio"};
+    ImGui::BeginChild("##gz_scene_panel", ImVec2(560.0f, 0.0f), true);
+    for (int i = 0; i < IM_ARRAYSIZE(tabs); i++) {
+        if (i > 0) ImGui::SameLine();
+        if (ImGui::Selectable(tabs[i], tab == i, 0, ImVec2(ImGui::CalcTextSize(tabs[i]).x + 12.0f, 0.0f))) {
+            tab = i;
+        }
+    }
+    ImGui::Separator();
+
+    if (tab == 0) {
+        gz_disabled_checkbox("freeze time");
+        gz_disabled_checkbox("freeze actors");
+        gz_disabled_checkbox("freeze camera");
+    } else if (tab == 1) {
+        gz_disabled_checkbox("viewers");
+    } else {
+        gz_disabled_checkbox("mute bgm");
+        gz_disabled_checkbox("mute sfx");
+    }
+    ImGui::EndChild();
+}
+
+void draw_gz_settings_panel() {
+    ImGui::BeginChild("##gz_settings_panel", ImVec2(560.0f, 0.0f), true);
+    gz_disabled_checkbox("boot to menu");
+    gz_disabled_checkbox("cursor type");
+    gz_disabled_checkbox("display mode");
+    gz_disabled_checkbox("drop shadows");
+    gz_disabled_checkbox("menu pauses game");
+    gz_disabled_checkbox("menu sfx");
+    gz_disabled_checkbox("reload type");
+    gz_disabled_checkbox("state streaming");
+    gz_disabled_checkbox("swap equips");
+    gz_disabled_checkbox("theme");
+    ImGui::Separator();
+    gz_disabled_button("command combos");
+    gz_disabled_button("menu positions");
+    gz_disabled_button("start gdb server");
+    gz_disabled_button("save settings");
+    gz_disabled_button("load settings");
+    gz_disabled_button("delete settings");
+    ImGui::EndChild();
+}
+
+void draw_gz_warping_panel() {
+    auto& state = s_gzWarpState;
+    clamp_gz_warp_state(state);
+    ImGui::BeginChild("##gz_warp_panel", ImVec2(560.0f, 0.0f), true);
+
+    auto combo_label = [](const char* label, const char* value) {
+        ImGui::TextUnformatted(label);
+        ImGui::SameLine(90.0f);
+        ImGui::SetNextItemWidth(300.0f);
+        return value;
+    };
+
+    const bool typeSelected = gz_begin_row();
+    if (ImGui::BeginCombo("##gz_warp_type", combo_label("type", gameRegions[state.region].regionName))) {
+        for (int i = 0; i < static_cast<int>(gameRegions.size()); i++) {
+            if (ImGui::Selectable(gameRegions[i].regionName, state.region == i)) {
+                state.region = i;
+                state.map = state.room = state.spawn = 0;
+                clamp_gz_warp_state(state);
+            }
+        }
+        ImGui::EndCombo();
+    }
+    gz_end_row(typeSelected);
+
+    const auto& region = gameRegions[state.region];
+    const bool stageSelected = gz_begin_row();
+    if (ImGui::BeginCombo("##gz_warp_stage", combo_label("stage", region.maps[state.map].mapName))) {
+        for (int i = 0; i < static_cast<int>(region.maps.size()); i++) {
+            if (ImGui::Selectable(region.maps[i].mapName, state.map == i)) {
+                state.map = i;
+                state.room = state.spawn = 0;
+                clamp_gz_warp_state(state);
+            }
+        }
+        ImGui::EndCombo();
+    }
+    gz_end_row(stageSelected);
+
+    const auto& map = region.maps[state.map];
+    const auto& room = map.mapRooms[state.room];
+    const std::string roomLabel = fmt::format("{}", room.roomNo);
+    const bool roomSelected = gz_begin_row();
+    if (ImGui::BeginCombo("##gz_warp_room", combo_label("room", roomLabel.c_str()))) {
+        for (int i = 0; i < static_cast<int>(map.mapRooms.size()); i++) {
+            const std::string label = fmt::format("{}", map.mapRooms[i].roomNo);
+            if (ImGui::Selectable(label.c_str(), state.room == i)) {
+                state.room = i;
+                state.spawn = 0;
+                clamp_gz_warp_state(state);
+            }
+        }
+        ImGui::EndCombo();
+    }
+    gz_end_row(roomSelected);
+
+    const s16 spawnPoint = room.roomPoints[state.spawn];
+    const std::string spawnLabel = fmt::format("{}", spawnPoint);
+    const bool spawnSelected = gz_begin_row();
+    if (ImGui::BeginCombo("##gz_warp_spawn", combo_label("spawn", spawnLabel.c_str()))) {
+        for (int i = 0; i < static_cast<int>(room.roomPoints.size()); i++) {
+            const std::string label = fmt::format("{}", room.roomPoints[i]);
+            if (ImGui::Selectable(label.c_str(), state.spawn == i)) {
+                state.spawn = i;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    gz_end_row(spawnSelected);
+
+    const std::string layerLabel = state.layer < 0 ? std::string("default") : fmt::format("{}", state.layer);
+    const bool layerSelected = gz_begin_row();
+    if (ImGui::BeginCombo("##gz_warp_layer", combo_label("layer", layerLabel.c_str()))) {
+        for (int layer = -1; layer <= 14; layer++) {
+            const std::string label = layer < 0 ? std::string("default") : fmt::format("{}", layer);
+            if (ImGui::Selectable(label.c_str(), state.layer == layer)) {
+                state.layer = layer;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    gz_end_row(layerSelected);
+
+    const bool warpSelected = gz_begin_row();
+    if (!dusk::IsGameLaunched) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("warp", ImVec2(160.0f, 0.0f))) {
+        dComIfGp_setNextStage(map.mapFile, spawnPoint, room.roomNo, state.layer);
+    }
+    if (!dusk::IsGameLaunched) {
+        ImGui::EndDisabled();
+    }
+    gz_end_row(warpSelected);
+    ImGui::EndChild();
+}
 }  // namespace
 
 void ImGuiPracticeSaves::loadMetadata() {
@@ -322,15 +701,15 @@ void ImGuiPracticeSaves::loadCategoryMetadata(SaveCategory category) {
 
         saves.reserve(count);
         for (uint32_t i = 0; i < count; i++) {
-            const u8* entry = data.data() + kMetadataHeaderSize + (static_cast<size_t>(i) * kMetadataEntrySize);
+            const u8* entryData = data.data() + kMetadataHeaderSize + (static_cast<size_t>(i) * kMetadataEntrySize);
             PracticeSaveEntry save;
-            save.name = read_fixed_string(entry + kNameOffset, kNameSize);
-            save.description = read_fixed_string(entry + kDescriptionOffset, kDescriptionSize);
-            save.filename = read_fixed_string(entry + kFilenameOffset, kFilenameSize);
+            save.name = read_fixed_string(entryData + kNameOffset, kNameSize);
+            save.description = read_fixed_string(entryData + kDescriptionOffset, kDescriptionSize);
+            save.filename = read_fixed_string(entryData + kFilenameOffset, kFilenameSize);
             save.index = static_cast<int>(i);
-            const u8 setFlags = entry[kPlacementOffset];
+            const u8 setFlags = entryData[kPlacementOffset];
             if ((setFlags & 1) != 0) {
-                const u8* placement = entry + kPlacementOffset;
+                const u8* placement = entryData + kPlacementOffset;
                 const s16 angle = read_be16(placement + 2);
                 save.placement = PracticeSavePlacement{
                     cXyz(read_be_float(placement + 4),
@@ -457,6 +836,47 @@ void ImGuiPracticeSaves::handleController(bool& open) {
         return;
     }
 
+    if (m_focusSaveList && m_mainCategory != MainCategory::Practice) {
+        const int count = gz_generic_row_count(m_mainCategory);
+        if (count > 0) {
+            if (accept(PAD_BUTTON_UP, 0.18)) {
+                m_selectedGenericRow = std::max(0, m_selectedGenericRow - 1);
+                m_scrollSelectedGenericRow = true;
+                return;
+            }
+            if (accept(PAD_BUTTON_DOWN, 0.18)) {
+                m_selectedGenericRow = std::min(count - 1, m_selectedGenericRow + 1);
+                m_scrollSelectedGenericRow = true;
+                return;
+            }
+            if (acceptPress(PAD_TRIGGER_L)) {
+                gz_adjust_generic_row(m_mainCategory, m_selectedGenericRow, -1);
+                m_selectedGenericRow = std::min(m_selectedGenericRow, std::max(0, gz_generic_row_count(m_mainCategory) - 1));
+                m_scrollSelectedGenericRow = true;
+                return;
+            }
+            if (acceptPress(PAD_TRIGGER_R)) {
+                gz_adjust_generic_row(m_mainCategory, m_selectedGenericRow, 1);
+                m_selectedGenericRow = std::min(m_selectedGenericRow, std::max(0, gz_generic_row_count(m_mainCategory) - 1));
+                m_scrollSelectedGenericRow = true;
+                return;
+            }
+            if (accept(PAD_BUTTON_LEFT)) {
+                gz_adjust_generic_row(m_mainCategory, m_selectedGenericRow, -1);
+                return;
+            }
+            if (accept(PAD_BUTTON_RIGHT)) {
+                gz_adjust_generic_row(m_mainCategory, m_selectedGenericRow, 1);
+                return;
+            }
+            if (accept(PAD_BUTTON_A, 0.20)) {
+                gz_activate_generic_row(m_mainCategory, m_selectedGenericRow);
+                return;
+            }
+        }
+        return;
+    }
+
     if (m_focusSaveList && m_mainCategory == MainCategory::Practice) {
         if (acceptPress(PAD_TRIGGER_L)) {
             int next = category_index(m_saveCategory) - 1;
@@ -469,7 +889,7 @@ void ImGuiPracticeSaves::handleController(bool& open) {
             return;
         }
         if (acceptPress(PAD_TRIGGER_R)) {
-            int next = (category_index(m_saveCategory) + 1) % static_cast<int>(SaveCategory::Count);
+            const int next = (category_index(m_saveCategory) + 1) % static_cast<int>(SaveCategory::Count);
             m_saveCategory = static_cast<SaveCategory>(next);
             m_selectedSave = 0;
             m_scrollSelectedSave = true;
@@ -505,30 +925,33 @@ void ImGuiPracticeSaves::handleController(bool& open) {
                 return;
             }
         }
-    } else {
-        if (accept(PAD_BUTTON_LEFT)) {
-            m_focusSaveList = false;
-            return;
-        }
-        if (m_mainCategory == MainCategory::Practice && accept(PAD_BUTTON_RIGHT)) {
-            m_focusSaveList = true;
-            return;
-        }
+        return;
+    }
 
-        int category = main_category_index(m_mainCategory);
-        if (accept(PAD_BUTTON_UP, 0.18)) {
-            category = std::max(0, category - 1);
-            m_mainCategory = static_cast<MainCategory>(category);
-            return;
-        }
-        if (accept(PAD_BUTTON_DOWN, 0.18)) {
-            category = std::min(static_cast<int>(MainCategory::Count) - 1, category + 1);
-            m_mainCategory = static_cast<MainCategory>(category);
-            return;
-        }
-        if (m_mainCategory == MainCategory::Practice && accept(PAD_BUTTON_A, 0.16)) {
-            m_focusSaveList = true;
-        }
+    if (accept(PAD_BUTTON_A, 0.16)) {
+        m_focusSaveList = true;
+        m_selectedGenericRow = std::min(m_selectedGenericRow, std::max(0, gz_generic_row_count(m_mainCategory) - 1));
+        m_scrollSelectedGenericRow = true;
+        return;
+    }
+
+    int category = main_category_index(m_mainCategory);
+    if (accept(PAD_BUTTON_UP, 0.18)) {
+        category = std::max(0, category - 1);
+        m_mainCategory = static_cast<MainCategory>(category);
+        m_selectedGenericRow = 0;
+        m_scrollSelectedGenericRow = true;
+        return;
+    }
+    if (accept(PAD_BUTTON_DOWN, 0.18)) {
+        category = std::min(static_cast<int>(MainCategory::Count) - 1, category + 1);
+        m_mainCategory = static_cast<MainCategory>(category);
+        m_selectedGenericRow = 0;
+        m_scrollSelectedGenericRow = true;
+        return;
+    }
+    if (m_mainCategory == MainCategory::Practice && accept(PAD_BUTTON_A, 0.16)) {
+        m_focusSaveList = true;
     }
 }
 
@@ -536,12 +959,13 @@ void ImGuiPracticeSaves::drawCategoryList() {
     ImGui::BeginChild("##gz_main_categories", ImVec2(170.0f, 0.0f), false);
     for (int i = 0; i < static_cast<int>(MainCategory::Count); i++) {
         const bool selected = i == main_category_index(m_mainCategory);
-        const ImVec4 color = selected ? ImVec4(0.1f, 0.9f, 0.1f, 1.0f) :
-                                        ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+        const ImVec4 color = selected ? ImVec4(0.1f, 0.9f, 0.1f, 1.0f) : ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
         ImGui::PushStyleColor(ImGuiCol_Text, color);
         if (ImGui::Selectable(kMainCategoryNames[i], selected, 0, ImVec2(150.0f, 0.0f))) {
             m_mainCategory = static_cast<MainCategory>(i);
             m_focusSaveList = false;
+            m_selectedGenericRow = 0;
+            m_scrollSelectedGenericRow = true;
         }
         ImGui::PopStyleColor();
     }
@@ -606,59 +1030,54 @@ void ImGuiPracticeSaves::drawPracticePanel(bool& open) {
 }
 
 void ImGuiPracticeSaves::drawGenericPanel() {
-    const char* const* rows = nullptr;
-    int rowCount = 0;
-
+    s_gzDrawRow = 0;
+    s_gzSelectedRow = m_selectedGenericRow;
+    s_gzPanelFocused = m_focusSaveList;
+    s_gzScrollSelectedRow = m_scrollSelectedGenericRow;
     switch (m_mainCategory) {
     case MainCategory::Cheats:
-        rows = kCheatRows.data();
-        rowCount = static_cast<int>(kCheatRows.size());
-        break;
-    case MainCategory::Flags:
-        rows = kFlagRows.data();
-        rowCount = static_cast<int>(kFlagRows.size());
-        break;
-    case MainCategory::Inventory:
-        rows = kInventoryRows.data();
-        rowCount = static_cast<int>(kInventoryRows.size());
-        break;
-    case MainCategory::Memory:
-        rows = kMemoryRows.data();
-        rowCount = static_cast<int>(kMemoryRows.size());
+        draw_gz_cheats_panel();
         break;
     case MainCategory::Scene:
-        rows = kSceneRows.data();
-        rowCount = static_cast<int>(kSceneRows.size());
+        draw_gz_scene_panel();
         break;
     case MainCategory::Settings:
-        rows = kSettingsRows.data();
-        rowCount = static_cast<int>(kSettingsRows.size());
+        draw_gz_settings_panel();
         break;
     case MainCategory::Tools:
-        rows = kToolRows.data();
-        rowCount = static_cast<int>(kToolRows.size());
+        draw_gz_tools_panel();
         break;
     case MainCategory::Warping:
-        rows = kWarpRows.data();
-        rowCount = static_cast<int>(kWarpRows.size());
+        draw_gz_warping_panel();
         break;
-    default:
-        break;
-    }
-
-    ImGui::BeginChild("##gz_generic_panel", ImVec2(560.0f, 0.0f), true);
-    static std::array<std::array<bool, 64>, static_cast<int>(MainCategory::Count)> sOptionStates = {};
-    auto& optionStates = sOptionStates[main_category_index(m_mainCategory)];
-    for (int i = 0; i < rowCount; i++) {
-        ImGui::PushID(i);
-        if (m_mainCategory == MainCategory::Warping && i == rowCount - 1) {
-            ImGui::Button(rows[i], ImVec2(160.0f, 0.0f));
-        } else {
-            ImGui::Checkbox(rows[i], &optionStates[i]);
+    default: {
+        const char* const* rows = nullptr;
+        int rowCount = 0;
+        switch (m_mainCategory) {
+        case MainCategory::Flags:
+            rows = kFlagRows.data();
+            rowCount = static_cast<int>(kFlagRows.size());
+            break;
+        case MainCategory::Inventory:
+            rows = kInventoryRows.data();
+            rowCount = static_cast<int>(kInventoryRows.size());
+            break;
+        case MainCategory::Memory:
+            rows = kMemoryRows.data();
+            rowCount = static_cast<int>(kMemoryRows.size());
+            break;
+        default:
+            break;
         }
-        ImGui::PopID();
+        ImGui::BeginChild("##gz_placeholder_panel", ImVec2(560.0f, 0.0f), true);
+        for (int i = 0; i < rowCount; i++) {
+            gz_disabled_checkbox(rows[i]);
+        }
+        ImGui::EndChild();
+        break;
     }
-    ImGui::EndChild();
+    }
+    m_scrollSelectedGenericRow = false;
 }
 
 void ImGuiPracticeSaves::tickPendingApply() {

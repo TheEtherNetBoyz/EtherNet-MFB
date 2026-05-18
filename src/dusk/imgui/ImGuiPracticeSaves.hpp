@@ -77,6 +77,8 @@ private:
     double m_nextControllerInputTime = 0.0;
     u32 m_lastControllerHold = 0;
     bool m_scrollSelectedSave = false;
+    int m_selectedGenericRow = 0;
+    bool m_scrollSelectedGenericRow = false;
     bool m_loaded = false;
     bool m_loadInProgress = false;
     bool m_loadPeekSeen = false;
