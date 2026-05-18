@@ -1311,10 +1311,10 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         leftPane.register_control(
             leftPane.add_child<NumberButton>(NumberButton::Props{
                 .key = "Damage Multiplier",
-                .getValue = [] { return getSettings().game.damageMultiplier.getValue(); },
+                .getValue = [] { return std::clamp(getSettings().game.damageMultiplier.getValue(), 1, 8); },
                 .setValue =
                     [](int value) {
-                        getSettings().game.damageMultiplier.setValue(value);
+                        getSettings().game.damageMultiplier.setValue(std::clamp(value, 1, 8));
                         config::Save();
                     },
                 .isDisabled = [] { return getSettings().game.speedrunMode; },

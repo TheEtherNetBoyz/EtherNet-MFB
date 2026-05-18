@@ -26,6 +26,7 @@
 #include <dolphin/gx/GXAurora.h>
 #include <dolphin/vi.h>
 #include <SDL3/SDL_misc.h>
+#include <algorithm>
 #include <cstdint>
 
 #if defined(__APPLE__)
@@ -153,10 +154,10 @@ namespace dusk {
         }
 
         void SliderIntItem(const char* label, ConfigVar<int>& value, int min, int max) {
-            int copy = value.getValue();
+            int copy = std::clamp(value.getValue(), min, max);
             ImGui::SetNextItemWidth(160.0f);
             if (ImGui::SliderInt(label, &copy, min, max)) {
-                value.setValue(copy);
+                value.setValue(std::clamp(copy, min, max));
                 config::Save();
             }
         }
