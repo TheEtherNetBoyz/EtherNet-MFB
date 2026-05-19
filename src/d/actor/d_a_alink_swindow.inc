@@ -111,6 +111,11 @@ int daAlink_c::loadModelDVD() {
                         changeLink(1);
                     }
 
+                    if (s_duskForceHumanFormWaitInit) {
+                        s_duskForceHumanFormWaitInit = false;
+                        procWaitInit();
+                    }
+
                     return 1;
                 }
                 mClothesChangeWaitTimer = 2;

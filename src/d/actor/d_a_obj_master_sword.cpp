@@ -6,12 +6,77 @@
 #include "d/dolzel_rel.h" // IWYU pragma: keep
 
 #include "d/actor/d_a_obj_master_sword.h"
+#include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_player.h"
 #include "d/d_com_inf_game.h"
+#include "d/d_event.h"
 #include "d/d_meter2_info.h"
+#include "d/d_stage.h"
+#include "dusk/cutscene_skip.h"
+#include "Z2AudioLib/Z2Instances.h"
 
 daObjMasterSword_Attr_c const daObjMasterSword_c::mAttr = {1.0f};
 
+static daObjMasterSword_c* s_activeMasterSwordSkipActor;
+
+static void completeMasterSwordGet(daObjMasterSword_c* i_this) {
+    dComIfGs_onItemFirstBit(dItemNo_MASTER_SWORD_e);
+    dMeter2Info_setSword(dItemNo_MASTER_SWORD_e, false);
+    dComIfGs_setSelectEquipSword(dItemNo_MASTER_SWORD_e);
+
+    dComIfGp_setItemLifeCount(dComIfGs_getMaxLife(), 0);
+    dComIfGs_onEventBit(dSv_event_flag_c::saveBitLabels[i_this->getFlagNo()]);
+    s_activeMasterSwordSkipActor = NULL;
+    fopAcM_delete(i_this);
+}
+
+static void restoreMasterSwordPlayerState() {
+    daAlink_c* player = daAlink_getAlinkActorClass();
+    player->duskForceHumanFormAfterCutscene();
+}
+
+static void finishMasterSwordDemo(daObjMasterSword_c* i_this) {
+    dComIfGs_onTmpBit((u16)dSv_event_tmp_flag_c::tempBitLabels[73]);
+    dComIfGs_onEventBit(dSv_event_flag_c::M_077);
+    dComIfGs_onEventBit(dSv_event_flag_c::M_068);
+    dComIfGs_onEventBit(dSv_event_flag_c::saveBitLabels[550]);
+
+    completeMasterSwordGet(i_this);
+    restoreMasterSwordPlayerState();
+
+    Z2GetAudioMgr()->bgmStreamStop(0);
+    Z2GetAudioMgr()->setDemoName(NULL);
+}
+
+static int masterSwordDemoSkip(void* i_actor, int param_1) {
+    dStage_MapEvent_dt_c* mapEvent = dComIfGp_getEvent()->getStageEventDt();
+    if (mapEvent != NULL) {
+        switch (mapEvent->type) {
+        case dStage_MapEvent_dt_TYPE_STB:
+            dEv_defaultSkipStb(i_actor, param_1);
+            break;
+        case dStage_MapEvent_dt_TYPE_ZEV:
+            dEv_defaultSkipZev(i_actor, param_1);
+            break;
+        case dStage_MapEvent_dt_TYPE_MAPTOOLCAMERA:
+        default:
+            dEv_defaultSkipProc(i_actor, param_1);
+            break;
+        }
+    } else {
+        dEv_defaultSkipProc(i_actor, param_1);
+    }
+
+    finishMasterSwordDemo((daObjMasterSword_c*)i_actor);
+    return 1;
+}
+
+static void installMasterSwordDemoSkip(daObjMasterSword_c* i_this) {
+    if (dusk::cutscene_skip::enabled()) {
+        dComIfGp_getEvent()->setSkipProc(i_this, masterSwordDemoSkip, 0);
+        dComIfGp_getEvent()->onSkipFade();
+    }
+}
 void daObjMasterSword_c::initBaseMtx() {
     fopAcM_SetMtx(this, mpModel->getBaseTRMtx());
 
@@ -46,7 +111,9 @@ void daObjMasterSword_c::executeWait() {
 
     if (fopAcM_checkCarryNow(this)) {
         dMeter2Info_setCloth(dItemNo_WEAR_KOKIRI_e, false);
+        s_activeMasterSwordSkipActor = this;
         fopAcM_orderMapToolEvent(this, getEventID(), 0xFF, 0xFFFF, 1, 0);
+        installMasterSwordDemoSkip(this);
     }
 }
 
@@ -180,19 +247,17 @@ void daObjMasterSword_c::setCollision() {
 
 int daObjMasterSword_c::execute() {
     callExecute();
+    if (eventInfo.checkCommandDemoAccrpt() ||
+        (s_activeMasterSwordSkipActor == this && dComIfGp_event_runCheck())) {
+        installMasterSwordDemoSkip(this);
+    }
     setCollision();
 
     mBtk.play();
     mBrk.play();
 
     if (dComIfGs_isTmpBit(dSv_event_tmp_flag_c::tempBitLabels[73])) {
-        dComIfGs_onItemFirstBit(dItemNo_MASTER_SWORD_e);
-        dMeter2Info_setSword(dItemNo_MASTER_SWORD_e, false);
-        dComIfGs_setSelectEquipSword(dItemNo_MASTER_SWORD_e);
-
-        dComIfGp_setItemLifeCount(dComIfGs_getMaxLife(), 0);
-        dComIfGs_onEventBit(dSv_event_flag_c::saveBitLabels[getFlagNo()]);
-        fopAcM_delete(this);
+        completeMasterSwordGet(this);
     }
 
     return 1;

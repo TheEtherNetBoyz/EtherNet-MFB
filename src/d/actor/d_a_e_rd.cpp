@@ -22,6 +22,7 @@
 #include "d/actor/d_a_e_dn.h"
 #include "d/actor/d_a_e_arrow.h"
 #include "d/actor/d_a_npc_tk.h"
+#include "dusk/cutscene_skip.h"
 #include "Z2AudioLib/Z2Instances.h"
 #include "f_op/f_op_actor_enemy.h"
 #include <cstring>
@@ -6087,8 +6088,10 @@ static void demo_camera(e_rd_class* i_this) {
             i_this->field_0x12f0.y = 2000.0f;
 
             daPy_getPlayerActorClass()->changeOriginalDemo();
-            dComIfGp_getEvent()->setSkipProc(enemy, lv9_resistance_demo_skip, 0);
-            dComIfGp_getEvent()->onSkipFade();
+            if (dusk::cutscene_skip::enabled()) {
+                dComIfGp_getEvent()->setSkipProc(enemy, lv9_resistance_demo_skip, 0);
+                dComIfGp_getEvent()->onSkipFade();
+            }
             if (daPy_py_c::checkNowWolf()) {
                 daPy_getPlayerActorClass()->changeDemoMode(71, 0, 0, 0);
                 i_this->demo_mode = 19;

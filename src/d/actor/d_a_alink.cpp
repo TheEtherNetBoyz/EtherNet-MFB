@@ -65,6 +65,7 @@ static int daAlink_Delete(daAlink_c* i_this);
 static int daAlink_Execute(daAlink_c* i_this);
 static int daAlink_Draw(daAlink_c* i_this);
 static fopAc_ac_c* daAlink_searchTagKandelaar(fopAc_ac_c* i_actor, void* i_data);
+static bool s_duskForceHumanFormWaitInit;
 
 BOOL daAlink_c::getE3Zhint() {
     return false;
@@ -17709,6 +17710,26 @@ int daAlink_c::procCoMetamorphoseOnly() {
     }
 
     return 1;
+}
+
+void daAlink_c::duskForceHumanFormAfterCutscene() {
+    offPlayerNoDraw();
+    offPlayerShadowNoDraw();
+    offMidnaRide();
+    dComIfGs_setTransformStatus(0);
+
+    if (!checkWolf()) {
+        cancelOriginalDemo();
+        return;
+    }
+
+    deleteEquipItem(FALSE, TRUE);
+    commonProcInit(PROC_METAMORPHOSE_ONLY);
+    mClothesChangeWaitTimer = 4;
+    mNormalSpeed = 0.0f;
+    speed.y = 0.0f;
+    s_duskForceHumanFormWaitInit = true;
+    cancelOriginalDemo();
 }
 
 int daAlink_c::procFloorDownReboundInit() {
