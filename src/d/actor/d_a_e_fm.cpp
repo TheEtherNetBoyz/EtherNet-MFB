@@ -11,10 +11,12 @@
 #include "d/d_s_play.h"
 #include "d/actor/d_a_obj_hhashi.h"
 #include "d/actor/d_a_obj_ystone.h"
+#include "d/actor/d_a_npc_grz.h"
 #include "c/c_damagereaction.h"
 #include "f_op/f_op_camera_mng.h"
 #include "f_op/f_op_msg_mng.h"
 #include "Z2AudioLib/Z2Instances.h"
+#include "dusk/cutscene_skip.h"
 
 class daE_FM_HIO_c : public JORReflexible {
 public:
@@ -440,6 +442,10 @@ static void chain_draw(e_fm_class* i_this, chain_s* i_chain_s, int i_chainNo) {
 }
 
 static int daE_FM_Draw(e_fm_class* i_this) {
+    if (i_this->mDemoCamMode == 1000) {
+        return 1;
+    }
+
     J3DModel* model = i_this->mpFmModelMorf->getModel();
     g_env_light.settingTevStruct(0, &i_this->current.pos, &i_this->tevStr);
     g_env_light.setLightTevColorType_MAJI(model, &i_this->tevStr);
@@ -1148,7 +1154,123 @@ static void cam_3d_morf(e_fm_class* i_this, f32 param_1) {
 }
 
 static int demo_stop;
+static bool isFyrusDeathDemoMode(int i_mode) {
+    return i_mode >= 50 && i_mode <= 55;
+}
 
+static void finishFyrusDeathDemo(e_fm_class* i_this) {
+    fopAc_ac_c* actor = (fopAc_ac_c*)i_this;
+    daPy_py_c* player = daPy_getPlayerActorClass();
+
+    i_this->mAction = ACTION_END;
+    i_this->mMode = 1;
+    i_this->mDemoCamMode = 1000;
+    i_this->mDemoCamTimer = 0;
+    i_this->mDrawDemoModel = FALSE;
+    i_this->mHideCore = TRUE;
+    i_this->mShadowKey = 353535;
+    i_this->field_0x5c8 = 0;
+    i_this->mKankyoBlend = 0.0f;
+    i_this->field_0x7b6 = 0;
+    i_this->field_0x7b8 = 0.0f;
+    i_this->field_0x1b07c = 0;
+    dKy_custom_colset(0, 1, 0.0f);
+    i_this->mpFmModelMorf->setPlaySpeed(0.0f);
+    i_this->mpFmBrk[TEXANM_DEMO_END01]->setPlaySpeed(0.0f);
+    i_this->mpFmBtk[TEXANM_DEMO_END01]->setPlaySpeed(0.0f);
+
+    if (!dComIfGs_isStageLife() && fopAcM_SearchByName(fpcNm_Obj_LifeContainer_e) == NULL) {
+        cXyz pos(209.0f, 0.0f, 861.0f);
+        cXyz size(1.0f, 1.0f, 1.0f);
+        fopAcM_createItemForBoss(&pos, dItemNo_UTAWA_HEART_e, fopAcM_GetRoomNo(actor),
+                                 &actor->shape_angle, &size, 0.0f, 0.0f, -1);
+    }
+
+    obj_ystone_class* ystone = (obj_ystone_class*)fopAcM_SearchByName(fpcNm_OBJ_YSTONE_e);
+    if (ystone != NULL) {
+        fopAcM_delete((fopAc_ac_c*)ystone);
+    }
+
+    if (!dComIfGs_isStageBossEnemy()) {
+        cXyz warp_pos(-363.0f, 0.0f, 291.0f);
+        csXyz warp_rot(0, 0, 0);
+        fopAcM_createWarpHole(&warp_pos, &warp_rot, fopAcM_GetRoomNo(actor), 0, 0, 0xFF);
+
+        dComIfGs_onStageBossEnemy();
+        dComIfGs_onEventBit(dSv_event_flag_c::saveBitLabels[64]);
+
+        cXyz grz_pos = actor->current.pos;
+        fpc_ProcID grz_id = fopAcM_create(fpcNm_NPC_GRZ_e, 0xFFFFFF01, &grz_pos,
+                                           fopAcM_GetRoomNo(actor), &actor->shape_angle,
+                                           NULL, -1);
+        daNpc_Grz_c* grz = (daNpc_Grz_c*)fopAcM_SearchByID(grz_id);
+        if (grz != NULL) {
+            grz->duskForcePostFyrusBattleState();
+        }
+    }
+
+    fopAcM_OffStatus(actor, 0);
+    actor->attention_info.flags = 0;
+    actor->current.pos.set(20000.0f, -23000.0f, 40000.0f);
+    actor->old.pos = actor->current.pos;
+    actor->eyePos = actor->current.pos;
+
+    camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
+    cMtx_YrotS(*calc_mtx, player->shape_angle.y);
+    cXyz eye_offset(0.0f, 100.0f, -250.0f);
+    cXyz eye;
+    MtxPosition(&eye_offset, &eye);
+    eye += player->current.pos;
+
+    cXyz center = player->current.pos;
+    center.y += 120.0f;
+    dComIfGp_event_reset();
+    player->cancelOriginalDemo();
+
+    camera->mCamera.Reset(center, eye);
+    camera->mCamera.Start();
+    camera->mCamera.SetTrimSize(0);
+    dComIfGp_getVibration().StopQuake(0x1F);
+
+    dKy_custom_colset(2, 2, 1.0f);
+    g_env_light.mColpatWeather = 2;
+    g_env_light.wether_pat0 = 2;
+    g_env_light.wether_pat1 = 2;
+    dComIfGs_BossLife_public_Set(0);
+    i_this->mSound.deleteObject();
+    Z2GetAudioMgr()->subBgmStop();
+    Z2GetAudioMgr()->bgmStart(0x200005b, 0, 0);
+    Z2GetAudioMgr()->setDemoName(NULL);
+}
+
+static bool processFyrusDeathDemoLocalSkip(e_fm_class* i_this) {
+    static int s_fyrusDeathSkipTimer;
+
+    if (!dusk::cutscene_skip::enabled() || !isFyrusDeathDemoMode(i_this->mDemoCamMode)) {
+        s_fyrusDeathSkipTimer = 0;
+        return false;
+    }
+
+    if (mDoCPd_c::getTrigStart(PAD_1)) {
+        if (s_fyrusDeathSkipTimer > 0) {
+            s_fyrusDeathSkipTimer = 0;
+            finishFyrusDeathDemo(i_this);
+            return true;
+        }
+
+        s_fyrusDeathSkipTimer = 1;
+    }
+
+    if (s_fyrusDeathSkipTimer > 0) {
+        dComIfGp_setSButtonStatusForce(0x43, 1);
+
+        if (s_fyrusDeathSkipTimer++ > 45) {
+            s_fyrusDeathSkipTimer = 0;
+        }
+    }
+
+    return false;
+}
 static void demo_camera(e_fm_class* i_this) {
     fopAc_ac_c* actor = (fopAc_ac_c*)i_this;
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
@@ -1159,6 +1281,10 @@ static void demo_camera(e_fm_class* i_this) {
     cXyz spE0;
     cXyz spD4;
     cXyz spC8;
+
+    if (processFyrusDeathDemoLocalSkip(i_this)) {
+        return;
+    }
 
     switch (i_this->mDemoCamMode) {
     case 0:
@@ -2770,6 +2896,9 @@ static void action(e_fm_class* i_this) {
     }
 
     demo_camera(i_this);
+    if (i_this->mDemoCamMode == 1000) {
+        return;
+    }
 
     if (bossroom_wait_on) {
         daPy_getPlayerActorClass()->onBossRoomWait();
@@ -2977,6 +3106,9 @@ static int daE_FM_Execute(e_fm_class* i_this) {
     }
 
     action(i_this);
+    if (i_this->mDemoCamMode == 1000) {
+        return 1;
+    }
 
     i_this->mAcch.CrrPos(dComIfG_Bgsp());
     actor->current.pos.y = actor->home.pos.y;

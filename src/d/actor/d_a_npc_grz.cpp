@@ -9,6 +9,7 @@
 #include "d/actor/d_a_npc.h"
 #include "d/actor/d_a_obj_grz_rock.h"
 #include "Z2AudioLib/Z2Instances.h"
+#include "dusk/cutscene_skip.h"
 #include <cstring>
 
 enum grZ_RES_File_ID {
@@ -1295,9 +1296,15 @@ void daNpc_Grz_c::reset() {
     if (mType == TYPE_LIEDOWN) {
         field_0x1a84 = 2;
         mMsgNo = 208;
-        mColor.r = mpHIO->m.color_r;
-        mColor.g = mpHIO->m.color_g;
-        mColor.b = mpHIO->m.color_b;
+        if (dusk::cutscene_skip::enabled() && daNpcF_chkEvtBit(64)) {
+            mColor.r = 0;
+            mColor.g = 0;
+            mColor.b = 0;
+        } else {
+            mColor.r = mpHIO->m.color_r;
+            mColor.g = mpHIO->m.color_g;
+            mColor.b = mpHIO->m.color_b;
+        }
         setExpression(EXPR_LIEDOWN, -1.0f);
         setMotion(MOT_LIEDOWN, 0.0f, 0);
     } else {
@@ -1318,6 +1325,16 @@ void daNpc_Grz_c::reset() {
     }
 
     field_0x9ee = true;
+}
+
+void daNpc_Grz_c::duskForcePostFyrusBattleState() {
+    field_0x1a84 = 2;
+    mTimer = 0;
+    mColor.r = 0;
+    mColor.g = 0;
+    mColor.b = 0;
+    setExpression(EXPR_LIEDOWN, -1.0f);
+    setMotion(MOT_LIEDOWN, -1.0f, 0);
 }
 
 void daNpc_Grz_c::resetCol() {

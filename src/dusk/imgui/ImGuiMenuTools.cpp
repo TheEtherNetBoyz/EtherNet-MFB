@@ -70,6 +70,7 @@ namespace dusk {
             s.game.noHeartDrops.setSpeedrunValue(false);
             s.game.autoSave.setSpeedrunValue(false);
             s.game.sunsSong.setSpeedrunValue(false);
+            s.game.skipAllCutscenes.setSpeedrunValue(false);
 
             s.game.infiniteHearts.setSpeedrunValue(false);
             s.game.infiniteArrows.setSpeedrunValue(false);
@@ -340,6 +341,7 @@ namespace dusk {
                 MenuCheckbox("Quick Transform (R+Y)", s.game.enableQuickTransform);
                 MenuCheckbox("Bigger Wallets", s.game.biggerWallets);
                 MenuCheckbox("Disable Rupee Cutscenes", s.game.disableRupeeCutscenes);
+                MenuCheckbox("Skip All Cutscenes", s.game.skipAllCutscenes, !s.game.speedrunMode);
                 MenuCheckbox("No Rupee Returns", s.game.noReturnRupees);
                 MenuCheckbox("No Sword Recoil", s.game.noSwordRecoil);
                 MenuCheckbox("Faster Climbing", s.game.fastClimbing);

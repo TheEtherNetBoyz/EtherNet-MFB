@@ -113,6 +113,7 @@ public:
     int doStoneSmashCut(int);
     int doStoneSmashSkipCut(int);
     void adjustShapeAngle() {}
+    void duskForcePostFyrusBattleState();
 
     u8 getPathNoFromParam() { return (fopAcM_GetParam(this) & 0xFF00) >> 8; }
 

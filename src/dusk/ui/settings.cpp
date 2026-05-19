@@ -269,6 +269,7 @@ void reset_for_speedrun_mode() {
     getSettings().game.noHeartDrops.setSpeedrunValue(false);
     getSettings().game.autoSave.setSpeedrunValue(false);
     getSettings().game.sunsSong.setSpeedrunValue(false);
+    getSettings().game.skipAllCutscenes.setSpeedrunValue(false);
 
     getSettings().game.infiniteHearts.setSpeedrunValue(false);
     getSettings().game.infiniteArrows.setSpeedrunValue(false);
@@ -1341,6 +1342,8 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Wallet sizes are like in the HD version. (500, 1000, 2000)");
         addOption("Disable Rupee Cutscenes", getSettings().game.disableRupeeCutscenes,
             "Rupees will not play cutscenes after you have collected them the first time.");
+        addSpeedrunDisabledOption("Skip All Cutscenes", getSettings().game.skipAllCutscenes,
+            "Automatically skips supported cutscenes.");
         addOption("Faster Climbing", getSettings().game.fastClimbing,
             "Quicker climbing on ladders and vines like the HD version.");
         addOption("Faster Tears of Light", getSettings().game.fastTears,
