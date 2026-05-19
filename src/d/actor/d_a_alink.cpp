@@ -49,7 +49,11 @@
 #include "d/actor/d_a_tag_mwait.h"
 #include "d/actor/d_a_canoe.h"
 #include "d/actor/d_a_ni.h"
+#include "d/d_event.h"
 #include "d/d_s_play.h"
+#include "d/d_stage.h"
+#include "dusk/cutscene_skip.h"
+#include "Z2AudioLib/Z2Instances.h"
 
 #if TARGET_PC
 #include "dusk/action_bindings.h"
@@ -66,6 +70,66 @@ static int daAlink_Execute(daAlink_c* i_this);
 static int daAlink_Draw(daAlink_c* i_this);
 static fopAc_ac_c* daAlink_searchTagKandelaar(fopAc_ac_c* i_actor, void* i_data);
 static bool s_duskForceHumanFormWaitInit;
+
+static bool isCastleBarrierApproachStage() {
+    const char* stageName = dComIfGp_getStartStageName();
+    return strcmp(stageName, "F_SP116") == 0 || strcmp(stageName, "F_SP121") == 0 ||
+           strcmp(stageName, "F_SP122") == 0 || strcmp(stageName, "D_MN09") == 0;
+}
+
+static void* duskDeleteCastleBarrier(void* i_actor, void*) {
+    if (fopAc_IsActor(i_actor) &&
+        (fopAcM_GetName(i_actor) == fpcNm_Obj_GanonWall2_e ||
+         fopAcM_GetName(i_actor) == fpcNm_Obj_GanonWall_e)) {
+        fopAcM_delete((fopAc_ac_c*)i_actor);
+    }
+
+    return NULL;
+}
+
+static void skipCastleBarrierEvent(void* i_actor, int param_1) {
+    dStage_MapEvent_dt_c* mapEvent = dComIfGp_getEvent()->getStageEventDt();
+    if (mapEvent != NULL) {
+        switch (mapEvent->type) {
+        case dStage_MapEvent_dt_TYPE_STB:
+            dEv_defaultSkipStb(i_actor, param_1);
+            break;
+        case dStage_MapEvent_dt_TYPE_ZEV:
+            dEv_defaultSkipZev(i_actor, param_1);
+            break;
+        case dStage_MapEvent_dt_TYPE_MAPTOOLCAMERA:
+        default:
+            dEv_defaultSkipProc(i_actor, param_1);
+            break;
+        }
+    } else {
+        dEv_defaultSkipProc(i_actor, param_1);
+    }
+}
+
+static void finishCastleBarrierDemo(daAlink_c* i_player) {
+    dComIfGs_onEventBit(dSv_event_flag_c::F_0542);
+    fopAcIt_Judge((fopAcIt_JudgeFunc)duskDeleteCastleBarrier, NULL);
+
+    i_player->cancelOriginalDemo();
+    Z2GetAudioMgr()->bgmStreamStop(0);
+    Z2GetAudioMgr()->subBgmStop();
+    Z2GetAudioMgr()->setDemoName(NULL);
+}
+
+static int castleBarrierDemoSkip(void* i_actor, int param_1) {
+    skipCastleBarrierEvent(i_actor, param_1);
+    finishCastleBarrierDemo((daAlink_c*)i_actor);
+    return 1;
+}
+
+static void installCastleBarrierDemoSkip(daAlink_c* i_player) {
+    if (dusk::cutscene_skip::enabled() && isCastleBarrierApproachStage() &&
+        !dComIfGs_isEventBit(dSv_event_flag_c::F_0542)) {
+        dComIfGp_getEvent()->setSkipProc(i_player, castleBarrierDemoSkip, 0);
+        dComIfGp_getEvent()->onSkipFade();
+    }
+}
 
 BOOL daAlink_c::getE3Zhint() {
     return false;
@@ -17851,6 +17915,7 @@ int daAlink_c::execute() {
     setSelectEquipItem(FALSE);
 
     if (dComIfGp_event_runCheck()) {
+        installCastleBarrierDemoSkip(this);
         mAlinkStaffId = dComIfGp_evmng_getMyStaffId("Alink", this, 0);
 
         if (eventInfo.checkCommandDoor() && !dComIfGp_event_chkEventFlag(4) &&
