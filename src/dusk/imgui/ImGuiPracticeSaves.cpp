@@ -959,15 +959,18 @@ void ImGuiPracticeSaves::drawCategoryList() {
     ImGui::BeginChild("##gz_main_categories", ImVec2(170.0f, 0.0f), false);
     for (int i = 0; i < static_cast<int>(MainCategory::Count); i++) {
         const bool selected = i == main_category_index(m_mainCategory);
-        const ImVec4 color = selected ? ImVec4(0.1f, 0.9f, 0.1f, 1.0f) : ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
-        ImGui::PushStyleColor(ImGuiCol_Text, color);
+        const bool entered = selected && m_focusSaveList;
+        const ImVec4 selectedText = ImVec4(0.1f, 0.9f, 0.1f, 1.0f);
+        const ImVec4 normalText = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+        ImGui::PushStyleColor(ImGuiCol_Text, entered ? selectedText : normalText);
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImGui::GetStyleColorVec4(ImGuiCol_Header));
         if (ImGui::Selectable(kMainCategoryNames[i], selected, 0, ImVec2(150.0f, 0.0f))) {
             m_mainCategory = static_cast<MainCategory>(i);
-            m_focusSaveList = false;
+            m_focusSaveList = true;
             m_selectedGenericRow = 0;
             m_scrollSelectedGenericRow = true;
         }
-        ImGui::PopStyleColor();
+        ImGui::PopStyleColor(2);
     }
     ImGui::EndChild();
 }
