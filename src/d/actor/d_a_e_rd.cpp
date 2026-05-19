@@ -5829,6 +5829,41 @@ static void* s_lv9arrow_sub2(void* i_actor, void* i_data) {
     return NULL;
 }
 
+static void lv9_demo_disable_actor(fopAc_ac_c* actor) {
+    fopAcM_OffStatus(actor, 0);
+    actor->attention_info.flags = 0;
+}
+
+static void* s_lv9dn_finish_sub(void* i_actor, void* i_data) {
+    UNUSED(i_data);
+    if (fopAcM_IsActor(i_actor) && fopAcM_GetName(i_actor) == fpcNm_E_DN_e) {
+        fopEn_enemy_c* enemy = (fopEn_enemy_c*)i_actor;
+        lv9_demo_disable_actor(enemy);
+
+        int swBit = (fopAcM_GetParam(enemy) & 0xFF000000) >> 24;
+        if (swBit != 0xFF) {
+            dComIfGs_onSwitch(swBit, fopAcM_GetRoomNo(enemy));
+        }
+
+        fopAcM_delete(enemy);
+    }
+
+    return NULL;
+}
+
+static void* s_lv9rd_finish_sub(void* i_actor, void* i_data) {
+    e_rd_class* skippedActor = (e_rd_class*)i_data;
+    if (fopAcM_IsActor(i_actor) && fopAcM_GetName(i_actor) == fpcNm_E_RD_e && i_actor != &skippedActor->enemy) {
+        e_rd_class* rd = (e_rd_class*)i_actor;
+        if (rd->arg1 == 13 || rd->arg1 == 14 || rd->field_0xafb != 0) {
+            lv9_demo_disable_actor((fopAc_ac_c*)i_actor);
+            fopAcM_delete((fopAc_ac_c*)i_actor);
+        }
+    }
+
+    return NULL;
+}
+
 static void cam_3d_morf(e_rd_class* i_this, f32 i_scale) {
     cLib_addCalc2(&i_this->demo_cam_ctr.x, i_this->demo_cam_target.x, i_scale, i_this->demo_cam_way_spd.x * i_this->demo_cam_morf);
     cLib_addCalc2(&i_this->demo_cam_ctr.y, i_this->demo_cam_target.y, i_scale, i_this->demo_cam_way_spd.y * i_this->demo_cam_morf);
@@ -5846,6 +5881,56 @@ static void cam_spd_set(e_rd_class* i_this) {
     i_this->demo_cam_way_spd.y = fabsf(i_this->demo_cam_target.y - i_this->demo_cam_ctr.y);
     i_this->demo_cam_way_spd.z = fabsf(i_this->demo_cam_target.z - i_this->demo_cam_ctr.z);
     i_this->demo_cam_morf = 0.0f;
+}
+
+static void finish_lv9_resistance_demo(e_rd_class* i_this) {
+    fopEn_enemy_c* enemy = &i_this->enemy;
+    int roomNo = fopAcM_GetRoomNo(enemy);
+
+    dComIfGs_onSwitch(75, roomNo);
+
+    int bitsw = (fopAcM_GetParam(enemy) & 0xFF000000) >> 24;
+    if (bitsw != 0xFF) {
+        dComIfGs_onSwitch(bitsw, roomNo);
+    }
+
+    fpcM_Search(s_lv9rd_sub, i_this);
+    fpcM_Search(s_lv9dn_sub, i_this);
+    fpcM_Search(s_lv9dn_sub2, i_this);
+    fpcM_Search(s_lv9arrow_sub2, i_this);
+
+    data_80519338 = 14;
+    fpcM_Search(s_lv9rd_sub2, i_this);
+    data_80519338 = 13;
+    fpcM_Search(s_lv9rd_sub2, i_this);
+
+    fpcM_Search(s_lv9dn_sub3, i_this);
+    fpcM_Search(s_lv9dn_finish_sub, i_this);
+    fpcM_Search(s_lv9rd_finish_sub, i_this);
+
+    dComIfGs_onTmpBit((u16)dSv_event_tmp_flag_c::tempBitLabels[0x76]);
+    dComIfGs_onTmpBit((u16)dSv_event_tmp_flag_c::tempBitLabels[0x75]);
+    dComIfGs_onTmpBit((u16)dSv_event_tmp_flag_c::tempBitLabels[0x74]);
+
+    Z2GetAudioMgr()->bgmStreamStop(0);
+    Z2GetAudioMgr()->setDemoName(NULL);
+
+    camera_process_class* cam = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
+    cam->mCamera.Start();
+    cam->mCamera.SetTrimSize(0);
+    dComIfGp_event_reset();
+    daPy_getPlayerActorClass()->cancelOriginalDemo();
+    i_this->blurRate = 0;
+    i_this->field_0x9a4 = 0;
+    i_this->attack_range = 0.0f;
+    i_this->demo_mode = -1;
+    i_this->demo_timer = 0;
+}
+
+static int lv9_resistance_demo_skip(void* i_actor, int param_2) {
+    UNUSED(param_2);
+    finish_lv9_resistance_demo((e_rd_class*)i_actor);
+    return 1;
 }
 
 static void demo_camera(e_rd_class* i_this) {
@@ -6002,6 +6087,8 @@ static void demo_camera(e_rd_class* i_this) {
             i_this->field_0x12f0.y = 2000.0f;
 
             daPy_getPlayerActorClass()->changeOriginalDemo();
+            dComIfGp_getEvent()->setSkipProc(enemy, lv9_resistance_demo_skip, 0);
+            dComIfGp_getEvent()->onSkipFade();
             if (daPy_py_c::checkNowWolf()) {
                 daPy_getPlayerActorClass()->changeDemoMode(71, 0, 0, 0);
                 i_this->demo_mode = 19;
@@ -6353,11 +6440,8 @@ static void demo_camera(e_rd_class* i_this) {
 
         case 36:
             if (i_this->demo_timer == 120) {
-                demo_set = true;
-                int bitsw = (fopAcM_GetParam(enemy) & 0xFF000000) >> 24;
-                if (bitsw != 0xFF) {
-                    dComIfGs_onSwitch(bitsw, fopAcM_GetRoomNo(enemy));
-                }
+                finish_lv9_resistance_demo(i_this);
+                return;
             }
             break;
     }
