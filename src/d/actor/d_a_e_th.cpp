@@ -12,6 +12,9 @@
 #include "c/c_damagereaction.h"
 #include "f_op/f_op_actor_enemy.h"
 #include "f_op/f_op_camera_mng.h"
+#include "Z2AudioLib/Z2Instances.h"
+#include "dusk/cutscene_skip.h"
+#include "m_Do/m_Do_controller_pad.h"
 #if TARGET_PC
 #include "dusk/achievements.h"
 #endif
@@ -1006,6 +1009,75 @@ static void demo_camera(e_th_class* i_this) {
     if (i_this->mDemoCamMode != 0) {
         camera->mCamera.Set(i_this->mDemoCamCenter, i_this->mDemoCamEye, i_this->mDemoCamFovy, 0);
         i_this->mDemoCamTimer++;
+
+        static int s_duskDarkhammerDeathSkipTimer;
+        if (dusk::cutscene_skip::enabled() && i_this->mDemoCamMode >= 11 && i_this->mDemoCamMode <= 13) {
+            if (mDoCPd_c::getTrigStart(PAD_1)) {
+                if (s_duskDarkhammerDeathSkipTimer > 0) {
+                    s_duskDarkhammerDeathSkipTimer = 0;
+
+                    e_th_ball_class* ball_p = (e_th_ball_class*)fopAcM_SearchByID(i_this->mBallID);
+                    if (ball_p != NULL) {
+                        cMtx_YrotS(*calc_mtx, i_this->shape_angle.y);
+                        sp8C.x = AREG_F(3);
+                        sp8C.y = AREG_F(4);
+                        sp8C.z = 400.0f + AREG_F(5);
+                        MtxPosition(&sp8C, &ball_p->current.pos);
+                        ball_p->current.pos += i_this->current.pos;
+                        ball_p->old.pos = ball_p->current.pos;
+                        ball_p->shape_angle.set(0, 0, 0x1700);
+                        ball_p->current.angle.y = i_this->shape_angle.y;
+                        ball_p->current.angle.x = -0x1000;
+                        ball_p->speedF = 0.0f;
+                        ball_p->mAction = 10;
+                        ball_p->mMode = 0;
+                        ball_p->mPlayerGet = 0;
+                        ball_p->mDemoMode = 0;
+                    }
+
+                    int bitSw = (fopAcM_GetParam(i_this) & 0xFF000000) >> 0x18;
+                    dComIfGs_onStageMiddleBoss();
+                    dComIfGs_onSaveSwitch(94);
+                    dComIfGs_onSwitch(bitSw, fopAcM_GetRoomNo(i_this));
+                    dComIfGs_offSwitch(106, fopAcM_GetRoomNo(i_this));
+                    i_this->mAction = ACTION_END;
+                    i_this->mMode = 3;
+                    i_this->mNoDraw = TRUE;
+                    i_this->mDemoCamMode = 0;
+
+                    cMtx_YrotS(*calc_mtx, i_this->shape_angle.y);
+                    sp8C.x = 100.0f + AREG_F(7);
+                    sp8C.y = AREG_F(8);
+                    sp8C.z = -300.0f + AREG_F(9);
+                    MtxPosition(&sp8C, &sp80);
+                    sp80 += i_this->current.pos;
+                    player->setPlayerPosAndAngle(&sp80, i_this->shape_angle.y, 0);
+
+                    camera->mCamera.Reset(i_this->mDemoCamCenter, i_this->mDemoCamEye);
+                    camera->mCamera.Start();
+                    camera->mCamera.SetTrimSize(0);
+                    dComIfGp_getVibration().StopQuake(0x1F);
+                    Z2GetAudioMgr()->bgmStop(0, 0);
+                    Z2GetAudioMgr()->bgmStreamStop(0);
+                    Z2GetAudioMgr()->subBgmStop();
+                    Z2GetAudioMgr()->setDemoName(NULL);
+                    dComIfGp_event_reset();
+                    daPy_getPlayerActorClass()->cancelOriginalDemo();
+                    return;
+                }
+
+                s_duskDarkhammerDeathSkipTimer = 1;
+            }
+
+            if (s_duskDarkhammerDeathSkipTimer > 0) {
+                dComIfGp_setSButtonStatusForce(0x43, 1);
+                if (s_duskDarkhammerDeathSkipTimer++ > 45) {
+                    s_duskDarkhammerDeathSkipTimer = 0;
+                }
+            }
+        } else {
+            s_duskDarkhammerDeathSkipTimer = 0;
+        }
 
         if (i_this->mDemoCamMode >= 2 && i_this->mDemoCamMode < 10 && dComIfGp_getEvent()->checkSkipEdge()) {
             Z2GetAudioMgr()->subBgmStop();
