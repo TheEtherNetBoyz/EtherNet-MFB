@@ -1278,6 +1278,7 @@ static void finishDiababaDeathDemo(b_bq_class* i_this) {
     g_env_light.mColpatWeather = 6;
     g_env_light.wether_pat0 = 6;
     g_env_light.wether_pat1 = 6;
+    Z2GetAudioMgr()->bgmStop(0, 0);
     Z2GetAudioMgr()->bgmStreamStop(0);
     Z2GetAudioMgr()->subBgmStop();
     Z2GetAudioMgr()->bgmStart(0x200005b, 0, 0);

@@ -1518,6 +1518,7 @@ void daNpc_GWolf_c::duskFinishHowlingSessionCutscene() {
     Z2GetSeqMgr()->stopWolfHowlSong();
     JASGlobalInstance<Z2WolfHowlMgr>::getInstance()->skipCorrectDemo();
     JASGlobalInstance<Z2WolfHowlMgr>::getInstance()->resetState();
+    Z2GetAudioMgr()->bgmStop(0, 0);
     Z2GetAudioMgr()->subBgmStop();
     Z2GetAudioMgr()->bgmStreamStop(0);
     mSound.deleteObject();

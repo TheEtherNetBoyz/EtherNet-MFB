@@ -770,6 +770,7 @@ static void finishArgorokDeathDemo(daB_DRE_c* i_this) {
     dComIfGp_event_reset();
     player->cancelOriginalDemo();
 
+    Z2GetAudioMgr()->bgmStop(0, 0);
     Z2GetAudioMgr()->bgmStreamStop(0);
     Z2GetAudioMgr()->subBgmStop();
     Z2GetAudioMgr()->bgmStart(0x200005b, 0, 0);
@@ -778,31 +779,6 @@ static void finishArgorokDeathDemo(daB_DRE_c* i_this) {
 }
 
 static bool processArgorokDeathDemoLocalSkip(daB_DRE_c* i_this) {
-    static int s_argorokDeathSkipTimer;
-
-    if (!dusk::cutscene_skip::enabled() || i_this->mAction == 0 || i_this->mDrMode == 0 ||
-        i_this->mDrMode >= 100)
-    {
-        s_argorokDeathSkipTimer = 0;
-        return false;
-    }
-
-    if (mDoCPd_c::getTrigStart(PAD_1)) {
-        if (s_argorokDeathSkipTimer > 0) {
-            s_argorokDeathSkipTimer = 0;
-            finishArgorokDeathDemo(i_this);
-            return true;
-        }
-        s_argorokDeathSkipTimer = 1;
-    }
-
-    if (s_argorokDeathSkipTimer > 0) {
-        dComIfGp_setSButtonStatusForce(0x43, 1);
-        if (s_argorokDeathSkipTimer++ > 45) {
-            s_argorokDeathSkipTimer = 0;
-        }
-    }
-
     return false;
 }
 int daB_DRE_c::Execute() {

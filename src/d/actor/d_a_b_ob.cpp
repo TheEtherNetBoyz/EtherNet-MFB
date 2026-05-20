@@ -2111,6 +2111,7 @@ static void finishMorpheelDeathDemo(b_ob_class* i_this) {
 
     i_this->mSound.deleteObject();
     i_this->mOISound.deleteObject();
+    Z2GetAudioMgr()->bgmStop(0, 0);
     Z2GetAudioMgr()->bgmStreamStop(0);
     Z2GetAudioMgr()->subBgmStop();
     Z2GetAudioMgr()->bgmStart(0x200005b, 0, 0);

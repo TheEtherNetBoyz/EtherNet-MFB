@@ -1065,6 +1065,7 @@ static void finishArmagohmaDeathDemo(b_gm_class* i_this) {
     dComIfGp_event_reset();
     player->cancelOriginalDemo();
 
+    Z2GetAudioMgr()->bgmStop(0, 0);
     Z2GetAudioMgr()->bgmStreamStop(0);
     Z2GetAudioMgr()->subBgmStop();
     Z2GetAudioMgr()->bgmStart(0x200005b, 0, 0);

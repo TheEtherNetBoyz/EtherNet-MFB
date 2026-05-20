@@ -10,6 +10,7 @@
 #include "d/d_com_inf_game.h"
 #include "d/actor/d_a_player.h"
 #include "d/d_s_play.h"
+#include "c/c_damagereaction.h"
 #include "f_op/f_op_camera_mng.h"
 #include <cstring>
 
@@ -32,6 +33,7 @@
 #define ANM_WIND 16
 #define ANM_WIND_FALL 17
 
+static const u8 DUSK_ARGOROK_PHASE2_RELOAD_SKIP = 0xA2;
 
 daE_PH_HIO_c::daE_PH_HIO_c() {
     field_0x4 = -1;
@@ -1167,6 +1169,13 @@ int daE_PH_c::create() {
 #endif
 
         mAction = fopAcM_GetParam(this) & 0xF;
+        bool argorok_phase2_reload = cDmr_SkipInfo == DUSK_ARGOROK_PHASE2_RELOAD_SKIP;
+
+        if (argorok_phase2_reload) {
+            dComIfGs_onZoneSwitch(2, fopAcM_GetRoomNo(this));
+            fopAcM_onSwitch(this, 0x10);
+            fopAcM_onSwitch(this, 0x3F);
+        }
 
         if (dComIfGs_isZoneSwitch(2, fopAcM_GetRoomNo(this)) && mAction == 4) {
             return cPhs_ERROR_e;
@@ -1287,6 +1296,10 @@ int daE_PH_c::create() {
                 field_0x5b2 = 0;
                 fopAcM_offSwitch(this, 0x10);
                 fopAcM_offSwitch(this, 0x3F);
+            } else if (argorok_phase2_reload) {
+                field_0x5b2 = 1;
+                fopAcM_onSwitch(this, 0x10);
+                fopAcM_onSwitch(this, 0x3F);
             }
         }
 

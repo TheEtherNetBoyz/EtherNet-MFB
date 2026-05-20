@@ -70,6 +70,9 @@ public:
     void cc_set();
     void down_cc_set();
     void demo_skip(int);
+    void duskFinishArgorokPhaseDemo();
+    void duskFinishArgorokDeathDemo();
+    bool duskProcessArgorokDeathDemoLocalSkip();
     static int DemoSkipCallBack(void*, int);
     int execute();
     int _delete();

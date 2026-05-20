@@ -16,6 +16,8 @@
 #include "c/c_damagereaction.h"
 #include "f_op/f_op_camera_mng.h"
 #include "Z2AudioLib/Z2Instances.h"
+#include "dusk/cutscene_skip.h"
+#include "m_Do/m_Do_controller_pad.h"
 
 
 class daB_DR_HIO_c : public JORReflexible {
@@ -135,6 +137,10 @@ enum daB_DR_Action {
     ACTION_MIDDLE_DEMO,
     ACTION_DEAD,
 };
+
+static const u8 DUSK_ARGOROK_PHASE2_RELOAD_SKIP = 0xA2;
+static int s_argorokSkipPromptTimer;
+static int s_argorokPhase2ReloadClearTimer;
 
 namespace {
 static dCcD_SrcCyl cc_dr_week_src = {
@@ -3810,6 +3816,108 @@ void daB_DR_c::down_cc_set() {
     }
 }
 
+void daB_DR_c::duskFinishArgorokPhaseDemo() {
+    daPy_py_c* player = daPy_getPlayerActorClass();
+
+    cDmr_SkipInfo = DUSK_ARGOROK_PHASE2_RELOAD_SKIP;
+    dComIfGs_onZoneSwitch(0, fopAcM_GetRoomNo(this));
+    dComIfGs_onZoneSwitch(20, fopAcM_GetRoomNo(this));
+    dComIfGs_onZoneSwitch(1, fopAcM_GetRoomNo(this));
+    dComIfGs_onZoneSwitch(2, fopAcM_GetRoomNo(this));
+    dComIfGs_onZoneSwitch(23, fopAcM_GetRoomNo(this));
+    dComIfGs_onSaveDunSwitch(22);
+    fopAcM_onSwitch(this, 16);
+    fopAcM_onSwitch(this, 0x3F);
+    dKy_getEnvlight()->wether = 2;
+
+    camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
+    camera->mCamera.Start();
+    camera->mCamera.SetTrimSize(0);
+    dComIfGp_getVibration().StopQuake(0x1F);
+    dComIfGp_event_reset();
+    player->cancelOriginalDemo();
+
+    Z2GetAudioMgr()->bgmStop(0, 0);
+    Z2GetAudioMgr()->bgmStreamStop(0);
+    Z2GetAudioMgr()->subBgmStop();
+    Z2GetAudioMgr()->setDemoName(NULL);
+    dStage_changeScene(1, 0.0f, 0, fopAcM_GetRoomNo(this), 0, -1);
+}
+
+void daB_DR_c::duskFinishArgorokDeathDemo() {
+    daPy_py_c* player = daPy_getPlayerActorClass();
+
+    cXyz player_pos(0.0f, 0.0f, 0.0f);
+    player->setPlayerPosAndAngle(&player_pos, 0x8000, 0);
+
+    dComIfGs_onEventBit(dSv_event_flag_c::F_0268);
+    dComIfGs_onStageBossEnemy(0x16);
+    fopAcM_onSwitch(this, 0x38);
+    dComIfGs_BossLife_public_Set(0);
+
+    dScnKy_env_light_c* kankyo = dKy_getEnvlight();
+    kankyo->wether = 0;
+
+    camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
+    cMtx_YrotS(*calc_mtx, player->shape_angle.y);
+    cXyz eye_offset(0.0f, 100.0f, -250.0f);
+    cXyz eye;
+    MtxPosition(&eye_offset, &eye);
+    eye += player->current.pos;
+
+    cXyz center = player->current.pos;
+    center.y += 120.0f;
+    camera->mCamera.Reset(center, eye);
+    camera->mCamera.Start();
+    camera->mCamera.SetTrimSize(0);
+    dComIfGp_getVibration().StopQuake(0x1F);
+    dComIfGp_event_reset();
+    player->cancelOriginalDemo();
+    dKy_getEnvlight()->evt_wind_go = 0;
+    dKyw_custom_windpower(0.0f);
+
+    Z2GetAudioMgr()->bgmStop(0, 0);
+    Z2GetAudioMgr()->bgmStreamStop(0);
+    Z2GetAudioMgr()->subBgmStop();
+    Z2GetAudioMgr()->setDemoName(NULL);
+    dStage_changeScene(1, 0.0f, 0, fopAcM_GetRoomNo(this), 0, -1);
+}
+
+bool daB_DR_c::duskProcessArgorokDeathDemoLocalSkip() {
+    if (!dusk::cutscene_skip::enabled() || dComIfGs_isStageBossEnemy()) {
+        return false;
+    }
+
+    bool can_skip_phase_demo = mActionMode == ACTION_TAIL_HIT && mBreakPartsNo != 0 &&
+                               mMoveMode >= 12 && mMoveMode <= 15;
+    bool can_skip_death_demo = mActionMode == ACTION_WEEK_HIT && health <= 0 &&
+                               mMoveMode == 1000;
+    if (!can_skip_phase_demo && !can_skip_death_demo) {
+        s_argorokSkipPromptTimer = 0;
+        return false;
+    }
+
+    if (mDoCPd_c::getTrigStart(PAD_1)) {
+        if (s_argorokSkipPromptTimer > 0) {
+            s_argorokSkipPromptTimer = 0;
+            if (can_skip_phase_demo) {
+                duskFinishArgorokPhaseDemo();
+            } else {
+                duskFinishArgorokDeathDemo();
+            }
+            return true;
+        }
+        s_argorokSkipPromptTimer = 1;
+    }
+
+    if (s_argorokSkipPromptTimer > 0) {
+        dComIfGp_setSButtonStatusForce(0x43, 1);
+        if (s_argorokSkipPromptTimer++ > 45) {
+            s_argorokSkipPromptTimer = 0;
+        }
+    }
+    return false;
+}
 void daB_DR_c::demo_skip(int) {
     fopAc_ac_c* parent;
     if (cDmr_SkipInfo == 0 && fopAcM_SearchByID(parentActorID, &parent) && parent != NULL) {
@@ -3838,6 +3946,12 @@ int daB_DR_c::DemoSkipCallBack(void* i_proc, int param_1) {
 }
 
 int daB_DR_c::execute() {
+    if (s_argorokPhase2ReloadClearTimer > 0 && --s_argorokPhase2ReloadClearTimer == 0 &&
+        cDmr_SkipInfo == DUSK_ARGOROK_PHASE2_RELOAD_SKIP)
+    {
+        cDmr_SkipInfo = 0;
+    }
+
     if (field_0x7d5 != 0) {
         cXyz restart_pos;
         csXyz restart_angle;
@@ -3879,6 +3993,10 @@ int daB_DR_c::execute() {
         if (arg0 == 0xFF) {
             return 1;
         }
+    }
+
+    if (duskProcessArgorokDeathDemoLocalSkip()) {
+        return 1;
     }
 
     if (arg0 == 0xFE && cLib_calcTimer<int>(&mTimer[0]) == 0) {
@@ -4045,6 +4163,17 @@ int daB_DR_c::create() {
 
         if (arg0 == 0xFF) {
             arg0 = 0;
+        }
+
+        if (cDmr_SkipInfo == DUSK_ARGOROK_PHASE2_RELOAD_SKIP) {
+            dComIfGs_onZoneSwitch(0, fopAcM_GetRoomNo(this));
+            dComIfGs_onZoneSwitch(20, fopAcM_GetRoomNo(this));
+            dComIfGs_onZoneSwitch(1, fopAcM_GetRoomNo(this));
+            dComIfGs_onZoneSwitch(2, fopAcM_GetRoomNo(this));
+            dComIfGs_onZoneSwitch(23, fopAcM_GetRoomNo(this));
+            dComIfGs_onSaveDunSwitch(22);
+            fopAcM_onSwitch(this, 0x3F);
+            s_argorokPhase2ReloadClearTimer = 60;
         }
 
         switch (arg0) {
@@ -4230,11 +4359,16 @@ int daB_DR_c::create() {
             if (dComIfGs_isZoneSwitch(2, fopAcM_GetRoomNo(this))) {
                 field_0x724 = 100.0f;
                 fopAcM_onSwitch(this, 16);
+                fopAcM_onSwitch(this, 0x3F);
                 arg0 = 1;
                 field_0x7d1 = 2;
                 mBreakPartsNo = 3;
+                field_0x7e0 = 54;
                 field_0x750 = JREG_S(8) + 200;
                 setActionMode(ACTION_FLY_WAIT, 0);
+                Z2GetAudioMgr()->bgmStop(0, 0);
+                Z2GetAudioMgr()->subBgmStop();
+                Z2GetAudioMgr()->bgmStart(Z2BGM_DRAGON_BTL02, 0, 0);
                 
                 dScnKy_env_light_c* kankyo = dKy_getEnvlight();
                 kankyo->wether = 2;

@@ -1239,6 +1239,8 @@ static void finishFyrusDeathDemo(e_fm_class* i_this) {
     g_env_light.wether_pat1 = 2;
     dComIfGs_BossLife_public_Set(0);
     i_this->mSound.deleteObject();
+    Z2GetAudioMgr()->bgmStop(0, 0);
+    Z2GetAudioMgr()->bgmStreamStop(0);
     Z2GetAudioMgr()->subBgmStop();
     Z2GetAudioMgr()->bgmStart(0x200005b, 0, 0);
     Z2GetAudioMgr()->setDemoName(NULL);
