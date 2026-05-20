@@ -13,7 +13,9 @@
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_mirror.h"
 #include "d/d_s_play.h"
+#include "dusk/cutscene_skip.h"
 #include "f_op/f_op_msg_mng.h"
+#include "m_Do/m_Do_controller_pad.h"
 #include "SSystem/SComponent/c_math.h"
 #include "Z2AudioLib/Z2Instances.h"
 #include "JSystem/JAudio2/JAUSectionHeap.h"
@@ -183,6 +185,89 @@ static s8 warp_next_room[] = {
     57,
     60,
 };
+
+static int s_duskZantOpeningSkipTimer;
+static bool s_duskZantOpeningSkipReload;
+
+static void duskFinishZantOpeningSkip() {
+    daPy_py_c* player = daPy_getPlayerActorClass();
+    cXyz pos(0.0f, 0.0f, 0.0f);
+
+    dComIfGs_onSaveDunSwitch(30);
+    dComIfGs_setRestartRoom(pos, 0, warp_next_room[daB_ZANT_c::PHASE_BB]);
+    dComIfGs_setRestartRoomParam(daPy_py_c::setParamData(warp_next_room[daB_ZANT_c::PHASE_BB], 0, 0xCA, 0));
+
+    dComIfGp_getVibration().StopQuake(0x1F);
+    dComIfGp_event_reset();
+    player->cancelOriginalDemo();
+
+    Z2GetAudioMgr()->bgmStop(0, 0);
+    Z2GetAudioMgr()->bgmStreamStop(0);
+    Z2GetAudioMgr()->subBgmStop();
+    Z2GetAudioMgr()->setDemoName(NULL);
+
+    s_duskZantOpeningSkipReload = true;
+    dComIfGp_setNextStage("D_MN08D", -1, warp_next_room[daB_ZANT_c::PHASE_BB], -1, 0.0f, 0, 0, 0, 0, 1, 0);
+}
+
+static bool duskProcessZantOpeningSkip(daB_ZANT_c* i_this) {
+    if (!dusk::cutscene_skip::enabled() || i_this->mAction != daB_ZANT_c::ACT_OPENING ||
+        i_this->mFightPhase != daB_ZANT_c::PHASE_OP || dComIfGp_roomControl_getStayNo() != 50 ||
+        !i_this->eventInfo.checkCommandDemoAccrpt())
+    {
+        s_duskZantOpeningSkipTimer = 0;
+        return false;
+    }
+
+    if (mDoCPd_c::getTrigStart(PAD_1)) {
+        if (s_duskZantOpeningSkipTimer > 0) {
+            s_duskZantOpeningSkipTimer = 0;
+            duskFinishZantOpeningSkip();
+            return true;
+        }
+        s_duskZantOpeningSkipTimer = 1;
+    }
+
+    if (s_duskZantOpeningSkipTimer > 0) {
+        dComIfGp_setSButtonStatusForce(0x43, 1);
+        if (s_duskZantOpeningSkipTimer++ > 45) {
+            s_duskZantOpeningSkipTimer = 0;
+        }
+    }
+
+    return false;
+}
+
+static void duskApplyZantOpeningSkipReload(daB_ZANT_c* i_this) {
+    if (!s_duskZantOpeningSkipReload || i_this->mFightPhase != daB_ZANT_c::PHASE_BB ||
+        dComIfGp_roomControl_getStayNo() != warp_next_room[daB_ZANT_c::PHASE_BB])
+    {
+        return;
+    }
+
+    s_duskZantOpeningSkipReload = false;
+    i_this->field_0x70b = 1;
+    i_this->field_0x70c = 0;
+    i_this->field_0x711 = 1;
+    i_this->mFlyWarpPosID = 0;
+    i_this->mFlyWarpPos.set(0.0f, 400.0f, 1000.0f);
+    i_this->current.pos = i_this->mFlyWarpPos;
+    i_this->old.pos = i_this->current.pos;
+    i_this->shape_angle.x = 0;
+    i_this->shape_angle.y = 0x8000;
+    i_this->current.angle.y = i_this->shape_angle.y;
+    i_this->speedF = 0.0f;
+    i_this->speed.y = 0.0f;
+    i_this->gravity = 0.0f;
+    i_this->mModelScaleXZ = 1.0f;
+    i_this->mModelScaleY = 1.0f;
+    i_this->setActionMode(daB_ZANT_c::ACT_FLY, 1);
+    i_this->setTgHitBit(TRUE);
+    i_this->setBck(daB_ZANT_c::BCK_ZAN_FLOAT_WAIT, J3DFrameCtrl::EMode_LOOP, 3.0f, 1.0f);
+    i_this->mModeTimer = 60;
+    i_this->field_0x70c = 0;
+    i_this->setTgType(0x10040);
+}
 }
 
 daB_ZANT_HIO_c::daB_ZANT_HIO_c() {
@@ -1330,6 +1415,10 @@ void daB_ZANT_c::executeOpening() {
     cXyz sp34(0.0f, 0.0f, 0.0f);
     cXyz sp40;
     cXyz sp4C;
+
+    if (duskProcessZantOpeningSkip(this)) {
+        return;
+    }
 
     switch (mMode) {
     case MODE_START_DEMO:
@@ -5576,6 +5665,7 @@ int daB_ZANT_c::create() {
         if (mFightPhase == PHASE_BB) {
             field_0x70b = 0;
         }
+        duskApplyZantOpeningSkipReload(this);
 
         mModelScaleXZ = 1.0f;
         mModelScaleY = 1.0f;
