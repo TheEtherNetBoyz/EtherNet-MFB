@@ -8,7 +8,12 @@
 #include "d/actor/d_a_npc_gwolf.h"
 #include "d/actor/d_a_npc.h"
 #include "Z2AudioLib/Z2Instances.h"
+#include "Z2AudioLib/Z2SeqMgr.h"
 #include "d/d_camera.h"
+#include "d/d_com_inf_game.h"
+#include "m_Do/m_Do_audio.h"
+#include "m_Do/m_Do_controller_pad.h"
+#include "dusk/cutscene_skip.h"
 
 enum GWolf_RES_File_ID {
     /* BCK */
@@ -1501,9 +1506,68 @@ BOOL daNpc_GWolf_c::ECut_attackWarpHorse(int i_staffId) {
     return rv;
 }
 
+void daNpc_GWolf_c::duskFinishHowlingSessionCutscene() {
+    if (mParamMode != -1 && mParamMode != 0) {
+        daNpcT_onEvtBit(l_warpAppearFlag[mParamMode]);
+    }
+
+    if (swBit != 0xFF && mSaveTable != 0xFF) {
+        dComIfGs_onStageSwitch(mSaveTable, swBit);
+    }
+
+    Z2GetSeqMgr()->stopWolfHowlSong();
+    JASGlobalInstance<Z2WolfHowlMgr>::getInstance()->skipCorrectDemo();
+    JASGlobalInstance<Z2WolfHowlMgr>::getInstance()->resetState();
+    Z2GetAudioMgr()->subBgmStop();
+    Z2GetAudioMgr()->bgmStreamStop(0);
+    mSound.deleteObject();
+    mDoAud_taktModeMuteOff();
+
+    if (mParamMode == -1 || mParamMode == 0) {
+        dStage_changeScene(0, 0.0f, 0, fopAcM_GetRoomNo(this), 0, -1);
+        return;
+    }
+
+    static u32 l_warpIdList[6] = {
+        0, 8, 9,
+        0xA, 0xB, 0xC,
+    };
+
+    dStage_changeScene(l_warpIdList[mParamMode - 1], 0.0f, 0, fopAcM_GetRoomNo(this), 0, -1);
+}
+
+bool daNpc_GWolf_c::duskProcessHowlingSessionCutsceneSkip() {
+    static int s_howlingSessionSkipTimer;
+
+    if (!dusk::cutscene_skip::enabled()) {
+        s_howlingSessionSkipTimer = 0;
+        return false;
+    }
+
+    if (mDoCPd_c::getTrigStart(PAD_1)) {
+        if (s_howlingSessionSkipTimer > 0) {
+            s_howlingSessionSkipTimer = 0;
+            duskFinishHowlingSessionCutscene();
+            return true;
+        }
+        s_howlingSessionSkipTimer = 1;
+    }
+
+    if (s_howlingSessionSkipTimer > 0) {
+        dComIfGp_setSButtonStatusForce(0x43, 1);
+        if (s_howlingSessionSkipTimer++ > 45) {
+            s_howlingSessionSkipTimer = 0;
+        }
+    }
+
+    return false;
+}
 BOOL daNpc_GWolf_c::ECut_howlingSessionA(int i_staffId) {
     dEvent_manager_c& eventManager = dComIfGp_getEventManager();
     daPy_getPlayerActorClass();
+    if (duskProcessHowlingSessionCutsceneSkip()) {
+        return TRUE;
+    }
     BOOL rv = FALSE;
     int prm = -1;
     int* piVar1 = dComIfGp_evmng_getMyIntegerP(i_staffId, "prm");
@@ -1608,25 +1672,8 @@ BOOL daNpc_GWolf_c::ECut_howlingSessionA(int i_staffId) {
 
         case 50:
             if (cLib_calcTimer(&mEventTimer) == 0) {
-                if (mParamMode != -1 && mParamMode != 0) {
-                    daNpcT_onEvtBit(l_warpAppearFlag[mParamMode]);
-                }
+                duskFinishHowlingSessionCutscene();
 
-                if (swBit != 0xFF && mSaveTable != 0xFF) {
-                    dComIfGs_onStageSwitch(mSaveTable, swBit);
-                }
-
-                if (mParamMode == -1 || mParamMode == 0) {
-                    dStage_changeScene(0, 0.0f, 0, fopAcM_GetRoomNo(this), 0, -1);
-                    break;
-                }
-
-                static u32 l_warpIdList[6] = {
-                    0, 8,9,
-                    0xA, 0xB, 0xC,
-                };
-
-                dStage_changeScene(l_warpIdList[mParamMode - 1], 0.0f, 0, fopAcM_GetRoomNo(this), 0, -1);
             }
             break;
 

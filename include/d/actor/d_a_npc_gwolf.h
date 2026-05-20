@@ -103,6 +103,8 @@ public:
     u16 getSaveTableFromParam() { return home.angle.z & 0xFF; }
     void setHowlingEndFlag() { field_0xe1c = 2; }
     void setHowlingFlag() { field_0xe1c = 1; }
+    void duskFinishHowlingSessionCutscene();
+    bool duskProcessHowlingSessionCutsceneSkip();
 
     static char* mEvtCutNameList[5];
     static cutFunc mEvtCutList[5];
