@@ -14,6 +14,7 @@
 #include "d/actor/d_a_obj_lv3WaterB.h"
 #include "d/actor/d_a_obj_ystone.h"
 #include "Z2AudioLib/Z2Instances.h"
+#include "dusk/cutscene_skip.h"
 
 enum B_oh_RES_File_ID {
     /* BCK */
@@ -276,6 +277,10 @@ static void dark(J3DModelData* i_modelData, s16 i_color) {
 
 static int daB_OB_Draw(b_ob_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
+
+    if (i_this->mDemoAction == 1000) {
+        return 1;
+    }
 
     g_env_light.settingTevStruct(0, &a_this->current.pos, &a_this->tevStr);
     BOOL var_r28 = true;
@@ -1993,6 +1998,155 @@ static void* s_hasidel_sub(void* i_this, void* i_data) {
     return NULL;
 }
 
+static bool isMorpheelDeathDemoAction(int i_action) {
+    return i_action >= 41 && i_action <= 49;
+}
+
+static void finishMorpheelDeathDemo(b_ob_class* i_this) {
+    fopAc_ac_c* actor = (fopAc_ac_c*)i_this;
+    daPy_py_c* player = daPy_getPlayerActorClass();
+
+    fpcM_Search(s_hasidel_sub, i_this);
+    fpcM_Search(s_kaisoudel_sub, i_this);
+
+    obj_lv3WaterB_class* water = (obj_lv3WaterB_class*)fopAcM_SearchByName(fpcNm_OBJ_LV3WATERB_e);
+    if (water != NULL) {
+        if (water->mpOctHibiModel != NULL && water->mpOctHibiBgW != NULL) {
+            dComIfG_Bgsp().Release(water->mpOctHibiBgW);
+        }
+
+        water->mpOctHibiModel = NULL;
+        water->mAction = LV3WATERB_ACT_END;
+        water->field_0x586 = 1;
+        water->current.pos.y = (water->home.pos.y - 14450.0f) + AREG_F(17) + 160.0f;
+    }
+
+    cXyz player_pos(-1225.0f, -24000.0f, 8678.0f);
+    player->setPlayerPosAndAngle(&player_pos, 10000, 0);
+
+    if (!dComIfGs_isStageLife() && fopAcM_SearchByName(fpcNm_Obj_LifeContainer_e) == NULL) {
+        cXyz heart_pos(-916.0f, -23954.0f, 8916.0f);
+        cXyz scale(1.0f, 1.0f, 1.0f);
+        fopAcM_createItemForBoss(&heart_pos, dItemNo_UTAWA_HEART_e, fopAcM_GetRoomNo(actor),
+                                 &actor->shape_angle, &scale, 0.0f, 0.0f, -1);
+    }
+
+    obj_ystone_class* ystone = (obj_ystone_class*)fopAcM_SearchByName(fpcNm_OBJ_YSTONE_e);
+    if (ystone != NULL) {
+        fopAcM_delete((fopAc_ac_c*)ystone);
+    }
+
+    if (fopAcM_SearchByName(fpcNm_Obj_BossWarp_e) == NULL) {
+        cXyz warp_pos(-1520.0f, -23960.0f, 7100.0f);
+        csXyz warp_rot(0, 0, 0);
+        fopAcM_createWarpHole(&warp_pos, &warp_rot, fopAcM_GetRoomNo(actor), 0, 0, 2);
+    }
+
+    dComIfGs_onStageBossEnemy();
+    dComIfGs_onEventBit(dSv_event_flag_c::saveBitLabels[78]);
+    dComIfGs_onSwitch(actor->home.angle.z & 0xFF, fopAcM_GetRoomNo(actor));
+    dComIfGs_BossLife_public_Set(0);
+
+    i_this->mAction = OB_ACTION_FISH_END;
+    i_this->mDemoAction = 1000;
+    i_this->mDemoActionTimer = 0;
+    i_this->mHideCore = true;
+    i_this->mFishBattleMode = 0;
+    i_this->mCoreBattleMode = 0;
+    i_this->mBlureRate = 0;
+    i_this->mBlureRateTarget = 0;
+    i_this->field_0x5dd8 = 0;
+    i_this->mColsetBlend = 0.0f;
+
+    for (int i = 0; i < 19; i++) {
+        i_this->mBodyParts[i].mHide = true;
+    }
+
+    for (int i = 0; i < 8; i++) {
+        fopAc_ac_c* tentacle = fopAcM_SearchByID(i_this->mTentacleActorIDs[i]);
+        if (tentacle != NULL) {
+            fopAcM_delete(tentacle);
+        }
+    }
+
+    for (int i = 0; i < 5; i++) {
+        JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(i_this->field_0x5d24[i]);
+        if (emitter != NULL) {
+            emitter->becomeDeleteEmitter();
+        }
+    }
+
+    for (int i = 0; i < 19; i++) {
+        for (int j = 0; j < 2; j++) {
+            if (i_this->field_0x5d40[j][i] != NULL) {
+                i_this->field_0x5d40[j][i]->becomeDeleteEmitter();
+            }
+        }
+    }
+
+    fopAcM_OffStatus(actor, 0);
+    actor->attention_info.flags = 0;
+    actor->health = 0;
+    actor->current.pos.set(20000.0f, -23000.0f, 40000.0f);
+    actor->old.pos = actor->current.pos;
+    actor->eyePos = actor->current.pos;
+
+    camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
+    cMtx_YrotS(*calc_mtx, player->shape_angle.y);
+    cXyz eye_offset(0.0f, 100.0f, -250.0f);
+    cXyz eye;
+    MtxPosition(&eye_offset, &eye);
+    eye += player->current.pos;
+
+    cXyz center = player->current.pos;
+    center.y += 120.0f;
+    dComIfGp_event_reset();
+    player->cancelOriginalDemo();
+
+    camera->mCamera.Reset(center, eye);
+    camera->mCamera.Start();
+    camera->mCamera.SetTrimSize(0);
+    dComIfGp_getVibration().StopQuake(0x1F);
+    dKy_custom_colset(4, 4, 0.0f);
+
+    i_this->mSound.deleteObject();
+    i_this->mOISound.deleteObject();
+    Z2GetAudioMgr()->bgmStreamStop(0);
+    Z2GetAudioMgr()->subBgmStop();
+    Z2GetAudioMgr()->bgmStart(0x200005b, 0, 0);
+    Z2GetAudioMgr()->setDemoName(NULL);
+
+    fopAcM_delete(actor);
+}
+
+static bool processMorpheelDeathDemoLocalSkip(b_ob_class* i_this) {
+    static int s_morpheelDeathSkipTimer;
+
+    if (!dusk::cutscene_skip::enabled() || !isMorpheelDeathDemoAction(i_this->mDemoAction)) {
+        s_morpheelDeathSkipTimer = 0;
+        return false;
+    }
+
+    if (mDoCPd_c::getTrigStart(PAD_1)) {
+        if (s_morpheelDeathSkipTimer > 0) {
+            s_morpheelDeathSkipTimer = 0;
+            finishMorpheelDeathDemo(i_this);
+            return true;
+        }
+
+        s_morpheelDeathSkipTimer = 1;
+    }
+
+    if (s_morpheelDeathSkipTimer > 0) {
+        dComIfGp_setSButtonStatusForce(0x43, 1);
+
+        if (s_morpheelDeathSkipTimer++ > 45) {
+            s_morpheelDeathSkipTimer = 0;
+        }
+    }
+
+    return false;
+}
 static void demo_camera(b_ob_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
@@ -2008,6 +2162,10 @@ static void demo_camera(b_ob_class* i_this) {
     b_oh_class* tentacle =
         (b_oh_class*)fopAcM_SearchByID(i_this->mTentacleActorIDs[i_this->field_0x5ce8]);
     int var_r27 = 0;
+
+    if (processMorpheelDeathDemoLocalSkip(i_this)) {
+        return;
+    }
 
     switch (i_this->mDemoAction) {
     case 1:
@@ -3212,6 +3370,10 @@ static int daB_OB_Execute(b_ob_class* i_this) {
     }
 
     demo_camera(i_this);
+
+    if (i_this->mDemoAction == 1000) {
+        return 1;
+    }
 
     f32 blend_target = 0.0f;
     if (i_this->field_0x5dd8 == 0) {
