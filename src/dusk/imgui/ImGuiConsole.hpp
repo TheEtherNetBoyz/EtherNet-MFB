@@ -9,6 +9,7 @@
 
 #include "ImGuiMenuTools.hpp"
 #include "dusk/main.h"
+#include "dusk/settings.h"
 #include "imgui.h"
 
 union SDL_Event;
@@ -24,6 +25,7 @@ public:
     void PostDraw();
 
     static bool CheckMenuViewToggle(ImGuiKey key, bool& active);
+    static bool CheckMenuViewToggle(const UserSettings::HotkeyBinding& binding, bool& active);
     void AddToast(std::string_view message, float duration = 3.f);
 
 private:

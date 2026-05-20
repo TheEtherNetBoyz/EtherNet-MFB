@@ -597,7 +597,7 @@ namespace dusk {
 
     void ImGuiMenuTools::ShowDebugOverlay() {
         if (!getSettings().backend.enableAdvancedSettings ||
-            !ImGuiConsole::CheckMenuViewToggle(ImGuiKey_F3, m_showDebugOverlay))
+            !ImGuiConsole::CheckMenuViewToggle(getSettings().hotkeys.debugOverlay, m_showDebugOverlay))
         {
             return;
         }
@@ -663,7 +663,7 @@ namespace dusk {
 
     void ImGuiMenuTools::ShowPlayerInfo() {
         if (!getSettings().backend.enableAdvancedSettings ||
-            !ImGuiConsole::CheckMenuViewToggle(ImGuiKey_F5, m_showPlayerInfo))
+            !ImGuiConsole::CheckMenuViewToggle(getSettings().hotkeys.playerInfo, m_showPlayerInfo))
         {
             return;
         }

@@ -46,6 +46,13 @@ enum class AspectRatioMode : int {
     Ratio3x2 = 3,
 };
 
+enum HotkeyModifier : int {
+    HOTKEY_MOD_NONE = 0,
+    HOTKEY_MOD_CTRL = 1 << 0,
+    HOTKEY_MOD_SHIFT = 1 << 1,
+    HOTKEY_MOD_ALT = 1 << 2,
+};
+
 namespace config {
 template <>
 struct ConfigEnumRange<BloomMode> {
@@ -87,6 +94,11 @@ struct ConfigEnumRange<AspectRatioMode> {
 // Persistent user settings
 
 struct UserSettings {
+    struct HotkeyBinding {
+        ConfigVar<int> key;
+        ConfigVar<int> modifiers;
+    };
+
     // Program settings
 
     struct {
@@ -237,6 +249,26 @@ struct UserSettings {
         ConfigVar<int> cardFileType;
         ConfigVar<bool> enableAdvancedSettings;
     } backend;
+
+    struct {
+        HotkeyBinding toggleImGuiMenu;
+        HotkeyBinding toggleThirtyFps;
+        HotkeyBinding turboSpeed;
+        HotkeyBinding toggleFullscreen;
+        HotkeyBinding hideShowImGuiMenu;
+        HotkeyBinding processManagement;
+        HotkeyBinding debugOverlay;
+        HotkeyBinding heapViewer;
+        HotkeyBinding playerInfo;
+        HotkeyBinding saveEditor;
+        HotkeyBinding stateShare;
+        HotkeyBinding debugCamera;
+        HotkeyBinding audioDebug;
+        HotkeyBinding useTexturePack;
+        HotkeyBinding gyroAim;
+        HotkeyBinding showInputViewer;
+        HotkeyBinding moveLink;
+    } hotkeys;
 
     // Arrays of size 4 for 4 ports
     struct {

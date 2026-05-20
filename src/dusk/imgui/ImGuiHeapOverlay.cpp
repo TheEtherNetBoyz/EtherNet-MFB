@@ -23,7 +23,7 @@ namespace dusk {
 
     void ImGuiMenuTools::ShowHeapOverlay() {
         if (!getSettings().backend.enableAdvancedSettings ||
-            !ImGuiConsole::CheckMenuViewToggle(ImGuiKey_F4, m_showHeapOverlay))
+            !ImGuiConsole::CheckMenuViewToggle(getSettings().hotkeys.heapViewer, m_showHeapOverlay))
         {
             return;
         }

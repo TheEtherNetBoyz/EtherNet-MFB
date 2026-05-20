@@ -28,6 +28,8 @@
 #include <aurora/lib/window.hpp>
 #include <dolphin/gx/GXAurora.h>
 #include <SDL3/SDL_filesystem.h>
+#include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_scancode.h>
 #include <fmt/format.h>
 
 #if DUSK_ENABLE_SENTRY_NATIVE
@@ -38,6 +40,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 
 namespace dusk::ui {
 namespace {
@@ -147,6 +150,257 @@ constexpr std::array kFpsOverlayCornerNames = {
 constexpr std::array kGyroInputModeLabels = {
     "Sensor",
     "Mouse",
+};
+
+enum class HotkeyAction {
+    ToggleImGuiMenu,
+    ToggleThirtyFps,
+    TurboSpeed,
+    ToggleFullscreen,
+    HideShowImGuiMenu,
+    ProcessManagement,
+    DebugOverlay,
+    HeapViewer,
+    PlayerInfo,
+    SaveEditor,
+    StateShare,
+    DebugCamera,
+    AudioDebug,
+    UseTexturePack,
+    GyroAim,
+    ShowInputViewer,
+    MoveLink,
+};
+
+struct HotkeyEntry {
+    HotkeyAction action;
+    const char* label;
+    const char* helpText;
+};
+
+constexpr std::array kHotkeyEntries = {
+    HotkeyEntry{HotkeyAction::ToggleImGuiMenu, "Toggle ImGui Menu", "Show or hide the ImGui menu bar."},
+    HotkeyEntry{HotkeyAction::ToggleThirtyFps, "Toggle 30 FPS Cap", "Force 30 FPS mode until toggled again."},
+    HotkeyEntry{HotkeyAction::TurboSpeed, "Turbo Speed Key", "Hold to use turbo frame pacing."},
+    HotkeyEntry{HotkeyAction::ToggleFullscreen, "Toggle Fullscreen", "Switch between windowed and fullscreen."},
+    HotkeyEntry{HotkeyAction::HideShowImGuiMenu, "Hide/Show ImGui Menu", "Alternate shortcut for showing or hiding the ImGui menu bar."},
+    HotkeyEntry{HotkeyAction::ProcessManagement, "Process Management", "Show process and task information."},
+    HotkeyEntry{HotkeyAction::DebugOverlay, "Debug Overlay", "Show frame, backend, and renderer statistics."},
+    HotkeyEntry{HotkeyAction::HeapViewer, "Heap Viewer", "Show memory heap information."},
+    HotkeyEntry{HotkeyAction::PlayerInfo, "Player Info", "Show Link and Epona position, angle, and speed."},
+    HotkeyEntry{HotkeyAction::SaveEditor, "Save Editor", "Open the save editor."},
+    HotkeyEntry{HotkeyAction::StateShare, "State Share", "Open the state share window."},
+    HotkeyEntry{HotkeyAction::DebugCamera, "Debug Camera", "Show the developer camera tools."},
+    HotkeyEntry{HotkeyAction::AudioDebug, "Audio Debug", "Open the audio debug window."},
+    HotkeyEntry{HotkeyAction::UseTexturePack, "Use Texture Pack", "Enable or disable texture replacements."},
+    HotkeyEntry{HotkeyAction::GyroAim, "Gyro Aim", "Enable or disable gyro aiming for supported actions."},
+    HotkeyEntry{HotkeyAction::ShowInputViewer, "Show Input Viewer", "Show or hide the controller input overlay."},
+    HotkeyEntry{HotkeyAction::MoveLink, "Move Link", "Allow or block the Move Link activation combo."},
+};
+
+UserSettings::HotkeyBinding& hotkey_binding(HotkeyAction action) {
+    auto& hotkeys = getSettings().hotkeys;
+    switch (action) {
+    case HotkeyAction::ToggleImGuiMenu:
+        return hotkeys.toggleImGuiMenu;
+    case HotkeyAction::ToggleThirtyFps:
+        return hotkeys.toggleThirtyFps;
+    case HotkeyAction::TurboSpeed:
+        return hotkeys.turboSpeed;
+    case HotkeyAction::ToggleFullscreen:
+        return hotkeys.toggleFullscreen;
+    case HotkeyAction::HideShowImGuiMenu:
+        return hotkeys.hideShowImGuiMenu;
+    case HotkeyAction::ProcessManagement:
+        return hotkeys.processManagement;
+    case HotkeyAction::DebugOverlay:
+        return hotkeys.debugOverlay;
+    case HotkeyAction::HeapViewer:
+        return hotkeys.heapViewer;
+    case HotkeyAction::PlayerInfo:
+        return hotkeys.playerInfo;
+    case HotkeyAction::SaveEditor:
+        return hotkeys.saveEditor;
+    case HotkeyAction::StateShare:
+        return hotkeys.stateShare;
+    case HotkeyAction::DebugCamera:
+        return hotkeys.debugCamera;
+    case HotkeyAction::AudioDebug:
+        return hotkeys.audioDebug;
+    case HotkeyAction::UseTexturePack:
+        return hotkeys.useTexturePack;
+    case HotkeyAction::GyroAim:
+        return hotkeys.gyroAim;
+    case HotkeyAction::ShowInputViewer:
+        return hotkeys.showInputViewer;
+    case HotkeyAction::MoveLink:
+        return hotkeys.moveLink;
+    }
+    return hotkeys.toggleImGuiMenu;
+}
+
+int current_hotkey_modifiers() {
+    int keyCount = 0;
+    const bool* keys = SDL_GetKeyboardState(&keyCount);
+    int modifiers = HOTKEY_MOD_NONE;
+    if (keys == nullptr) {
+        return modifiers;
+    }
+    if ((SDL_SCANCODE_LCTRL < keyCount && keys[SDL_SCANCODE_LCTRL]) ||
+        (SDL_SCANCODE_RCTRL < keyCount && keys[SDL_SCANCODE_RCTRL])) {
+        modifiers |= HOTKEY_MOD_CTRL;
+    }
+    if ((SDL_SCANCODE_LSHIFT < keyCount && keys[SDL_SCANCODE_LSHIFT]) ||
+        (SDL_SCANCODE_RSHIFT < keyCount && keys[SDL_SCANCODE_RSHIFT])) {
+        modifiers |= HOTKEY_MOD_SHIFT;
+    }
+    if ((SDL_SCANCODE_LALT < keyCount && keys[SDL_SCANCODE_LALT]) ||
+        (SDL_SCANCODE_RALT < keyCount && keys[SDL_SCANCODE_RALT])) {
+        modifiers |= HOTKEY_MOD_ALT;
+    }
+    return modifiers;
+}
+
+bool is_modifier_scancode(int scancode) {
+    return scancode == SDL_SCANCODE_LCTRL || scancode == SDL_SCANCODE_RCTRL ||
+           scancode == SDL_SCANCODE_LSHIFT || scancode == SDL_SCANCODE_RSHIFT ||
+           scancode == SDL_SCANCODE_LALT || scancode == SDL_SCANCODE_RALT;
+}
+
+bool keyboard_neutral() {
+    int keyCount = 0;
+    const bool* keys = SDL_GetKeyboardState(&keyCount);
+    if (keys == nullptr) {
+        return true;
+    }
+    for (int i = 0; i < keyCount; ++i) {
+        if (keys[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int keyboard_key_pressed() {
+    int keyCount = 0;
+    const bool* keys = SDL_GetKeyboardState(&keyCount);
+    if (keys == nullptr) {
+        return SDL_SCANCODE_UNKNOWN;
+    }
+    for (int i = 1; i < keyCount; ++i) {
+        if (keys[i] && !is_modifier_scancode(i)) {
+            return i;
+        }
+    }
+    return SDL_SCANCODE_UNKNOWN;
+}
+
+Rml::String hotkey_binding_name(const UserSettings::HotkeyBinding& binding) {
+    const int scancode = binding.key.getValue();
+    if (scancode == SDL_SCANCODE_UNKNOWN) {
+        return "Unbound";
+    }
+
+    Rml::String out;
+    const int modifiers = binding.modifiers.getValue();
+    if (modifiers & HOTKEY_MOD_CTRL) {
+        out += "Ctrl+";
+    }
+    if (modifiers & HOTKEY_MOD_SHIFT) {
+        out += "Shift+";
+    }
+    if (modifiers & HOTKEY_MOD_ALT) {
+        out += "Alt+";
+    }
+
+    if (scancode < 0 || scancode >= SDL_SCANCODE_COUNT) {
+        out += "Unknown";
+        return out;
+    }
+
+    const char* name = SDL_GetScancodeName(static_cast<SDL_Scancode>(scancode));
+    out += name != nullptr && name[0] != '\0' ? name : "Unknown";
+    return out;
+}
+
+class HotkeyConfigWindow : public Window {
+public:
+    HotkeyConfigWindow() {
+        add_tab("Configure Hotkeys", [this](Rml::Element* content) {
+            auto& leftPane = add_child<Pane>(content, Pane::Type::Controlled);
+            auto& rightPane = add_child<Pane>(content, Pane::Type::Uncontrolled);
+
+            leftPane.add_section("Hotkeys");
+            for (const auto& entry : kHotkeyEntries) {
+                auto& button = leftPane.add_select_button({
+                    .key = entry.label,
+                    .getValue = [this, action = entry.action] {
+                        return mPendingHotkey == action ? Rml::String{"Press key..."} :
+                                                          hotkey_binding_name(hotkey_binding(action));
+                    },
+                    .isModified = [action = entry.action] {
+                        const auto& binding = hotkey_binding(action);
+                        return binding.key.getValue() != binding.key.getDefaultValue() ||
+                               binding.modifiers.getValue() != binding.modifiers.getDefaultValue();
+                    },
+                });
+                button.on_pressed([this, action = entry.action] {
+                    mPendingHotkey = action;
+                    mSuppressCaptureUntilNeutral = true;
+                });
+                leftPane.register_control(
+                    button,
+                    rightPane, [helpText = entry.helpText](Pane& pane) {
+                        pane.add_text(helpText);
+                        pane.add_rml("<br/>Press A/Enter to bind a new key. Press Escape while binding to clear it.");
+                    });
+            }
+        });
+    }
+
+    void update() override {
+        poll_pending_hotkey();
+        Window::update();
+    }
+
+private:
+    void poll_pending_hotkey() {
+        if (!mPendingHotkey.has_value()) {
+            return;
+        }
+
+        if (mSuppressCaptureUntilNeutral) {
+            if (!keyboard_neutral()) {
+                return;
+            }
+            mSuppressCaptureUntilNeutral = false;
+        }
+
+        int keyCount = 0;
+        const bool* keys = SDL_GetKeyboardState(&keyCount);
+        if (keys != nullptr && SDL_SCANCODE_ESCAPE < keyCount && keys[SDL_SCANCODE_ESCAPE]) {
+            auto& binding = hotkey_binding(*mPendingHotkey);
+            binding.key.setValue(SDL_SCANCODE_UNKNOWN);
+            binding.modifiers.setValue(HOTKEY_MOD_NONE);
+            config::Save();
+            mPendingHotkey.reset();
+            return;
+        }
+
+        const int scancode = keyboard_key_pressed();
+        if (scancode == SDL_SCANCODE_UNKNOWN) {
+            return;
+        }
+
+        auto& binding = hotkey_binding(*mPendingHotkey);
+        binding.key.setValue(scancode);
+        binding.modifiers.setValue(current_hotkey_modifiers());
+        config::Save();
+        mPendingHotkey.reset();
+    }
+
+    std::optional<HotkeyAction> mPendingHotkey;
+    bool mSuppressCaptureUntilNeutral = false;
 };
 
 bool try_parse_backend(std::string_view backend, AuroraBackend& outBackend) {
@@ -1216,6 +1470,15 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         addOption("Reset Key (" + Rml::String{hotkeys::DO_RESET} + ")",
             getSettings().game.enableResetKeybind,
             "Press " + Rml::String{hotkeys::DO_RESET} + " to reset the game.");
+
+        leftPane.add_section("Hotkeys");
+        leftPane.register_control(leftPane.add_button("Configure Hotkeys").on_pressed([this] {
+            push(std::make_unique<HotkeyConfigWindow>());
+        }),
+            rightPane, [](Pane& pane) {
+                pane.clear();
+                pane.add_text("Open hotkey configuration.");
+            });
     });
 
     add_tab("Audio", [this](Rml::Element* content) {

@@ -1,6 +1,8 @@
 #include "dusk/settings.h"
 #include "dusk/config.hpp"
 
+#include <SDL3/SDL_scancode.h>
+
 namespace dusk {
 
 UserSettings g_userSettings = {
@@ -147,6 +149,77 @@ UserSettings g_userSettings = {
         .checkForUpdates {"backend.checkForUpdates", false},
         .cardFileType {"backend.cardFileType", static_cast<int>(CARD_GCIFOLDER)},
         .enableAdvancedSettings {"backend.enableAdvancedSettings", false},
+    },
+
+    .hotkeys = {
+        .toggleImGuiMenu = {
+            ConfigVar<int>{"hotkeys.toggleImGuiMenu.key", SDL_SCANCODE_GRAVE},
+            ConfigVar<int>{"hotkeys.toggleImGuiMenu.modifiers", HOTKEY_MOD_NONE},
+        },
+        .toggleThirtyFps = {
+            ConfigVar<int>{"hotkeys.toggleThirtyFps.key", SDL_SCANCODE_BACKSLASH},
+            ConfigVar<int>{"hotkeys.toggleThirtyFps.modifiers", HOTKEY_MOD_NONE},
+        },
+        .turboSpeed = {
+            ConfigVar<int>{"hotkeys.turboSpeed.key", SDL_SCANCODE_TAB},
+            ConfigVar<int>{"hotkeys.turboSpeed.modifiers", HOTKEY_MOD_NONE},
+        },
+        .toggleFullscreen = {
+            ConfigVar<int>{"hotkeys.toggleFullscreen.key", SDL_SCANCODE_F11},
+            ConfigVar<int>{"hotkeys.toggleFullscreen.modifiers", HOTKEY_MOD_NONE},
+        },
+        .hideShowImGuiMenu = {
+            ConfigVar<int>{"hotkeys.hideShowImGuiMenu.key", SDL_SCANCODE_F1},
+            ConfigVar<int>{"hotkeys.hideShowImGuiMenu.modifiers", HOTKEY_MOD_SHIFT},
+        },
+        .processManagement = {
+            ConfigVar<int>{"hotkeys.processManagement.key", SDL_SCANCODE_F2},
+            ConfigVar<int>{"hotkeys.processManagement.modifiers", HOTKEY_MOD_NONE},
+        },
+        .debugOverlay = {
+            ConfigVar<int>{"hotkeys.debugOverlay.key", SDL_SCANCODE_F3},
+            ConfigVar<int>{"hotkeys.debugOverlay.modifiers", HOTKEY_MOD_NONE},
+        },
+        .heapViewer = {
+            ConfigVar<int>{"hotkeys.heapViewer.key", SDL_SCANCODE_F4},
+            ConfigVar<int>{"hotkeys.heapViewer.modifiers", HOTKEY_MOD_NONE},
+        },
+        .playerInfo = {
+            ConfigVar<int>{"hotkeys.playerInfo.key", SDL_SCANCODE_F5},
+            ConfigVar<int>{"hotkeys.playerInfo.modifiers", HOTKEY_MOD_NONE},
+        },
+        .saveEditor = {
+            ConfigVar<int>{"hotkeys.saveEditor.key", SDL_SCANCODE_F6},
+            ConfigVar<int>{"hotkeys.saveEditor.modifiers", HOTKEY_MOD_NONE},
+        },
+        .stateShare = {
+            ConfigVar<int>{"hotkeys.stateShare.key", SDL_SCANCODE_F8},
+            ConfigVar<int>{"hotkeys.stateShare.modifiers", HOTKEY_MOD_NONE},
+        },
+        .debugCamera = {
+            ConfigVar<int>{"hotkeys.debugCamera.key", SDL_SCANCODE_F9},
+            ConfigVar<int>{"hotkeys.debugCamera.modifiers", HOTKEY_MOD_NONE},
+        },
+        .audioDebug = {
+            ConfigVar<int>{"hotkeys.audioDebug.key", SDL_SCANCODE_F10},
+            ConfigVar<int>{"hotkeys.audioDebug.modifiers", HOTKEY_MOD_NONE},
+        },
+        .useTexturePack = {
+            ConfigVar<int>{"hotkeys.useTexturePack.key", SDL_SCANCODE_UNKNOWN},
+            ConfigVar<int>{"hotkeys.useTexturePack.modifiers", HOTKEY_MOD_NONE},
+        },
+        .gyroAim = {
+            ConfigVar<int>{"hotkeys.gyroAim.key", SDL_SCANCODE_UNKNOWN},
+            ConfigVar<int>{"hotkeys.gyroAim.modifiers", HOTKEY_MOD_NONE},
+        },
+        .showInputViewer = {
+            ConfigVar<int>{"hotkeys.showInputViewer.key", SDL_SCANCODE_UNKNOWN},
+            ConfigVar<int>{"hotkeys.showInputViewer.modifiers", HOTKEY_MOD_NONE},
+        },
+        .moveLink = {
+            ConfigVar<int>{"hotkeys.moveLink.key", SDL_SCANCODE_UNKNOWN},
+            ConfigVar<int>{"hotkeys.moveLink.modifiers", HOTKEY_MOD_NONE},
+        },
     },
 
     // Not sure if there's a better way to declare this
@@ -304,6 +377,41 @@ void registerSettings() {
     Register(g_userSettings.backend.checkForUpdates);
     Register(g_userSettings.backend.cardFileType);
     Register(g_userSettings.backend.enableAdvancedSettings);
+
+    Register(g_userSettings.hotkeys.toggleImGuiMenu.key);
+    Register(g_userSettings.hotkeys.toggleImGuiMenu.modifiers);
+    Register(g_userSettings.hotkeys.toggleThirtyFps.key);
+    Register(g_userSettings.hotkeys.toggleThirtyFps.modifiers);
+    Register(g_userSettings.hotkeys.turboSpeed.key);
+    Register(g_userSettings.hotkeys.turboSpeed.modifiers);
+    Register(g_userSettings.hotkeys.toggleFullscreen.key);
+    Register(g_userSettings.hotkeys.toggleFullscreen.modifiers);
+    Register(g_userSettings.hotkeys.hideShowImGuiMenu.key);
+    Register(g_userSettings.hotkeys.hideShowImGuiMenu.modifiers);
+    Register(g_userSettings.hotkeys.processManagement.key);
+    Register(g_userSettings.hotkeys.processManagement.modifiers);
+    Register(g_userSettings.hotkeys.debugOverlay.key);
+    Register(g_userSettings.hotkeys.debugOverlay.modifiers);
+    Register(g_userSettings.hotkeys.heapViewer.key);
+    Register(g_userSettings.hotkeys.heapViewer.modifiers);
+    Register(g_userSettings.hotkeys.playerInfo.key);
+    Register(g_userSettings.hotkeys.playerInfo.modifiers);
+    Register(g_userSettings.hotkeys.saveEditor.key);
+    Register(g_userSettings.hotkeys.saveEditor.modifiers);
+    Register(g_userSettings.hotkeys.stateShare.key);
+    Register(g_userSettings.hotkeys.stateShare.modifiers);
+    Register(g_userSettings.hotkeys.debugCamera.key);
+    Register(g_userSettings.hotkeys.debugCamera.modifiers);
+    Register(g_userSettings.hotkeys.audioDebug.key);
+    Register(g_userSettings.hotkeys.audioDebug.modifiers);
+    Register(g_userSettings.hotkeys.useTexturePack.key);
+    Register(g_userSettings.hotkeys.useTexturePack.modifiers);
+    Register(g_userSettings.hotkeys.gyroAim.key);
+    Register(g_userSettings.hotkeys.gyroAim.modifiers);
+    Register(g_userSettings.hotkeys.showInputViewer.key);
+    Register(g_userSettings.hotkeys.showInputViewer.modifiers);
+    Register(g_userSettings.hotkeys.moveLink.key);
+    Register(g_userSettings.hotkeys.moveLink.modifiers);
 
     Register(g_userSettings.actionBindings.firstPersonCamera[0]);
     Register(g_userSettings.actionBindings.firstPersonCamera[1]);

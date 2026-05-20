@@ -283,7 +283,7 @@ static void ShowAllJAISeqs() {
 
 void dusk::ImGuiMenuTools::ShowAudioDebug() {
     if (!getSettings().backend.enableAdvancedSettings ||
-        !ImGuiConsole::CheckMenuViewToggle(ImGuiKey_F10, m_showAudioDebug))
+        !ImGuiConsole::CheckMenuViewToggle(getSettings().hotkeys.audioDebug, m_showAudioDebug))
     {
         return;
     }
@@ -331,7 +331,7 @@ void dusk::ImGuiMenuTools::ShowAudioDebug() {
 
 void dusk::ImGuiMenuTools::ShowSaveEditor() {
     if (!getSettings().backend.enableAdvancedSettings ||
-        !ImGuiConsole::CheckMenuViewToggle(ImGuiKey_F6, m_showSaveEditor))
+        !ImGuiConsole::CheckMenuViewToggle(getSettings().hotkeys.saveEditor, m_showSaveEditor))
     {
         return;
     }

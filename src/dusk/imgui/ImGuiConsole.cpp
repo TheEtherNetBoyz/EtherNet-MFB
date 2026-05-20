@@ -12,6 +12,7 @@
 #include "ImGuiConsole.hpp"
 #include "ImGuiEngine.hpp"
 #include "JSystem/JUtility/JUTGamePad.h"
+#include "SDL3/SDL_keyboard.h"
 #include "SDL3/SDL_mouse.h"
 #include "SDL3/SDL_events.h"
 #include "SDL3/SDL_scancode.h"
@@ -30,6 +31,7 @@
 #include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_main.h"
 #include "tracy/Tracy.hpp"
+#include <aurora/gfx.h>
 #include <dolphin/vi.h>
 
 #if _WIN32
@@ -53,6 +55,66 @@ ImGuiWindow* FindDragScrollWindow(ImGuiWindow* window) {
         window = window->ParentWindow;
     }
     return nullptr;
+}
+
+bool is_modifier_scancode(int scancode) {
+    return scancode == SDL_SCANCODE_LCTRL || scancode == SDL_SCANCODE_RCTRL ||
+           scancode == SDL_SCANCODE_LSHIFT || scancode == SDL_SCANCODE_RSHIFT ||
+           scancode == SDL_SCANCODE_LALT || scancode == SDL_SCANCODE_RALT;
+}
+
+int current_hotkey_modifiers() {
+    int keyCount = 0;
+    const bool* keys = SDL_GetKeyboardState(&keyCount);
+    int modifiers = dusk::HOTKEY_MOD_NONE;
+    if (keys == nullptr) {
+        return modifiers;
+    }
+    if ((SDL_SCANCODE_LCTRL < keyCount && keys[SDL_SCANCODE_LCTRL]) ||
+        (SDL_SCANCODE_RCTRL < keyCount && keys[SDL_SCANCODE_RCTRL])) {
+        modifiers |= dusk::HOTKEY_MOD_CTRL;
+    }
+    if ((SDL_SCANCODE_LSHIFT < keyCount && keys[SDL_SCANCODE_LSHIFT]) ||
+        (SDL_SCANCODE_RSHIFT < keyCount && keys[SDL_SCANCODE_RSHIFT])) {
+        modifiers |= dusk::HOTKEY_MOD_SHIFT;
+    }
+    if ((SDL_SCANCODE_LALT < keyCount && keys[SDL_SCANCODE_LALT]) ||
+        (SDL_SCANCODE_RALT < keyCount && keys[SDL_SCANCODE_RALT])) {
+        modifiers |= dusk::HOTKEY_MOD_ALT;
+    }
+    return modifiers;
+}
+
+bool hotkey_down(const dusk::UserSettings::HotkeyBinding& binding) {
+    const int scancode = binding.key.getValue();
+    if (scancode == SDL_SCANCODE_UNKNOWN || is_modifier_scancode(scancode) ||
+        current_hotkey_modifiers() != binding.modifiers.getValue()) {
+        return false;
+    }
+
+    int keyCount = 0;
+    const bool* keys = SDL_GetKeyboardState(&keyCount);
+    return keys != nullptr && scancode < keyCount && keys[scancode];
+}
+
+bool hotkey_event_pressed(const SDL_Event& event, const dusk::UserSettings::HotkeyBinding& binding) {
+    if (event.type != SDL_EVENT_KEY_DOWN || event.key.repeat) {
+        return false;
+    }
+    const int scancode = binding.key.getValue();
+    return scancode != SDL_SCANCODE_UNKNOWN && !is_modifier_scancode(scancode) &&
+           event.key.scancode == scancode &&
+           current_hotkey_modifiers() == binding.modifiers.getValue();
+}
+
+void toggle_config_bool(dusk::config::ConfigVar<bool>& value) {
+    value.setValue(!value.getValue());
+    dusk::config::Save();
+}
+
+void toggle_texture_pack() {
+    toggle_config_bool(dusk::getSettings().game.enableTextureReplacements);
+    aurora_set_texture_replacements_enabled(dusk::getSettings().game.enableTextureReplacements.getValue());
 }
 }  // namespace
 
@@ -239,23 +301,49 @@ namespace dusk {
     ImGuiConsole::ImGuiConsole() {}
 
     void ImGuiConsole::HandleSDLEvent(const SDL_Event& event) {
-        if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
-            event.key.scancode == SDL_SCANCODE_GRAVE)
-        {
+        const auto& hotkeys = getSettings().hotkeys;
+        if (hotkey_event_pressed(event, hotkeys.toggleImGuiMenu)) {
             m_isHidden = !m_isHidden;
         }
 
-        if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
-            event.key.scancode == SDL_SCANCODE_BACKSLASH)
-        {
+        if (hotkey_event_pressed(event, hotkeys.toggleThirtyFps)) {
             getTransientSettings().forceThirtyFpsLimit = !getTransientSettings().forceThirtyFpsLimit;
             DuskToast(getTransientSettings().forceThirtyFpsLimit ? "30 FPS cap enabled" : "FPS cap restored", 1.5f);
+        }
+
+        if (hotkey_event_pressed(event, hotkeys.toggleFullscreen)) {
+            getSettings().video.enableFullscreen.setValue(!getSettings().video.enableFullscreen);
+            VISetWindowFullscreen(getSettings().video.enableFullscreen);
+            config::Save();
+        }
+
+        if (hotkey_event_pressed(event, hotkeys.hideShowImGuiMenu)) {
+            m_isHidden = !m_isHidden;
+        }
+
+        if (hotkey_event_pressed(event, hotkeys.useTexturePack)) {
+            toggle_texture_pack();
+        }
+
+        if (hotkey_event_pressed(event, hotkeys.gyroAim)) {
+            toggle_config_bool(getSettings().game.enableGyroAim);
+        }
+
+        if (hotkey_event_pressed(event, hotkeys.showInputViewer)) {
+            toggle_config_bool(getSettings().game.showInputViewer);
+        }
+
+        if (hotkey_event_pressed(event, hotkeys.moveLink)) {
+            toggle_config_bool(getSettings().game.moveLink);
+            if (!getSettings().game.moveLink.getValue()) {
+                getTransientSettings().moveLinkActive = false;
+            }
         }
     }
 
     void ImGuiConsole::UpdateSettings() {
         getTransientSettings().skipFrameRateLimit = getSettings().game.enableTurboKeybind &&
-            (ImGui::IsKeyDown(ImGuiKey_Tab) || getActionBindHoldAnyPort(ActionBinds::TURBO_SPEED_BUTTON));
+            (hotkey_down(getSettings().hotkeys.turboSpeed) || getActionBindHoldAnyPort(ActionBinds::TURBO_SPEED_BUTTON));
 
         static int sFrameBufferScaleApplyFrames = 0;
         static int sLastFrameBufferScale = getSettings().game.internalResolutionScale.getValue();
@@ -286,22 +374,12 @@ namespace dusk {
 
         UpdateSettings();
 
-        if (ImGui::IsKeyPressed(ImGuiKey_F11)) {
-            getSettings().video.enableFullscreen.setValue(!getSettings().video.enableFullscreen);
-            VISetWindowFullscreen(getSettings().video.enableFullscreen);
-            config::Save();
-        }
-
         if (getSettings().game.enableResetKeybind && ImGui::GetIO().KeyCtrl &&
             ImGui::IsKeyReleased(ImGuiKey_R) && !fpcM_SearchByName(fpcNm_LOGO_SCENE_e))
         {
             JUTGamePad::C3ButtonReset::sResetSwitchPushing = true;
         }
 
-        if (ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_F1)) {
-            m_isHidden = !m_isHidden;
-        }
-        
         bool showMenu = !m_isHidden;
 
         // The menu bar renders with ImGuiCol_WindowBg behind it. We just want ImGuiCol_MenuBarBg,
@@ -482,6 +560,22 @@ namespace dusk {
             active = !active;
         }
 
+        return active;
+    }
+
+    bool ImGuiConsole::CheckMenuViewToggle(const UserSettings::HotkeyBinding& binding, bool& active) {
+        static std::array<std::array<bool, 8>, SDL_SCANCODE_COUNT> sWasDown{};
+        const int scancode = binding.key.getValue();
+        if (scancode < 0 || scancode >= static_cast<int>(sWasDown.size())) {
+            return active;
+        }
+
+        const int modifiers = binding.modifiers.getValue() & (HOTKEY_MOD_CTRL | HOTKEY_MOD_SHIFT | HOTKEY_MOD_ALT);
+        const bool down = hotkey_down(binding);
+        if (down && !sWasDown[scancode][modifiers] && !ImGui::IsAnyItemActive()) {
+            active = !active;
+        }
+        sWasDown[scancode][modifiers] = down;
         return active;
     }
 
