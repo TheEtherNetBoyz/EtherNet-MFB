@@ -1224,6 +1224,7 @@ static void finishFyrusDeathDemo(e_fm_class* i_this) {
 
     cXyz center = player->current.pos;
     center.y += 120.0f;
+    dComIfGs_offOneZoneSwitch(0, -1);
     dComIfGp_event_reset();
     player->cancelOriginalDemo();
 
