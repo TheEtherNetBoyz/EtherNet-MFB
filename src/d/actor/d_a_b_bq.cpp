@@ -16,6 +16,7 @@
 #include "JSystem/J3DGraphBase/J3DMaterial.h"
 #include "SSystem/SComponent/c_math.h"
 #include "c/c_damagereaction.h"
+#include "dusk/cutscene_skip.h"
 #include <cmath>
 
 enum B_bq_RES_File_ID {
@@ -1193,6 +1194,122 @@ static void fish_set(b_bq_class* i_this) {
     }
 }
 
+static bool isDiababaDeathDemoMode(int i_mode) {
+    return i_mode >= 51 && i_mode <= 54;
+}
+
+static void finishDiababaDeathDemo(b_bq_class* i_this) {
+    fopAc_ac_c* actor = (fopAc_ac_c*)i_this;
+    daPy_py_c* player = daPy_getPlayerActorClass();
+
+    if (!dComIfGs_isStageLife() && fopAcM_SearchByName(fpcNm_Obj_LifeContainer_e) == NULL) {
+        cXyz heart_pos(60.0f, 0.0f, 1778.0f);
+        cXyz scale(1.0f, 1.0f, 1.0f);
+        fopAcM_createItemForBoss(&heart_pos, dItemNo_UTAWA_HEART_e, fopAcM_GetRoomNo(actor),
+                                 &actor->shape_angle, &scale, 0.0f, 0.0f, -1);
+    }
+
+    obj_ystone_class* ystone = (obj_ystone_class*)fopAcM_SearchByName(fpcNm_OBJ_YSTONE_e);
+    if (ystone != NULL) {
+        fopAcM_delete((fopAc_ac_c*)ystone);
+    }
+
+    if (fopAcM_SearchByName(fpcNm_Obj_BossWarp_e) == NULL) {
+        cXyz warp_pos(-234.0f, 0.0f, 2191.0f);
+        csXyz warp_rot(0, 0, 0);
+        fopAcM_createWarpHole(&warp_pos, &warp_rot, fopAcM_GetRoomNo(actor), 0, 0, 0xFF);
+    }
+
+    cXyz player_pos(121.0f, 0.0f, 2486.0f);
+    player->setPlayerPosAndAngle(&player_pos, 0x8000, 0);
+
+    dComIfGs_onStageBossEnemy();
+    dComIfGs_onEventBit(dSv_event_flag_c::saveBitLabels[55]);
+    int sw = (fopAcM_GetParam(actor) & 0x00FF0000) >> 0x10;
+    dComIfGs_offSwitch(sw, fopAcM_GetRoomNo(actor));
+    dComIfGs_BossLife_public_Set(0);
+    fish_set(i_this);
+
+    for (int i = 0; i < 2; i++) {
+        fopAc_ac_c* tentacle = fopAcM_SearchByID(i_this->mTentacleIDs[i]);
+        if (tentacle != NULL) {
+            fopAcM_delete(tentacle);
+        }
+    }
+
+    fopAc_ac_c* monkey_bomb = fopAcM_SearchByID(i_this->mMonkeyBombID);
+    if (monkey_bomb != NULL) {
+        fopAcM_delete(monkey_bomb);
+    }
+
+    i_this->mDemoMode = 1000;
+    i_this->mDemoModeTimer = 0;
+    i_this->mDisableDraw = true;
+    i_this->mBlureRate = 0;
+    i_this->mBlureRateTarget = 0;
+    i_this->mColpatType = 6;
+    i_this->mColpatBlend = 1.0f;
+    i_this->field_0x1151 = 1;
+    i_this->mSound.deleteObject();
+    i_this->field_0x684.deleteObject();
+    i_this->field_0x6a4.deleteObject();
+
+    actor->attention_info.flags = 0;
+    actor->current.pos.set(20000.0f, -23000.0f, 40000.0f);
+    actor->old.pos = actor->current.pos;
+    actor->eyePos = actor->current.pos;
+
+    camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
+    cMtx_YrotS(*calc_mtx, player->shape_angle.y);
+    cXyz eye_offset(0.0f, 100.0f, -250.0f);
+    cXyz eye;
+    MtxPosition(&eye_offset, &eye);
+    eye += player->current.pos;
+
+    cXyz center = player->current.pos;
+    center.y += 120.0f;
+    camera->mCamera.Reset(center, eye);
+    camera->mCamera.Start();
+    camera->mCamera.SetTrimSize(0);
+    dComIfGp_getVibration().StopQuake(0x1F);
+    dComIfGp_event_reset();
+    player->cancelOriginalDemo();
+
+    g_env_light.mColpatWeather = 6;
+    g_env_light.wether_pat0 = 6;
+    g_env_light.wether_pat1 = 6;
+    Z2GetAudioMgr()->bgmStreamStop(0);
+    Z2GetAudioMgr()->subBgmStop();
+    Z2GetAudioMgr()->bgmStart(0x200005b, 0, 0);
+    Z2GetAudioMgr()->setDemoName(NULL);
+}
+
+static bool processDiababaDeathDemoLocalSkip(b_bq_class* i_this) {
+    static int s_diababaDeathSkipTimer;
+
+    if (!dusk::cutscene_skip::enabled() || !isDiababaDeathDemoMode(i_this->mDemoMode)) {
+        s_diababaDeathSkipTimer = 0;
+        return false;
+    }
+
+    if (mDoCPd_c::getTrigStart(PAD_1)) {
+        if (s_diababaDeathSkipTimer > 0) {
+            s_diababaDeathSkipTimer = 0;
+            finishDiababaDeathDemo(i_this);
+            return true;
+        }
+        s_diababaDeathSkipTimer = 1;
+    }
+
+    if (s_diababaDeathSkipTimer > 0) {
+        dComIfGp_setSButtonStatusForce(0x43, 1);
+        if (s_diababaDeathSkipTimer++ > 45) {
+            s_diababaDeathSkipTimer = 0;
+        }
+    }
+
+    return false;
+}
 static void demo_camera(b_bq_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
     camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
@@ -1208,6 +1325,10 @@ static void demo_camera(b_bq_class* i_this) {
 
     f32 var_f31 = 0.0f;
     s8 var_r28 = false;
+
+    if (processDiababaDeathDemoLocalSkip(i_this)) {
+        return;
+    }
 
     switch (i_this->mDemoMode) {
     case 1:

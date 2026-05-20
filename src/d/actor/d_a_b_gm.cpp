@@ -16,6 +16,7 @@
 #include "f_op/f_op_camera_mng.h"
 #include "f_op/f_op_msg_mng.h"
 #include "Z2AudioLib/Z2Instances.h"
+#include "dusk/cutscene_skip.h"
 
 #define ANM_EYE_TEST            6
 #define ANM_GM_BEAM             7
@@ -1007,6 +1008,95 @@ static void cam_spd_set(b_gm_class* i_this) {
     i_this->field_0x1cdc = 0.0f;
 }
 
+static bool isArmagohmaDeathDemoMode(int i_mode) {
+    return i_mode >= 41 && i_mode <= 42;
+}
+
+static void finishArmagohmaDeathDemo(b_gm_class* i_this) {
+    fopAc_ac_c* actor = (fopAc_ac_c*)i_this;
+    daPy_py_c* player = daPy_getPlayerActorClass();
+
+    if (!dComIfGs_isStageLife() && fopAcM_SearchByName(fpcNm_Obj_LifeContainer_e) == NULL) {
+        cXyz heart_pos(400.0f, 0.0f, 0.0f);
+        cXyz scale(1.0f, 1.0f, 1.0f);
+        fopAcM_createItemForBoss(&heart_pos, dItemNo_UTAWA_HEART_e, fopAcM_GetRoomNo(actor),
+                                 &actor->shape_angle, &scale, 0.0f, 0.0f, -1);
+    }
+
+    obj_ystone_class* ystone = (obj_ystone_class*)fopAcM_SearchByName(fpcNm_OBJ_YSTONE_e);
+    if (ystone != NULL) {
+        fopAcM_delete((fopAc_ac_c*)ystone);
+    }
+
+    if (fopAcM_SearchByName(fpcNm_Obj_BossWarp_e) == NULL) {
+        cXyz warp_pos(0.0f, 0.0f, 0.0f);
+        csXyz warp_rot(0, 0, 0);
+        fopAcM_createWarpHole(&warp_pos, &warp_rot, fopAcM_GetRoomNo(actor), 0, 0, 0xFF);
+    }
+
+    dComIfGs_onStageBossEnemy();
+    dComIfGs_onEventBit(dSv_event_flag_c::saveBitLabels[267]);
+    dComIfGs_BossLife_public_Set(0);
+
+    i_this->mIsDisappear = true;
+    i_this->mDemoMode = 1000;
+    i_this->mDemoModeTimer = 0;
+    i_this->mCreatureSound.deleteObject();
+    i_this->mBeamSound.deleteObject();
+
+    actor->attention_info.flags = 0;
+    actor->current.pos.set(20000.0f, -23000.0f, 40000.0f);
+    actor->old.pos = actor->current.pos;
+    actor->eyePos = actor->current.pos;
+
+    camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
+    cMtx_YrotS(*calc_mtx, player->shape_angle.y);
+    cXyz eye_offset(0.0f, 100.0f, -250.0f);
+    cXyz eye;
+    MtxPosition(&eye_offset, &eye);
+    eye += player->current.pos;
+
+    cXyz center = player->current.pos;
+    center.y += 120.0f;
+    camera->mCamera.Reset(center, eye);
+    camera->mCamera.Start();
+    camera->mCamera.SetTrimSize(0);
+    dComIfGp_getVibration().StopQuake(0x1F);
+    dComIfGp_event_reset();
+    player->cancelOriginalDemo();
+
+    Z2GetAudioMgr()->bgmStreamStop(0);
+    Z2GetAudioMgr()->subBgmStop();
+    Z2GetAudioMgr()->bgmStart(0x200005b, 0, 0);
+    Z2GetAudioMgr()->setDemoName(NULL);
+}
+
+static bool processArmagohmaDeathDemoLocalSkip(b_gm_class* i_this) {
+    static int s_armagohmaDeathSkipTimer;
+
+    if (!dusk::cutscene_skip::enabled() || !isArmagohmaDeathDemoMode(i_this->mDemoMode)) {
+        s_armagohmaDeathSkipTimer = 0;
+        return false;
+    }
+
+    if (mDoCPd_c::getTrigStart(PAD_1)) {
+        if (s_armagohmaDeathSkipTimer > 0) {
+            s_armagohmaDeathSkipTimer = 0;
+            finishArmagohmaDeathDemo(i_this);
+            return true;
+        }
+        s_armagohmaDeathSkipTimer = 1;
+    }
+
+    if (s_armagohmaDeathSkipTimer > 0) {
+        dComIfGp_setSButtonStatusForce(0x43, 1);
+        if (s_armagohmaDeathSkipTimer++ > 45) {
+            s_armagohmaDeathSkipTimer = 0;
+        }
+    }
+
+    return false;
+}
 static void demo_camera(b_gm_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
@@ -1018,6 +1108,10 @@ static void demo_camera(b_gm_class* i_this) {
     cXyz spA4;
     
     s8 sp10 = 0;
+
+    if (processArmagohmaDeathDemoLocalSkip(i_this)) {
+        return;
+    }
 
     switch (i_this->mDemoMode) {
     case 1:

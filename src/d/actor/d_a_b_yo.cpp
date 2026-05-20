@@ -23,6 +23,8 @@
 #include "d/d_com_inf_game.h"
 #include "d/d_s_play.h"
 #include "Z2AudioLib/Z2Instances.h"
+#include "Z2AudioLib/Z2SeMgr.h"
+#include "dusk/cutscene_skip.h"
 #include <cstring>
 
 class daB_YO_HIO_c {
@@ -2103,6 +2105,121 @@ void daB_YO_c::executeAttackBody() {
     }
 }
 
+static bool isBlizzetaDeathDemoMode(int i_mode) {
+    return i_mode >= 1 && i_mode <= 13;
+}
+
+void daB_YO_c::duskFinishBlizzetaDeathDemo() {
+    daB_YO_c* i_this = this;
+    daPy_py_c* player = daPy_getPlayerActorClass();
+
+    if (i_this->mRoomType != 0) {
+        if (i_this->mpRoomNormalBgW != NULL) {
+            dComIfG_Bgsp().Regist(i_this->mpRoomNormalBgW, i_this);
+        }
+        if (i_this->mpRoomArenaBgW != NULL) {
+            dComIfG_Bgsp().Release(i_this->mpRoomArenaBgW);
+        }
+    }
+
+    obj_ystone_class* ystone;
+    fopAcM_SearchByID(i_this->mYstoneID, (fopAc_ac_c**)&ystone);
+    if (ystone != NULL) {
+        fopAcM_delete((fopAc_ac_c*)ystone);
+    }
+
+    if (fopAcM_SearchByName(fpcNm_Obj_BossWarp_e) == NULL) {
+        cXyz warp_pos(-550.0f, 0.0f, -250.0f);
+        csXyz warp_rot(0, 0, 0);
+        i_this->mWarpHoleID = fopAcM_createWarpHole(&warp_pos, &warp_rot, fopAcM_GetRoomNo(i_this),
+                                                     1, 0, 0xFF);
+    }
+
+    if (!dComIfGs_isStageLife() && fopAcM_SearchByName(fpcNm_Obj_LifeContainer_e) == NULL) {
+        cXyz heart_pos(211.0f, 0.0f, -900.0f);
+        cXyz scale(1.0f, 1.0f, 1.0f);
+        csXyz heart_angle(0, 0x5000, 0);
+        fopAcM_createItemForBoss(&heart_pos, dItemNo_UTAWA_HEART_e, fopAcM_GetRoomNo(i_this),
+                                 &heart_angle, &scale, 0.0f, 0.0f, -1);
+    }
+
+    cXyz player_pos(-196.0f, 0.0f, -21.0f);
+    player->setPlayerPosAndAngle(&player_pos, 0x7800, 0);
+
+    dComIfGs_onStageBossEnemy();
+    dComIfGs_onEventBit(dSv_event_flag_c::saveBitLabels[266]);
+    dComIfGs_onSwitch(i_this->mSwNo2, fopAcM_GetRoomNo(i_this));
+    dComIfGs_BossLife_public_Set(0);
+
+    i_this->mAction = daB_YO_c::ACT_DEMO_REVIVAL;
+    i_this->mMode = 16;
+    i_this->mActionTimer = 0;
+    i_this->mIsEnemyDemoEnd = false;
+    i_this->mIsInactive = 1;
+    i_this->mIsInactive2 = 1;
+    i_this->mReverted = true;
+    i_this->mRoomType = 0;
+    i_this->mRoomAlpha[0] = 255.0f;
+    i_this->mRoomAlpha[1] = 0.0f;
+    i_this->mColorMode = 0;
+    i_this->mColBlend = 1.0f;
+    i_this->mBlureRate = 0.0f;
+    dKy_custom_colset(0, 0, 0.0f);
+    i_this->mCreatureSound.deleteObject();
+    Z2GetSeMgr()->seStop(Z2SE_EN_YO_DEMO_END, 0);
+    Z2GetSeMgr()->seStop(Z2SE_EN_YO_VIBE_ROOM, 0);
+    Z2GetSeMgr()->seStop(Z2SE_EN_YO_FALL, 0);
+    Z2GetSeMgr()->seStop(Z2SE_EN_YO_VIBRATE, 0);
+
+    camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
+    cMtx_YrotS(*calc_mtx, player->shape_angle.y);
+    cXyz eye_offset(0.0f, 100.0f, -250.0f);
+    cXyz eye;
+    MtxPosition(&eye_offset, &eye);
+    eye += player->current.pos;
+
+    cXyz center = player->current.pos;
+    center.y += 120.0f;
+    camera->mCamera.Reset(center, eye);
+    camera->mCamera.Start();
+    camera->mCamera.SetTrimSize(0);
+    dComIfGp_getVibration().StopQuake(0x1F);
+    dComIfGp_event_reset();
+    player->cancelOriginalDemo();
+
+    Z2GetAudioMgr()->bgmStreamStop(0);
+    Z2GetAudioMgr()->subBgmStop();
+    Z2GetAudioMgr()->bgmStart(0x200005b, 0, 0);
+    Z2GetAudioMgr()->setDemoName(NULL);
+}
+
+bool daB_YO_c::duskProcessBlizzetaDeathDemoLocalSkip() {
+    daB_YO_c* i_this = this;
+    static int s_blizzetaDeathSkipTimer;
+
+    if (!dusk::cutscene_skip::enabled() || !isBlizzetaDeathDemoMode(i_this->mMode)) {
+        s_blizzetaDeathSkipTimer = 0;
+        return false;
+    }
+
+    if (mDoCPd_c::getTrigStart(PAD_1)) {
+        if (s_blizzetaDeathSkipTimer > 0) {
+            s_blizzetaDeathSkipTimer = 0;
+            i_this->duskFinishBlizzetaDeathDemo();
+            return true;
+        }
+        s_blizzetaDeathSkipTimer = 1;
+    }
+
+    if (s_blizzetaDeathSkipTimer > 0) {
+        dComIfGp_setSButtonStatusForce(0x43, 1);
+        if (s_blizzetaDeathSkipTimer++ > 45) {
+            s_blizzetaDeathSkipTimer = 0;
+        }
+    }
+
+    return false;
+}
 void daB_YO_c::executeDemoRevival() {
     camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
 
@@ -2283,6 +2400,10 @@ void daB_YO_c::executeDeath() {
     pos2.y += 300.0f;
     obj_ystone_class* ystone;
     fopAcM_SearchByID(mYstoneID, (fopAc_ac_c**)&ystone);
+
+    if (duskProcessBlizzetaDeathDemoLocalSkip()) {
+        return;
+    }
 
     switch (mMode) {
     case 0:

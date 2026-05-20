@@ -79,6 +79,8 @@ public:
     void onIceStatus(u16 i_no) { mIceStatus |= (1 << i_no); }
     void setDrawOff() { mIsInactive = 1; }
     bool isEnemyDemoEnd() { return (u8)mIsEnemyDemoEnd != 0; }
+    void duskFinishBlizzetaDeathDemo();
+    bool duskProcessBlizzetaDeathDemoLocalSkip();
 
 private:
     /* 0x05AC */ request_of_phase_process_class mPhase1;

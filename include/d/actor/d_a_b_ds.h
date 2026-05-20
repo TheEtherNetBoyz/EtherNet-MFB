@@ -188,6 +188,8 @@ public:
     bool isArg0() { return arg0; }
     void onDemo() { mIsDemo = true; }
     void offDemo() { mIsDemo = false; }
+    void duskFinishStallordDeathDemo();
+    bool duskProcessStallordDeathDemoLocalSkip();
 
 private:
     /* 0x05AC */ request_of_phase_process_class mPhase;

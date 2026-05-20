@@ -1343,7 +1343,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         addOption("Disable Rupee Cutscenes", getSettings().game.disableRupeeCutscenes,
             "Rupees will not play cutscenes after you have collected them the first time.");
         addSpeedrunDisabledOption("Skip All Cutscenes", getSettings().game.skipAllCutscenes,
-            "Automatically skips supported cutscenes.");
+            "Allows additional cutscene skips.");
         addOption("Faster Climbing", getSettings().game.fastClimbing,
             "Quicker climbing on ladders and vines like the HD version.");
         addOption("Faster Tears of Light", getSettings().game.fastTears,

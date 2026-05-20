@@ -18,6 +18,7 @@
 #include "c/c_damagereaction.h"
 #include "f_op/f_op_actor_enemy.h"
 #include "Z2AudioLib/Z2Instances.h"
+#include "dusk/cutscene_skip.h"
 
 enum daB_DS_Joint {
     DS_JNT_BACKBONE1,
@@ -3622,6 +3623,90 @@ bool daB_DS_c::mDeadMove() {
     }
 }
 
+void daB_DS_c::duskFinishStallordDeathDemo() {
+    daB_DS_c* i_this = this;
+    daPy_py_c* player = daPy_getPlayerActorClass();
+
+    if (!dComIfGs_isStageLife() && fopAcM_SearchByName(fpcNm_Obj_LifeContainer_e) == NULL) {
+        cXyz heart_pos(-400.0f, 1775.0f, -4132.0f);
+        cXyz scale(1.0f, 1.0f, 1.0f);
+        csXyz angle(0, 0, 0);
+        fopAcM_createItemForBoss(&heart_pos, dItemNo_UTAWA_HEART_e, fopAcM_GetRoomNo(i_this),
+                                 &angle, &scale, 0.0f, 0.0f, -1);
+    }
+
+    cXyz player_pos(0.0f, 1800.0f, -900.0f);
+    player->setPlayerPosAndAngle(&player_pos, 0x8000, 0);
+
+    dComIfGs_onZoneSwitch(8, fopAcM_GetRoomNo(i_this));
+    fopAcM_onSwitch(i_this, 0x70);
+    fopAcM_onSwitch(i_this, 0x7b);
+    dComIfGs_onStageBossEnemy(0x13);
+    dComIfGs_onEventBit(0x2010);
+    dComIfGs_BossLife_public_Set(0);
+
+    g_env_light.mColpatPrevGather = 4;
+    g_env_light.mColpatCurrGather = 4;
+    g_env_light.mColPatBlendGather = 1.0f;
+
+    i_this->mDead = true;
+    i_this->mNoDrawSword = true;
+    i_this->mIsDemo = false;
+    i_this->mIsOpeningDemo = false;
+    i_this->mMode = 1000;
+    i_this->attention_info.flags = 0;
+    i_this->mSound.deleteObject();
+
+    camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
+    cMtx_YrotS(*calc_mtx, player->shape_angle.y);
+    cXyz eye_offset(0.0f, 100.0f, -250.0f);
+    cXyz eye;
+    MtxPosition(&eye_offset, &eye);
+    eye += player->current.pos;
+
+    cXyz center = player->current.pos;
+    center.y += 120.0f;
+    camera->mCamera.Reset(center, eye);
+    camera->mCamera.Start();
+    camera->mCamera.SetTrimSize(0);
+    dComIfGp_getVibration().StopQuake(0x1F);
+    dComIfGp_event_reset();
+    player->cancelOriginalDemo();
+
+    Z2GetAudioMgr()->bgmStreamStop(0);
+    Z2GetAudioMgr()->subBgmStop();
+    Z2GetAudioMgr()->bgmStart(0x200005b, 0, 0);
+    Z2GetAudioMgr()->setDemoName(NULL);
+    fopAcM_delete(i_this);
+}
+
+bool daB_DS_c::duskProcessStallordDeathDemoLocalSkip() {
+    daB_DS_c* i_this = this;
+    static int s_stallordDeathSkipTimer;
+
+    if (!dusk::cutscene_skip::enabled() || i_this->mMode <= 0 || i_this->mMode >= 1000) {
+        s_stallordDeathSkipTimer = 0;
+        return false;
+    }
+
+    if (mDoCPd_c::getTrigStart(PAD_1)) {
+        if (s_stallordDeathSkipTimer > 0) {
+            s_stallordDeathSkipTimer = 0;
+            i_this->duskFinishStallordDeathDemo();
+            return true;
+        }
+        s_stallordDeathSkipTimer = 1;
+    }
+
+    if (s_stallordDeathSkipTimer > 0) {
+        dComIfGp_setSButtonStatusForce(0x43, 1);
+        if (s_stallordDeathSkipTimer++ > 45) {
+            s_stallordDeathSkipTimer = 0;
+        }
+    }
+
+    return false;
+}
 void daB_DS_c::executeBattle2Dead() {
     static cXyz mEd2CenterDt[2] = {
         cXyz(70.0f, 1890.0f, -1190.0f),
@@ -3638,6 +3723,10 @@ void daB_DS_c::executeBattle2Dead() {
     cXyz mae, ato;
     cXyz particle_scale(1.5f, 1.5f, 1.5f);
     cXyz item_scale;
+
+    if (duskProcessStallordDeathDemoLocalSkip()) {
+        return;
+    }
 
     switch (mMode) {
     case 0:

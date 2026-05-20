@@ -34,7 +34,7 @@ void JAISound::attachHandle(JAISoundHandle* handle) {
 }
 
 s32 JAISoundStatus_::lockWhenPrepared() {
-    if (state.unk == 0) {
+                                                                if (state.unk == 0) {
         state.unk = 1;
         return 1;
     }

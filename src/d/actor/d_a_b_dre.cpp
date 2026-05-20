@@ -8,6 +8,7 @@
 #include "d/actor/d_a_b_dre.h"
 #include "SSystem/SComponent/c_math.h"
 #include "Z2AudioLib/Z2Instances.h"
+#include "dusk/cutscene_skip.h"
 #include "d/actor/d_a_obj_ystone.h"
 #include "d/actor/d_a_player.h"
 #include "d/d_camera.h"
@@ -713,6 +714,97 @@ void daB_DRE_c::SoundChk() {
     }
 }
 
+static void finishArgorokDeathDemo(daB_DRE_c* i_this) {
+    daPy_py_c* player = daPy_getPlayerActorClass();
+
+    if (!dComIfGs_isStageLife() && fopAcM_SearchByName(fpcNm_Obj_LifeContainer_e) == NULL) {
+        cXyz heart_pos(224.0f, 0.0f, 762.0f);
+        cXyz scale(1.0f, 1.0f, 1.0f);
+        csXyz angle(0, 0, 0);
+        fopAcM_createItemForBoss(&heart_pos, dItemNo_UTAWA_HEART_e, fopAcM_GetRoomNo(i_this),
+                                 &angle, &scale, 0.0f, 0.0f, -1);
+    }
+
+    obj_ystone_class* ystone = (obj_ystone_class*)fopAcM_SearchByName(fpcNm_OBJ_YSTONE_e);
+    if (ystone != NULL) {
+        fopAcM_delete((fopAc_ac_c*)ystone);
+    }
+
+    if (fopAcM_SearchByName(fpcNm_Obj_BossWarp_e) == NULL) {
+        cXyz warp_pos(-325.0f, 0.0f, 215.0f);
+        csXyz warp_rot(0, 0, 0);
+        fopAcM_createWarpHole(&warp_pos, &warp_rot, fopAcM_GetRoomNo(i_this), 2, 0, 0xFF);
+    }
+
+    cXyz player_pos(0.0f, 0.0f, 0.0f);
+    player->setPlayerPosAndAngle(&player_pos, 0x8000, 0);
+
+    dComIfGs_onEventBit(dSv_event_flag_c::F_0268);
+    dComIfGs_onStageBossEnemy(0x16);
+    fopAcM_onSwitch(i_this, 0x38);
+    dComIfGs_BossLife_public_Set(0);
+
+    dScnKy_env_light_c* kankyo = dKy_getEnvlight();
+    kankyo->wether = 0;
+
+    i_this->mHideModel = true;
+    i_this->mHideParts = true;
+    i_this->mDrMode = 100;
+    i_this->mCameraMode = 100;
+    i_this->attention_info.flags = 0;
+    i_this->mSound.deleteObject();
+
+    camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
+    cMtx_YrotS(*calc_mtx, player->shape_angle.y);
+    cXyz eye_offset(0.0f, 100.0f, -250.0f);
+    cXyz eye;
+    MtxPosition(&eye_offset, &eye);
+    eye += player->current.pos;
+
+    cXyz center = player->current.pos;
+    center.y += 120.0f;
+    camera->mCamera.Reset(center, eye);
+    camera->mCamera.Start();
+    camera->mCamera.SetTrimSize(0);
+    dComIfGp_getVibration().StopQuake(0x1F);
+    dComIfGp_event_reset();
+    player->cancelOriginalDemo();
+
+    Z2GetAudioMgr()->bgmStreamStop(0);
+    Z2GetAudioMgr()->subBgmStop();
+    Z2GetAudioMgr()->bgmStart(0x200005b, 0, 0);
+    Z2GetAudioMgr()->setDemoName(NULL);
+    fopAcM_delete(i_this);
+}
+
+static bool processArgorokDeathDemoLocalSkip(daB_DRE_c* i_this) {
+    static int s_argorokDeathSkipTimer;
+
+    if (!dusk::cutscene_skip::enabled() || i_this->mAction == 0 || i_this->mDrMode == 0 ||
+        i_this->mDrMode >= 100)
+    {
+        s_argorokDeathSkipTimer = 0;
+        return false;
+    }
+
+    if (mDoCPd_c::getTrigStart(PAD_1)) {
+        if (s_argorokDeathSkipTimer > 0) {
+            s_argorokDeathSkipTimer = 0;
+            finishArgorokDeathDemo(i_this);
+            return true;
+        }
+        s_argorokDeathSkipTimer = 1;
+    }
+
+    if (s_argorokDeathSkipTimer > 0) {
+        dComIfGp_setSButtonStatusForce(0x43, 1);
+        if (s_argorokDeathSkipTimer++ > 45) {
+            s_argorokDeathSkipTimer = 0;
+        }
+    }
+
+    return false;
+}
 int daB_DRE_c::Execute() {
     daPy_py_c* player = daPy_getPlayerActorClass();
     s_LinkPos = &fopAcM_GetPosition(player);
@@ -733,6 +825,10 @@ int daB_DRE_c::Execute() {
     mDoMtx_stack_c::copy(mpModelMorf->getModel()->getAnmMtx(0x2D));
     mDoMtx_stack_c::multVec(&pos, &pos);
     s_TalePos = pos;
+
+    if (processArgorokDeathDemoLocalSkip(this)) {
+        return 1;
+    }
 
     for (int i = 0; i < 5; i++) {
         mTimers[i]--;
