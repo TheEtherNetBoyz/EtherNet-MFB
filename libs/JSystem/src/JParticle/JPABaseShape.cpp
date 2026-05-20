@@ -421,6 +421,38 @@ static projectionFunc p_prj[3] = {
     loadPrjAnm,
 };
 
+static bool JPAGetPresentationParticlePos(JPABaseParticle* ptcl, JGeometry::TVec3<f32>* pos) {
+#if TARGET_PC
+    if (!dusk::frame_interp::is_enabled() || dusk::frame_interp::is_sim_frame() ||
+        ptcl->mAge == 0)
+    {
+        return false;
+    }
+
+    const f32 step = dusk::frame_interp::get_interpolation_step();
+    pos->set(ptcl->mPosition.x + ptcl->mVelocity.x * step,
+             ptcl->mPosition.y + ptcl->mVelocity.y * step,
+             ptcl->mPosition.z + ptcl->mVelocity.z * step);
+    return true;
+#else
+    return false;
+#endif
+}
+
+static s16 JPAGetPresentationRotateAngle(JPABaseParticle* ptcl) {
+#if TARGET_PC
+    if (!dusk::frame_interp::is_enabled() || dusk::frame_interp::is_sim_frame() ||
+        ptcl->mAge == 0)
+    {
+        return ptcl->mRotateAngle;
+    }
+
+    return ptcl->mRotateAngle + (s16)(ptcl->mRotateSpeed * dusk::frame_interp::get_interpolation_step());
+#else
+    return ptcl->mRotateAngle;
+#endif
+}
+
 #if TARGET_PC
 void JPAInterpBillboard(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
     Mtx ptclPosMtx;
@@ -455,7 +487,14 @@ void JPADrawBillboard(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
     } else
 #endif
     {
-        MTXMultVec(work->mPosCamMtx, &ptcl->mPosition, &pos);
+        JGeometry::TVec3<f32> worldPos;
+#if TARGET_PC
+        if (!JPAGetPresentationParticlePos(ptcl, &worldPos))
+#endif
+        {
+            worldPos.set(ptcl->mPosition);
+        }
+        MTXMultVec(work->mPosCamMtx, &worldPos, &pos);
     }
     Mtx posMtx;
     posMtx[0][0] = work->mGlobalPtclScl.x * ptcl->mParticleScaleX;
@@ -492,9 +531,17 @@ void JPADrawRotBillboard(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
     } else
 #endif
     {
-        MTXMultVec(work->mPosCamMtx, &ptcl->mPosition, &pos);
-        sinRot = JMASSin(ptcl->mRotateAngle);
-        cosRot = JMASCos(ptcl->mRotateAngle);
+        JGeometry::TVec3<f32> worldPos;
+#if TARGET_PC
+        if (!JPAGetPresentationParticlePos(ptcl, &worldPos))
+#endif
+        {
+            worldPos.set(ptcl->mPosition);
+        }
+        const s16 angle = JPAGetPresentationRotateAngle(ptcl);
+        MTXMultVec(work->mPosCamMtx, &worldPos, &pos);
+        sinRot = JMASSin(angle);
+        cosRot = JMASCos(angle);
     }
     f32 particleX = work->mGlobalPtclScl.x * ptcl->mParticleScaleX;
     f32 particleY = work->mGlobalPtclScl.y * ptcl->mParticleScaleY;
@@ -519,7 +566,14 @@ void JPADrawYBillboard(JPAEmitterWorkData* work, JPABaseParticle* param_1) {
     }
 
     JGeometry::TVec3<f32> local_48;
-    MTXMultVec(work->mPosCamMtx, &param_1->mPosition, &local_48);
+    JGeometry::TVec3<f32> worldPos;
+#if TARGET_PC
+    if (!JPAGetPresentationParticlePos(param_1, &worldPos))
+#endif
+    {
+        worldPos.set(param_1->mPosition);
+    }
+    MTXMultVec(work->mPosCamMtx, &worldPos, &local_48);
     Mtx local_38;
     f32 particleX = work->mGlobalPtclScl.x * param_1->mParticleScaleX;
     f32 particleY = work->mGlobalPtclScl.y * param_1->mParticleScaleY;
@@ -543,9 +597,17 @@ void JPADrawRotYBillboard(JPAEmitterWorkData* work, JPABaseParticle* param_1) {
     }
 
     JGeometry::TVec3<f32> local_48;
-    MTXMultVec(work->mPosCamMtx, &param_1->mPosition, &local_48);
-    f32 sinRot = JMASSin(param_1->mRotateAngle);
-    f32 cosRot = JMASCos(param_1->mRotateAngle);
+    JGeometry::TVec3<f32> worldPos;
+#if TARGET_PC
+    if (!JPAGetPresentationParticlePos(param_1, &worldPos))
+#endif
+    {
+        worldPos.set(param_1->mPosition);
+    }
+    MTXMultVec(work->mPosCamMtx, &worldPos, &local_48);
+    const s16 angle = JPAGetPresentationRotateAngle(param_1);
+    f32 sinRot = JMASSin(angle);
+    f32 cosRot = JMASCos(angle);
     Mtx local_38;
     f32 particleX = work->mGlobalPtclScl.x * param_1->mParticleScaleX;
     f32 particleY = work->mGlobalPtclScl.y * param_1->mParticleScaleY;
@@ -856,6 +918,14 @@ void JPADrawDirection(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
         posMtx[2][1] = axisY.z;
         posMtx[2][2] = axisZ.z;
         posMtx[2][3] = ptcl->mPosition.z;
+#if TARGET_PC
+        JGeometry::TVec3<f32> worldPos;
+        if (JPAGetPresentationParticlePos(ptcl, &worldPos)) {
+            posMtx[0][3] = worldPos.x;
+            posMtx[1][3] = worldPos.y;
+            posMtx[2][3] = worldPos.z;
+        }
+#endif
         p_plane[work->mPlaneType](posMtx, scaleX, scaleY);
     }
 
@@ -878,8 +948,9 @@ void JPADrawRotDirection(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
     if (!dusk::frame_interp::lookup_replacement(ptcl, mtx1))
 #endif
     {
-        f32 sinRot = JMASSin(ptcl->mRotateAngle);
-        f32 cosRot = JMASCos(ptcl->mRotateAngle);
+        const s16 angle = JPAGetPresentationRotateAngle(ptcl);
+        f32 sinRot = JMASSin(angle);
+        f32 cosRot = JMASCos(angle);
         JGeometry::TVec3<f32> axisY;
         JGeometry::TVec3<f32> axisZ;
         p_direction[work->mDirType](work, ptcl, &axisY);
@@ -914,6 +985,14 @@ void JPADrawRotDirection(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
         mtx2[2][1] = axisY.z;
         mtx2[2][2] = axisZ.z;
         mtx2[2][3] = ptcl->mPosition.z;
+#if TARGET_PC
+        JGeometry::TVec3<f32> worldPos;
+        if (JPAGetPresentationParticlePos(ptcl, &worldPos)) {
+            mtx2[0][3] = worldPos.x;
+            mtx2[1][3] = worldPos.y;
+            mtx2[2][3] = worldPos.z;
+        }
+#endif
         MTXConcat(mtx2, mtx1, mtx1);
     }
     MTXConcat(work->mPosCamMtx, mtx1, mtx2);
@@ -941,7 +1020,14 @@ void JPADrawDBillboard(JPAEmitterWorkData* param_0, JPABaseParticle* param_1) {
     local_70.normalize();
     MTXMultVecSR(param_0->mPosCamMtx, &local_70, &local_70);
     JGeometry::TVec3<f32> local_88;
-    MTXMultVec(param_0->mPosCamMtx, &param_1->mPosition, &local_88);
+    JGeometry::TVec3<f32> worldPos;
+#if TARGET_PC
+    if (!JPAGetPresentationParticlePos(param_1, &worldPos))
+#endif
+    {
+        worldPos.set(param_1->mPosition);
+    }
+    MTXMultVec(param_0->mPosCamMtx, &worldPos, &local_88);
     f32 particleX = param_0->mGlobalPtclScl.x * param_1->mParticleScaleX;
     f32 particleY = param_0->mGlobalPtclScl.y * param_1->mParticleScaleY;
     Mtx local_60;
@@ -966,16 +1052,24 @@ void JPADrawRotation(JPAEmitterWorkData* param_0, JPABaseParticle* param_1) {
 
     ZoneScoped;
 
-    f32 sinRot = JMASSin(param_1->mRotateAngle);
-    f32 cosRot = JMASCos(param_1->mRotateAngle);
+    const s16 angle = JPAGetPresentationRotateAngle(param_1);
+    f32 sinRot = JMASSin(angle);
+    f32 cosRot = JMASCos(angle);
     f32 particleX = param_0->mGlobalPtclScl.x * param_1->mParticleScaleX;
     f32 particleY = param_0->mGlobalPtclScl.y * param_1->mParticleScaleY;
     Mtx auStack_88;
     p_rot[param_0->mRotType](sinRot, cosRot, auStack_88);
     p_plane[param_0->mPlaneType](auStack_88, particleX, particleY);
-    auStack_88[0][3] = param_1->mPosition.x;
-    auStack_88[1][3] = param_1->mPosition.y;
-    auStack_88[2][3] = param_1->mPosition.z;
+    JGeometry::TVec3<f32> worldPos;
+#if TARGET_PC
+    if (!JPAGetPresentationParticlePos(param_1, &worldPos))
+#endif
+    {
+        worldPos.set(param_1->mPosition);
+    }
+    auStack_88[0][3] = worldPos.x;
+    auStack_88[1][3] = worldPos.y;
+    auStack_88[2][3] = worldPos.z;
     MTXConcat(param_0->mPosCamMtx, auStack_88, auStack_88);
     GXLoadPosMtxImm(auStack_88, 0);
     p_prj[param_0->mPrjType](param_0, auStack_88);
@@ -991,8 +1085,15 @@ void JPADrawPoint(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
 
     GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
     GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+    JGeometry::TVec3<f32> worldPos;
+#if TARGET_PC
+    if (!JPAGetPresentationParticlePos(ptcl, &worldPos))
+#endif
+    {
+        worldPos.set(ptcl->mPosition);
+    }
     GXBegin(GX_POINTS, GX_VTXFMT1, 1);
-    GXPosition3f32(ptcl->mPosition.x, ptcl->mPosition.y, ptcl->mPosition.z);
+    GXPosition3f32(worldPos.x, worldPos.y, worldPos.z);
     GXTexCoord2f32(0.0f, 0.0f);
     GXEnd();
     GXSetVtxDesc(GX_VA_POS, GX_INDEX8);
@@ -1006,7 +1107,13 @@ void JPADrawLine(JPAEmitterWorkData* param_0, JPABaseParticle* param_1) {
 
     ZoneScoped;
 
-    JGeometry::TVec3<f32> local_1c(param_1->mPosition);
+    JGeometry::TVec3<f32> local_1c;
+#if TARGET_PC
+    if (!JPAGetPresentationParticlePos(param_1, &local_1c))
+#endif
+    {
+        local_1c.set(param_1->mPosition);
+    }
     JGeometry::TVec3<f32> local_28;
     param_1->getVelVec(&local_28);
 

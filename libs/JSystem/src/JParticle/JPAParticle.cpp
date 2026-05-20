@@ -6,6 +6,9 @@
 #include "JSystem/JParticle/JPAEmitter.h"
 #include "JSystem/JParticle/JPAEmitterManager.h"
 #include "JSystem/JParticle/JPAExtraShape.h"
+#if TARGET_PC
+#include "dusk/frame_interpolation.h"
+#endif
 
 JPAParticleCallBack::~JPAParticleCallBack() {
     /* empty function */
@@ -206,8 +209,7 @@ void JPABaseParticle::init_c(JPAEmitterWorkData* work, JPABaseParticle* parent) 
 
 #if TARGET_PC
 void JPABaseParticle::interp(JPAEmitterWorkData* work, void const* drawFunc) {
-    static bool enable = false;
-    if (!enable)
+    if (!dusk::frame_interp::is_enabled())
         return;
 
     // don't interpolate the first frame
