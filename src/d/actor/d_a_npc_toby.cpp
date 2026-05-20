@@ -14,7 +14,9 @@
 #include "d/actor/d_a_obj_automata.h"
 #include "d/d_msg_object.h"
 #include "d/actor/d_a_obj_scannon.h"
+#include "dusk/cutscene_skip.h"
 #include "dusk/frame_interpolation.h"
+#include "m_Do/m_Do_controller_pad.h"
 #include <cstring>
 
 const daNpc_Toby_HIOParam daNpc_Toby_Param_c::m = {
@@ -1287,6 +1289,11 @@ int daNpc_Toby_c::cutTalkToOneself(int arg0) {
 int daNpc_Toby_c::cutRepairSCannon(int arg0) {
     dScnKy_env_light_c* env_light = dKy_getEnvlight();
     fopAc_ac_c* scannon_p = mActorMngr[2].getActorP();
+    if (scannon_p == NULL) {
+        mActorMngr[2].entry(getNearestActorP(fpcNm_Obj_SCannon_e));
+        scannon_p = mActorMngr[2].getActorP();
+    }
+
     cXyz work;
     csXyz angle;
     int retval = 0;
@@ -1301,6 +1308,37 @@ int daNpc_Toby_c::cutRepairSCannon(int arg0) {
     param_p = dComIfGp_evmng_getMyIntegerP(arg0, "timer");
     if (param_p != NULL) {
         timer_val = *param_p;
+    }
+
+    static int s_duskRepairSCannonSkipTimer;
+    bool duskCanSkipRepair = dusk::cutscene_skip::enabled() && prm_val >= 0 && scannon_p != NULL;
+    bool duskShowRepairSkip = false;
+    if (duskCanSkipRepair) {
+        if (mDoCPd_c::getTrigStart(PAD_1)) {
+            if (s_duskRepairSCannonSkipTimer > 0) {
+                s_duskRepairSCannonSkipTimer = 0;
+                ((daSCannon_c*)scannon_p)->setCannonRepair();
+                Z2GetAudioMgr()->bgmStop(0, 0);
+                Z2GetAudioMgr()->bgmStreamStop(0);
+                Z2GetAudioMgr()->subBgmStop();
+                Z2GetAudioMgr()->setDemoName(NULL);
+                daPy_getPlayerActorClass()->cancelOriginalDemo();
+                dComIfGp_event_reset();
+                dStage_changeScene(8, 0.0f, 0, fopAcM_GetRoomNo(this), 0, dComIfG_play_c::getLayerNo(0));
+                return 1;
+            }
+
+            s_duskRepairSCannonSkipTimer = 1;
+        }
+
+        if (s_duskRepairSCannonSkipTimer > 0) {
+            duskShowRepairSkip = true;
+            if (s_duskRepairSCannonSkipTimer++ > 45) {
+                s_duskRepairSCannonSkipTimer = 0;
+            }
+        }
+    } else {
+        s_duskRepairSCannonSkipTimer = 0;
     }
 
     if (dComIfGp_getEventManager().getIsAddvance(arg0)) {
@@ -1409,6 +1447,10 @@ int daNpc_Toby_c::cutRepairSCannon(int arg0) {
         mAcch.SetWallNone();
         gravity = 0.0f;
         break;
+    }
+
+    if (duskShowRepairSkip) {
+        dComIfGp_setSButtonStatusForce(0x43, 1);
     }
 
     if (prm_val == 1) {
