@@ -14,6 +14,7 @@
 #include "DuskDsp.hpp"
 #include "JSystem/JAudio2/JASAudioThread.h"
 #include "JSystem/JAudio2/JASDriverIF.h"
+#include "dusk/settings.h"
 #include "tracy/Tracy.hpp"
 
 using namespace dusk::audio;
@@ -62,6 +63,7 @@ static void InitSDL3Output() {
 void dusk::audio::Initialize() {
     InitSDL3Output();
     DspInit();
+    ApplySettings();
 
     JASDsp::initBuffer();
     JASDSPChannel::initAll();
@@ -69,6 +71,13 @@ void dusk::audio::Initialize() {
     JASPoolAllocObject_MultiThreaded<JASChannel>::newMemPool(0x48);
 
     SDL_ResumeAudioStreamDevice(PlaybackStream);
+}
+
+void dusk::audio::ApplySettings() {
+    const auto& settings = dusk::getSettings().audio;
+    SetMasterVolume(MasterVolumeToLinear(settings.masterVolume.getValue() / 100.0f));
+    SetEnableReverb(settings.enableReverb.getValue());
+    EnableHrtf = settings.enableHrtf.getValue();
 }
 
 void dusk::audio::SetMasterVolume(const f32 value) {

@@ -457,7 +457,7 @@ namespace dusk {
             ImGui::SetNextItemWidth(150.0f);
             if (ImGui::SliderInt("##MasterVolume", &masterVolume, 0, 100, "%d%%")) {
                 s.audio.masterVolume.setValue(masterVolume);
-                audio::SetMasterVolume(masterVolume / 100.0f);
+                audio::SetMasterVolume(audio::MasterVolumeToLinear(masterVolume / 100.0f));
                 config::Save();
             }
             ImGui::Separator();
