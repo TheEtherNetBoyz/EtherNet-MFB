@@ -70,7 +70,6 @@ namespace dusk {
             s.game.noHeartDrops.setSpeedrunValue(false);
             s.game.autoSave.setSpeedrunValue(false);
             s.game.sunsSong.setSpeedrunValue(false);
-            s.game.skipAllCutscenes.setSpeedrunValue(false);
 
             s.game.infiniteHearts.setSpeedrunValue(false);
             s.game.infiniteArrows.setSpeedrunValue(false);
@@ -341,14 +340,14 @@ namespace dusk {
                 MenuCheckbox("Quick Transform (R+Y)", s.game.enableQuickTransform);
                 MenuCheckbox("Bigger Wallets", s.game.biggerWallets);
                 MenuCheckbox("Disable Rupee Cutscenes", s.game.disableRupeeCutscenes);
-                MenuCheckbox("Skip All Cutscenes", s.game.skipAllCutscenes, !s.game.speedrunMode);
+                MenuCheckbox("Skip All Cutscenes", s.game.skipAllCutscenes);
                 MenuCheckbox("No Rupee Returns", s.game.noReturnRupees);
                 MenuCheckbox("No Sword Recoil", s.game.noSwordRecoil);
                 MenuCheckbox("Faster Climbing", s.game.fastClimbing);
                 MenuCheckbox("No Climbing Miss Animation", s.game.noMissClimbing);
                 MenuCheckbox("Faster Tears of Light", s.game.fastTears);
                 MenuCheckbox("No 2nd Fish for Cat", s.game.no2ndFishForCat);
-                MenuCheckbox("Sun's Song (R+X)", s.game.sunsSong);
+                MenuCheckbox("Sun's Song (R+X)", s.game.sunsSong, !s.game.speedrunMode);
                 ImGui::Separator();
                 LoadModeCheckbox("Fast Loads", s.game.enableFastLoads, s.game.enableInstaLoads);
                 LoadModeCheckbox("Insta Loads", s.game.enableInstaLoads, s.game.enableFastLoads);
@@ -369,8 +368,8 @@ namespace dusk {
                 MenuCheckbox("Restore Wii 1.0 Glitches", s.game.restoreWiiGlitches);
                 MenuCheckbox("Rotating Link Doll", s.game.enableLinkDollRotation);
                 MenuCheckbox("Hide TV Settings Screen", s.game.hideTvSettingsScreen);
-                MenuCheckbox("Pause On Focus Lost", s.game.pauseOnFocusLost);
-                MenuCheckbox("Recording Mode", s.game.recordingMode);
+                MenuCheckbox("Pause On Focus Lost", s.game.pauseOnFocusLost, !s.game.speedrunMode);
+                MenuCheckbox("Recording Mode", s.game.recordingMode, !s.game.speedrunMode);
                 MenuCheckbox("Skip Pre-Launch UI", s.backend.skipPreLaunchUI);
                 ImGui::Separator();
                 SpeedrunModeCheckbox();

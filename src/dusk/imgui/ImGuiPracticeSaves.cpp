@@ -1190,6 +1190,12 @@ void ImGuiPracticeSaves::draw(bool& open) {
 }
 
 void ImGuiMenuTools::ShowPracticeSaves() {
+    if (getSettings().game.speedrunMode) {
+        m_showPracticeSaves = false;
+        getTransientSettings().practiceMenuInputCapture = false;
+        return;
+    }
+
     static bool sComboHeld = false;
     const bool comboDown = dusk::IsGameLaunched &&
                            (raw_pad_hold() & (PAD_TRIGGER_L | PAD_TRIGGER_R | PAD_BUTTON_DOWN)) ==
