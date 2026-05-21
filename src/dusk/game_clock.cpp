@@ -1,5 +1,6 @@
 #include "dusk/game_clock.h"
 
+#include "dusk/latency.h"
 #include "dusk/logging.h"
 #include "dusk/main.h"
 #include "dusk/settings.h"
@@ -23,6 +24,8 @@ std::unordered_map<uintptr_t, clock::time_point> s_interval_last_sample;
 
 constexpr clock::duration kSimPeriodDuration =
     std::chrono::duration_cast<clock::duration>(std::chrono::duration<float>(sim_pace()));
+constexpr clock::duration kLowLatencyInterpDelay =
+    std::chrono::duration_cast<clock::duration>(std::chrono::duration<float>(sim_pace() * 0.5f));
 constexpr clock::duration kAbnormalGapResetThreshold = std::chrono::milliseconds(250);
 constexpr int kMaxSimTicksPerFrame = 2;
 
@@ -100,7 +103,9 @@ MainLoopPacer advance_main_loop() {
 
     int sim_ticks_to_run = 0;
     clock::time_point projected_snapshot_time = s_current_snapshot_time;
-    const clock::time_point render_time = now - kSimPeriodDuration;
+    const clock::duration interpolation_delay =
+        dusk::low_latency_presentation_enabled() ? kLowLatencyInterpDelay : kSimPeriodDuration;
+    const clock::time_point render_time = now - interpolation_delay;
     while (sim_ticks_to_run < kMaxSimTicksPerFrame && projected_snapshot_time < render_time) {
         projected_snapshot_time += kSimPeriodDuration;
         sim_ticks_to_run++;
@@ -137,3 +142,11 @@ float consume_interval(const void* consumer) {
 }
 
 }  // namespace dusk::game_clock
+
+namespace dusk {
+
+bool low_latency_presentation_enabled() {
+    return getSettings().game.lowLatencyPresentation.getValue();
+}
+
+}  // namespace dusk

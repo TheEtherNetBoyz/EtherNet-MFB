@@ -20,6 +20,7 @@
 #include "f_pc/f_pc_pause.h"
 #include "f_pc/f_pc_priority.h"
 #include "m_Do/m_Do_controller_pad.h"
+#include "dusk/latency.h"
 
 #include "tracy/Tracy.hpp"
 
@@ -65,7 +66,7 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
 
 #ifdef TARGET_PC
             // FRAME INTERP NOTE: Called in m_Do_main when interp is enabled
-            if (!dusk::frame_interp::is_enabled())
+            if (!dusk::frame_interp::is_enabled() && !dusk::low_latency_presentation_enabled())
 #endif
             {
                 cAPIGph_Painter();
@@ -100,6 +101,12 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
             if (i_postExecuteFn != NULL) {
                 i_postExecuteFn();
             }
+
+#ifdef TARGET_PC
+            if (!dusk::frame_interp::is_enabled() && dusk::low_latency_presentation_enabled()) {
+                cAPIGph_Painter();
+            }
+#endif
 
             dComIfGp_drawSimpleModel();
         } else if (!l_dvdError) {

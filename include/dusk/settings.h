@@ -166,6 +166,7 @@ struct UserSettings {
         ConfigVar<bool> enableTextureReplacements;
         ConfigVar<bool> enableFrameInterpolation;
         ConfigVar<int> frameRateLimit;
+        ConfigVar<bool> lowLatencyPresentation;
         ConfigVar<int> internalResolutionScale;
         ConfigVar<int> shadowResolutionMultiplier;
         ConfigVar<Resampler> resampler;

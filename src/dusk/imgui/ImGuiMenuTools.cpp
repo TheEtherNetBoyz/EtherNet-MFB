@@ -441,6 +441,7 @@ namespace dusk {
             MenuCheckbox("Show FPS Counter", s.video.enableFpsOverlay);
             ImGui::Separator();
             FrameRateLimitSlider();
+            MenuCheckbox("Low Latency Presentation", s.game.lowLatencyPresentation);
             MenuCheckbox("Depth of Field", s.game.enableDepthOfField);
             MenuCheckbox("Map Background", s.game.enableMapBackground);
             MenuCheckbox("Disable Water Refraction", s.game.disableWaterRefraction);

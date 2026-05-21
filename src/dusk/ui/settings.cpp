@@ -700,8 +700,8 @@ const Rml::String kBloomHelpText =
 const Rml::String kBloomBrightnessHelpText =
     "Configure bloom intensity. Higher values make bright areas glow more strongly.";
 const Rml::String kUnlockFramerateHelpText =
-    "Uses inter-frame interpolation to enable higher frame rates.<br/><br/>May introduce minor "
-    "visual artifacts or animation glitches.";
+    "Uses inter-frame interpolation to enable higher frame rates. "
+    "May introduce minor visual artifacts or animation glitches.";
 
 constexpr std::array kFrameRateLimitValues = {30, 60, 120, 240, 360, 480, 0};
 constexpr std::array kFrameRateLimitNames = {
@@ -1317,6 +1317,12 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                     });
                 }
                 pane.add_text(kUnlockFramerateHelpText);
+            });
+        config_bool_select(leftPane, rightPane, getSettings().game.lowLatencyPresentation,
+            {
+                .key = "Low Latency Presentation",
+                .helpText = "Reduces the extra presentation delay used by the PC port's normal frame pacing. "
+
             });
         config_bool_select(leftPane, rightPane, getSettings().game.enableDepthOfField,
             {

@@ -67,6 +67,7 @@ UserSettings g_userSettings = {
         .enableTextureReplacements {"game.enableTextureReplacements", true},
         .enableFrameInterpolation {"game.enableFrameInterpolation", false},
         .frameRateLimit {"game.frameRateLimit", 0},
+        .lowLatencyPresentation {"game.lowLatencyPresentation", true},
         .internalResolutionScale {"game.internalResolutionScale", 0},
         .shadowResolutionMultiplier {"game.shadowResolutionMultiplier", 1},
         .resampler {"game.resampler", Resampler::Bilinear},
@@ -355,6 +356,7 @@ void registerSettings() {
     Register(g_userSettings.game.invincibleEnemies);
     Register(g_userSettings.game.enableFrameInterpolation);
     Register(g_userSettings.game.frameRateLimit);
+    Register(g_userSettings.game.lowLatencyPresentation);
     Register(g_userSettings.game.gyroMode);
     Register(g_userSettings.game.enableGyroAim);
     Register(g_userSettings.game.enableGyroRollgoal);
