@@ -118,6 +118,13 @@ set(AURORA_ENABLE_CARD ON CACHE BOOL "Enable CARD API support" FORCE)
 set(AURORA_ENABLE_RMLUI ON CACHE BOOL "Enable RmlUi UI support" FORCE)
 add_subdirectory(extern/aurora EXCLUDE_FROM_ALL)
 target_compile_definitions(aurora_mtx PRIVATE MTX_USE_PS=1)
+target_sources(aurora_mtx PRIVATE ${CMAKE_SOURCE_DIR}/src/dusk/vector_rsqrt.cpp)
+target_include_directories(aurora_mtx PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_compile_options(aurora_mtx PRIVATE
+    $<$<AND:$<COMPILE_LANGUAGE:C>,$<C_COMPILER_ID:MSVC>>:/FI${CMAKE_SOURCE_DIR}/include/dusk/vector_rsqrt_force_include.h>
+    $<$<AND:$<COMPILE_LANGUAGE:C>,$<NOT:$<C_COMPILER_ID:MSVC>>>:-include>
+    $<$<AND:$<COMPILE_LANGUAGE:C>,$<NOT:$<C_COMPILER_ID:MSVC>>>:${CMAKE_SOURCE_DIR}/include/dusk/vector_rsqrt_force_include.h>
+)
 
 add_subdirectory(libs/freeverb)
 

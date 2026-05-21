@@ -223,6 +223,7 @@ struct UserSettings {
 
         // Technical
         ConfigVar<bool> restoreWiiGlitches;
+        ConfigVar<bool> usePpcFastInvSqrt;
 
         // Controls
         ConfigVar<bool> enableTurboKeybind;

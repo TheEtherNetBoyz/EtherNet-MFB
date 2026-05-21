@@ -20,6 +20,7 @@
 #include "dusk/main.h"
 #include "dusk/ui/menu_bar.hpp"
 #include "dusk/ui/ui.hpp"
+#include "dusk/vector_rsqrt.h"
 #include "m_Do/m_Do_main.h"
 
 #include <aurora/lib/internal.hpp>
@@ -366,6 +367,9 @@ namespace dusk {
             }
             if (ImGui::BeginMenu("Misc")) {
                 MenuCheckbox("Restore Wii 1.0 Glitches", s.game.restoreWiiGlitches);
+                if (MenuCheckbox("PPC Fast InvSqrt", s.game.usePpcFastInvSqrt)) {
+                    dusk_set_native_vector_rsqrt(!s.game.usePpcFastInvSqrt.getValue());
+                }
                 MenuCheckbox("Rotating Link Doll", s.game.enableLinkDollRotation);
                 MenuCheckbox("Hide TV Settings Screen", s.game.hideTvSettingsScreen);
                 MenuCheckbox("Pause On Focus Lost", s.game.pauseOnFocusLost, !s.game.speedrunMode);

@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "dusk/math.h"
+#include "dusk/vector_rsqrt.h"
 
 typedef f32 Mtx33[3][3];
 typedef f32 Mtx23[2][3];
@@ -56,7 +57,7 @@ inline float __frsqrtes(__REGISTER double f) {
     // clang-format on
     return out;
 #else
-    return 1.0f / sqrtf(f);
+    return dusk_vector_rsqrt((float)f);
 #endif
 }
 
@@ -73,7 +74,7 @@ inline f32 JMAFastSqrt(__REGISTER const f32 input) {
     }
 #else
     if (input > 0.0f) {
-        return frsqrte(input) * input;
+        return dusk_fast_sqrt(input);
     } else {
         return input;
     }

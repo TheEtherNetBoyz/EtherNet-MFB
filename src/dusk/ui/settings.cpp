@@ -15,6 +15,7 @@
 #include "dusk/livesplit.h"
 #include "dusk/main.h"
 #include "dusk/discord_presence.hpp"
+#include "dusk/vector_rsqrt.h"
 #include "graphics_tuner.hpp"
 #include "m_Do/m_Do_main.h"
 #include "menu_bar.hpp"
@@ -1567,6 +1568,15 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "experience.");
         addOption("Restore Wii 1.0 Glitches", getSettings().game.restoreWiiGlitches,
             "Restores patched glitches from Wii USA 1.0, the first released version.");
+        config_bool_select(leftPane, rightPane, getSettings().game.usePpcFastInvSqrt,
+            {
+                .key = "PPC Fast InvSqrt",
+                .helpText =
+                    "Uses the default GameCube/Wii reciprocal square root estimate for fast "
+                    "square-root and vector distance math. Turn this off to use the modern "
+                    "platform sqrt implementation.",
+                .onChange = [](bool value) { dusk_set_native_vector_rsqrt(!value); },
+            });
         addOption("Enable Rotating Link Doll", getSettings().game.enableLinkDollRotation,
             "Enables rotating Link in the collection menu with the C-Stick.");
 

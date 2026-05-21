@@ -85,6 +85,7 @@
 #include "dusk/config.hpp"
 #include "dusk/speedrun.h"
 #include "dusk/settings.h"
+#include "dusk/vector_rsqrt.h"
 #include "dusk/io.hpp"
 #include "dusk/version.hpp"
 #include "dusk/discord_presence.hpp"
@@ -542,6 +543,7 @@ int game_main(int argc, char* argv[]) {
         dusk::resetForSpeedrunMode();
     }
     ApplyCVarOverrides(parsed_arg_options["cvar"]);
+    dusk_set_native_vector_rsqrt(!dusk::getSettings().game.usePpcFastInvSqrt.getValue());
     dusk::crash_reporting::initialize();
     // TODO: How to handle this?
     // PADSetDefaultMapping(&defaultPadMapping, PAD_TYPE_STANDARD);
