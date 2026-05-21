@@ -6,6 +6,7 @@
 
 #if TARGET_PC
 #include "dusk/action_bindings.h"
+#include "dusk/latency_trace.h"
 #endif
 
 u32 JUTGamePad::CRumble::sChannelMask[4] = {
@@ -88,9 +89,13 @@ int JUTGamePad::sClampMode = EClampStick;
 u32 JUTGamePad::sRumbleSupported;
 
 u32 JUTGamePad::read() {
+#if TARGET_PC
+    dusk::latency_trace::mark("JUTGamePad_read_before_PADRead");
+#endif
     sRumbleSupported = PADRead(mPadStatus);
 #if TARGET_PC
-   dusk::updateActionBindings();
+    dusk::latency_trace::mark("JUTGamePad_read_after_PADRead");
+    dusk::updateActionBindings();
 #endif
 
     switch (sClampMode) {

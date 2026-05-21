@@ -24,8 +24,6 @@ std::unordered_map<uintptr_t, clock::time_point> s_interval_last_sample;
 
 constexpr clock::duration kSimPeriodDuration =
     std::chrono::duration_cast<clock::duration>(std::chrono::duration<float>(sim_pace()));
-constexpr clock::duration kLowLatencyInterpDelay =
-    std::chrono::duration_cast<clock::duration>(std::chrono::duration<float>(sim_pace() * 0.5f));
 constexpr clock::duration kAbnormalGapResetThreshold = std::chrono::milliseconds(250);
 constexpr int kMaxSimTicksPerFrame = 2;
 
@@ -55,6 +53,13 @@ void apply_frame_rate_limit() {
     s_frame_limiter.Sleep(1'000'000'000ULL / static_cast<Limiter::duration_t>(limit));
 }
 
+clock::duration interpolation_buffer_duration() {
+    const bool use_low_latency_interpolation =
+        dusk::low_latency_presentation_enabled() &&
+        dusk::getSettings().game.lowLatencyInterpolation.getValue();
+    return use_low_latency_interpolation ? kSimPeriodDuration / 2 : kSimPeriodDuration;
+}
+
 void ensure_initialized() {
     if (s_initialized) {
         return;
@@ -73,7 +78,9 @@ void reset_frame_timer() {
 
 MainLoopPacer advance_main_loop() {
     ensure_initialized();
-    apply_frame_rate_limit();
+    if (!dusk::low_latency_presentation_enabled()) {
+        apply_frame_rate_limit();
+    }
 
     const clock::time_point now = clock::now();
     const clock::duration frame_gap = now - s_previous_sample;
@@ -88,6 +95,7 @@ MainLoopPacer advance_main_loop() {
                                     !dusk::getTransientSettings().skipFrameRateLimit;
     out.is_interpolating = should_interpolate;
     out.sim_pace = sim_pace();
+    out.interpolation_buffer_seconds = 0.0f;
 
     if (!should_interpolate) {
         s_current_snapshot_time = now;
@@ -103,15 +111,23 @@ MainLoopPacer advance_main_loop() {
 
     int sim_ticks_to_run = 0;
     clock::time_point projected_snapshot_time = s_current_snapshot_time;
-    const clock::duration interpolation_delay =
-        dusk::low_latency_presentation_enabled() ? kLowLatencyInterpDelay : kSimPeriodDuration;
-    const clock::time_point render_time = now - interpolation_delay;
+    const clock::duration interpolation_buffer = interpolation_buffer_duration();
+    out.interpolation_buffer_seconds = std::chrono::duration<float>(interpolation_buffer).count();
+
+    const clock::time_point render_time = now - interpolation_buffer;
     while (sim_ticks_to_run < kMaxSimTicksPerFrame && projected_snapshot_time < render_time) {
         projected_snapshot_time += kSimPeriodDuration;
         sim_ticks_to_run++;
     }
     out.sim_ticks_to_run = sim_ticks_to_run;
     return out;
+}
+
+void finish_main_loop() {
+    ensure_initialized();
+    if (dusk::low_latency_presentation_enabled()) {
+        apply_frame_rate_limit();
+    }
 }
 
 void commit_sim_tick() {
@@ -121,8 +137,11 @@ void commit_sim_tick() {
 
 float sample_interpolation_step() {
     ensure_initialized();
+    const clock::duration interpolation_buffer = interpolation_buffer_duration();
     const float step =
-        std::chrono::duration<float>(clock::now() - s_current_snapshot_time).count() / sim_pace();
+        std::chrono::duration<float>(clock::now() - s_current_snapshot_time +
+                                     kSimPeriodDuration - interpolation_buffer).count() /
+        sim_pace();
     return std::clamp(step, 0.0f, 1.0f);
 }
 

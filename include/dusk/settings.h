@@ -167,6 +167,7 @@ struct UserSettings {
         ConfigVar<bool> enableFrameInterpolation;
         ConfigVar<int> frameRateLimit;
         ConfigVar<bool> lowLatencyPresentation;
+        ConfigVar<bool> lowLatencyInterpolation;
         ConfigVar<int> internalResolutionScale;
         ConfigVar<int> shadowResolutionMultiplier;
         ConfigVar<Resampler> resampler;
@@ -225,6 +226,7 @@ struct UserSettings {
         // Technical
         ConfigVar<bool> restoreWiiGlitches;
         ConfigVar<bool> usePpcFastInvSqrt;
+        ConfigVar<bool> enableLatencyTrace;
 
         // Controls
         ConfigVar<bool> enableTurboKeybind;

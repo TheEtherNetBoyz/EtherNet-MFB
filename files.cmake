@@ -1415,6 +1415,7 @@ set(DUSK_FILES
         include/dusk/endian_gx.hpp
         include/dusk/config.hpp
         include/dusk/dvd_asset.hpp
+        include/dusk/latency_trace.h
         include/dusk/scope_guard.hpp
         src/dusk/dvd_asset.cpp
         src/d/actor/d_a_alink_dusk.cpp
@@ -1436,6 +1437,7 @@ set(DUSK_FILES
         src/dusk/http/http.hpp
         src/dusk/io.cpp
         src/dusk/layout.cpp
+        src/dusk/latency_trace.cpp
         src/dusk/logging.cpp
         src/dusk/settings.cpp
         src/dusk/speedrun.cpp

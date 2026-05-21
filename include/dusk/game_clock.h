@@ -15,9 +15,11 @@ struct MainLoopPacer {
     bool is_interpolating;
     int sim_ticks_to_run;
     float sim_pace;
+    float interpolation_buffer_seconds;
 };
 
 MainLoopPacer advance_main_loop();
+void finish_main_loop();
 void commit_sim_tick();
 float sample_interpolation_step();
 
