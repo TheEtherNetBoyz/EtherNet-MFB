@@ -370,7 +370,6 @@ namespace dusk {
                 if (MenuCheckbox("PPC Fast InvSqrt", s.game.usePpcFastInvSqrt)) {
                     dusk_set_native_vector_rsqrt(!s.game.usePpcFastInvSqrt.getValue());
                 }
-                MenuCheckbox("Latency Trace", s.game.enableLatencyTrace);
                 MenuCheckbox("Rotating Link Doll", s.game.enableLinkDollRotation);
                 MenuCheckbox("Hide TV Settings Screen", s.game.hideTvSettingsScreen);
                 MenuCheckbox("Pause On Focus Lost", s.game.pauseOnFocusLost, !s.game.speedrunMode);
@@ -442,9 +441,8 @@ namespace dusk {
             MenuCheckbox("Show FPS Counter", s.video.enableFpsOverlay);
             ImGui::Separator();
             FrameRateLimitSlider();
-            MenuCheckbox("Low Latency Presentation", s.game.lowLatencyPresentation);
-            MenuCheckbox("Low Latency Interpolation", s.game.lowLatencyInterpolation,
-                         s.game.enableFrameInterpolation.getValue() && s.game.lowLatencyPresentation.getValue());
+            MenuCheckbox("Low Latency Presentation", s.game.lowLatencyPresentation,
+                         getTransientSettings().forceThirtyFpsLimit || !s.game.enableFrameInterpolation.getValue());
             MenuCheckbox("Depth of Field", s.game.enableDepthOfField);
             MenuCheckbox("Map Background", s.game.enableMapBackground);
             MenuCheckbox("Disable Water Refraction", s.game.disableWaterRefraction);
@@ -519,6 +517,7 @@ namespace dusk {
             config::ImGuiMenuItem("Show Input Viewer", nullptr, getSettings().game.showInputViewer);
             config::ImGuiMenuItem("Show Gyro Input Viewer", nullptr,
                 getSettings().game.showInputViewerGyro, getSettings().game.showInputViewer);
+            config::ImGuiMenuItem("Latency Trace", nullptr, getSettings().game.enableLatencyTrace);
 
             if (!dusk::IsGameLaunched) {
                 ImGui::EndDisabled();

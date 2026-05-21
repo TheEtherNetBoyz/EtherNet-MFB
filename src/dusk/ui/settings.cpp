@@ -1322,17 +1322,10 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             {
                 .key = "Low Latency Presentation",
                 .helpText = "Reduces the extra presentation delay used by the PC port's normal frame pacing. "
-
-            });
-        config_bool_select(leftPane, rightPane, getSettings().game.lowLatencyInterpolation,
-            {
-                .key = "Low Latency Interpolation",
-                .helpText =
-                    "Experimental: reduces the interpolation buffer for higher frame-rate modes. "
-                    "This may improve response at the cost of more visible interpolation instability.",
+                            "Only available in 30 FPS mode.",
                 .isDisabled = [] {
-                    return !getSettings().game.enableFrameInterpolation.getValue() ||
-                           !getSettings().game.lowLatencyPresentation.getValue();
+                    return getSettings().game.enableFrameInterpolation.getValue() &&
+                           !getTransientSettings().forceThirtyFpsLimit;
                 },
             });
         config_bool_select(leftPane, rightPane, getSettings().game.enableDepthOfField,
@@ -1594,8 +1587,6 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                     "platform sqrt implementation.",
                 .onChange = [](bool value) { dusk_set_native_vector_rsqrt(!value); },
             });
-        addOption("Latency Trace", getSettings().game.enableLatencyTrace,
-            "Writes input timing markers to logs/latency-trace.csv for measuring input-to-present latency.");
         addOption("Enable Rotating Link Doll", getSettings().game.enableLinkDollRotation,
             "Enables rotating Link in the collection menu with the C-Stick.");
 

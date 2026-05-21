@@ -54,10 +54,7 @@ void apply_frame_rate_limit() {
 }
 
 clock::duration interpolation_buffer_duration() {
-    const bool use_low_latency_interpolation =
-        dusk::low_latency_presentation_enabled() &&
-        dusk::getSettings().game.lowLatencyInterpolation.getValue();
-    return use_low_latency_interpolation ? kSimPeriodDuration / 2 : kSimPeriodDuration;
+    return kSimPeriodDuration;
 }
 
 void ensure_initialized() {
@@ -165,7 +162,9 @@ float consume_interval(const void* consumer) {
 namespace dusk {
 
 bool low_latency_presentation_enabled() {
-    return getSettings().game.lowLatencyPresentation.getValue();
+    const bool is_thirty_fps_mode = getTransientSettings().forceThirtyFpsLimit ||
+                                    !getSettings().game.enableFrameInterpolation.getValue();
+    return is_thirty_fps_mode && getSettings().game.lowLatencyPresentation.getValue();
 }
 
 }  // namespace dusk

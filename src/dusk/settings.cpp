@@ -68,7 +68,6 @@ UserSettings g_userSettings = {
         .enableFrameInterpolation {"game.enableFrameInterpolation", false},
         .frameRateLimit {"game.frameRateLimit", 0},
         .lowLatencyPresentation {"game.lowLatencyPresentation", true},
-        .lowLatencyInterpolation {"game.lowLatencyInterpolation", false},
         .internalResolutionScale {"game.internalResolutionScale", 0},
         .shadowResolutionMultiplier {"game.shadowResolutionMultiplier", 1},
         .resampler {"game.resampler", Resampler::Bilinear},
@@ -360,7 +359,6 @@ void registerSettings() {
     Register(g_userSettings.game.enableFrameInterpolation);
     Register(g_userSettings.game.frameRateLimit);
     Register(g_userSettings.game.lowLatencyPresentation);
-    Register(g_userSettings.game.lowLatencyInterpolation);
     Register(g_userSettings.game.gyroMode);
     Register(g_userSettings.game.enableGyroAim);
     Register(g_userSettings.game.enableGyroRollgoal);

@@ -167,7 +167,6 @@ struct UserSettings {
         ConfigVar<bool> enableFrameInterpolation;
         ConfigVar<int> frameRateLimit;
         ConfigVar<bool> lowLatencyPresentation;
-        ConfigVar<bool> lowLatencyInterpolation;
         ConfigVar<int> internalResolutionScale;
         ConfigVar<int> shadowResolutionMultiplier;
         ConfigVar<Resampler> resampler;
