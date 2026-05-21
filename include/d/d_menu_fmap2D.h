@@ -87,6 +87,10 @@ public:
     void restorePresentationInterpolation();
     void primePresentationInterpolation();
     void resetPresentationInterpolation();
+    void setPresentationSwipe(u8, f32, f32, bool, bool);
+    void clearPresentationSwipe();
+    bool applyPresentationSwipe();
+    void restorePresentationSwipe();
     #endif
 
     virtual void draw();
@@ -346,6 +350,10 @@ public:
 
     #if TARGET_PC
     void fMapTopWide();
+    void setPresentationSwipe(u8, f32, f32, bool, bool);
+    void clearPresentationSwipe();
+    bool applyPresentationSwipe();
+    void restorePresentationSwipe();
     #endif
 
     virtual void draw();

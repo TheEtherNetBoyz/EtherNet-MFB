@@ -96,8 +96,21 @@ struct FmapPresentationBackup {
     bool active = false;
 };
 
+struct FmapSwipeInterp {
+    f32 frame = 0.0f;
+    f32 frameMax = 1.0f;
+    f32 backupX = 0.0f;
+    f32 backupY = 0.0f;
+    f32 backupAlpha = 0.0f;
+    u8 dir = 0;
+    bool opening = false;
+    bool closing = false;
+    bool active = false;
+};
+
 static std::unordered_map<const dMenu_Fmap2DBack_c*, FmapControlInterp> s_fmapControlInterp;
 static std::unordered_map<dMenu_Fmap2DBack_c*, FmapPresentationBackup> s_fmapPresentationBackup;
+static std::unordered_map<void*, FmapSwipeInterp> s_fmapSwipeInterp;
 
 static bool getFmapPresentationBackup(dMenu_Fmap2DBack_c* map, FmapPresentationBackup* out) {
     auto it = s_fmapPresentationBackup.find(map);
@@ -144,6 +157,65 @@ static void copyFmapArray(f32* dst, const f32* src) {
     for (int i = 0; i < 8; i++) {
         dst[i] = src[i];
     }
+}
+
+static f32 clampFmapSwipeRate(f32 rate) {
+    if (rate < 0.0f) {
+        return 0.0f;
+    }
+
+    if (rate > 1.0f) {
+        return 1.0f;
+    }
+
+    return rate;
+}
+
+static void calcFmapSwipeTrans(u8 dir, f32 rate, bool opening, f32* x, f32* y) {
+    const f32 dist = 1.0f - clampFmapSwipeRate(rate);
+
+    *x = 0.0f;
+    *y = 0.0f;
+
+    if (dir == 1) {
+        *x = dist * (opening ? -FB_WIDTH_BASE : FB_WIDTH_BASE);
+    } else if (dir == 3) {
+        *x = dist * (opening ? FB_WIDTH_BASE : -FB_WIDTH_BASE);
+    } else if (dir == 2) {
+        *y = dist * (opening ? -FB_HEIGHT_BASE : FB_HEIGHT_BASE);
+    } else if (dir == 0) {
+        *y = dist * (opening ? FB_HEIGHT_BASE : -FB_HEIGHT_BASE);
+    }
+}
+
+static bool getFmapSwipeInterp(void* key, f32* x, f32* y, f32* alpha) {
+    auto it = s_fmapSwipeInterp.find(key);
+    if (it == s_fmapSwipeInterp.end() || (!it->second.opening && !it->second.closing)) {
+        return false;
+    }
+
+    if (!dusk::frame_interp::is_enabled() || dusk::frame_interp::is_sim_frame() ||
+        it->second.frameMax <= 0.0f)
+    {
+        return false;
+    }
+
+    const f32 step = dusk::frame_interp::get_interpolation_step();
+    const f32 frame = it->second.opening ? it->second.frame + step : it->second.frame - step;
+    const f32 rate = clampFmapSwipeRate(frame / it->second.frameMax);
+    calcFmapSwipeTrans(it->second.dir, rate, it->second.opening, x, y);
+    *alpha = rate;
+    return true;
+}
+
+static void setFmapSwipeInterp(void* key, u8 dir, f32 frame, f32 frameMax, bool opening,
+                               bool closing) {
+    FmapSwipeInterp& interp = s_fmapSwipeInterp[key];
+    interp.dir = dir;
+    interp.frame = frame;
+    interp.frameMax = frameMax;
+    interp.opening = opening;
+    interp.closing = closing;
 }
 
 static void recordFmapControlSample(const dMenu_Fmap2DBack_c* map, f32 x, f32 y, f32 zoom,
@@ -422,6 +494,48 @@ void dMenu_Fmap2DBack_c::primePresentationInterpolation() {
 void dMenu_Fmap2DBack_c::resetPresentationInterpolation() {
     s_fmapControlInterp.erase(this);
     s_fmapPresentationBackup.erase(this);
+    s_fmapSwipeInterp.erase(this);
+}
+
+void dMenu_Fmap2DBack_c::setPresentationSwipe(u8 dir, f32 frame, f32 frameMax, bool opening,
+                                              bool closing) {
+    setFmapSwipeInterp(this, dir, frame, frameMax, opening, closing);
+}
+
+void dMenu_Fmap2DBack_c::clearPresentationSwipe() {
+    s_fmapSwipeInterp.erase(this);
+}
+
+bool dMenu_Fmap2DBack_c::applyPresentationSwipe() {
+    f32 transX;
+    f32 transY;
+    f32 alpha;
+    if (!getFmapSwipeInterp(this, &transX, &transY, &alpha)) {
+        return false;
+    }
+
+    FmapSwipeInterp& interp = s_fmapSwipeInterp[this];
+    interp.backupX = mTransX;
+    interp.backupY = mTransZ;
+    interp.backupAlpha = mAlphaRate;
+    interp.active = true;
+    mTransX = transX;
+    mTransZ = transY;
+    setAllAlphaRate(alpha, false);
+    return true;
+}
+
+void dMenu_Fmap2DBack_c::restorePresentationSwipe() {
+    auto it = s_fmapSwipeInterp.find(this);
+    if (it == s_fmapSwipeInterp.end() || !it->second.active) {
+        return;
+    }
+
+    FmapSwipeInterp& interp = it->second;
+    mTransX = interp.backupX;
+    mTransZ = interp.backupY;
+    setAllAlphaRate(interp.backupAlpha, false);
+    interp.active = false;
 }
 #endif
 
@@ -675,6 +789,7 @@ void dMenu_Fmap2DBack_c::draw() {
     #if TARGET_PC
     fMapBackWide();
     bool restoreInterpState = applyPresentationInterpolation();
+    bool restoreSwipeState = applyPresentationSwipe();
     #endif
 
     calcBlink();
@@ -900,6 +1015,10 @@ void dMenu_Fmap2DBack_c::draw() {
                     mDoGph_gInf_c::getHeightF(), false, false, false);
 
 #if TARGET_PC
+    if (restoreSwipeState) {
+        restorePresentationSwipe();
+    }
+
     if (restoreInterpState) {
         restorePresentationInterpolation();
     }
@@ -3139,9 +3258,53 @@ void dMenu_Fmap2DTop_c::setAllAlphaRate(f32 i_rate, bool i_init) {
     mpTitleRoot->setAlphaMorfRate(i_rate);
 }
 
+#if TARGET_PC
+void dMenu_Fmap2DTop_c::setPresentationSwipe(u8 dir, f32 frame, f32 frameMax, bool opening,
+                                             bool closing) {
+    setFmapSwipeInterp(this, dir, frame, frameMax, opening, closing);
+}
+
+void dMenu_Fmap2DTop_c::clearPresentationSwipe() {
+    s_fmapSwipeInterp.erase(this);
+}
+
+bool dMenu_Fmap2DTop_c::applyPresentationSwipe() {
+    f32 transX;
+    f32 transY;
+    f32 alpha;
+    if (!getFmapSwipeInterp(this, &transX, &transY, &alpha)) {
+        return false;
+    }
+
+    FmapSwipeInterp& interp = s_fmapSwipeInterp[this];
+    interp.backupX = mTransX;
+    interp.backupY = mTransY;
+    interp.backupAlpha = mAlphaRate;
+    interp.active = true;
+    mTransX = transX;
+    mTransY = transY;
+    setAllAlphaRate(alpha, false);
+    return true;
+}
+
+void dMenu_Fmap2DTop_c::restorePresentationSwipe() {
+    auto it = s_fmapSwipeInterp.find(this);
+    if (it == s_fmapSwipeInterp.end() || !it->second.active) {
+        return;
+    }
+
+    FmapSwipeInterp& interp = it->second;
+    mTransX = interp.backupX;
+    mTransY = interp.backupY;
+    setAllAlphaRate(interp.backupAlpha, false);
+    interp.active = false;
+}
+#endif
+
 void dMenu_Fmap2DTop_c::draw() {
     #if TARGET_PC
     fMapTopWide();
+    bool restoreSwipeState = applyPresentationSwipe();
     #endif
 
     u32 scissor_left, scissor_top, scissor_width, scissor_height;
@@ -3156,6 +3319,12 @@ void dMenu_Fmap2DTop_c::draw() {
     if (mpScrnExplain) {
         mpScrnExplain->draw(ctx);
     }
+
+    #if TARGET_PC
+    if (restoreSwipeState) {
+        restorePresentationSwipe();
+    }
+    #endif
 }
 
 void dMenu_Fmap2DTop_c::btkAnimeLoop(J2DAnmTextureSRTKey* i_anm, f32 i_delta) {

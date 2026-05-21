@@ -1727,6 +1727,9 @@ bool dMenu_Fmap_c::isOpen() {
         if (mpDraw2DBack != NULL) {
             mpDraw2DBack->resetPresentationInterpolation();
         }
+        if (mpDraw2DTop != NULL) {
+            mpDraw2DTop->clearPresentationSwipe();
+        }
         dusk::frame_interp::request_presentation_sync();
 #endif
     }
@@ -1761,6 +1764,14 @@ bool dMenu_Fmap_c::isOpen() {
     mpDraw2DBack->setAllAlphaRate(mAlphaRatio, init);
     mpDraw2DTop->setAllTrans(mTransX, mTransY);
     mpDraw2DTop->setAllAlphaRate(mAlphaRatio, init);
+#if TARGET_PC
+    mpDraw2DBack->setPresentationSwipe(mPanDirection, mDisplayFrame, display_frame_num, !ret, false);
+    mpDraw2DTop->setPresentationSwipe(mPanDirection, mDisplayFrame, display_frame_num, !ret, false);
+    if (ret) {
+        mpDraw2DBack->clearPresentationSwipe();
+        mpDraw2DTop->clearPresentationSwipe();
+    }
+#endif
     mpDraw2DBack->setSpotTextureFadeAlpha(mSpotTextureFadeAlpha);
 
     return ret;
@@ -1803,6 +1814,14 @@ bool dMenu_Fmap_c::isClose() {
     mpDraw2DBack->setAllAlphaRate(mAlphaRatio, bVar2);
     mpDraw2DTop->setAllTrans(mTransX, mTransY);
     mpDraw2DTop->setAllAlphaRate(mAlphaRatio, bVar2);
+#if TARGET_PC
+    mpDraw2DBack->setPresentationSwipe(mPanDirection, mDisplayFrame, undisplay_frame_num, false, !ret);
+    mpDraw2DTop->setPresentationSwipe(mPanDirection, mDisplayFrame, undisplay_frame_num, false, !ret);
+    if (ret) {
+        mpDraw2DBack->clearPresentationSwipe();
+        mpDraw2DTop->clearPresentationSwipe();
+    }
+#endif
 
     return ret;
 }
