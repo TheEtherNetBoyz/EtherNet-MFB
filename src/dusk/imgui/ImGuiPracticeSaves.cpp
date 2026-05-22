@@ -4,8 +4,11 @@
 #include "imgui.h"
 #include "fmt/format.h"
 
+#include "c/c_damagereaction.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_kankyo.h"
+#include "d/actor/d_a_b_ds.h"
+#include "d/actor/d_a_e_zs.h"
 #include "d/actor/d_a_player.h"
 #include "dusk/config.hpp"
 #include "dusk/io.hpp"
@@ -129,32 +132,64 @@ enum class PracticeSaveCallback : int {
     None,
     OrdonGateClip,
     SetupHugo,
+    StallordInit,
+    StallordSkipCAD,
+    StallordSkipJoseph,
+    StallordPhase2,
 };
 
-PracticeSaveCallback player_init_callback(ImGuiPracticeSaves::SaveCategory category, int index) {
+struct PracticeSaveCallbacks {
+    PracticeSaveCallback stageInit = PracticeSaveCallback::None;
+    PracticeSaveCallback playerInit = PracticeSaveCallback::None;
+};
+
+PracticeSaveCallbacks practice_save_callbacks(ImGuiPracticeSaves::SaveCategory category, int index) {
     switch (category) {
     case ImGuiPracticeSaves::SaveCategory::Any:
         if (index == 0) {
-            return PracticeSaveCallback::OrdonGateClip;
+            return {PracticeSaveCallback::None, PracticeSaveCallback::OrdonGateClip};
         }
         if (index == 4) {
-            return PracticeSaveCallback::SetupHugo;
+            return {PracticeSaveCallback::None, PracticeSaveCallback::SetupHugo};
+        }
+        if (index == 40) {
+            return {PracticeSaveCallback::StallordInit, PracticeSaveCallback::StallordInit};
+        }
+        if (index == 41) {
+            return {PracticeSaveCallback::StallordInit, PracticeSaveCallback::StallordSkipCAD};
+        }
+        if (index == 42 || index == 43) {
+            return {PracticeSaveCallback::StallordInit, PracticeSaveCallback::StallordSkipJoseph};
+        }
+        if (index == 44) {
+            return {PracticeSaveCallback::StallordInit, PracticeSaveCallback::StallordPhase2};
         }
         break;
     case ImGuiPracticeSaves::SaveCategory::NoSq:
         if (index == 1) {
-            return PracticeSaveCallback::SetupHugo;
+            return {PracticeSaveCallback::None, PracticeSaveCallback::SetupHugo};
+        }
+        if (index == 23) {
+            return {PracticeSaveCallback::StallordInit, PracticeSaveCallback::StallordInit};
+        }
+        break;
+    case ImGuiPracticeSaves::SaveCategory::Hundred:
+        if (index == 40) {
+            return {PracticeSaveCallback::StallordInit, PracticeSaveCallback::StallordInit};
         }
         break;
     case ImGuiPracticeSaves::SaveCategory::AllDungeons:
         if (index == 3) {
-            return PracticeSaveCallback::SetupHugo;
+            return {PracticeSaveCallback::None, PracticeSaveCallback::SetupHugo};
+        }
+        if (index == 30) {
+            return {PracticeSaveCallback::StallordInit, PracticeSaveCallback::StallordInit};
         }
         break;
     default:
         break;
     }
-    return PracticeSaveCallback::None;
+    return {};
 }
 
 void apply_ordon_gate_clip_callback() {
@@ -181,6 +216,38 @@ void apply_hugo_callback() {
     }
 }
 
+static void* find_staltroop_actor(void* actor, void*) {
+    if (fopAcM_IsActor(actor) && fopAcM_GetName(actor) == fpcNm_E_ZS_e) {
+        return actor;
+    }
+
+    return nullptr;
+}
+
+void apply_stallord_init_callback() {
+    if (auto* stallord = static_cast<daB_DS_c*>(fopAcM_SearchByName(fpcNm_B_DS_e))) {
+        dComIfGs_onZoneSwitch(5, fopAcM_GetRoomNo(stallord));
+    }
+
+    cDmr_SkipInfo = 1;
+}
+
+void apply_stallord_skip_joseph_callback(bool moveToSkipPosition) {
+    apply_stallord_init_callback();
+
+    if (auto* joseph = static_cast<daE_ZS_c*>(fopAcM_Search(find_staltroop_actor, nullptr))) {
+        joseph->duskSetupStallordSkip(moveToSkipPosition);
+    }
+}
+
+void apply_stallord_phase2_callback() {
+    apply_stallord_init_callback();
+
+    if (auto* stallord = static_cast<daB_DS_c*>(fopAcM_SearchByName(fpcNm_B_DS_e))) {
+        stallord->duskSetupStallordPhase2();
+    }
+}
+
 void apply_player_init_callback(PracticeSaveCallback callback) {
     switch (callback) {
     case PracticeSaveCallback::OrdonGateClip:
@@ -188,6 +255,18 @@ void apply_player_init_callback(PracticeSaveCallback callback) {
         break;
     case PracticeSaveCallback::SetupHugo:
         apply_hugo_callback();
+        break;
+    case PracticeSaveCallback::StallordInit:
+        apply_stallord_init_callback();
+        break;
+    case PracticeSaveCallback::StallordSkipCAD:
+        apply_stallord_skip_joseph_callback(false);
+        break;
+    case PracticeSaveCallback::StallordSkipJoseph:
+        apply_stallord_skip_joseph_callback(true);
+        break;
+    case PracticeSaveCallback::StallordPhase2:
+        apply_stallord_phase2_callback();
         break;
     default:
         break;
@@ -753,7 +832,11 @@ bool ImGuiPracticeSaves::loadPracticeSave(const PracticeSaveEntry& entry) {
         m_pendingSavedata = save;
         m_pendingVibration = vibration;
         m_pendingPlacement = entry.placement;
-        m_pendingPlayerInitCallback = static_cast<int>(player_init_callback(m_saveCategory, entry.index));
+        const PracticeSaveCallbacks callbacks = practice_save_callbacks(m_saveCategory, entry.index);
+        if (callbacks.stageInit != PracticeSaveCallback::None) {
+            apply_player_init_callback(callbacks.stageInit);
+        }
+        m_pendingPlayerInitCallback = static_cast<int>(callbacks.playerInit);
         m_pendingPlacementFrames = 0;
         m_pendingPlayerInitFrames = 0;
         m_loadInProgress = true;

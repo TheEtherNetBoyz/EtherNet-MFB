@@ -557,6 +557,19 @@ int daE_ZS_c::create() {
     return phase;
 }
 
+void daE_ZS_c::duskSetupStallordSkip(bool moveToSkipPosition) {
+    setActionMode(ACT_WAIT, 0);
+    field_0x65c = 0.0f;
+    field_0x673 = 1;
+    mCyl.OnTgSetBit();
+    mCyl.OnCoSetBit();
+    fopAcM_OnStatus(this, fopAcStts_UNK_0x200000_e);
+
+    if (moveToSkipPosition) {
+        current.pos.set(301.9f, 1800.0f, -4966.0f);
+    }
+}
+
 static int daE_ZS_Create(daE_ZS_c* i_this) {
     return i_this->create();
 }

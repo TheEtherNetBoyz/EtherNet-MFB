@@ -190,6 +190,7 @@ public:
     void offDemo() { mIsDemo = false; }
     void duskFinishStallordDeathDemo();
     bool duskProcessStallordDeathDemoLocalSkip();
+    void duskSetupStallordPhase2();
 
 private:
     /* 0x05AC */ request_of_phase_process_class mPhase;

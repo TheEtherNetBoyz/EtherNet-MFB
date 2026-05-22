@@ -38,6 +38,7 @@ public:
     int _delete();
     int CreateHeap();
     int create();
+    void duskSetupStallordSkip(bool moveToSkipPosition);
 
 private:
     /* 0x5ac */ request_of_phase_process_class mPhase;

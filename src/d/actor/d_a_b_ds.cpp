@@ -3708,6 +3708,11 @@ bool daB_DS_c::duskProcessStallordDeathDemoLocalSkip() {
 
     return false;
 }
+
+void daB_DS_c::duskSetupStallordPhase2() {
+    mAction = ACT_DAMAGE;
+    mMode = 100;
+}
 void daB_DS_c::executeBattle2Dead() {
     static cXyz mEd2CenterDt[2] = {
         cXyz(70.0f, 1890.0f, -1190.0f),
