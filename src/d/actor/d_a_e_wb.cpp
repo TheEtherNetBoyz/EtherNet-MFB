@@ -19,6 +19,7 @@
 #include "m_Do/m_Do_graphic.h"
 #include "res/Object/Always.h"
 #include "dusk/dusk.h"
+#include "dusk/cutscene_skip.h"
 #include "dusk/frame_interpolation.h"
 #include <cstring>
 
@@ -3753,6 +3754,55 @@ static void cam_3d_morf(e_wb_class* i_this, f32 i_scale) {
                   i_this->demo_cam_eye_spd.z * i_this->demo_cam_morf);
 }
 
+static bool checkBulblinCampDefeatSkipDemo(e_wb_class* i_this) {
+    return dusk::cutscene_skip::enabled() && strcmp(dComIfGp_getStartStageName(), "F_SP118") == 0 &&
+           i_this->demo_mode >= 60 && i_this->demo_mode <= 64;
+}
+
+static void finishBulblinCampDefeatSkip(e_wb_class* i_this, e_rdb_class* boss,
+                                        camera_process_class* cam, daPy_py_c* player) {
+    cXyz player_pos(2120.0f, player->current.pos.y, 1200.0f);
+    player->setPlayerPosAndAngle(&player_pos, 5300, 0);
+
+    dComIfGs_onOneZoneSwitch(5, -1);
+
+    daObjCRVSTEEL_c* crtSteel = (daObjCRVSTEEL_c*)fopAcM_SearchByName(fpcNm_Obj_CRVSTEEL_e);
+    if (crtSteel != NULL) {
+        crtSteel->CloseSet(-40.0f + AREG_F(5));
+    }
+
+    if (boss != NULL) {
+        boss->mMode = 10;
+        boss->field_0x680 = 0;
+        boss->field_0x6c0 = 10;
+        boss->field_0xfcf = 2;
+        boss->field_0xfe4 = 24;
+        boss->field_0x6d8 = 4;
+        boss->mBlend = 0.0f;
+        boss->enemy.current.pos.y = boss->enemy.home.pos.y + 5000.0f;
+        boss->enemy.speed.y = 0.0f;
+        fopAcM_OffStatus(&boss->enemy, 0x100);
+    }
+
+    i_this->field_0x1720 = 0;
+    i_this->field_0x171c = 0.0f;
+    i_this->demo_mode = 0;
+    i_this->demo_timer = 0;
+
+    dComIfGp_getVibration().StopQuake(0x1F);
+    Z2GetAudioMgr()->seMoveVolumeAll(1.0f, 0);
+    Z2GetAudioMgr()->bgmStop(0, 0);
+    Z2GetAudioMgr()->bgmStreamStop(0);
+    Z2GetAudioMgr()->subBgmStop();
+    Z2GetAudioMgr()->setDemoName(NULL);
+
+    cam->mCamera.Reset(i_this->demo_cam_ctr, i_this->demo_cam_eye);
+    cam->mCamera.Start();
+    cam->mCamera.SetTrimSize(0);
+    dComIfGp_event_reset();
+    daPy_getPlayerActorClass()->cancelOriginalDemo();
+}
+
 static void demo_camera(e_wb_class* i_this) {
     fopEn_enemy_c* enemy = (fopEn_enemy_c*)i_this;
     camera_process_class* cam = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
@@ -4593,6 +4643,9 @@ static void demo_camera(e_wb_class* i_this) {
         boss->enemy.shape_angle.y = boss->enemy.current.angle.y = 2392;
         daPy_getPlayerActorClass()->changeOriginalDemo();
         daPy_getPlayerActorClass()->changeDemoMode(0x17, 1, 2, 0);
+        if (checkBulblinCampDefeatSkipDemo(i_this)) {
+            dComIfGp_getEvent()->startCheckSkipEdge(enemy);
+        }
         dComIfGs_onOneZoneSwitch(5, -1);
     }
         // fallthrough
@@ -5047,6 +5100,8 @@ static void demo_camera(e_wb_class* i_this) {
                     Z2GetAudioMgr()->subBgmStart(Z2BGM_FACE_OFF_BATTLE3);
                 }
             }
+        } else if (checkBulblinCampDefeatSkipDemo(i_this) && dComIfGp_getEvent()->checkSkipEdge()) {
+            finishBulblinCampDefeatSkip(i_this, boss, cam, pla);
         }
     }
 #if TARGET_PC
