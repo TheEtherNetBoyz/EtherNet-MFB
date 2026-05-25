@@ -97,6 +97,7 @@ struct UserSettings {
     struct HotkeyBinding {
         ConfigVar<int> key;
         ConfigVar<int> modifiers;
+        ConfigVar<int> controllerButton;
     };
 
     // Program settings

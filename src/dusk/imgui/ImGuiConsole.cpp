@@ -15,6 +15,7 @@
 #include "SDL3/SDL_keyboard.h"
 #include "SDL3/SDL_mouse.h"
 #include "SDL3/SDL_events.h"
+#include "SDL3/SDL_gamepad.h"
 #include "SDL3/SDL_scancode.h"
 #include "dusk/action_bindings.h"
 #include "dusk/audio/DuskAudioSystem.h"
@@ -32,6 +33,7 @@
 #include "m_Do/m_Do_main.h"
 #include "tracy/Tracy.hpp"
 #include <aurora/gfx.h>
+#include <aurora/lib/input.hpp>
 #include <dolphin/vi.h>
 
 #if _WIN32
@@ -86,6 +88,18 @@ int current_hotkey_modifiers() {
 }
 
 bool hotkey_down(const dusk::UserSettings::HotkeyBinding& binding) {
+    const int controllerButton = binding.controllerButton.getValue();
+    if (static_cast<u32>(controllerButton) != PAD_NATIVE_BUTTON_INVALID) {
+        for (u32 port = 0; port < PAD_CHANMAX; ++port) {
+            auto controller = aurora::input::get_controller_for_player(port);
+            if (controller != nullptr &&
+                SDL_GetGamepadButton(controller->m_controller,
+                                     static_cast<SDL_GamepadButton>(controllerButton))) {
+                return true;
+            }
+        }
+    }
+
     const int scancode = binding.key.getValue();
     if (scancode == SDL_SCANCODE_UNKNOWN || is_modifier_scancode(scancode) ||
         current_hotkey_modifiers() != binding.modifiers.getValue()) {
@@ -98,6 +112,12 @@ bool hotkey_down(const dusk::UserSettings::HotkeyBinding& binding) {
 }
 
 bool hotkey_event_pressed(const SDL_Event& event, const dusk::UserSettings::HotkeyBinding& binding) {
+    if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        const int controllerButton = binding.controllerButton.getValue();
+        return static_cast<u32>(controllerButton) != PAD_NATIVE_BUTTON_INVALID &&
+               event.gbutton.button == controllerButton;
+    }
+
     if (event.type != SDL_EVENT_KEY_DOWN || event.key.repeat) {
         return false;
     }
@@ -565,6 +585,17 @@ namespace dusk {
 
     bool ImGuiConsole::CheckMenuViewToggle(const UserSettings::HotkeyBinding& binding, bool& active) {
         static std::array<std::array<bool, 8>, SDL_SCANCODE_COUNT> sWasDown{};
+        static std::array<bool, SDL_GAMEPAD_BUTTON_COUNT> sControllerWasDown{};
+        const int controllerButton = binding.controllerButton.getValue();
+        if (controllerButton >= 0 && controllerButton < static_cast<int>(sControllerWasDown.size())) {
+            const bool down = hotkey_down(binding);
+            if (down && !sControllerWasDown[controllerButton] && !ImGui::IsAnyItemActive()) {
+                active = !active;
+            }
+            sControllerWasDown[controllerButton] = down;
+            return active;
+        }
+
         const int scancode = binding.key.getValue();
         if (scancode < 0 || scancode >= static_cast<int>(sWasDown.size())) {
             return active;

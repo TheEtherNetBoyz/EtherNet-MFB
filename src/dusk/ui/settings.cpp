@@ -282,6 +282,19 @@ bool keyboard_neutral() {
     return true;
 }
 
+bool controller_neutral() {
+    for (int port = PAD_CHAN0; port < PAD_CHANMAX; ++port) {
+        if (PADGetNativeButtonPressed(port) != -1) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool hotkey_input_neutral() {
+    return keyboard_neutral() && controller_neutral();
+}
+
 int keyboard_key_pressed() {
     int keyCount = 0;
     const bool* keys = SDL_GetKeyboardState(&keyCount);
@@ -296,31 +309,59 @@ int keyboard_key_pressed() {
     return SDL_SCANCODE_UNKNOWN;
 }
 
+int controller_button_pressed() {
+    for (int port = PAD_CHAN0; port < PAD_CHANMAX; ++port) {
+        const int button = PADGetNativeButtonPressed(port);
+        if (button != -1) {
+            return button;
+        }
+    }
+    return static_cast<int>(PAD_NATIVE_BUTTON_INVALID);
+}
+
+void clear_hotkey_binding(UserSettings::HotkeyBinding& binding) {
+    binding.key.setValue(SDL_SCANCODE_UNKNOWN);
+    binding.modifiers.setValue(HOTKEY_MOD_NONE);
+    binding.controllerButton.setValue(PAD_NATIVE_BUTTON_INVALID);
+}
+
 Rml::String hotkey_binding_name(const UserSettings::HotkeyBinding& binding) {
     const int scancode = binding.key.getValue();
-    if (scancode == SDL_SCANCODE_UNKNOWN) {
+    const int controllerButton = binding.controllerButton.getValue();
+    if (scancode == SDL_SCANCODE_UNKNOWN &&
+        static_cast<u32>(controllerButton) == PAD_NATIVE_BUTTON_INVALID) {
         return "Unbound";
     }
 
     Rml::String out;
-    const int modifiers = binding.modifiers.getValue();
-    if (modifiers & HOTKEY_MOD_CTRL) {
-        out += "Ctrl+";
-    }
-    if (modifiers & HOTKEY_MOD_SHIFT) {
-        out += "Shift+";
-    }
-    if (modifiers & HOTKEY_MOD_ALT) {
-        out += "Alt+";
+    if (scancode != SDL_SCANCODE_UNKNOWN) {
+        const int modifiers = binding.modifiers.getValue();
+        if (modifiers & HOTKEY_MOD_CTRL) {
+            out += "Ctrl+";
+        }
+        if (modifiers & HOTKEY_MOD_SHIFT) {
+            out += "Shift+";
+        }
+        if (modifiers & HOTKEY_MOD_ALT) {
+            out += "Alt+";
+        }
+
+        if (scancode < 0 || scancode >= SDL_SCANCODE_COUNT) {
+            out += "Unknown";
+        } else {
+            const char* name = SDL_GetScancodeName(static_cast<SDL_Scancode>(scancode));
+            out += name != nullptr && name[0] != '\0' ? name : "Unknown";
+        }
     }
 
-    if (scancode < 0 || scancode >= SDL_SCANCODE_COUNT) {
-        out += "Unknown";
+    if (static_cast<u32>(controllerButton) != PAD_NATIVE_BUTTON_INVALID) {
+        if (!out.empty()) {
+            out += " / ";
+        }
+        out += native_button_name(nullptr, static_cast<u32>(controllerButton));
         return out;
     }
 
-    const char* name = SDL_GetScancodeName(static_cast<SDL_Scancode>(scancode));
-    out += name != nullptr && name[0] != '\0' ? name : "Unknown";
     return out;
 }
 
@@ -342,7 +383,8 @@ public:
                     .isModified = [action = entry.action] {
                         const auto& binding = hotkey_binding(action);
                         return binding.key.getValue() != binding.key.getDefaultValue() ||
-                               binding.modifiers.getValue() != binding.modifiers.getDefaultValue();
+                               binding.modifiers.getValue() != binding.modifiers.getDefaultValue() ||
+                               binding.controllerButton.getValue() != binding.controllerButton.getDefaultValue();
                     },
                 });
                 button.on_pressed([this, action = entry.action] {
@@ -353,7 +395,8 @@ public:
                     button,
                     rightPane, [helpText = entry.helpText](Pane& pane) {
                         pane.add_text(helpText);
-                        pane.add_rml("<br/>Press A/Enter to bind a new key. Press Escape while binding to clear it.");
+                        pane.add_rml("<br/>Press A/Enter to bind a new key or controller button."
+                                     " Press Escape while binding to clear it.");
                     });
             }
         });
@@ -371,7 +414,7 @@ private:
         }
 
         if (mSuppressCaptureUntilNeutral) {
-            if (!keyboard_neutral()) {
+            if (!hotkey_input_neutral()) {
                 return;
             }
             mSuppressCaptureUntilNeutral = false;
@@ -381,8 +424,18 @@ private:
         const bool* keys = SDL_GetKeyboardState(&keyCount);
         if (keys != nullptr && SDL_SCANCODE_ESCAPE < keyCount && keys[SDL_SCANCODE_ESCAPE]) {
             auto& binding = hotkey_binding(*mPendingHotkey);
+            clear_hotkey_binding(binding);
+            config::Save();
+            mPendingHotkey.reset();
+            return;
+        }
+
+        const int controllerButton = controller_button_pressed();
+        if (static_cast<u32>(controllerButton) != PAD_NATIVE_BUTTON_INVALID) {
+            auto& binding = hotkey_binding(*mPendingHotkey);
             binding.key.setValue(SDL_SCANCODE_UNKNOWN);
             binding.modifiers.setValue(HOTKEY_MOD_NONE);
+            binding.controllerButton.setValue(controllerButton);
             config::Save();
             mPendingHotkey.reset();
             return;
@@ -396,6 +449,7 @@ private:
         auto& binding = hotkey_binding(*mPendingHotkey);
         binding.key.setValue(scancode);
         binding.modifiers.setValue(current_hotkey_modifiers());
+        binding.controllerButton.setValue(PAD_NATIVE_BUTTON_INVALID);
         config::Save();
         mPendingHotkey.reset();
     }
