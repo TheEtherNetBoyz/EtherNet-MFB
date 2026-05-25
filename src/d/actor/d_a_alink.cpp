@@ -77,6 +77,11 @@ static bool isCastleBarrierApproachStage() {
            strcmp(stageName, "F_SP122") == 0 || strcmp(stageName, "D_MN09") == 0;
 }
 
+static bool isCastleBarrierBreakReady() {
+    return dComIfGs_isEventBit(dSv_event_flag_c::F_0250) &&
+           !dComIfGs_isEventBit(dSv_event_flag_c::F_0542);
+}
+
 static void* duskDeleteCastleBarrier(void* i_actor, void*) {
     if (fopAc_IsActor(i_actor) &&
         (fopAcM_GetName(i_actor) == fpcNm_Obj_GanonWall2_e ||
@@ -125,7 +130,7 @@ static int castleBarrierDemoSkip(void* i_actor, int param_1) {
 
 static void installCastleBarrierDemoSkip(daAlink_c* i_player) {
     if (dusk::cutscene_skip::enabled() && isCastleBarrierApproachStage() &&
-        !dComIfGs_isEventBit(dSv_event_flag_c::F_0542)) {
+        isCastleBarrierBreakReady()) {
         dComIfGp_getEvent()->setSkipProc(i_player, castleBarrierDemoSkip, 0);
         dComIfGp_getEvent()->onSkipFade();
     }

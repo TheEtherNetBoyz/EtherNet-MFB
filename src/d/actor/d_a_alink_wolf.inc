@@ -7135,7 +7135,7 @@ int daAlink_c::procWolfRollAttackCharge() {
         return 1;
     }
 
-    #if PLATFORM_GCN
+    #if PLATFORM_NULL
     if (!itemButtonCheck(BTN_B)) {
         checkWolfAttackAction();
     } else
