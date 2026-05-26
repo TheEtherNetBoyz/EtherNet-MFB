@@ -23,6 +23,8 @@ float get_interpolation_step();
 
 void request_presentation_sync();
 bool presentation_sync_active();
+void request_presentation_skip();
+bool presentation_skip_active();
 
 bool is_enabled();
 

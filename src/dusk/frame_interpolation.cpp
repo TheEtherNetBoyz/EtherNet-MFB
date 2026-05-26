@@ -17,6 +17,7 @@ bool g_enabled = false;
 bool g_recording = false;
 bool g_interpolating = false;
 bool g_sync_presentation = false;
+bool g_skip_presentation = false;
 
 float g_step = 0.0f;
 bool g_is_sim_frame = false;
@@ -141,6 +142,9 @@ void begin_frame(bool enabled, bool is_sim_frame, float step) {
     g_enabled = enabled;
     g_is_sim_frame = is_sim_frame;
     g_step = std::clamp(step, 0.0f, 1.0f);
+    if (!enabled || is_sim_frame) {
+        g_skip_presentation = false;
+    }
 }
 
 bool is_enabled() {
@@ -213,6 +217,20 @@ bool presentation_sync_active() {
         return false;
     }
     return g_sync_presentation;
+}
+
+void request_presentation_skip() {
+    ensure_initialized();
+    if (!g_enabled) {
+        return;
+    }
+    g_skip_presentation = true;
+    request_presentation_sync();
+}
+
+bool presentation_skip_active() {
+    ensure_initialized();
+    return g_enabled && g_skip_presentation;
 }
 
 float get_interpolation_step() {

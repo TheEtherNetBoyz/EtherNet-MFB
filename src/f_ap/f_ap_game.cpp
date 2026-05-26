@@ -763,7 +763,9 @@ void fapGm_After() {
 
 #if TARGET_PC
     if (fapGm_isInstaLoadPumpAllowed(hadNextStage)) {
+        BOOL visualReady = FALSE;
         BOOL drawReady = FALSE;
+        const bool frameInterpolationEnabled = dusk::frame_interp::is_enabled();
 
         for (int i = 0; i < 4096; i++) {
             fpcDt_Handler();
@@ -782,21 +784,26 @@ void fapGm_After() {
             fopCamM_Management();
             mDoAud_Execute();
 
-            drawReady = fpcM_SearchByName(fpcNm_PLAY_SCENE_e) != NULL &&
-                        dComIfGp_getWindowNum() != 0 &&
-                        !dComIfGp_isEnableNextStage() &&
+            visualReady = fpcM_SearchByName(fpcNm_PLAY_SCENE_e) != NULL &&
+                          dComIfGp_getWindowNum() != 0 &&
+                          !dComIfGp_isEnableNextStage();
+            drawReady = visualReady &&
                         !mDoAud_check1stDynamicWave() &&
                         !mDoAud_zelAudio_c::isBgmSet();
 
-            if (drawReady) {
+            if (drawReady || (frameInterpolationEnabled && visualReady)) {
                 break;
             }
         }
 
-        if (drawReady && !fapGm_HIO_c::isCaptureScreen()) {
-            fpcDw_Handler((fpcDw_HandlerFuncFunc)fpcM_DrawIterater, (fpcDw_HandlerFunc)fpcM_Draw);
-            dComIfGp_drawSimpleModel();
-            cAPIGph_Painter();
+        if (!fapGm_HIO_c::isCaptureScreen()) {
+            if (frameInterpolationEnabled) {
+                dusk::frame_interp::request_presentation_skip();
+            } else if (drawReady) {
+                fpcDw_Handler((fpcDw_HandlerFuncFunc)fpcM_DrawIterater, (fpcDw_HandlerFunc)fpcM_Draw);
+                dComIfGp_drawSimpleModel();
+                cAPIGph_Painter();
+            }
         }
     }
 #endif

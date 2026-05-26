@@ -331,14 +331,18 @@ void main01(void) {
                 dusk::frame_interp::request_presentation_sync();
             }
             sLastWindowStatus = windowStatus;
-            dusk::frame_interp::interpolate();
-            dusk::frame_interp::begin_presentation_camera();
-            // run draw functions for anything specially marked to handle interp
-            dusk::latency_trace::mark("interp_draw_before");
-            fpcM_DrawIterater((fpcM_DrawIteraterFunc)fpcM_Draw);
-            cAPIGph_Painter();
-            dusk::latency_trace::mark("interp_draw_after");
-            dusk::frame_interp::end_presentation_camera();
+            if (!dusk::frame_interp::presentation_skip_active()) {
+                dusk::frame_interp::interpolate();
+                dusk::frame_interp::begin_presentation_camera();
+                // run draw functions for anything specially marked to handle interp
+                dusk::latency_trace::mark("interp_draw_before");
+                fpcM_DrawIterater((fpcM_DrawIteraterFunc)fpcM_Draw);
+                cAPIGph_Painter();
+                dusk::latency_trace::mark("interp_draw_after");
+                dusk::frame_interp::end_presentation_camera();
+            } else {
+                dusk::latency_trace::mark("interp_draw_skipped");
+            }
             dusk::frame_interp::set_ui_tick_pending(false);
         } else {
             dusk::frame_interp::begin_frame(false, true, 0.0f);
