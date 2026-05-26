@@ -42,6 +42,13 @@ static bool fopScnRq_isDmn07VanillaFastLoad() {
            strcmp(dComIfGp_getStartStageName(), "D_MN07") == 0 &&
            strcmp(dComIfGp_getNextStageName(), "D_MN07") == 0;
 }
+
+static bool fopScnRq_isZantDeathSkipVanillaLoad() {
+    return dComIfGp_isEnableNextStage() &&
+           strcmp(dComIfGp_getNextStageName(), "D_MN08A") == 0 &&
+           dComIfGp_getNextStageRoomNo() == 10 &&
+           dComIfGp_getNextStageLayer() == 9;
+}
 #endif
 
 static cPhs_Step fopScnRq_phase_ClearOverlap(scene_request_class* i_sceneReq) {
@@ -60,6 +67,7 @@ static cPhs_Step fopScnRq_phase_Execute(scene_request_class* i_sceneReq) {
         !mDoRst::isReturnToMenu() &&
         !mDoRst::isShutdown() &&
         !fopScnRq_isDmn07VanillaFastLoad() &&
+        !fopScnRq_isZantDeathSkipVanillaLoad() &&
         !fopScnRq_IsTitleToFileSelectVanillaFastLoad() &&
 #endif
         i_sceneReq->create_request.name == fpcNm_PLAY_SCENE_e &&
@@ -194,6 +202,7 @@ fpc_ProcID fopScnRq_Request(int i_reqType, scene_class* i_scene, s16 i_procName,
     if (!l_titleToFileSelectVanillaFastLoad &&
         dusk::getSettings().game.enableInstaLoads.getValue() &&
         !mDoRst::isReset() &&
+        !fopScnRq_isZantDeathSkipVanillaLoad() &&
         i_procName == fpcNm_PLAY_SCENE_e &&
         i_fadename == fpcNm_OVERLAP0_e)
     {

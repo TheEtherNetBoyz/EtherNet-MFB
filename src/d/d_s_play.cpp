@@ -577,10 +577,16 @@ static int dScnPly_Draw(dScnPly_c* i_this) {
                  dusk::getSettings().game.enableInstaLoads.getValue()),
                 false);
 #if TARGET_PC
+            bool zantDeathSkipVanillaLoad =
+                strcmp(dComIfGp_getNextStageName(), "D_MN08A") == 0 &&
+                dComIfGp_getNextStageRoomNo() == 10 &&
+                dComIfGp_getNextStageLayer() == 9;
+
             if (useFastLoadOverlap &&
                 (mDoRst::isReset() ||
                  mDoRst::isReturnToMenu() ||
                  mDoRst::isShutdown() ||
+                 zantDeathSkipVanillaLoad ||
                  fpcM_GetName(i_this) == fpcNm_OPENING_SCENE_e ||
                  fpcM_SearchByName(fpcNm_TITLE_e) != NULL))
             {

@@ -735,6 +735,13 @@ void fapGm_HIO_c::printCpuTimer(const char* message) {
 #endif
 
 #if TARGET_PC
+static bool fapGm_isZantDeathSkipVanillaLoad() {
+    return dComIfGp_isEnableNextStage() &&
+           strcmp(dComIfGp_getNextStageName(), "D_MN08A") == 0 &&
+           dComIfGp_getNextStageRoomNo() == 10 &&
+           dComIfGp_getNextStageLayer() == 9;
+}
+
 static bool fapGm_isInstaLoadPumpAllowed(BOOL hadNextStage) {
     return hadNextStage &&
            dusk::getSettings().game.enableInstaLoads.getValue() &&
@@ -742,6 +749,7 @@ static bool fapGm_isInstaLoadPumpAllowed(BOOL hadNextStage) {
            !mDoRst::isReturnToMenu() &&
            !mDoRst::isShutdown() &&
            !fopScnRq_IsTitleToFileSelectVanillaFastLoad() &&
+           !fapGm_isZantDeathSkipVanillaLoad() &&
            fpcM_SearchByName(fpcNm_OPENING_SCENE_e) == NULL &&
            fpcM_SearchByName(fpcNm_NAME_SCENE_e) == NULL &&
            fpcM_SearchByName(fpcNm_TITLE_e) == NULL;
