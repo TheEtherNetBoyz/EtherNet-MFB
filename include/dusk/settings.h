@@ -203,6 +203,7 @@ struct UserSettings {
         ConfigVar<bool> debugFlyCam;
         ConfigVar<bool> debugFlyCamLockEvents;
         ConfigVar<bool> allowBackgroundInput;
+        ConfigVar<int> inputLagMs;
 
         // Cheats
         ConfigVar<bool> infiniteHearts;

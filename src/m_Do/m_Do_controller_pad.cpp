@@ -15,6 +15,10 @@
 #if TARGET_PC
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_scancode.h>
+
+#include <algorithm>
+#include <array>
+#include <chrono>
 #endif
 
 JUTGamePad* mDoCPd_c::m_gamePad[4];
@@ -27,6 +31,19 @@ static bool sCtrlRResetHeld = false;
 static constexpr u32 kPracticeMenuInputMask = PAD_BUTTON_UP | PAD_BUTTON_DOWN | PAD_BUTTON_LEFT |
                                               PAD_BUTTON_RIGHT | PAD_BUTTON_A | PAD_BUTTON_B |
                                               PAD_TRIGGER_L | PAD_TRIGGER_R;
+static constexpr int kMaxInputLagMs = 150;
+static constexpr size_t kInputDelayHistorySize = 64;
+
+using InputDelayClock = std::chrono::steady_clock;
+
+struct InputDelaySample {
+    bool valid = false;
+    InputDelayClock::time_point time{};
+    std::array<interface_of_controller_pad, 4> pads{};
+};
+
+static std::array<InputDelaySample, kInputDelayHistorySize> sInputDelayHistory;
+static size_t sInputDelayHistoryWriteIndex = 0;
 
 static void checkCtrlRSoftReset() {
     int keyCount = 0;
@@ -51,6 +68,63 @@ static void clearPracticeMenuInput(interface_of_controller_pad* interface) {
     interface->mTrigLockL = false;
     interface->mHoldLockR = false;
     interface->mTrigLockR = false;
+}
+
+static void resetInputDelayHistory() {
+    for (InputDelaySample& sample : sInputDelayHistory) {
+        sample.valid = false;
+    }
+    sInputDelayHistoryWriteIndex = 0;
+}
+
+static void applyInputDelay(interface_of_controller_pad* pads) {
+    const int delayMs = std::clamp(dusk::getSettings().game.inputLagMs.getValue(), 0, kMaxInputLagMs);
+    if (delayMs <= 0) {
+        resetInputDelayHistory();
+        return;
+    }
+
+    const InputDelayClock::time_point now = InputDelayClock::now();
+    InputDelaySample& writeSample = sInputDelayHistory[sInputDelayHistoryWriteIndex];
+    writeSample.valid = true;
+    writeSample.time = now;
+    for (size_t i = 0; i < writeSample.pads.size(); ++i) {
+        writeSample.pads[i] = pads[i];
+    }
+    sInputDelayHistoryWriteIndex = (sInputDelayHistoryWriteIndex + 1) % sInputDelayHistory.size();
+
+    const InputDelayClock::time_point target =
+        now - std::chrono::milliseconds(delayMs);
+    const InputDelaySample* bestSample = nullptr;
+    const InputDelaySample* oldestSample = nullptr;
+
+    for (const InputDelaySample& sample : sInputDelayHistory) {
+        if (!sample.valid) {
+            continue;
+        }
+
+        if (oldestSample == nullptr || sample.time < oldestSample->time) {
+            oldestSample = &sample;
+        }
+
+        if (sample.time <= target &&
+            (bestSample == nullptr || sample.time > bestSample->time))
+        {
+            bestSample = &sample;
+        }
+    }
+
+    if (bestSample == nullptr) {
+        bestSample = oldestSample;
+    }
+
+    if (bestSample == nullptr) {
+        return;
+    }
+
+    for (size_t i = 0; i < bestSample->pads.size(); ++i) {
+        pads[i] = bestSample->pads[i];
+    }
 }
 #endif
 
@@ -145,6 +219,10 @@ void mDoCPd_c::read() {
         interface2++;
 #endif
     }
+
+#if TARGET_PC
+    applyInputDelay(m_cpadInfo);
+#endif
 }
 
 void mDoCPd_c::convert(interface_of_controller_pad* pInterface, JUTGamePad* pPad) {

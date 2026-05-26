@@ -938,6 +938,31 @@ SelectButton& config_percent_select(Pane& leftPane, Pane& rightPane, ConfigVar<f
     return button;
 }
 
+SelectButton& config_milliseconds_select(Pane& leftPane, Pane& rightPane, ConfigVar<int>& var,
+    Rml::String key, Rml::String helpText, int min, int max, int step = 1,
+    std::function<bool()> isDisabled = {}) {
+    auto& button = leftPane.add_child<NumberButton>(NumberButton::Props{
+        .key = std::move(key),
+        .getValue = [&var] { return var.getValue(); },
+        .setValue =
+            [&var, min, max](int value) {
+                var.setValue(std::clamp(value, min, max));
+                config::Save();
+            },
+        .isDisabled = std::move(isDisabled),
+        .isModified = [&var] { return var.getValue() != var.getDefaultValue(); },
+        .min = min,
+        .max = max,
+        .step = step,
+        .suffix = " ms",
+    });
+    leftPane.register_control(button, rightPane, [helpText = std::move(helpText)](Pane& pane) {
+        pane.clear();
+        pane.add_text(helpText);
+    });
+    return button;
+}
+
 SelectButton& config_level_select(Pane& leftPane, Pane& rightPane, ConfigVar<float>& var,
     Rml::String key, Rml::String helpText, std::function<bool()> isDisabled = {}) {
     auto& button = leftPane.add_child<FloatButton>(FloatButton::Props{
@@ -1424,6 +1449,10 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .helpText = "Allow controller input even when the game window is not focused.",
                 .onChange = [](bool value) { aurora_set_background_input(value); },
             });
+        config_milliseconds_select(leftPane, rightPane, getSettings().game.inputLagMs,
+            "Input Lag", "Adds a controller delay between 0-150ms. "
+                         "25-45ms matches GameCube latency.",
+            0, 150, 1);
 
         leftPane.add_section("Camera");
         addOption("Free Camera", getSettings().game.freeCamera,
