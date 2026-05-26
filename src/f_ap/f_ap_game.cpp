@@ -9,6 +9,7 @@
 #include "JSystem/JKernel/JKRSolidHeap.h"
 #include "JSystem/JUtility/JUTDbPrint.h"
 #include "SSystem/SComponent/c_counter.h"
+#include "SSystem/SComponent/c_API_graphic.h"
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_grass.h"
 #include "d/actor/d_a_midna.h"
@@ -22,6 +23,13 @@
 #include "f_op/f_op_draw_tag.h"
 #include "f_op/f_op_overlap_mng.h"
 #include "f_op/f_op_scene_mng.h"
+#include "f_pc/f_pc_creator.h"
+#include "f_pc/f_pc_deletor.h"
+#include "f_pc/f_pc_draw.h"
+#include "f_pc/f_pc_manager.h"
+#include "f_pc/f_pc_name.h"
+#include "f_pc/f_pc_priority.h"
+#include "m_Do/m_Do_audio.h"
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_main.h"
 
@@ -725,7 +733,50 @@ void fapGm_HIO_c::printCpuTimer(const char* message) {
 #endif
 
 void fapGm_After() {
+    BOOL hadNextStage = dComIfGp_isEnableNextStage();
+
     fopScnM_Management();
+
+#if TARGET_PC
+    if (hadNextStage && dusk::getSettings().game.enableInstaLoads.getValue()) {
+        BOOL drawReady = FALSE;
+
+        for (int i = 0; i < 4096; i++) {
+            fpcDt_Handler();
+
+            if (!fpcPi_Handler()) {
+                break;
+            }
+
+            if (!fpcCt_Handler()) {
+                break;
+            }
+
+            fopScnM_Management();
+            fpcEx_Handler((fpcLnIt_QueueFunc)fpcM_Execute);
+            fopOvlpM_Management();
+            fopCamM_Management();
+            mDoAud_Execute();
+
+            drawReady = fpcM_SearchByName(fpcNm_PLAY_SCENE_e) != NULL &&
+                        dComIfGp_getWindowNum() != 0 &&
+                        !dComIfGp_isEnableNextStage() &&
+                        !mDoAud_check1stDynamicWave() &&
+                        !mDoAud_zelAudio_c::isBgmSet();
+
+            if (drawReady) {
+                break;
+            }
+        }
+
+        if (drawReady && !fapGm_HIO_c::isCaptureScreen()) {
+            fpcDw_Handler((fpcDw_HandlerFuncFunc)fpcM_DrawIterater, (fpcDw_HandlerFunc)fpcM_Draw);
+            dComIfGp_drawSimpleModel();
+            cAPIGph_Painter();
+        }
+    }
+#endif
+
     fopOvlpM_Management();
     fopCamM_Management();
 }

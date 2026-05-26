@@ -296,18 +296,6 @@ u8 mDoGph_gInf_c::mFade;
 
 bool mDoGph_gInf_c::mAutoForcus;
 
-#if TARGET_PC
-static bool l_instaLoadFrameHoldActive;
-static bool l_instaLoadFrameHoldCaptured;
-static int l_instaLoadFrameHoldFramesLeft;
-
-static bool isInstaLoadFrameHoldReadyToRelease() {
-    return dComIfGp_getWindowNum() != 0 &&
-           dComIfGp_getPlayer(0) != NULL &&
-           !dComIfGp_isEnableNextStage();
-}
-#endif
-
 #if TARGET_PC || PLATFORM_WII
 static void captureFullFrameBuffer() {
     GXSetTexCopySrc(0, 0, mDoGph_gInf_c::getWidth(), mDoGph_gInf_c::getHeight());
@@ -360,18 +348,6 @@ static void drawFullFrameBuffer(bool mirror) {
     GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_S8, 0);
     GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_RGB8, 0);
     mDoGph_drawFilterQuad(1, 1);
-}
-#endif
-
-#if TARGET_PC
-void mDoGph_gInf_c::requestInstaLoadFrameHold() {
-    l_instaLoadFrameHoldActive = true;
-    l_instaLoadFrameHoldFramesLeft = 180;
-}
-
-void mDoGph_gInf_c::clearInstaLoadFrameHold() {
-    l_instaLoadFrameHoldActive = false;
-    l_instaLoadFrameHoldFramesLeft = 0;
 }
 #endif
 
@@ -2784,28 +2760,6 @@ int mDoGph_Painter() {
     #endif
 
 #if TARGET_PC
-    if (l_instaLoadFrameHoldActive) {
-        if (!dusk::getSettings().game.enableInstaLoads.getValue() ||
-            isInstaLoadFrameHoldReadyToRelease())
-        {
-            mDoGph_gInf_c::clearInstaLoadFrameHold();
-        } else if (l_instaLoadFrameHoldCaptured) {
-            drawFullFrameBuffer(false);
-            if (--l_instaLoadFrameHoldFramesLeft <= 0) {
-                mDoGph_gInf_c::clearInstaLoadFrameHold();
-            }
-        }
-    }
-
-    if (!l_instaLoadFrameHoldActive &&
-        dusk::getSettings().game.enableInstaLoads.getValue() &&
-        dComIfGp_getWindowNum() != 0 &&
-        dComIfGp_getPlayer(0) != NULL)
-    {
-        captureFullFrameBuffer();
-        l_instaLoadFrameHoldCaptured = true;
-    }
-
     dusk::g_imguiConsole.PostDraw();
 #endif
 

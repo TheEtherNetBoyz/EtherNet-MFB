@@ -1068,9 +1068,12 @@ int dEvt_control_c::Step() {
 
         dComIfGp_getVibration().StopQuake(31);
         daAlink_c* player = daAlink_getAlinkActorClass();
+        dCamera_c* camera = dComIfGp_getCamera(0) != NULL ? dCam_getBody() : NULL;
 
-        if (!dCam_getBody()->Active() && player->checkFishingCastMode()) {
-            dCam_getBody()->QuickStart();
+        if (camera != NULL && player != NULL &&
+            !camera->Active() && player->checkFishingCastMode())
+        {
+            camera->QuickStart();
         }
 
         mEventStatus = 1;

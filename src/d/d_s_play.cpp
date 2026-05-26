@@ -590,7 +590,6 @@ static int dScnPly_Draw(dScnPly_c* i_this) {
                 dusk::getSettings().game.enableInstaLoads.getValue() &&
                 !mDoRst::isReset())
             {
-                mDoGph_gInf_c::requestInstaLoadFrameHold();
                 mDoGph_gInf_c::startFadeIn(0);
                 mDoGph_gInf_c::offFade();
             }
@@ -740,6 +739,12 @@ static u32 l_sceneChangeStartTick;
 
 #if TARGET_PC
 static BOOL autoSaved;
+
+static bool dScnPly_isAcceleratedLoadAudio() {
+    return (dusk::getSettings().game.enableFastLoads.getValue() ||
+            dusk::getSettings().game.enableInstaLoads.getValue()) &&
+           !mDoRst::isReset();
+}
 #endif
 
 static int dScnPly_Execute(dScnPly_c* i_this) {
@@ -773,9 +778,11 @@ static int dScnPly_Execute(dScnPly_c* i_this) {
     dStage_roomControl_c::setRoomReadId(0xFF);
 
 #if TARGET_PC
-    if (dusk::getSettings().game.enableFastLoads.getValue() &&
-        !dusk::getSettings().game.enableInstaLoads.getValue() &&
-        mDoAud_zelAudio_c::isBgmSet() && !mDoAud_check1stDynamicWave())
+    bool acceleratedLoadBgmReady = dScnPly_isAcceleratedLoadAudio() &&
+                                   mDoAud_zelAudio_c::isBgmSet() &&
+                                   !mDoAud_check1stDynamicWave();
+
+    if (acceleratedLoadBgmReady)
     {
         mDoAud_setFadeInStart(0);
         mDoAud_sceneBgmStart();
@@ -788,9 +795,15 @@ static int dScnPly_Execute(dScnPly_c* i_this) {
 
     if (!fopOvlpM_IsPeek()) {
         if (mDoAud_zelAudio_c::isBgmSet()) {
-            mDoAud_sceneBgmStart();
-            mDoAud_load2ndDynamicWave();
-            mDoAud_zelAudio_c::offBgmSet();
+#if TARGET_PC
+            if (!dScnPly_isAcceleratedLoadAudio() || !mDoAud_check1stDynamicWave()) {
+#endif
+                mDoAud_sceneBgmStart();
+                mDoAud_load2ndDynamicWave();
+                mDoAud_zelAudio_c::offBgmSet();
+#if TARGET_PC
+            }
+#endif
         }
 
         if (i_this->calcPauseTimer() != 0) {

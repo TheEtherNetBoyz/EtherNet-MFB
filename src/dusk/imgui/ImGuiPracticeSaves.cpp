@@ -1216,7 +1216,11 @@ void ImGuiPracticeSaves::tickPendingApply() {
 
     if (fopOvlpM_IsPeek()) {
         m_loadPeekSeen = true;
-    } else if (m_loadPeekSeen) {
+    } else if (m_loadPeekSeen ||
+               (getSettings().game.enableInstaLoads.getValue() &&
+                !dComIfGp_isEnableNextStage() &&
+                daPy_getPlayerActorClass() != nullptr))
+    {
         m_loadInProgress = false;
         m_loadPeekSeen = false;
         m_pendingPlacementFrames = m_pendingPlacement.has_value() ? 20 : 0;

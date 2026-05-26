@@ -59,7 +59,6 @@
 #include "dusk/action_bindings.h"
 #include "dusk/frame_interpolation.h"
 #include "dusk/settings.h"
-#include "m_Do/m_Do_Reset.h"
 #include "res/Object/Alink.h"
 #include <algorithm>
 #include <cstring>
@@ -71,35 +70,6 @@ static int daAlink_Execute(daAlink_c* i_this);
 static int daAlink_Draw(daAlink_c* i_this);
 static fopAc_ac_c* daAlink_searchTagKandelaar(fopAc_ac_c* i_actor, void* i_data);
 static bool s_duskForceHumanFormWaitInit;
-
-static bool duskShouldSkipLoadStartDemo(int startMode, u32 lastMode) {
-#if TARGET_PC
-    if (!dusk::getSettings().game.enableInstaLoads.getValue() || mDoRst::isReset()) {
-        return false;
-    }
-
-    if ((strcmp(dComIfGp_getStartStageName(), "F_SP102") == 0 &&
-         dComIfGp_getStartStagePoint() >= 100) ||
-        strcmp(dComIfGp_getStartStageName(), "S_MV000") == 0)
-    {
-        return false;
-    }
-
-    switch (startMode) {
-    case 1:
-    case 2:
-    case 3:
-    case 5:
-    case 13:
-    case 14:
-        return true;
-    default:
-        return lastMode == 2 || lastMode == 3;
-    }
-#else
-    return false;
-#endif
-}
 
 static bool isCastleBarrierApproachStage() {
     const char* stageName = dComIfGp_getStartStageName();
@@ -4699,11 +4669,8 @@ void daAlink_c::playerInit() {
 
     int startMode = getStartMode();
     int startEvent = getStartEvent();
-    bool skipLoadStartDemo = duskShouldSkipLoadStartDemo(startMode, getLastSceneMode());
 
-    if (skipLoadStartDemo) {
-        mStartEventID = 0xFF;
-    } else if (dComIfGp_getStartStagePoint() == -2 || dComIfGp_getStartStagePoint() == -3) {
+    if (dComIfGp_getStartStagePoint() == -2 || dComIfGp_getStartStagePoint() == -3) {
         mStartEventID = dComIfGp_evmng_startDemo(-1);
     } else if (dComIfGp_getStartStagePoint() == -4) {
         mStartEventID = dComIfGp_evmng_startDemo(0xD5);
@@ -4743,9 +4710,7 @@ void daAlink_c::playerInit() {
         }
     }
 
-    if (!skipLoadStartDemo) {
-        dComIfGp_getPEvtManager()->orderStartDemo();
-    }
+    dComIfGp_getPEvtManager()->orderStartDemo();
     field_0x2f94 = -1;
     field_0x2f95 = -1;
     field_0x2f96 = -1;
@@ -4896,22 +4861,15 @@ int daAlink_c::setStartProcInit() {
                 mNormalSpeed = dComIfGs_getLastSceneSpeedF();
             }
 
-            bool skipStartDemo = duskShouldSkipLoadStartDemo(start_mode, last_mode);
-
-            if (!skipStartDemo) {
-                mDemo.setStartDemoType();
-                mDemo.setDemoMode(daPy_demo_c::DEMO_UNK_14_e);
-                mDemo.setMoveAngle(current.angle.y);
-                mDemo.setTimer(35);
-            }
+            mDemo.setStartDemoType();
+            mDemo.setDemoMode(daPy_demo_c::DEMO_UNK_14_e);
+            mDemo.setMoveAngle(current.angle.y);
+            mDemo.setTimer(35);
 
             if (checkModeFlg(0x400)) {
                 daHorse_c* horse = dComIfGp_getHorseActor();
-
-                if (!skipStartDemo) {
-                    horse->changeOriginalDemo();
-                    horse->changeDemoMode(6, 0);
-                }
+                horse->changeOriginalDemo();
+                horse->changeDemoMode(6, 0);
 
                 if (start_mode == 2) {
                     if (checkStageName("F_SP109") && fopAcM_GetRoomNo(this) == 0 && dComIfGs_getStartPoint() == 35) {
@@ -4919,7 +4877,7 @@ int daAlink_c::setStartProcInit() {
                     } else {
                         horse->setSpeedF(0.0f);
                     }
-                } else if (start_mode == 1 && !skipStartDemo) {
+                } else if (start_mode == 1) {
                     horse->setWalkSpeedF();
                 } else {
                     horse->setSpeedF(dComIfGs_getLastSceneSpeedF());
@@ -4948,22 +4906,11 @@ int daAlink_c::setStartProcInit() {
                 field_0x2f99 = 0;
             } else if (start_mode == 1) {
                 if (checkWolf()) {
-                    mNormalSpeed = skipStartDemo ?
-                                       dComIfGs_getLastSceneSpeedF() :
-                                       mpHIO->mWolf.mWlMove.m.mIdleToWalkRate *
-                                           mpHIO->mWolf.mWlMove.m.mMaxSpeed;
-                    if (mNormalSpeed > mpHIO->mWolf.mWlMove.m.mMaxSpeed) {
-                        mNormalSpeed = mpHIO->mWolf.mWlMove.m.mMaxSpeed;
-                    }
+                    mNormalSpeed = mpHIO->mWolf.mWlMove.m.mIdleToWalkRate * mpHIO->mWolf.mWlMove.m.mMaxSpeed;
                     speedF = mNormalSpeed;
                     procWolfMoveInit();
                 } else {
-                    mNormalSpeed = skipStartDemo ?
-                                       dComIfGs_getLastSceneSpeedF() :
-                                       mpHIO->mMove.m.mWalkChangeRate * mpHIO->mMove.m.mMaxSpeed;
-                    if (mNormalSpeed > mpHIO->mMove.m.mMaxSpeed) {
-                        mNormalSpeed = mpHIO->mMove.m.mMaxSpeed;
-                    }
+                    mNormalSpeed = mpHIO->mMove.m.mWalkChangeRate * mpHIO->mMove.m.mMaxSpeed;
                     speedF = mNormalSpeed;
                     procMoveInit();
                 }

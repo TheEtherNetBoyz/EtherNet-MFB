@@ -125,8 +125,6 @@ public:
 #if TARGET_PC
     static f32 hudAspectScaleDown;
     static f32 hudAspectScaleUp;
-    static void requestInstaLoadFrameHold();
-    static void clearInstaLoadFrameHold();
     static void updateSafeAreaBounds();
     static f32 getSafeMinXF() { return m_safeMinXF; }
     static f32 getSafeMinYF() { return m_safeMinYF; }
