@@ -158,7 +158,10 @@ public:
     bool isChangeOK(void* actor) { return mChangeActor == actor; }
     u8 checkCompulsory() { return mCompulsory; }
 
-    void startCheckSkipEdge(void* actor) { setSkipProc(actor, dEv_noFinishSkipProc, 0); }
+    void startCheckSkipEdge(void* actor) {
+        setSkipProc(actor, dEv_noFinishSkipProc, 0);
+        offSkipFade();
+    }
 
 public:
     /* 0x000 */ u8 unk_0x0[4];
