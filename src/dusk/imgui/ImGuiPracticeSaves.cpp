@@ -5,7 +5,9 @@
 #include "fmt/format.h"
 
 #include "c/c_damagereaction.h"
+#include "SSystem/SComponent/c_counter.h"
 #include "d/d_com_inf_game.h"
+#include "d/d_event.h"
 #include "d/d_kankyo.h"
 #include "d/actor/d_a_b_ds.h"
 #include "d/actor/d_a_e_zs.h"
@@ -22,6 +24,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <functional>
@@ -143,6 +146,8 @@ enum class PracticeSaveCallback : int {
     SetEscortNextStage,
     GiveEscortKeys,
     SetSnowpeakBossKeyNextStage,
+    GorgeVoidInit,
+    GorgeVoidPostLoad,
 };
 
 struct PracticeSaveCallbacks {
@@ -158,6 +163,9 @@ PracticeSaveCallbacks practice_save_callbacks(ImGuiPracticeSaves::SaveCategory c
         }
         if (index == 4) {
             return {PracticeSaveCallback::None, PracticeSaveCallback::SetupHugo};
+        }
+        if (index == 9) {
+            return {PracticeSaveCallback::GorgeVoidInit, PracticeSaveCallback::GorgeVoidPostLoad};
         }
         if (index == 20 || index == 21) {
             return {PracticeSaveCallback::SetNextStageLayer4SkipDemo, PracticeSaveCallback::None};
@@ -304,6 +312,40 @@ void apply_give_escort_keys_callback() {
     dComIfGs_setKeyNum(2);
 }
 
+void apply_gorge_void_save_state_callback() {
+    g_dComIfG_gameInfo.info.getMemory().getBit().onSwitch(0);
+    dComIfGs_putSave(g_dComIfG_gameInfo.info.getDan().mStageNo);
+    dComIfGs_setTransformStatus(TF_STATUS_WOLF);
+
+    g_dComIfG_gameInfo.info.getRestart().setLastSceneInfo(0.0f, 0x28000000, 0);
+    g_dComIfG_gameInfo.info.getRestart().setStartPoint(2);
+
+    cXyz pos(-11856.857f, -5700.0f, 56661.5f);
+    g_dComIfG_gameInfo.info.getRestart().setRoom(pos, 24169, 3);
+
+    dComIfGs_setLife(12);
+    cDmr_SkipInfo = 1;
+}
+
+void apply_gorge_void_init_callback() {
+    apply_gorge_void_save_state_callback();
+    g_dComIfG_gameInfo.play.setNextStage("F_SP121", 3, 2, 0xE, 13, 0);
+}
+
+void apply_gorge_void_post_load_callback() {
+    dComIfGs_onSwitch(21, 3);
+}
+
+void apply_post_save_inject_callback(PracticeSaveCallback callback) {
+    switch (callback) {
+    case PracticeSaveCallback::GorgeVoidInit:
+        apply_gorge_void_save_state_callback();
+        break;
+    default:
+        break;
+    }
+}
+
 void apply_player_init_callback(PracticeSaveCallback callback) {
     switch (callback) {
     case PracticeSaveCallback::OrdonGateClip:
@@ -347,6 +389,12 @@ void apply_player_init_callback(PracticeSaveCallback callback) {
         set_next_stage_route(11, 0, layer);
         break;
     }
+    case PracticeSaveCallback::GorgeVoidInit:
+        apply_gorge_void_init_callback();
+        break;
+    case PracticeSaveCallback::GorgeVoidPostLoad:
+        apply_gorge_void_post_load_callback();
+        break;
     default:
         break;
     }
@@ -501,7 +549,9 @@ void gz_activate_generic_row(ImGuiPracticeSaves::MainCategory category, int row)
         }
         break;
     case ImGuiPracticeSaves::MainCategory::Tools:
-        if (s_gzToolsTab == 1) {
+        if (s_gzToolsTab == 0) {
+            if (row == 3) gz_set_bool(s.game.gorgeVoidChecker);
+        } else if (s_gzToolsTab == 1) {
             if (row == 1) gz_set_bool(s.game.showSpeedrunRTATimer, s.game.speedrunMode);
             if (row == 2) gz_set_bool(s.game.showInputViewer);
         } else if (s_gzToolsTab == 2) {
@@ -665,7 +715,7 @@ void draw_gz_tools_panel() {
         gz_disabled_checkbox("coro td");
         gz_disabled_checkbox("ebmb");
         gz_disabled_checkbox("elevator escape");
-        gz_disabled_checkbox("gorge void");
+        gz_config_checkbox("gorge void", s.game.gorgeVoidChecker);
         gz_disabled_checkbox("ladder freezard cancel");
         gz_disabled_checkbox("rolls");
         gz_disabled_checkbox("universal map delay");
@@ -887,8 +937,12 @@ void ImGuiPracticeSaves::loadCategoryMetadata(SaveCategory category) {
 }
 
 bool ImGuiPracticeSaves::loadPracticeSave(const PracticeSaveEntry& entry) {
+    return loadPracticeSave(m_saveCategory, entry);
+}
+
+bool ImGuiPracticeSaves::loadPracticeSave(SaveCategory category, const PracticeSaveEntry& entry) {
     try {
-        const auto data = io::FileStream::ReadAllBytes(save_path(m_saveCategory, entry.filename));
+        const auto data = io::FileStream::ReadAllBytes(save_path(category, entry.filename));
         if (data.size() < sizeof(dSv_save_c)) {
             m_statusMsg = fmt::format("{} is too small to contain a raw save.", entry.filename);
             return false;
@@ -911,7 +965,8 @@ bool ImGuiPracticeSaves::loadPracticeSave(const PracticeSaveEntry& entry) {
         m_pendingSavedata = save;
         m_pendingVibration = vibration;
         m_pendingPlacement = entry.placement;
-        const PracticeSaveCallbacks callbacks = practice_save_callbacks(m_saveCategory, entry.index);
+        const PracticeSaveCallbacks callbacks = practice_save_callbacks(category, entry.index);
+        m_pendingStageInitCallback = static_cast<int>(callbacks.stageInit);
         m_pendingPlayerInitCallback = static_cast<int>(callbacks.playerInit);
         m_pendingPlacementFrames = 0;
         m_pendingPlayerInitFrames = 0;
@@ -933,6 +988,9 @@ bool ImGuiPracticeSaves::loadPracticeSave(const PracticeSaveEntry& entry) {
 
         if (callbacks.stageInit != PracticeSaveCallback::None) {
             apply_player_init_callback(callbacks.stageInit);
+            if (callbacks.stageInit == PracticeSaveCallback::GorgeVoidInit) {
+                g_dComIfG_gameInfo.info.mSavedata = save;
+            }
         }
 
         m_statusMsg = fmt::format("Loading {}.", entry.name);
@@ -941,6 +999,23 @@ bool ImGuiPracticeSaves::loadPracticeSave(const PracticeSaveEntry& entry) {
         m_statusMsg = fmt::format("Failed to load {}: {}", entry.name, e.what());
         return false;
     }
+}
+
+bool ImGuiPracticeSaves::loadPracticeSaveByIndex(SaveCategory category, int index) {
+    if (!m_loaded) {
+        loadMetadata();
+    }
+
+    const auto& saves = m_saves[category_index(category)];
+    const auto it = std::find_if(saves.begin(), saves.end(), [index](const PracticeSaveEntry& save) {
+        return save.index == index;
+    });
+    if (it == saves.end()) {
+        m_statusMsg = "Gorge Void practice save was not found.";
+        return false;
+    }
+
+    return loadPracticeSave(category, *it);
 }
 
 std::vector<ImGuiPracticeSaves::PracticeSaveEntry>& ImGuiPracticeSaves::currentSaves() {
@@ -1246,6 +1321,131 @@ void ImGuiPracticeSaves::drawGenericPanel() {
     m_scrollSelectedGenericRow = false;
 }
 
+void ImGuiPracticeSaves::executeGorgeVoidChecker() {
+    constexpr u32 kGorgeVoidReloadCombo = PAD_TRIGGER_L | PAD_TRIGGER_Z;
+    constexpr int kWarpCutsceneFrames = 160;
+    constexpr int kEarliestRelevantFrame = 123;
+    constexpr int kLatestRelevantLateFrame = 10;
+    constexpr int kResultDisplayFrames = 90;
+
+    auto& state = m_gorgeVoidChecker;
+    if (state.resultTimer > 0) {
+        state.resultTimer--;
+    }
+
+    const bool enabled = getSettings().game.gorgeVoidChecker.getValue() &&
+                         !getSettings().game.speedrunMode.getValue();
+    if (!enabled) {
+        state.timerStarted = false;
+        state.comboHeld = false;
+        state.gotIt = false;
+        state.counterDifference = 0;
+        state.afterCsVal = 0;
+        state.resultTimer = 0;
+        state.resultText[0] = '\0';
+        return;
+    }
+
+    const u32 hold = raw_pad_hold();
+    const bool comboHeld = (hold & kGorgeVoidReloadCombo) == kGorgeVoidReloadCombo;
+    if (comboHeld && !state.comboHeld &&
+        !m_loadInProgress && !getTransientSettings().stateShareLoadActive)
+    {
+        loadPracticeSaveByIndex(SaveCategory::Any, 9);
+        state.timerStarted = false;
+        state.gotIt = false;
+        state.counterDifference = 0;
+        state.afterCsVal = 0;
+        state.resultTimer = 0;
+    }
+    state.comboHeld = comboHeld;
+
+    const char* stageName = dComIfGp_getStartStageName();
+    if (stageName == nullptr || std::strcmp(stageName, "F_SP121") != 0 ||
+        m_loadInProgress || getTransientSettings().stateShareLoadActive)
+    {
+        state.timerStarted = false;
+        state.gotIt = false;
+        state.counterDifference = 0;
+        state.afterCsVal = 0;
+        return;
+    }
+
+    dEvt_control_c* event = dComIfGp_getEvent();
+    if (event == nullptr) {
+        return;
+    }
+
+    const int frame = static_cast<int>(g_Counter.mCounter0);
+    const bool halt = event->mEventStatus == 1;
+    if (!state.timerStarted && halt && event->mEventId == 262) {
+        state.timerStarted = true;
+        state.previousFrame = frame;
+        state.counterDifference = 0;
+        state.afterCsVal = 0;
+        state.gotIt = false;
+    }
+
+    if (!state.timerStarted) {
+        return;
+    }
+
+    state.counterDifference += frame - state.previousFrame;
+    state.previousFrame = frame;
+    if (state.counterDifference > kWarpCutsceneFrames) {
+        state.afterCsVal = state.counterDifference - kWarpCutsceneFrames;
+    }
+
+    if (state.counterDifference <= kEarliestRelevantFrame ||
+        state.afterCsVal >= kLatestRelevantLateFrame)
+    {
+        return;
+    }
+
+    const bool inputDetected = (raw_pad_hold() & PAD_TRIGGER_L) != 0 &&
+                               (raw_pad_trig() & PAD_BUTTON_A) != 0;
+    if (state.gotIt || !inputDetected) {
+        return;
+    }
+
+    if (state.counterDifference < kWarpCutsceneFrames) {
+        std::snprintf(state.resultText, sizeof(state.resultText), "-%df",
+                      kWarpCutsceneFrames - state.counterDifference);
+        state.resultColor = 1;
+    } else if (state.counterDifference == kWarpCutsceneFrames) {
+        std::snprintf(state.resultText, sizeof(state.resultText), "<3");
+        state.resultColor = 2;
+        state.gotIt = true;
+    } else {
+        std::snprintf(state.resultText, sizeof(state.resultText), "+%df", state.afterCsVal);
+        state.resultColor = 3;
+    }
+    state.resultTimer = kResultDisplayFrames;
+}
+
+void ImGuiPracticeSaves::drawGorgeVoidCheckerResult() {
+    const auto& state = m_gorgeVoidChecker;
+    if (state.resultTimer <= 0 || state.resultText[0] == '\0') {
+        return;
+    }
+
+    ImU32 color = IM_COL32(255, 255, 255, 255);
+    if (state.resultColor == 1) {
+        color = IM_COL32(70, 145, 255, 255);
+    } else if (state.resultColor == 2) {
+        color = IM_COL32(60, 230, 90, 255);
+    } else if (state.resultColor == 3) {
+        color = IM_COL32(255, 80, 80, 255);
+    }
+
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const float fontSize = ImGui::GetFontSize() * 2.0f;
+    const ImVec2 textSize = ImGui::CalcTextSize(state.resultText);
+    const ImVec2 pos(viewport->Pos.x + (viewport->Size.x - textSize.x * 2.0f) * 0.5f,
+                     viewport->Pos.y + 96.0f);
+    ImGui::GetForegroundDrawList()->AddText(nullptr, fontSize, pos, color, state.resultText);
+}
+
 void ImGuiPracticeSaves::tickPendingApply() {
     if (m_pendingSavedata.has_value() && !dComIfGp_isEnableNextStage()) {
         g_dComIfG_gameInfo.info.mSavedata = *m_pendingSavedata;
@@ -1257,6 +1457,10 @@ void ImGuiPracticeSaves::tickPendingApply() {
         m_pendingSavedata.reset();
 
         dComIfGs_getSave(g_dComIfG_gameInfo.info.getDan().mStageNo);
+        if (m_pendingStageInitCallback != static_cast<int>(PracticeSaveCallback::None)) {
+            apply_post_save_inject_callback(static_cast<PracticeSaveCallback>(m_pendingStageInitCallback));
+            m_pendingStageInitCallback = static_cast<int>(PracticeSaveCallback::None);
+        }
         dKy_set_nexttime(dComIfGs_getTime());
         dComIfGp_offOxygenShowFlag();
         dComIfGp_setMaxOxygen(600);
@@ -1319,6 +1523,11 @@ void ImGuiPracticeSaves::draw(bool& open) {
     if (!m_loaded) {
         loadMetadata();
     }
+
+    if (dusk::IsGameLaunched) {
+        executeGorgeVoidChecker();
+    }
+    drawGorgeVoidCheckerResult();
 
     if (!open) {
         return;

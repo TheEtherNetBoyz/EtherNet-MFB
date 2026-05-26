@@ -54,7 +54,11 @@ private:
     void loadMetadata();
     void loadCategoryMetadata(SaveCategory category);
     bool loadPracticeSave(const PracticeSaveEntry& entry);
+    bool loadPracticeSave(SaveCategory category, const PracticeSaveEntry& entry);
+    bool loadPracticeSaveByIndex(SaveCategory category, int index);
     void tickPendingApply();
+    void executeGorgeVoidChecker();
+    void drawGorgeVoidCheckerResult();
     void handleController(bool& open);
     void consumeControllerInput();
     void drawCategoryList();
@@ -69,6 +73,7 @@ private:
     std::optional<u8> m_pendingVibration;
     std::optional<PracticeSavePlacement> m_pendingPlacement;
     int m_pendingPlayerInitFrames = 0;
+    int m_pendingStageInitCallback = 0;
     int m_pendingPlayerInitCallback = 0;
     MainCategory m_mainCategory = MainCategory::Practice;
     SaveCategory m_saveCategory = SaveCategory::Any;
@@ -83,6 +88,20 @@ private:
     bool m_loadInProgress = false;
     bool m_loadPeekSeen = false;
     int m_pendingPlacementFrames = 0;
+
+    struct GorgeVoidCheckerState {
+        bool comboHeld = false;
+        bool timerStarted = false;
+        bool gotIt = false;
+        int previousFrame = 0;
+        int counterDifference = 0;
+        int afterCsVal = 0;
+        int resultTimer = 0;
+        int resultColor = 0;
+        char resultText[20] = {};
+    };
+
+    GorgeVoidCheckerState m_gorgeVoidChecker;
 };
 
 }

@@ -97,6 +97,7 @@ namespace dusk {
             s.game.recordingMode.setSpeedrunValue(false);
             s.game.debugFlyCam.setSpeedrunValue(false);
             s.game.moveLink.setSpeedrunValue(false);
+            s.game.gorgeVoidChecker.setSpeedrunValue(false);
             getTransientSettings().moveLinkActive = false;
         }
 

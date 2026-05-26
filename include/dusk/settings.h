@@ -266,6 +266,7 @@ struct UserSettings {
         ConfigVar<bool> liveSplitEnabled;
         ConfigVar<bool> showSpeedrunRTATimer;
         ConfigVar<bool> moveLink;
+        ConfigVar<bool> gorgeVoidChecker;
         ConfigVar<bool> recordingMode;
         ConfigVar<bool> removeQuestMapMarkers;
         ConfigVar<bool> showInputViewer;
