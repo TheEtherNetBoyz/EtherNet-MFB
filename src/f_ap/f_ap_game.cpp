@@ -23,6 +23,7 @@
 #include "f_op/f_op_draw_tag.h"
 #include "f_op/f_op_overlap_mng.h"
 #include "f_op/f_op_scene_mng.h"
+#include "f_op/f_op_scene_req.h"
 #include "f_pc/f_pc_creator.h"
 #include "f_pc/f_pc_deletor.h"
 #include "f_pc/f_pc_draw.h"
@@ -32,6 +33,7 @@
 #include "m_Do/m_Do_audio.h"
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_main.h"
+#include "m_Do/m_Do_Reset.h"
 
 #if TARGET_PC
 #include "tracy/Tracy.hpp"
@@ -732,13 +734,27 @@ void fapGm_HIO_c::printCpuTimer(const char* message) {
 }
 #endif
 
+#if TARGET_PC
+static bool fapGm_isInstaLoadPumpAllowed(BOOL hadNextStage) {
+    return hadNextStage &&
+           dusk::getSettings().game.enableInstaLoads.getValue() &&
+           !mDoRst::isReset() &&
+           !mDoRst::isReturnToMenu() &&
+           !mDoRst::isShutdown() &&
+           !fopScnRq_IsTitleToFileSelectVanillaFastLoad() &&
+           fpcM_SearchByName(fpcNm_OPENING_SCENE_e) == NULL &&
+           fpcM_SearchByName(fpcNm_NAME_SCENE_e) == NULL &&
+           fpcM_SearchByName(fpcNm_TITLE_e) == NULL;
+}
+#endif
+
 void fapGm_After() {
     BOOL hadNextStage = dComIfGp_isEnableNextStage();
 
     fopScnM_Management();
 
 #if TARGET_PC
-    if (hadNextStage && dusk::getSettings().game.enableInstaLoads.getValue()) {
+    if (fapGm_isInstaLoadPumpAllowed(hadNextStage)) {
         BOOL drawReady = FALSE;
 
         for (int i = 0; i < 4096; i++) {

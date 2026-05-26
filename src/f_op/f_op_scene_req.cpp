@@ -56,6 +56,9 @@ static cPhs_Step fopScnRq_phase_Execute(scene_request_class* i_sceneReq) {
 #if TARGET_PC
         (dusk::getSettings().game.enableFastLoads.getValue() ||
          dusk::getSettings().game.enableInstaLoads.getValue()) &&
+        !mDoRst::isReset() &&
+        !mDoRst::isReturnToMenu() &&
+        !mDoRst::isShutdown() &&
         !fopScnRq_isDmn07VanillaFastLoad() &&
         !fopScnRq_IsTitleToFileSelectVanillaFastLoad() &&
 #endif

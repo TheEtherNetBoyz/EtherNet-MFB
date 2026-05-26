@@ -578,6 +578,16 @@ static int dScnPly_Draw(dScnPly_c* i_this) {
                 false);
 #if TARGET_PC
             if (useFastLoadOverlap &&
+                (mDoRst::isReset() ||
+                 mDoRst::isReturnToMenu() ||
+                 mDoRst::isShutdown() ||
+                 fpcM_GetName(i_this) == fpcNm_OPENING_SCENE_e ||
+                 fpcM_SearchByName(fpcNm_TITLE_e) != NULL))
+            {
+                useFastLoadOverlap = false;
+            }
+
+            if (useFastLoadOverlap &&
                 dusk::getSettings().game.enableFastLoads.getValue() &&
                 !dusk::getSettings().game.enableInstaLoads.getValue() &&
                 strcmp(dComIfGp_getStartStageName(), "D_MN07") == 0 &&
