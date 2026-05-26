@@ -62,6 +62,7 @@
 #include "res/Object/Alink.h"
 #include <algorithm>
 #include <cstring>
+#include <dusk/string.hpp>
 #endif
 
 static int daAlink_Create(fopAc_ac_c* i_this);

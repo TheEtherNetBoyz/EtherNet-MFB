@@ -15,6 +15,12 @@ enum class BloomMode : int {
     Dusk = 2,
 };
 
+enum class DepthOfFieldMode : int {
+    Off = 0,
+    Classic = 1,
+    Dusk = 2,
+};
+
 enum class Resampler : int {
     Bilinear = 0,
     Area = 1,
@@ -53,11 +59,23 @@ enum HotkeyModifier : int {
     HOTKEY_MOD_ALT = 1 << 2,
 };
 
+enum class MenuScaling : u8 {
+    GameCube = 0,
+    Wii = 1,
+    Dusklight = 2,
+};
+
 namespace config {
 template <>
 struct ConfigEnumRange<BloomMode> {
     static constexpr auto min = BloomMode::Off;
     static constexpr auto max = BloomMode::Dusk;
+};
+
+template <>
+struct ConfigEnumRange<DepthOfFieldMode> {
+    static constexpr auto min = DepthOfFieldMode::Off;
+    static constexpr auto max = DepthOfFieldMode::Dusk;
 };
 
 template <>
@@ -88,6 +106,12 @@ template <>
 struct ConfigEnumRange<AspectRatioMode> {
     static constexpr auto min = AspectRatioMode::Off;
     static constexpr auto max = AspectRatioMode::Ratio3x2;
+};
+
+template <>
+struct ConfigEnumRange<MenuScaling> {
+    static constexpr auto min = MenuScaling::GameCube;
+    static constexpr auto max = MenuScaling::Dusklight;
 };
 }  // namespace config
 
@@ -150,6 +174,7 @@ struct UserSettings {
         ConfigVar<bool> instantText;
         ConfigVar<bool> sunsSong;
         ConfigVar<bool> autoSave;
+        ConfigVar<bool> enhancedMapMenus;
 
         // Preferences
         ConfigVar<bool> enableMirrorMode;
@@ -159,10 +184,12 @@ struct UserSettings {
         ConfigVar<bool> enableAchievementToasts;
         ConfigVar<bool> enableControllerToasts;
         ConfigVar<bool> enableDiscordPresence;
+        ConfigVar<MenuScaling> menuScalingMode;
 
         // Graphics
         ConfigVar<BloomMode> bloomMode;
         ConfigVar<float> bloomMultiplier;
+        ConfigVar<DepthOfFieldMode> depthOfFieldMode;
         ConfigVar<bool> disableWaterRefraction;
         ConfigVar<bool> enableTextureReplacements;
         ConfigVar<bool> enableFrameInterpolation;
@@ -171,7 +198,6 @@ struct UserSettings {
         ConfigVar<int> internalResolutionScale;
         ConfigVar<int> shadowResolutionMultiplier;
         ConfigVar<Resampler> resampler;
-        ConfigVar<bool> enableDepthOfField;
         ConfigVar<bool> enableMapBackground;
         ConfigVar<bool> disableCutscenePillarboxing;
 
@@ -195,6 +221,8 @@ struct UserSettings {
         ConfigVar<bool> invertCameraYAxis;
         ConfigVar<bool> invertFirstPersonXAxis;
         ConfigVar<bool> invertFirstPersonYAxis;
+        ConfigVar<bool> invertAirSwimX;
+        ConfigVar<bool> invertAirSwimY;
         ConfigVar<float> freeCameraSensitivity;
         ConfigVar<bool> enableCameraSpeedControls;
         ConfigVar<float> aimingCameraSensitivityLevel;
@@ -239,6 +267,7 @@ struct UserSettings {
         ConfigVar<bool> showSpeedrunRTATimer;
         ConfigVar<bool> moveLink;
         ConfigVar<bool> recordingMode;
+        ConfigVar<bool> removeQuestMapMarkers;
         ConfigVar<bool> showInputViewer;
         ConfigVar<bool> showInputViewerGyro;
     } game;
