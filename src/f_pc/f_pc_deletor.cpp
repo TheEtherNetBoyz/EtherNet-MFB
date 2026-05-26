@@ -13,6 +13,7 @@
 #include "JSystem/JUtility/JUTAssert.h"
 
 #if TARGET_PC
+#include "d/d_com_inf_game.h"
 #include "dusk/settings.h"
 #endif
 
@@ -44,7 +45,7 @@ void fpcDt_Handler() {
     }
 #endif
 #if TARGET_PC
-    if (dusk::getSettings().game.enableInstaLoads.getValue()) {
+    if (dusk::getSettings().game.enableInstaLoads.getValue() && dComIfGp_isEnableNextStage()) {
         int unchangedPasses = 0;
 
         for (int i = 0; i < 4096 && g_fpcDtTg_Queue.mSize > 0; i++) {

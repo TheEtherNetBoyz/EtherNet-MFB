@@ -82,6 +82,10 @@ static bool isCastleBarrierBreakReady() {
            !dComIfGs_isEventBit(dSv_event_flag_c::F_0542);
 }
 
+static bool isCastleBarrierBreakCutsceneStarted() {
+    return dComIfGs_isStageSwitch(dStage_SaveTbl_CASTLE_TOWN, 15);
+}
+
 static void* duskFindCastleBarrier(void* i_actor, void*) {
     if (fopAc_IsActor(i_actor) &&
         (fopAcM_GetName(i_actor) == fpcNm_Obj_GanonWall2_e ||
@@ -94,6 +98,10 @@ static void* duskFindCastleBarrier(void* i_actor, void*) {
 
 static bool duskCastleBarrierExists() {
     return fopAcIt_Judge((fopAcIt_JudgeFunc)duskFindCastleBarrier, NULL) != NULL;
+}
+
+static bool isCastleBarrierBreakStateValid() {
+    return duskCastleBarrierExists() || isCastleBarrierBreakCutsceneStarted();
 }
 
 static void* duskDeleteCastleBarrier(void* i_actor, void*) {
@@ -127,12 +135,13 @@ static void skipCastleBarrierEvent(void* i_actor, int param_1) {
 }
 
 static void finishCastleBarrierDemo(daAlink_c* i_player) {
-    if (!duskCastleBarrierExists()) {
+    if (!isCastleBarrierBreakStateValid()) {
         i_player->cancelOriginalDemo();
         Z2GetAudioMgr()->setDemoName(NULL);
         return;
     }
 
+    dComIfGs_onStageSwitch(dStage_SaveTbl_CASTLE_TOWN, 15);
     dComIfGs_onEventBit(dSv_event_flag_c::F_0542);
     fopAcIt_Judge((fopAcIt_JudgeFunc)duskDeleteCastleBarrier, NULL);
 
@@ -150,7 +159,7 @@ static int castleBarrierDemoSkip(void* i_actor, int param_1) {
 
 static void installCastleBarrierDemoSkip(daAlink_c* i_player) {
     if (dusk::cutscene_skip::enabled() && isCastleBarrierApproachStage() &&
-        isCastleBarrierBreakReady() && duskCastleBarrierExists()) {
+        isCastleBarrierBreakReady() && isCastleBarrierBreakStateValid()) {
         dComIfGp_getEvent()->setSkipProc(i_player, castleBarrierDemoSkip, 0);
         dComIfGp_getEvent()->onSkipFade();
     }
