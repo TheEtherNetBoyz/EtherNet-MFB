@@ -296,6 +296,85 @@ u8 mDoGph_gInf_c::mFade;
 
 bool mDoGph_gInf_c::mAutoForcus;
 
+#if TARGET_PC
+static bool l_instaLoadFrameHoldActive;
+static bool l_instaLoadFrameHoldCaptured;
+static int l_instaLoadFrameHoldFramesLeft;
+
+static bool isInstaLoadFrameHoldReadyToRelease() {
+    return dComIfGp_getWindowNum() != 0 &&
+           dComIfGp_getPlayer(0) != NULL &&
+           !dComIfGp_isEnableNextStage();
+}
+#endif
+
+#if TARGET_PC || PLATFORM_WII
+static void captureFullFrameBuffer() {
+    GXSetTexCopySrc(0, 0, mDoGph_gInf_c::getWidth(), mDoGph_gInf_c::getHeight());
+    GXSetTexCopyDst(mDoGph_gInf_c::getWidth(), mDoGph_gInf_c::getHeight(),
+                    (GXTexFmt)mDoGph_gInf_c::m_fullFrameBufferTimg->format, 0);
+    GXCopyTex(mDoGph_gInf_c::m_fullFrameBufferTex, 0);
+    GXPixModeSync();
+    GXInvalidateTexAll();
+}
+
+static void drawFullFrameBuffer(bool mirror) {
+#if TARGET_PC
+    mDoGph_gInf_c::m_fullFrameBufferTexObj.reset();
+#endif
+    mDoLib_setResTimgObj(mDoGph_gInf_c::m_fullFrameBufferTimg,
+                         &mDoGph_gInf_c::m_fullFrameBufferTexObj, 0, NULL);
+    GXLoadTexObj(&mDoGph_gInf_c::m_fullFrameBufferTexObj, GX_TEXMAP0);
+
+    GXSetNumChans(0);
+    GXSetNumIndStages(0);
+    GXSetNumTexGens(1);
+    GXSetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, 0x3C);
+    GXSetNumTevStages(1);
+    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
+    GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_TEXC);
+    GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_ENABLE, GX_TEVPREV);
+    GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO);
+    GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_ENABLE, GX_TEVPREV);
+    GXSetZCompLoc(GX_ENABLE);
+    GXSetZMode(GX_DISABLE, GX_ALWAYS, GX_DISABLE);
+    GXSetBlendMode(GX_BM_NONE, GX_BL_SRCALPHA, GX_BL_ONE, GX_LO_CLEAR);
+    GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_OR, GX_ALWAYS, 0);
+    GXSetFog(GX_FOG_NONE, 0.0f, 0.0f, 0.0f, 0.0f, g_clearColor);
+    GXSetFogRangeAdj(GX_DISABLE, 0, NULL);
+    GXSetCullMode(GX_CULL_NONE);
+    GXSetDither(GX_ENABLE);
+
+    Mtx44 mtx;
+    if (mirror) {
+        MTXOrtho(mtx, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 10.0f);
+    } else {
+        MTXOrtho(mtx, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 10.0f);
+    }
+    GXSetProjection(mtx, GX_ORTHOGRAPHIC);
+    GXLoadPosMtxImm(cMtx_getIdentity(), GX_PNMTX0);
+    GXSetCurrentMtx(0);
+    GXClearVtxDesc();
+    GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
+    GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_S8, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_RGB8, 0);
+    mDoGph_drawFilterQuad(1, 1);
+}
+#endif
+
+#if TARGET_PC
+void mDoGph_gInf_c::requestInstaLoadFrameHold() {
+    l_instaLoadFrameHoldActive = true;
+    l_instaLoadFrameHoldFramesLeft = 180;
+}
+
+void mDoGph_gInf_c::clearInstaLoadFrameHold() {
+    l_instaLoadFrameHoldActive = false;
+    l_instaLoadFrameHoldFramesLeft = 0;
+}
+#endif
+
 void mDoGph_gInf_c::create() {
     #if PLATFORM_WII || PLATFORM_SHIELD
     VISetTrapFilter(0);
@@ -2612,45 +2691,8 @@ int mDoGph_Painter() {
     #endif
     #if TARGET_PC || PLATFORM_WII
     {
-        GXSetTexCopySrc(0, 0, mDoGph_gInf_c::getWidth(), mDoGph_gInf_c::getHeight());
-        GXSetTexCopyDst(mDoGph_gInf_c::getWidth(), mDoGph_gInf_c::getHeight(), (GXTexFmt)mDoGph_gInf_c::m_fullFrameBufferTimg->format, 0);
-        GXCopyTex(mDoGph_gInf_c::m_fullFrameBufferTex, 0);
-        GXPixModeSync();
-        GXInvalidateTexAll();
-
-        mDoLib_setResTimgObj(mDoGph_gInf_c::m_fullFrameBufferTimg, &mDoGph_gInf_c::m_fullFrameBufferTexObj, 0, NULL);
-        GXLoadTexObj(&mDoGph_gInf_c::m_fullFrameBufferTexObj, GX_TEXMAP0);
-
-        GXSetNumChans(0);
-        GXSetNumIndStages(0);
-        GXSetNumTexGens(1);
-        GXSetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, 0x3C);
-        GXSetNumTevStages(1);
-        GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
-        GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_TEXC);
-        GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_ENABLE, GX_TEVPREV);
-        GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO);
-        GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_ENABLE, GX_TEVPREV);
-        GXSetZCompLoc(GX_ENABLE);
-        GXSetZMode(GX_DISABLE, GX_ALWAYS, GX_DISABLE);
-        GXSetBlendMode(GX_BM_NONE, GX_BL_SRCALPHA, GX_BL_ONE, GX_LO_CLEAR);
-        GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_OR, GX_ALWAYS, 0);
-        GXSetFog(GX_FOG_NONE, 0.0f, 0.0f, 0.0f, 0.0f, g_clearColor);
-        GXSetFogRangeAdj(GX_DISABLE, 0, NULL);
-        GXSetCullMode(GX_CULL_NONE);
-        GXSetDither(GX_ENABLE);
-
-        Mtx44 mtx;
-        MTXOrtho(mtx, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 10.0f);
-        GXSetProjection(mtx, GX_ORTHOGRAPHIC);
-        GXLoadPosMtxImm(cMtx_getIdentity(), GX_PNMTX0);
-        GXSetCurrentMtx(0);
-        GXClearVtxDesc();
-        GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
-        GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
-        GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_S8, 0);
-        GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_RGB8, 0);
-        mDoGph_drawFilterQuad(1, 1);
+        captureFullFrameBuffer();
+        drawFullFrameBuffer(true);
     }
     #endif
 
@@ -2742,6 +2784,28 @@ int mDoGph_Painter() {
     #endif
 
 #if TARGET_PC
+    if (l_instaLoadFrameHoldActive) {
+        if (!dusk::getSettings().game.enableInstaLoads.getValue() ||
+            isInstaLoadFrameHoldReadyToRelease())
+        {
+            mDoGph_gInf_c::clearInstaLoadFrameHold();
+        } else if (l_instaLoadFrameHoldCaptured) {
+            drawFullFrameBuffer(false);
+            if (--l_instaLoadFrameHoldFramesLeft <= 0) {
+                mDoGph_gInf_c::clearInstaLoadFrameHold();
+            }
+        }
+    }
+
+    if (!l_instaLoadFrameHoldActive &&
+        dusk::getSettings().game.enableInstaLoads.getValue() &&
+        dComIfGp_getWindowNum() != 0 &&
+        dComIfGp_getPlayer(0) != NULL)
+    {
+        captureFullFrameBuffer();
+        l_instaLoadFrameHoldCaptured = true;
+    }
+
     dusk::g_imguiConsole.PostDraw();
 #endif
 

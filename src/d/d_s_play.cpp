@@ -585,13 +585,27 @@ static int dScnPly_Draw(dScnPly_c* i_this) {
             {
                 useFastLoadOverlap = false;
             }
+
+            if (useFastLoadOverlap &&
+                dusk::getSettings().game.enableInstaLoads.getValue() &&
+                !mDoRst::isReset())
+            {
+                mDoGph_gInf_c::requestInstaLoadFrameHold();
+                mDoGph_gInf_c::startFadeIn(0);
+                mDoGph_gInf_c::offFade();
+            }
 #endif
 
-            int rt = fopScnM_ChangeReq(i_this, fpcNm_PLAY_SCENE_e,
-                                        DUSK_IF_ELSE(
-                                            useFastLoadOverlap ? fpcNm_OVERLAP0_e : l_wipeType[wipe],
-                                            l_wipeType[wipe]),
-                                        5);
+            int rt = fopScnM_ChangeReq(
+                i_this, fpcNm_PLAY_SCENE_e,
+                DUSK_IF_ELSE(
+                    useFastLoadOverlap ?
+                        (dusk::getSettings().game.enableInstaLoads.getValue() ?
+                             0x7FFF :
+                             fpcNm_OVERLAP0_e) :
+                        l_wipeType[wipe],
+                    l_wipeType[wipe]),
+                5);
 
             int hour = dKy_getdaytime_hour();
             BOOL isDaytime = (hour >= 6 && hour < 18) ? FALSE : TRUE;

@@ -36,7 +36,11 @@ static u32 z2FastLoadAudioFrames(u32 frames) {
 
 static u32 z2FastLoadAudioFadeFrames(u32 frames) {
 #if TARGET_PC
-    return z2IsAcceleratedLoadAudio() ? 6 : frames;
+    if (!z2IsAcceleratedLoadAudio()) {
+        return frames;
+    }
+
+    return dusk::getSettings().game.enableInstaLoads.getValue() ? 0 : 6;
 #else
     return frames;
 #endif

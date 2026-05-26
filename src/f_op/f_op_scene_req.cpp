@@ -15,6 +15,7 @@
 #if TARGET_PC
 #include "dusk/settings.h"
 #include "m_Do/m_Do_Reset.h"
+#include "m_Do/m_Do_graphic.h"
 #endif
 
 #if TARGET_PC
@@ -187,6 +188,16 @@ fpc_ProcID fopScnRq_Request(int i_reqType, scene_class* i_scene, s16 i_procName,
 #if TARGET_PC
     l_titleToFileSelectVanillaFastLoad =
         fopScnRq_isTitleToFileSelectVanillaFastLoad(i_procName, i_fadename, i_peektime);
+
+    if (!l_titleToFileSelectVanillaFastLoad &&
+        dusk::getSettings().game.enableInstaLoads.getValue() &&
+        !mDoRst::isReset() &&
+        i_procName == fpcNm_PLAY_SCENE_e &&
+        i_fadename == fpcNm_OVERLAP0_e)
+    {
+        mDoGph_gInf_c::requestInstaLoadFrameHold();
+        i_fadename = 0x7FFF;
+    }
 #endif
 
     if (i_fadename != 0x7FFF) {

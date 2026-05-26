@@ -26,9 +26,9 @@ public:
 
 static const int kFastFadeFrames = 20;
 static const int kFastFadeInFrames = 25;
-static const int kInstaFadeFrames = 12;
-static const int kInstaFadeInFrames = 10;
-static const int kInstaBlackFadeInFrames = 13;
+static const int kInstaFadeFrames = 0;
+static const int kInstaFadeInFrames = 0;
+static const int kInstaBlackFadeInFrames = 0;
 static const int kFastStartLoadBeforeFadeDoneFrames = 1;
 
 static bool dOvlpFd_isDmn07VanillaFastLoad() {
@@ -55,6 +55,10 @@ static bool dOvlpFd_isInstaLoad() {
                         false);
 }
 
+static bool dOvlpFd_isRealInstaLoad() {
+    return dOvlpFd_isInstaLoad();
+}
+
 static int dOvlpFd_getFadeFrames() {
     return DUSK_IF_ELSE(dOvlpFd_isInstaLoad() ? kInstaFadeFrames : kFastFadeFrames,
                         kFastFadeFrames);
@@ -75,8 +79,9 @@ static int dOvlpFd_getFadeInFrames() {
 }
 
 static int dOvlpFd_getDoneFrames() {
-    return DUSK_IF_ELSE(dOvlpFd_isInstaLoad() ? kInstaFadeFrames - 1 :
-                                                kFastStartLoadBeforeFadeDoneFrames,
+    return DUSK_IF_ELSE(dOvlpFd_isRealInstaLoad() ? 0 :
+                            (dOvlpFd_isInstaLoad() ? kInstaFadeFrames - 1 :
+                                                     kFastStartLoadBeforeFadeDoneFrames),
                         kFastStartLoadBeforeFadeDoneFrames);
 }
 
@@ -93,7 +98,20 @@ static void dOvlpFd_startFadeIn(int param_0) {
     fader->startFadeIn(param_0);
 }
 
+static void dOvlpFd_clearFader() {
+    dOvlpFd_startFadeIn(0);
+    mDoGph_gInf_c::offFade();
+}
+
 static int dOvlpFd_FadeOut(overlap1_class* i_this) {
+    if (dOvlpFd_isRealInstaLoad()) {
+        dOvlpFd_clearFader();
+        mDoAud_setFadeInStart(0);
+        fopOvlpM_SceneIsStart();
+        fopOvlpM_Done(i_this);
+        return 1;
+    }
+
     bool fastLoad = dOvlpFd_isFastLoad();
     int fastFadeFrames = dOvlpFd_getFadeInFrames();
     int var_r31 = fastLoad ? fastFadeFrames : i_this->field_0xd4;
@@ -143,6 +161,14 @@ static int dOvlpFd_Wait(overlap1_class* i_this) {
 }
 
 static int dOvlpFd_FadeIn(overlap1_class* i_this) {
+    if (dOvlpFd_isRealInstaLoad()) {
+        dOvlpFd_clearFader();
+        mDoAud_setFadeOutStart(0);
+        dOvlpFd_execute_f = dOvlpFd_Wait;
+        fopOvlpM_Done(i_this);
+        return 1;
+    }
+
     bool fastLoad = dOvlpFd_isFastLoad();
     int fastFadeFrames = dOvlpFd_getFadeFrames();
     int var_r30 = fastLoad ? fastFadeFrames : 30;
