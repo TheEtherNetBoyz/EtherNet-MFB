@@ -136,6 +136,13 @@ enum class PracticeSaveCallback : int {
     StallordSkipCAD,
     StallordSkipJoseph,
     StallordPhase2,
+    SetNextStageLayer1,
+    SetNextStageLayer3,
+    SetNextStageLayer4SkipDemo,
+    SetNextStageLayer5,
+    SetEscortNextStage,
+    GiveEscortKeys,
+    SetSnowpeakBossKeyNextStage,
 };
 
 struct PracticeSaveCallbacks {
@@ -152,6 +159,9 @@ PracticeSaveCallbacks practice_save_callbacks(ImGuiPracticeSaves::SaveCategory c
         if (index == 4) {
             return {PracticeSaveCallback::None, PracticeSaveCallback::SetupHugo};
         }
+        if (index == 20 || index == 21) {
+            return {PracticeSaveCallback::SetNextStageLayer4SkipDemo, PracticeSaveCallback::None};
+        }
         if (index == 40) {
             return {PracticeSaveCallback::StallordInit, PracticeSaveCallback::StallordInit};
         }
@@ -164,18 +174,42 @@ PracticeSaveCallbacks practice_save_callbacks(ImGuiPracticeSaves::SaveCategory c
         if (index == 44) {
             return {PracticeSaveCallback::StallordInit, PracticeSaveCallback::StallordPhase2};
         }
+        if (index == 64) {
+            return {PracticeSaveCallback::SetNextStageLayer1, PracticeSaveCallback::None};
+        }
         break;
     case ImGuiPracticeSaves::SaveCategory::NoSq:
         if (index == 1) {
             return {PracticeSaveCallback::None, PracticeSaveCallback::SetupHugo};
+        }
+        if (index == 11) {
+            return {PracticeSaveCallback::SetNextStageLayer3, PracticeSaveCallback::None};
+        }
+        if (index == 12) {
+            return {PracticeSaveCallback::SetEscortNextStage, PracticeSaveCallback::GiveEscortKeys};
         }
         if (index == 23) {
             return {PracticeSaveCallback::StallordInit, PracticeSaveCallback::StallordInit};
         }
         break;
     case ImGuiPracticeSaves::SaveCategory::Hundred:
+        if (index == 0) {
+            return {PracticeSaveCallback::SetNextStageLayer5, PracticeSaveCallback::None};
+        }
+        if (index == 24) {
+            return {PracticeSaveCallback::SetNextStageLayer3, PracticeSaveCallback::None};
+        }
+        if (index == 25) {
+            return {PracticeSaveCallback::SetEscortNextStage, PracticeSaveCallback::GiveEscortKeys};
+        }
+        if (index == 34) {
+            return {PracticeSaveCallback::SetNextStageLayer4SkipDemo, PracticeSaveCallback::None};
+        }
         if (index == 40) {
             return {PracticeSaveCallback::StallordInit, PracticeSaveCallback::StallordInit};
+        }
+        if (index == 46) {
+            return {PracticeSaveCallback::SetSnowpeakBossKeyNextStage, PracticeSaveCallback::None};
         }
         break;
     case ImGuiPracticeSaves::SaveCategory::AllDungeons:
@@ -248,6 +282,28 @@ void apply_stallord_phase2_callback() {
     }
 }
 
+void set_next_stage_layer(s8 layer) {
+    if (auto* nextStage = dComIfGp_getNextStartStage()) {
+        nextStage->setLayer(layer);
+    }
+}
+
+void set_next_stage_route(s8 roomNo, s16 point, s8 layer) {
+    auto& play = g_dComIfG_gameInfo.play;
+    char stageName[8] = {};
+    std::strncpy(stageName, play.getNextStageName(), sizeof(stageName) - 1);
+    play.setNextStage(stageName, roomNo, point, layer, play.getNextStageWipe(), play.getNextStageWipeSpeed());
+}
+
+void apply_empty_lake_hylia_callback() {
+    set_next_stage_layer(4);
+    cDmr_SkipInfo = 1;
+}
+
+void apply_give_escort_keys_callback() {
+    dComIfGs_setKeyNum(2);
+}
+
 void apply_player_init_callback(PracticeSaveCallback callback) {
     switch (callback) {
     case PracticeSaveCallback::OrdonGateClip:
@@ -268,6 +324,29 @@ void apply_player_init_callback(PracticeSaveCallback callback) {
     case PracticeSaveCallback::StallordPhase2:
         apply_stallord_phase2_callback();
         break;
+    case PracticeSaveCallback::SetNextStageLayer1:
+        set_next_stage_layer(1);
+        break;
+    case PracticeSaveCallback::SetNextStageLayer3:
+        set_next_stage_layer(3);
+        break;
+    case PracticeSaveCallback::SetNextStageLayer4SkipDemo:
+        apply_empty_lake_hylia_callback();
+        break;
+    case PracticeSaveCallback::SetNextStageLayer5:
+        set_next_stage_layer(5);
+        break;
+    case PracticeSaveCallback::SetEscortNextStage:
+        set_next_stage_route(13, 98, 2);
+        break;
+    case PracticeSaveCallback::GiveEscortKeys:
+        apply_give_escort_keys_callback();
+        break;
+    case PracticeSaveCallback::SetSnowpeakBossKeyNextStage: {
+        const s8 layer = dComIfGp_getNextStartStage() != nullptr ? dComIfGp_getNextStartStage()->getLayer() : -1;
+        set_next_stage_route(11, 0, layer);
+        break;
+    }
     default:
         break;
     }
@@ -833,9 +912,6 @@ bool ImGuiPracticeSaves::loadPracticeSave(const PracticeSaveEntry& entry) {
         m_pendingVibration = vibration;
         m_pendingPlacement = entry.placement;
         const PracticeSaveCallbacks callbacks = practice_save_callbacks(m_saveCategory, entry.index);
-        if (callbacks.stageInit != PracticeSaveCallback::None) {
-            apply_player_init_callback(callbacks.stageInit);
-        }
         m_pendingPlayerInitCallback = static_cast<int>(callbacks.playerInit);
         m_pendingPlacementFrames = 0;
         m_pendingPlayerInitFrames = 0;
@@ -854,6 +930,10 @@ bool ImGuiPracticeSaves::loadPracticeSave(const PracticeSaveEntry& entry) {
                               0,
                               1,
                               3);
+
+        if (callbacks.stageInit != PracticeSaveCallback::None) {
+            apply_player_init_callback(callbacks.stageInit);
+        }
 
         m_statusMsg = fmt::format("Loading {}.", entry.name);
         return true;
