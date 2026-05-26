@@ -188,6 +188,7 @@ static s8 warp_next_room[] = {
 
 static int s_duskZantOpeningSkipTimer;
 static bool s_duskZantOpeningSkipReload;
+static int s_duskZantLastEndSkipTimer;
 
 static void duskFinishZantOpeningSkip() {
     daPy_py_c* player = daPy_getPlayerActorClass();
@@ -4432,11 +4433,65 @@ static void* s_del_tp(void* i_actor, void* i_data) {
     return NULL;
 }
 
+static void duskFinishZantLastEndSkip(daB_ZANT_c* i_this) {
+    daPy_py_c* player = daPy_getPlayerActorClass();
+
+    i_this->mDrawSwords = false;
+    i_this->speedF = 0.0f;
+    i_this->speed.y = 0.0f;
+    i_this->setTgHitBit(FALSE);
+    i_this->setCoHitBit(FALSE);
+    fpcM_Search(s_del_tp, i_this);
+    dComIfGs_onStageBossEnemy();
+
+    dComIfGp_getVibration().StopQuake(0x1F);
+    Z2GetAudioMgr()->bgmStop(0, 0);
+    Z2GetAudioMgr()->bgmStreamStop(0);
+    Z2GetAudioMgr()->subBgmStop();
+    Z2GetAudioMgr()->setDemoName(NULL);
+
+    dComIfGp_event_reset();
+    player->cancelOriginalDemo();
+    dComIfGp_setNextStage("D_MN08A", 25, 10, 9);
+}
+
+static bool duskProcessZantLastEndSkip(daB_ZANT_c* i_this) {
+    if (!dusk::cutscene_skip::enabled() || i_this->mFightPhase != daB_ZANT_c::PHASE_LAST ||
+        i_this->mAction != daB_ZANT_c::ACT_LAST_END_DEMO ||
+        !i_this->eventInfo.checkCommandDemoAccrpt())
+    {
+        s_duskZantLastEndSkipTimer = 0;
+        return false;
+    }
+
+    if (mDoCPd_c::getTrigStart(PAD_1)) {
+        if (s_duskZantLastEndSkipTimer > 0) {
+            s_duskZantLastEndSkipTimer = 0;
+            duskFinishZantLastEndSkip(i_this);
+            return true;
+        }
+        s_duskZantLastEndSkipTimer = 1;
+    }
+
+    if (s_duskZantLastEndSkipTimer > 0) {
+        dComIfGp_setSButtonStatusForce(0x43, 1);
+        if (s_duskZantLastEndSkipTimer++ > 45) {
+            s_duskZantLastEndSkipTimer = 0;
+        }
+    }
+
+    return false;
+}
+
 void daB_ZANT_c::executeLastEndDemo() {
     dCamera_c* camera = dCam_getBody();
     daPy_py_c* player = daPy_getPlayerActorClass();
     cXyz sp34;
     cXyz sp40;
+
+    if (duskProcessZantLastEndSkip(this)) {
+        return;
+    }
 
     switch (mMode) {
     case 0:
