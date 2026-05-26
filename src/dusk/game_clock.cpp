@@ -1,6 +1,5 @@
 #include "dusk/game_clock.h"
 
-#include "dusk/latency.h"
 #include "dusk/logging.h"
 #include "dusk/main.h"
 #include "dusk/settings.h"
@@ -75,9 +74,6 @@ void reset_frame_timer() {
 
 MainLoopPacer advance_main_loop() {
     ensure_initialized();
-    if (!dusk::low_latency_presentation_enabled()) {
-        apply_frame_rate_limit();
-    }
 
     const clock::time_point now = clock::now();
     const clock::duration frame_gap = now - s_previous_sample;
@@ -122,9 +118,7 @@ MainLoopPacer advance_main_loop() {
 
 void finish_main_loop() {
     ensure_initialized();
-    if (dusk::low_latency_presentation_enabled()) {
-        apply_frame_rate_limit();
-    }
+    apply_frame_rate_limit();
 }
 
 void commit_sim_tick() {
