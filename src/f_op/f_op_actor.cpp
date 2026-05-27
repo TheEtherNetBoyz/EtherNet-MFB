@@ -345,11 +345,23 @@ static int fopAc_Execute(void* i_this) {
             fopAcM_OnCondition(actor, fopAcCnd_NOEXEC_e);
         }
 
+#if TARGET_PC
+        if (LEAFDRAW_BASE(actor).state.init_state == 3) {
+            return ret;
+        }
+#endif
+
         if (fopAcM_CheckStatus(actor, fopAcStts_UNK_0x20_e) &&
             actor->home.pos.y - actor->current.pos.y > 5000.0f)
         {
             fopAcM_delete(actor);
         }
+
+#if TARGET_PC
+        if (LEAFDRAW_BASE(actor).state.init_state == 3) {
+            return ret;
+        }
+#endif
 
         JUT_ASSERT(750, !isnan(actor->current.pos.x));
         JUT_ASSERT(751, !isnan(actor->current.pos.y));
