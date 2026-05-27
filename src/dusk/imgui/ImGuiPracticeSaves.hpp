@@ -55,7 +55,7 @@ private:
     void loadCategoryMetadata(SaveCategory category);
     bool loadPracticeSave(const PracticeSaveEntry& entry);
     bool loadPracticeSave(SaveCategory category, const PracticeSaveEntry& entry);
-    bool loadPracticeSaveByIndex(SaveCategory category, int index);
+    bool loadPracticeSaveByIndex(SaveCategory category, int index, bool checkerSetup = false);
     void tickPendingApply();
     void executeGorgeVoidChecker();
     void drawGorgeVoidCheckerResult();

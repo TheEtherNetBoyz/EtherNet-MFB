@@ -735,6 +735,10 @@ void fapGm_HIO_c::printCpuTimer(const char* message) {
 #endif
 
 #if TARGET_PC
+static bool fapGm_isInstaLoadAudioReady() {
+    return !mDoAud_check1stDynamicWave() && !mDoAud_zelAudio_c::isBgmSet();
+}
+
 static bool fapGm_isZantDeathSkipVanillaLoad() {
     return dComIfGp_isEnableNextStage() &&
            strcmp(dComIfGp_getNextStageName(), "D_MN08A") == 0 &&
@@ -764,6 +768,7 @@ void fapGm_After() {
 #if TARGET_PC
     if (fapGm_isInstaLoadPumpAllowed(hadNextStage)) {
         BOOL visualReady = FALSE;
+        BOOL audioReady = FALSE;
         BOOL drawReady = FALSE;
         const bool frameInterpolationEnabled = dusk::frame_interp::is_enabled();
 
@@ -787,11 +792,10 @@ void fapGm_After() {
             visualReady = fpcM_SearchByName(fpcNm_PLAY_SCENE_e) != NULL &&
                           dComIfGp_getWindowNum() != 0 &&
                           !dComIfGp_isEnableNextStage();
-            drawReady = visualReady &&
-                        !mDoAud_check1stDynamicWave() &&
-                        !mDoAud_zelAudio_c::isBgmSet();
+            audioReady = fapGm_isInstaLoadAudioReady();
+            drawReady = visualReady && audioReady;
 
-            if (drawReady || (frameInterpolationEnabled && visualReady)) {
+            if (drawReady) {
                 break;
             }
         }
