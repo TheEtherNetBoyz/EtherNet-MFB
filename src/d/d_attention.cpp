@@ -641,7 +641,12 @@ void dAttention_c::setOwnerAttentionPos() {
     mOwnerAttnPos = mpPlayer->attention_info.position;
 
     if (fopAcM_GetName(mpPlayer) == fpcNm_ALINK_e) {
+#if TARGET_PC
+        daPy_py_c* player = static_cast<daPy_py_c*>(mpPlayer);
+        mOwnerAttnPos.y -= player->checkWolf() ? -12.5f : 57.5f;
+#else
         mOwnerAttnPos.y -= ((daPy_py_c*)mpPlayer)->getAttentionOffsetY();
+#endif
     }
 }
 

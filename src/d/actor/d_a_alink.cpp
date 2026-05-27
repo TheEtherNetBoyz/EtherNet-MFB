@@ -19469,17 +19469,32 @@ void daAlink_c::shadowDraw() {
 }
 
 void daAlink_c::modelCalc(J3DModel* i_model) {
+#if TARGET_PC
+    if (i_model == NULL) {
+        return;
+    }
+#endif
     if (mClothesChangeWaitTimer == 0) {
         i_model->calc();
     }
 }
 
 void daAlink_c::basicModelDraw(J3DModel* i_model) {
+#if TARGET_PC
+    if (i_model == NULL) {
+        return;
+    }
+#endif
     g_env_light.setLightTevColorType_MAJI(i_model, &tevStr);
     mDoExt_modelEntryDL(i_model);
 }
 
 void daAlink_c::modelDraw(J3DModel* i_model, int param_1) {
+#if TARGET_PC
+    if (i_model == NULL) {
+        return;
+    }
+#endif
     g_env_light.setLightTevColorType_MAJI(i_model, &tevStr);
 
     if (param_1 == 0) {
