@@ -11003,6 +11003,15 @@ BOOL dKy_withwarp_capture_check() {
 }
 
 void dKy_depth_dist_set(void* process_p) {
+#if TARGET_PC
+    if (process_p == NULL ||
+        (dusk::getSettings().game.enableInstaLoads.getValue() &&
+         dComIfGp_isEnableNextStage()))
+    {
+        return;
+    }
+#endif
+
     dScnKy_env_light_c* kankyo = dKy_getEnvlight();
     camera_class* camera_p = (camera_class*)dComIfGp_getCamera(0);
     cXyz sp30;

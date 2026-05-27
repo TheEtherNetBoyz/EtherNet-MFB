@@ -6,8 +6,13 @@
 #include "d/dolzel_rel.h" // IWYU pragma: keep
 
 #include "d/actor/d_a_kytag07.h"
+#include "d/d_com_inf_game.h"
 #include "d/d_stage.h"
 #include "f_op/f_op_overlap_mng.h"
+
+#if TARGET_PC
+#include "dusk/settings.h"
+#endif
 
 static int daKytag07_Draw(kytag07_class* i_this) {
     return 1;
@@ -30,6 +35,12 @@ static int daKytag07_Execute(kytag07_class* i_this) {
 }
 
 static int daKytag07_IsDelete(kytag07_class* i_this) {
+#if TARGET_PC
+    if (dusk::getSettings().game.enableInstaLoads.getValue() && dComIfGp_isEnableNextStage()) {
+        return 1;
+    }
+#endif
+
     i_this->field_0x58c = 99;
 
     if (i_this->mLightInfluence.mPow <= 0.01f) {

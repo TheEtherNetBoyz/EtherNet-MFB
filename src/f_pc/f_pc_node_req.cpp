@@ -132,6 +132,10 @@ int fpcNdRq_Execute(node_create_request* i_request) {
 
     // Allow more creation work per frame on PC so area transitions spend fewer frames on black.
     for (int i = 0; i < maxPasses; i++) {
+        int beforePhase = i_request->phase_request.id;
+        process_node_class* beforeNode = i_request->node_proc.node;
+        fpc_ProcID beforeCreatingId = i_request->creating_id;
+
         result = fpcNdRq_DoPhase(i_request);
 
         switch (result) {
@@ -147,6 +151,15 @@ int fpcNdRq_Execute(node_create_request* i_request) {
         default:
             break;
         }
+
+#if TARGET_PC
+        if (i_request->phase_request.id == beforePhase &&
+            i_request->node_proc.node == beforeNode &&
+            i_request->creating_id == beforeCreatingId)
+        {
+            break;
+        }
+#endif
     }
 
     return cPhs_INIT_e;

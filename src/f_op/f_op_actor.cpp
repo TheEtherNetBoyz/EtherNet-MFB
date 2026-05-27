@@ -19,6 +19,10 @@
 #include "c/c_dylink.h"
 #include "m_Do/m_Do_printf.h"
 
+#if TARGET_PC
+#include "dusk/settings.h"
+#endif
+
 #if DEBUG
 class print_error_check_c {
 public:
@@ -212,6 +216,14 @@ BOOL fopAc_IsActor(void* i_actor) {
 
 u32 fopAc_ac_c::stopStatus;
 
+#if TARGET_PC
+static bool fopAcM_shouldSkipInstaLoadPostExecute(fopAc_ac_c* actor) {
+    return LEAFDRAW_BASE(actor).state.init_state == 3 ||
+           (dusk::getSettings().game.enableInstaLoads.getValue() &&
+            dComIfGp_isEnableNextStage());
+}
+#endif
+
 static int fopAc_Draw(void* i_this) {
     fopAc_ac_c* actor = (fopAc_ac_c*)i_this;
     int ret = 1;
@@ -346,7 +358,7 @@ static int fopAc_Execute(void* i_this) {
         }
 
 #if TARGET_PC
-        if (LEAFDRAW_BASE(actor).state.init_state == 3) {
+        if (fopAcM_shouldSkipInstaLoadPostExecute(actor)) {
             return ret;
         }
 #endif
@@ -358,7 +370,7 @@ static int fopAc_Execute(void* i_this) {
         }
 
 #if TARGET_PC
-        if (LEAFDRAW_BASE(actor).state.init_state == 3) {
+        if (fopAcM_shouldSkipInstaLoadPostExecute(actor)) {
             return ret;
         }
 #endif
