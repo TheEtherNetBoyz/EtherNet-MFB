@@ -51,6 +51,7 @@ compile_commands.json
 *.ini
 *.controller
 pipeline_cache.bin
+instaload_watch.log
 
 extract
 .aider*

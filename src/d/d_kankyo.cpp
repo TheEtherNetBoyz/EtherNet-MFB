@@ -27,6 +27,8 @@
 #include "f_ap/f_ap_game.h"
 #include "f_op/f_op_camera_mng.h"
 #include "f_op/f_op_kankyo.h"
+#include "m_Do/m_Do_audio.h"
+#include "m_Do/m_Do_Reset.h"
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_lib.h"
 #include "JSystem/JKernel/JKRSolidHeap.h"
@@ -40,6 +42,15 @@
 #endif
 
 static void GxXFog_set();
+
+#if TARGET_PC
+static bool dKy_shouldRefreshAcceleratedRoomBgm() {
+    return (dusk::getSettings().game.enableFastLoads.getValue() ||
+            dusk::getSettings().game.enableInstaLoads.getValue()) &&
+           !mDoRst::isReset() &&
+           !dComIfGp_isEnableNextStage();
+}
+#endif
 
 struct sub_kankyo__class : public kankyo_class {};
 
@@ -4037,6 +4048,13 @@ void dScnKy_env_light_c::settingTevStruct(int tevstrType, cXyz* pos_p, dKy_tevst
                     dComIfG_play_c::getLayerNo_common(dComIfGp_getStartStageName(),
                                                       dComIfGp_roomControl_getStayNo(),
                                                       dComIfGp_getStartStageLayer()));
+
+#if TARGET_PC
+                if (dKy_shouldRefreshAcceleratedRoomBgm()) {
+                    mDoAud_load1stDynamicWave();
+                    mDoAud_zelAudio_c::onBgmSet();
+                }
+#endif
 
                 if (strcmp(dComIfGp_getStartStageName(), "F_SP121") == 0) {
                     mDoAud_load2ndDynamicWave();
