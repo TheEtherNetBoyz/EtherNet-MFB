@@ -1003,6 +1003,10 @@ bool ImGuiPracticeSaves::loadPracticeSave(SaveCategory category, const PracticeS
 
         m_pendingSavedata = g_dComIfG_gameInfo.info.mSavedata;
 
+        // Force mDan.mStageNo = -1 so dComIfGs_initDan() during scene load always clears
+        // dungeon switch bits, even when reloading the same stage.
+        dComIfGs_resetDan();
+
         m_statusMsg = fmt::format("Loading {}.", entry.name);
         return true;
     } catch (const std::exception& e) {
