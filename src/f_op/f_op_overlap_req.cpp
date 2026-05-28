@@ -191,6 +191,7 @@ void fopOvlpReq_SetPeektime(overlap_request_class* i_overlapReq, u16 i_peektime)
         if ((dusk::getSettings().game.enableFastLoads.getValue() ||
              dusk::getSettings().game.enableInstaLoads.getValue()) &&
             !fopOvlpReq_isDmn07VanillaFastLoad() &&
+            !fopScnRq_IsGobIntroSkipVanillaFastLoad() &&
             !fopScnRq_IsTitleToFileSelectVanillaFastLoad())
         {
             i_overlapReq->peektime =

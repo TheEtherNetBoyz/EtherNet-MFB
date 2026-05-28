@@ -19,9 +19,26 @@
 
 #if TARGET_PC
 static bool l_titleToFileSelectVanillaFastLoad;
+static bool l_gobIntroSkipVanillaFastLoad;
 
 bool fopScnRq_IsTitleToFileSelectVanillaFastLoad() {
     return l_titleToFileSelectVanillaFastLoad;
+}
+
+bool fopScnRq_IsGobIntroSkipVanillaFastLoad() {
+    return l_gobIntroSkipVanillaFastLoad &&
+           dusk::getSettings().game.enableFastLoads.getValue() &&
+           !dusk::getSettings().game.enableInstaLoads.getValue() &&
+           !mDoRst::isReset();
+}
+
+void fopScnRq_UseGobIntroSkipVanillaFastLoad() {
+    l_gobIntroSkipVanillaFastLoad = true;
+}
+
+static void fopScnRq_ClearVanillaFastLoadOverrides() {
+    l_titleToFileSelectVanillaFastLoad = false;
+    l_gobIntroSkipVanillaFastLoad = false;
 }
 
 static bool fopScnRq_isTitleToFileSelectVanillaFastLoad(s16 i_procName, s16 i_fadename,
@@ -67,6 +84,7 @@ static cPhs_Step fopScnRq_phase_Execute(scene_request_class* i_sceneReq) {
         !mDoRst::isReturnToMenu() &&
         !mDoRst::isShutdown() &&
         !fopScnRq_isDmn07VanillaFastLoad() &&
+        !fopScnRq_IsGobIntroSkipVanillaFastLoad() &&
         !fopScnRq_isZantDeathSkipVanillaLoad() &&
         !fopScnRq_IsTitleToFileSelectVanillaFastLoad() &&
 #endif
@@ -102,7 +120,7 @@ static cPhs_Step fopScnRq_phase_Done(scene_request_class* i_sceneReq) {
 
     l_fopScnRq_IsUsingOfOverlap = FALSE;
 #if TARGET_PC
-    l_titleToFileSelectVanillaFastLoad = false;
+    fopScnRq_ClearVanillaFastLoadOverrides();
 #endif
     return cPhs_NEXT_e;
 }
@@ -134,7 +152,7 @@ static int fopScnRq_Cancel(scene_request_class* i_sceneReq) {
         return 0;
     } else {
 #if TARGET_PC
-        l_titleToFileSelectVanillaFastLoad = false;
+        fopScnRq_ClearVanillaFastLoadOverrides();
 #endif
         return 1;
     }
@@ -200,6 +218,7 @@ fpc_ProcID fopScnRq_Request(int i_reqType, scene_class* i_scene, s16 i_procName,
         fopScnRq_isTitleToFileSelectVanillaFastLoad(i_procName, i_fadename, i_peektime);
 
     if (!l_titleToFileSelectVanillaFastLoad &&
+        !fopScnRq_IsGobIntroSkipVanillaFastLoad() &&
         dusk::getSettings().game.enableInstaLoads.getValue() &&
         !mDoRst::isReset() &&
         !fopScnRq_isZantDeathSkipVanillaLoad() &&
@@ -215,7 +234,7 @@ fpc_ProcID fopScnRq_Request(int i_reqType, scene_class* i_scene, s16 i_procName,
         fade_req = fopScnRq_FadeRequest(i_fadename, i_peektime);
         if (fade_req == NULL) {
 #if TARGET_PC
-            l_titleToFileSelectVanillaFastLoad = false;
+            fopScnRq_ClearVanillaFastLoadOverrides();
 #endif
             fpcNdRq_Delete(&req->create_request);
             return fpcM_ERROR_PROCESS_ID_e;

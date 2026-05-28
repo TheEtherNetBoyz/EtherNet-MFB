@@ -9,6 +9,7 @@
 #include "d/d_ovlp_fade3.h"
 #include "d/d_camera.h"
 #include "d/d_s_play.h"
+#include "f_op/f_op_scene_req.h"
 #include "m_Do/m_Do_audio.h"
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_Reset.h"
@@ -24,13 +25,15 @@ static const int kInstaFadeInFrames = 10;
 static bool dOvlpFd3_isFastLoad() {
     return DUSK_IF_ELSE((dusk::getSettings().game.enableFastLoads.getValue() ||
                          dusk::getSettings().game.enableInstaLoads.getValue()) &&
-                            !mDoRst::isReset(),
+                            !mDoRst::isReset() &&
+                            !fopScnRq_IsGobIntroSkipVanillaFastLoad(),
                         false);
 }
 
 static bool dOvlpFd3_isInstaLoad() {
     return DUSK_IF_ELSE(dusk::getSettings().game.enableInstaLoads.getValue() &&
-                            !mDoRst::isReset(),
+                            !mDoRst::isReset() &&
+                            !fopScnRq_IsGobIntroSkipVanillaFastLoad(),
                         false);
 }
 

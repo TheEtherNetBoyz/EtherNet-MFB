@@ -44,6 +44,7 @@ static bool dOvlpFd_isFastLoad() {
     return DUSK_IF_ELSE((dusk::getSettings().game.enableFastLoads.getValue() ||
                          dusk::getSettings().game.enableInstaLoads.getValue()) &&
                             !mDoRst::isReset() && !dOvlpFd_isDmn07VanillaFastLoad() &&
+                            !fopScnRq_IsGobIntroSkipVanillaFastLoad() &&
                             !fopScnRq_IsTitleToFileSelectVanillaFastLoad(),
                         false);
 }
@@ -51,6 +52,7 @@ static bool dOvlpFd_isFastLoad() {
 static bool dOvlpFd_isInstaLoad() {
     return DUSK_IF_ELSE(dusk::getSettings().game.enableInstaLoads.getValue() &&
                             !mDoRst::isReset() &&
+                            !fopScnRq_IsGobIntroSkipVanillaFastLoad() &&
                             !fopScnRq_IsTitleToFileSelectVanillaFastLoad(),
                         false);
 }

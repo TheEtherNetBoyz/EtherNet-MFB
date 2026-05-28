@@ -13,6 +13,7 @@
 #include "d/actor/d_a_obj_myogan.h"
 #include "d/d_s_play.h"
 #include "f_op/f_op_camera_mng.h"
+#include "f_op/f_op_scene_req.h"
 #include "m_Do/m_Do_graphic.h"
 #include "c/c_damagereaction.h"
 #include "Z2AudioLib/Z2Instances.h"
@@ -1995,6 +1996,9 @@ static void demo_camera(e_gob_class* i_this) {
 
         if (i_this->mDemoCamMode >= 2 && i_this->mDemoCamMode < 10 && dComIfGp_getEvent()->checkSkipEdge()) {
             cDmr_SkipInfo = 20;
+#ifdef TARGET_PC
+            fopScnRq_UseGobIntroSkipVanillaFastLoad();
+#endif
             i_this->mDemoCamMode = 1000;
             dStage_changeScene(2, 0.0f, 0, fopAcM_GetRoomNo(actor), 0, -1);
         }

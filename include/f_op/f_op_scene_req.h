@@ -19,6 +19,8 @@ int fopScnRq_Handler();
 
 #if TARGET_PC
 bool fopScnRq_IsTitleToFileSelectVanillaFastLoad();
+bool fopScnRq_IsGobIntroSkipVanillaFastLoad();
+void fopScnRq_UseGobIntroSkipVanillaFastLoad();
 #endif
 
 #endif
