@@ -7,6 +7,12 @@
 #include "SSystem/SComponent/c_list.h"
 #include "SSystem/SComponent/c_tree.h"
 
+static void cTg_ClearUnusedNode(create_tag_class* tag) {
+    if (!tag->mbIsUse) {
+        cNd_ForcedClear(&tag->mpNode);
+    }
+}
+
 int cTg_IsUse(create_tag_class* tag) {
     return tag->mbIsUse;
 }
@@ -23,6 +29,7 @@ int cTg_SingleCutFromTree(create_tag_class* tag) {
 
 int cTg_AdditionToTree(node_lists_tree_class* tree, int listIdx, create_tag_class* tag) {
     if (!tag->mbIsUse) {
+        cTg_ClearUnusedNode(tag);
         int ret = cTr_Addition(tree, listIdx, &tag->mpNode);
         if (ret) {
             tag->mbIsUse = true;
@@ -35,6 +42,7 @@ int cTg_AdditionToTree(node_lists_tree_class* tree, int listIdx, create_tag_clas
 
 int cTg_InsertToTree(node_lists_tree_class* tree, int listIdx, create_tag_class* tag, int idx) {
     if (!tag->mbIsUse) {
+        cTg_ClearUnusedNode(tag);
         int ret = cTr_Insert(tree, listIdx, &tag->mpNode, idx);
         if (ret) {
             tag->mbIsUse = true;
@@ -67,6 +75,7 @@ int cTg_SingleCut(create_tag_class* tag) {
 
 int cTg_Addition(node_list_class* list, create_tag_class* tag) {
     if (!tag->mbIsUse) {
+        cTg_ClearUnusedNode(tag);
         int ret = cLs_Addition(list, &tag->mpNode);
         if (ret) {
             tag->mbIsUse = true;

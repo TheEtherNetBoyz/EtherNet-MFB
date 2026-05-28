@@ -13,6 +13,9 @@
 #include "m_Do/m_Do_DVDError.h"
 #include "m_Do/m_Do_ext.h"
 #include "m_Do/m_Do_MemCard.h"
+#if TARGET_PC
+#include "dusk/input_macro.h"
+#endif
 
 #if !PLATFORM_GCN
 #include <revolution/os.h>
@@ -104,6 +107,9 @@ void checkDiskCallback(s32 result, DVDCommandBlock* block) {
 }
 
 void mDoRst_resetCallBack(int port, void*) {
+#if TARGET_PC
+    dusk::input_macro::recordResetRequest();
+#endif
     if (mDoRst::isReset()) {
         return;
     }

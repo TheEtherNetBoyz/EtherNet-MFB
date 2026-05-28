@@ -5,6 +5,7 @@
 
 #include "f_pc/f_pc_layer_iter.h"
 #include "SSystem/SComponent/c_tag_iter.h"
+#include "SSystem/SComponent/c_tag.h"
 #include "SSystem/SComponent/c_tree_iter.h"
 #include "f_pc/f_pc_layer.h"
 

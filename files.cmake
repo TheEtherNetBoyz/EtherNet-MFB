@@ -1415,6 +1415,7 @@ set(DUSK_FILES
         include/dusk/endian_gx.hpp
         include/dusk/config.hpp
         include/dusk/dvd_asset.hpp
+        include/dusk/input_macro.h
         include/dusk/latency_trace.h
         include/dusk/scope_guard.hpp
         src/dusk/dvd_asset.cpp
@@ -1437,6 +1438,7 @@ set(DUSK_FILES
 		src/dusk/autosave.cpp
         src/dusk/http/http.hpp
         src/dusk/io.cpp
+        src/dusk/input_macro.cpp
         src/dusk/layout.cpp
         src/dusk/latency_trace.cpp
         src/dusk/logging.cpp
@@ -1460,6 +1462,7 @@ set(DUSK_FILES
         src/dusk/imgui/ImGuiProcessOverlay.cpp
         src/dusk/imgui/ImGuiCameraOverlay.cpp
         src/dusk/imgui/ImGuiHeapOverlay.cpp
+        src/dusk/imgui/ImGuiInputMacro.cpp
         src/dusk/imgui/ImGuiControllerOverlay.cpp
         src/dusk/imgui/ImGuiStubLog.cpp
         src/dusk/imgui/ImGuiSaveEditor.cpp

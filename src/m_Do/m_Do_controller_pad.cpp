@@ -7,6 +7,7 @@
 #include "JSystem/JAWExtSystem/JAWExtSystem.h"
 #include "SSystem/SComponent/c_lib.h"
 #include "d/d_com_inf_game.h"
+#include "dusk/input_macro.h"
 #include "f_ap/f_ap_game.h"
 #include "m_Do/m_Do_Reset.h"
 #include "m_Do/m_Do_main.h"
@@ -45,18 +46,21 @@ struct InputDelaySample {
 static std::array<InputDelaySample, kInputDelayHistorySize> sInputDelayHistory;
 static size_t sInputDelayHistoryWriteIndex = 0;
 
-static void checkCtrlRSoftReset() {
+static bool checkCtrlRSoftReset() {
     int keyCount = 0;
     const bool* keys = SDL_GetKeyboardState(&keyCount);
     const bool hasKeys = keyCount > SDL_SCANCODE_R && keyCount > SDL_SCANCODE_RCTRL;
     const bool comboHeld = hasKeys && keys[SDL_SCANCODE_R] &&
                            (keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL]);
 
+    bool resetRequested = false;
     if (sCtrlRResetHeld && !comboHeld && !mDoRst::isReset()) {
         mDoRst_resetCallBack(-1, NULL);
+        resetRequested = true;
     }
 
     sCtrlRResetHeld = comboHeld;
+    return resetRequested;
 }
 
 static void clearPracticeMenuInput(interface_of_controller_pad* interface) {
@@ -178,7 +182,7 @@ void mDoCPd_c::read() {
     }
 
 #if TARGET_PC
-    checkCtrlRSoftReset();
+    const bool ctrlRResetRequested = checkCtrlRSoftReset();
 #endif
 
 #if DEBUG
@@ -222,6 +226,9 @@ void mDoCPd_c::read() {
 
 #if TARGET_PC
     applyInputDelay(m_cpadInfo);
+    if (dusk::input_macro::tick(m_cpadInfo, ctrlRResetRequested) && !mDoRst::isReset()) {
+        mDoRst_resetCallBack(-1, NULL);
+    }
 #endif
 }
 

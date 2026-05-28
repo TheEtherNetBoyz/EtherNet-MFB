@@ -14,7 +14,6 @@
 #include "f_pc/f_pc_debug_sv.h"
 #include "f_pc/f_pc_create_tag.h"
 #include <cstdio>
-#include "dusk/logging.h"
 
 #if TARGET_PC
 #include "dusk/settings.h"
@@ -97,12 +96,6 @@ BOOL fpcCtRq_Do(create_request* i_request) {
             phase = pHandler(i_request);
             i_request->is_doing = FALSE;
         }
-    }
-
-    static int sCtRqDoLogCount = 0;
-    if (sCtRqDoLogCount < 30) {
-        DuskLog.debug("fpcCtRq_Do: phase={} process={}", phase, (void*)i_request->process);
-        sCtRqDoLogCount++;
     }
 
     switch (phase) {

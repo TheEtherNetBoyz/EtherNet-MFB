@@ -23,6 +23,7 @@
 #include "dusk/data.hpp"
 #include "dusk/dusk.h"
 #include "dusk/frame_interpolation.h"
+#include "dusk/input_macro.h"
 #include "dusk/livesplit.h"
 #include "dusk/main.h"
 #include "dusk/settings.h"
@@ -397,6 +398,7 @@ namespace dusk {
         if (getSettings().game.enableResetKeybind && ImGui::GetIO().KeyCtrl &&
             ImGui::IsKeyReleased(ImGuiKey_R) && !fpcM_SearchByName(fpcNm_LOGO_SCENE_e))
         {
+            input_macro::recordResetRequest();
             JUTGamePad::C3ButtonReset::sResetSwitchPushing = true;
         }
 
@@ -497,6 +499,7 @@ namespace dusk {
             m_menuTools.ShowAudioDebug();
             m_menuTools.ShowSaveEditor();
             m_menuTools.ShowPracticeSaves();
+            m_menuTools.ShowInputMacro();
             m_menuTools.ShowStateShare();
             m_menuTools.ShowActorSpawner();
         }

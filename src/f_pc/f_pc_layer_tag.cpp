@@ -4,6 +4,7 @@
  */
 
 #include "f_pc/f_pc_layer_tag.h"
+#include "f_pc/f_pc_base.h"
 #include "f_pc/f_pc_layer.h"
 
 int fpcLyTg_ToQueue(layer_management_tag_class* i_layer_tag, fpc_ProcID i_layerID, u16 i_listID,
