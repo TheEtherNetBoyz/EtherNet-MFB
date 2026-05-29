@@ -65,7 +65,6 @@ int fpcEx_ToLineQ(base_process_class* i_proc) {
 
 int fpcEx_ExecuteQTo(base_process_class* i_proc) {
     if (fpcLyTg_QueueTo(&i_proc->layer_tag) == 1) {
-        fpcLnTg_QueueTo(&i_proc->line_tag_);
         i_proc->state.init_state = 3;
         return 1;
     }
