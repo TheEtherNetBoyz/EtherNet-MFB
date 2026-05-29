@@ -12,6 +12,7 @@
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_b_ds.h"
 #include "d/actor/d_a_e_zs.h"
+#include "d/actor/d_a_kago.h"
 #include "d/actor/d_a_player.h"
 #include "dusk/config.hpp"
 #include "dusk/frame_interpolation.h"
@@ -150,6 +151,7 @@ enum class PracticeSaveCallback : int {
     SetSnowpeakBossKeyNextStage,
     GorgeVoidInit,
     GorgeVoidPostLoad,
+    PlummMinigameInit,
 };
 
 struct PracticeSaveCallbacks {
@@ -169,7 +171,10 @@ PracticeSaveCallbacks practice_save_callbacks(ImGuiPracticeSaves::SaveCategory c
         if (index == 9) {
             return {PracticeSaveCallback::GorgeVoidInit, PracticeSaveCallback::None};
         }
-        if (index == 20 || index == 21) {
+        if (index == 20) {
+            return {PracticeSaveCallback::PlummMinigameInit, PracticeSaveCallback::PlummMinigameInit};
+        }
+        if (index == 21) {
             return {PracticeSaveCallback::SetNextStageLayer4SkipDemo, PracticeSaveCallback::None};
         }
         if (index == 40) {
@@ -310,6 +315,19 @@ void apply_empty_lake_hylia_callback() {
     cDmr_SkipInfo = 1;
 }
 
+void apply_plumm_minigame_init_callback() {
+    set_next_stage_layer(4);
+    g_dComIfG_gameInfo.info.getRestart().setLastSceneInfo(0.0f, 10, 0);
+
+    auto* kago = static_cast<daKago_c*>(fopAcM_SearchByName(fpcNm_KAGO_e));
+    auto* player = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
+    if (kago != nullptr && player != nullptr) {
+        kago->setMidnaRideOn();
+        kago->setPlayerRideOn();
+        player->procWolfCargoCarryInit();
+    }
+}
+
 void apply_give_escort_keys_callback() {
     dComIfGs_setKeyNum(2);
 }
@@ -397,6 +415,9 @@ void apply_player_init_callback(PracticeSaveCallback callback) {
         break;
     case PracticeSaveCallback::GorgeVoidPostLoad:
         apply_gorge_void_post_load_callback();
+        break;
+    case PracticeSaveCallback::PlummMinigameInit:
+        apply_plumm_minigame_init_callback();
         break;
     default:
         break;
