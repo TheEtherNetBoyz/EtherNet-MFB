@@ -8,7 +8,6 @@
 #include "d/d_bg_s_movebg_actor.h"
 #include "d/d_bg_w.h"
 #include "d/d_com_inf_game.h"
-#include "f_pc/f_pc_base.h"
 #include "m_Do/m_Do_mtx.h"
 
 dBgS_MoveBgActor::dBgS_MoveBgActor() {

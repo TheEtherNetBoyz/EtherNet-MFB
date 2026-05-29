@@ -9,19 +9,29 @@
 #include "SSystem/SComponent/c_phase.h"
 #include "SSystem/SStandard/s_basic.h"
 #include "d/d_stage.h"
-#include "f_pc/f_pc_delete_tag.h"
 #include "f_pc/f_pc_layer.h"
-#include "f_pc/f_pc_layer_tag.h"
-#include "f_pc/f_pc_line_tag.h"
 #include "f_pc/f_pc_method.h"
 #include "f_pc/f_pc_pause.h"
 #include "f_pc/f_pc_profile.h"
 #include "f_pc/f_pc_debug_sv.h"
 #include "Z2AudioLib/Z2AudioMgr.h"
 #include <cstdio>
+#include "dusk/logging.h"
 
 #if TARGET_PC
 #include "dusk/settings.h"
+#include "f_pc/f_pc_name.h"
+
+static const char* getProcName(s16 id) {
+    for (auto procName : procNames) {
+        if (procName.id == id) {
+            return procName.name;
+        }
+    }
+
+    return nullptr;
+}
+
 #endif
 
 BOOL fpcBs_Is_JustOfType(int i_typeA, int i_typeB) {
@@ -55,7 +65,7 @@ int fpcBs_Execute(base_process_class* i_proc) {
         if (g_fpcDbSv_service[10] != NULL) {
             g_fpcDbSv_service[10](i_proc);
         }
-
+        
         return 0;
     }
 #endif
@@ -68,7 +78,7 @@ int fpcBs_Execute(base_process_class* i_proc) {
 
         fpcLy_SetCurrentLayer(save_layer);
     }
-
+    
     return result;
 }
 
@@ -128,12 +138,21 @@ base_process_class* fpcBs_Create(s16 i_profname, fpc_ProcID i_procID, void* i_ap
 
     pprofile = (process_profile_definition*)fpcPf_Get(i_profname);
     if (pprofile == NULL) {
+#if TARGET_PC
+        DuskLog.debug("fpcBs_Create: profile not found for profname={}", i_profname);
+#endif
         return NULL;
     }
+#if TARGET_PC
+    const char* procName = getProcName(i_profname);
+    DuskLog.debug("fpcBs_Create: pid={} profname={} ({}) profile={} procSize={} unkSize={}",
+           i_procID, procName ? procName : "(unknown)", i_profname, (void*)pprofile, pprofile->process_size, pprofile->unk_size);
+#endif
     size = pprofile->process_size + pprofile->unk_size;
 
     pprocess = (base_process_class*)cMl::memalignB(-4, size);
     if (pprocess == NULL) {
+        DuskLog.debug("fpcBs_Create: memalignB FAILED for size={}", size);
         return NULL;
     }
 

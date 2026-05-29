@@ -68,20 +68,17 @@ int fpcEx_ExecuteQTo(base_process_class* i_proc) {
         i_proc->state.init_state = 3;
         return 1;
     }
-
+    
     return 0;
 }
 
 int fpcEx_ToExecuteQ(base_process_class* i_proc) {
     process_priority_class* priority = &i_proc->priority;
-    if (fpcLyTg_ToQueue(&i_proc->layer_tag, priority->current_info.layer_id,
-                        priority->current_info.list_id, priority->current_info.list_priority) == 1)
-    {
-        int lineResult = fpcEx_ToLineQ(i_proc);
-        (void)lineResult;
+    if (fpcLyTg_ToQueue(&i_proc->layer_tag, priority->current_info.layer_id, priority->current_info.list_id, priority->current_info.list_priority) == 1) {
+        fpcEx_ToLineQ(i_proc);
         return 1;
     }
-
+    
     return 0;
 }
 

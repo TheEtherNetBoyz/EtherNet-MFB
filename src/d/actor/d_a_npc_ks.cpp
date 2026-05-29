@@ -311,43 +311,10 @@ static u8 hio_set;
 
 static daNpc_Ks_HIO_c l_HIO;
 
-// Matches the original: Forest Temple monkey set_ids are always 0-7 in practice.
-// The & 15 mask on set_id is defensive/general-purpose; values 8-15 are never
-// produced by actual game data.  saru_get/saru_set treat out-of-range ids as invalid.
-static const int SARU_SLOT_COUNT = 8;
-
 // Note that this is .bss in dbg asm, thus it must come here.
-static npc_ks_class* saru_p[SARU_SLOT_COUNT] = {
+static npc_ks_class* saru_p[8] = {
     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 };
-
-static int saru_clamp_count(int count) {
-    if (count < 0) {
-        return 0;
-    }
-
-    if (count > SARU_SLOT_COUNT) {
-        return SARU_SLOT_COUNT;
-    }
-
-    return count;
-}
-
-static npc_ks_class* saru_get(int index) {
-    if (index < 0 || index >= SARU_SLOT_COUNT) {
-        return NULL;
-    }
-
-    return saru_p[index];
-}
-
-static void saru_set(int index, npc_ks_class* value) {
-    if (index < 0 || index >= SARU_SLOT_COUNT) {
-        return;
-    }
-
-    saru_p[index] = value;
-}
 
 static void* target_info[10];
 
@@ -1811,39 +1778,21 @@ static void* s_next_get_sub(void* actor, void* i_data) {
 }
 
 static void order_set(int param_1) {
-    int count = saru_clamp_count(param_1);
-    npc_ks_class* first = saru_get(0);
-    npc_ks_class* last = saru_get(count - 1);
-
-    if (first == NULL || last == NULL) {
-        return;
-    }
-
-    if (first->dis < last->dis) {
-        for (int i = 0; i < count; i++) {
-            npc_ks_class* saru = saru_get(i);
-            if (saru != NULL) {
-                saru->order = i;
-            }
+    if (saru_p[0]->dis < saru_p[param_1 - 1]->dis) {
+        for (int i = 0; i < param_1; i++) {
+            saru_p[i]->order = i;
         }
     } else {
-        for (int i = 0; i < count; i++) {
-            npc_ks_class* saru = saru_get(i);
-            if (saru != NULL) {
-                saru->order = (count - 1) - i;
-            }
+        for (int i = 0; i < param_1; i++) {
+            saru_p[i]->order = (param_1 - 1) - i;
         }
     }
 }
 
 static void all_carry_finish(int param_1) {
-    int count = saru_clamp_count(param_1);
-    for (int i = 0; i < count; i++) {
-        npc_ks_class* saru = saru_get(i);
-        if (saru != NULL) {
-            saru->action = 10;
-            saru->mode = 0;
-        }
+    for (int i = 0; i < param_1; i++) {
+        saru_p[i]->action = 10;
+        saru_p[i]->mode = 0;
     }
 }
 
@@ -1892,7 +1841,7 @@ static void npc_ks_hang(npc_ks_class* i_this) {
     fopAc_ac_c* actor = &i_this->actor;
     if (fopAcM_GetRoomNo(actor) == 4) {
         for (int i = 0; i < 4; i++) {
-            if (saru_get(i) == NULL) {
+            if (saru_p[i] == NULL) {
                 return;
             }
         }
@@ -2309,14 +2258,12 @@ static void npc_ks_e_hang(npc_ks_class* i_this) {
 
 static int all_move_check(int param_1, int param_2) {
     int iVar1 = 0;
-    int count = saru_clamp_count(param_2);
-    while (iVar1 < count) {
+    while (iVar1 < param_2) {
         // the following forces dbg stack reg to use r31:
         int unused;
-        npc_ks_class* saru = saru_get(iVar1);
-        if (saru == NULL) return 0;
+        if (saru_p[iVar1] == NULL) return 0;
 
-        if (param_1 != saru->set_id && (saru->action != 21 || saru->mode != 20)) {
+        if (param_1 != saru_p[iVar1]->set_id && (saru_p[iVar1]->action != 21 || saru_p[iVar1]->mode != 20)) {
             return 0;
         }
 
@@ -2327,12 +2274,11 @@ static int all_move_check(int param_1, int param_2) {
 }
 
 static int go_jump_check(int param_1) {
-    int reg_r30 = saru_clamp_count(param_1) - 1;
+    int reg_r30 = param_1 - 1;
     while (reg_r30 >= 0) {
         // the following forces dbg stack reg to use r31:
         int unused;
-        npc_ks_class* saru = saru_get(reg_r30);
-        if (saru == NULL || saru->action != 21 || saru->timer[2] != 0) {
+        if (saru_p[reg_r30]->action != 21 || saru_p[reg_r30]->timer[2] != 0) {
             return 0;
         }
 
@@ -2463,7 +2409,7 @@ static int npc_ks_e_jump(npc_ks_class* i_this) {
             i_this->mode = 11;
         } else {
             i_this->mode = 20;
-            i_this->field_0x930 = saru_get(ks_p->set_id + 1);
+            i_this->field_0x930 = saru_p[ks_p->set_id + 1];
         }
 
         anm_init(i_this, 33, 1.0f, 0, 1.0f);
@@ -2531,17 +2477,14 @@ static npc_ks_class* get_move_saru(npc_ks_class* i_this, int param_2) {
     fopAc_ac_c* actor = &i_this->actor;
     if (fopAcM_GetRoomNo(actor) == 0) {
         for (int i = 0; i < 2; i++) {
-            npc_ks_class* saru = saru_get(i);
-            if (saru != NULL && saru->child_no != NULL && (saru->action == 20 || saru->action == 22) && i_this->field_0xb40 == saru->child_no->field_0x570) {
-                return saru;
+            if (saru_p[i] != NULL && (saru_p[i]->action == 20 || saru_p[i]->action == 22) && i_this->field_0xb40 == saru_p[i]->child_no->field_0x570) {
+                return saru_p[i];
             }
         }
     } else {
-        int count = saru_clamp_count(param_2);
-        for (int i = 0; i < count; i++) {
-            npc_ks_class* saru = saru_get(i);
-            if (saru != NULL && saru->child_no != NULL && i_this->field_0xb40 == saru->child_no->field_0x570 && ((saru->action == 20 || saru->action == 22) || saru->timer[2] != 0)) {
-                return saru;
+        for (int i = 0; i < param_2; i++) {
+            if (i_this->field_0xb40 == saru_p[i]->child_no->field_0x570 && ((saru_p[i]->action == 20 || saru_p[i]->action == 22) || saru_p[i]->timer[2] != 0)) {
+                return saru_p[i];
             }
         }
     }
@@ -2553,8 +2496,7 @@ static int all_hang_check(npc_ks_class* i_this, int param_2) {
     fopAc_ac_c* actor = &i_this->actor;
     if (fopAcM_GetRoomNo(actor) == 0) {
         for (int i = 0; i < 2; i++) {
-            npc_ks_class* saru = saru_get(i);
-            if (saru != NULL && saru->child_no != NULL && saru->field_0x5b5 != 0 && i_this->field_0xb40 == saru->child_no->field_0x570) {
+            if (saru_p[i] != NULL && saru_p[i]->field_0x5b5 != 0 && i_this->field_0xb40 == saru_p[i]->child_no->field_0x570) {
                 return 1;
             }
         }
@@ -2562,10 +2504,8 @@ static int all_hang_check(npc_ks_class* i_this, int param_2) {
         return 0;
     }
 
-    int count = saru_clamp_count(param_2);
-    for (int i = 0; i < count; i++) {
-        npc_ks_class* saru = saru_get(i);
-        if (saru == NULL || saru->field_0x5b5 == 0) {
+    for (int i = 0; i < param_2; i++) {
+        if (saru_p[i]->field_0x5b5 == 0) {
             return 0;
         }
     }
@@ -2766,21 +2706,16 @@ static void demo_camera(npc_ks_class* i_this) {
                     if (fopAcM_GetRoomNo(actor) == 0) {
                         i_this->demo_camera_no = 45;
                     } else if (sw_p->field_0x91c >= 3) {
-                        npc_ks_class* camera_saru = saru_get(saru_clamp_count(sw_p->field_0x91c) - 2);
-                        if (camera_saru != NULL) {
-                            i_this->field_0xb6c.x = camera_saru->actor.current.pos.x;
-                            i_this->field_0xb6c.y = camera_saru->actor.current.pos.y;
-                            i_this->field_0xb6c.y = i_this->field_0xb6c.y - 150.0f;
-                            i_this->field_0xb6c.z = camera_saru->actor.current.pos.z;
-
-                            i_this->field_0xb84.x = FABSF(i_this->field_0xb6c.x - i_this->demo_eye.x);
-                            i_this->field_0xb84.y = FABSF(i_this->field_0xb6c.y - i_this->demo_eye.y);
-                            i_this->field_0xb84.z = FABSF(i_this->field_0xb6c.z - i_this->demo_eye.z);
-                            i_this->field_0xbc4 = 0.0f;
-                            i_this->demo_camera_no = 5;
-                        } else {
-                            i_this->demo_camera_no = 45 + AREG_S(4);
-                        }
+                        i_this->field_0xb6c.x = saru_p[sw_p->field_0x91c - 2]->actor.current.pos.x;
+                        i_this->field_0xb6c.y = saru_p[sw_p->field_0x91c - 2]->actor.current.pos.y;
+                        i_this->field_0xb6c.y = i_this->field_0xb6c.y - 150.0f;
+                        i_this->field_0xb6c.z = saru_p[sw_p->field_0x91c - 2]->actor.current.pos.z;
+                        
+                        i_this->field_0xb84.x = FABSF(i_this->field_0xb6c.x - i_this->demo_eye.x);
+                        i_this->field_0xb84.y = FABSF(i_this->field_0xb6c.y - i_this->demo_eye.y);
+                        i_this->field_0xb84.z = FABSF(i_this->field_0xb6c.z - i_this->demo_eye.z);
+                        i_this->field_0xbc4 = 0.0f;
+                        i_this->demo_camera_no = 5;
                     } else {
                         i_this->demo_camera_no = 45 + AREG_S(4);
                     }
@@ -2799,14 +2734,8 @@ static void demo_camera(npc_ks_class* i_this) {
                 cLib_addCalc2(&i_this->field_0xbc4, 0.1f, 1.0f, 0.005f);
                 if (85 < i_this->demo_camera_no) {
                     i_this->demo_mode = 100;
-                    npc_ks_class* camera_saru = saru_get(i_this->field_0xb40);
-                    if (camera_saru == NULL) {
-                        i_this->demo_camera_no = 45 + AREG_S(4);
-                        break;
-                    }
-
-                    mae.x = camera_saru->actor.current.pos.x - i_this->field_0xbc8.x;
-                    mae.z = camera_saru->actor.current.pos.z - i_this->field_0xbc8.z;
+                    mae.x = saru_p[i_this->field_0xb40]->actor.current.pos.x - i_this->field_0xbc8.x;
+                    mae.z = saru_p[i_this->field_0xb40]->actor.current.pos.z - i_this->field_0xbc8.z;
                     s16 angle = cM_atan2s(mae.x, mae.z);
                     cMtx_YrotS(*calc_mtx, angle);
                     mae.x = 0.0f;
@@ -3045,39 +2974,27 @@ static void demo_camera(npc_ks_class* i_this) {
             // fallthrough
         case 81:
             if (i_this->demo_camera_no == 0) {
-                npc_ks_class* saru = saru_get(3);
-                if (saru != NULL) {
-                    saru->actor.current.pos.x = -500.0f;
-                    saru->actor.current.pos.y = 3681.0f;
-                    saru->actor.current.pos.z = 7485.0f;
-                }
+                saru_p[3]->actor.current.pos.x = -500.0f;
+                saru_p[3]->actor.current.pos.y = 3681.0f;
+                saru_p[3]->actor.current.pos.z = 7485.0f;
             }
 
             if (i_this->demo_camera_no == 30) {
-                npc_ks_class* saru = saru_get(0);
-                if (saru != NULL) {
-                    saru->actor.current.pos.x = player->current.pos.x;
-                    saru->actor.current.pos.y = player->current.pos.y + 500.0f;
-                    saru->actor.current.pos.z = player->current.pos.z - 100.0f;
-                }
+                saru_p[0]->actor.current.pos.x = player->current.pos.x;
+                saru_p[0]->actor.current.pos.y = player->current.pos.y + 500.0f;
+                saru_p[0]->actor.current.pos.z = player->current.pos.z - 100.0f;
             }
 
             if (i_this->demo_camera_no == 60) {
-                npc_ks_class* saru = saru_get(1);
-                if (saru != NULL) {
-                    saru->actor.current.pos.x = player->current.pos.x + 200.0f;
-                    saru->actor.current.pos.y = player->current.pos.y + 500.0f;
-                    saru->actor.current.pos.z = player->current.pos.z;
-                }
+                saru_p[1]->actor.current.pos.x = player->current.pos.x + 200.0f;
+                saru_p[1]->actor.current.pos.y = player->current.pos.y + 500.0f;
+                saru_p[1]->actor.current.pos.z = player->current.pos.z;
             }
 
             if (i_this->demo_camera_no == 90) {
-                npc_ks_class* saru = saru_get(2);
-                if (saru != NULL) {
-                    saru->actor.current.pos.x = i_this->demo_way.x - 250.0f;
-                    saru->actor.current.pos.y = i_this->demo_way.y + 200.0f;
-                    saru->actor.current.pos.z = i_this->demo_way.z - 100.0f;
-                }
+                saru_p[2]->actor.current.pos.x = i_this->demo_way.x - 250.0f;
+                saru_p[2]->actor.current.pos.y = i_this->demo_way.y + 200.0f;
+                saru_p[2]->actor.current.pos.z = i_this->demo_way.z - 100.0f;
             }
 
             if (i_this->demo_camera_no < 80) {
@@ -3555,9 +3472,8 @@ static int saru_count_check(npc_ks_class* i_this) {
     if (i_this->child_no == NULL) {
         return 0;
     } else {
-        int count = saru_clamp_count(i_this->child_no->field_0x91c);
-        for (int i = 0; i < count; i++) {
-            if (saru_get(i) == NULL) {
+        for (int i = 0; i < i_this->child_no->field_0x91c; i++) {
+            if (saru_p[i] == NULL) {
                 return 0;
             }
         }
@@ -3574,7 +3490,7 @@ static void action_check(npc_ks_class* i_this) {
     switch (fopAcM_GetRoomNo(actor)) {
         case 0:
             if (!dComIfGp_event_runCheck() && i_this->set_id == 0) {
-                if (saru_get(1) == NULL) {
+                if (saru_p[1] == NULL) {
                     if (dComIfGs_isSwitch(22, fopAcM_GetRoomNo(actor))) {
                         mae.x = actor->current.pos.x - 5.0f;
                         mae.z = actor->current.pos.z - 5274.0f;
@@ -3600,7 +3516,7 @@ static void action_check(npc_ks_class* i_this) {
                             return;
                         }
                     }
-                } else if (saru_get(1) != NULL && saru_get(2) != NULL && saru_get(3) != NULL) {
+                } else if (saru_p[1] != NULL && saru_p[2] != NULL && saru_p[3] != NULL) {
                     if (player->current.pos.y < 3000.0f) {
                         dComIfGs_onSwitch(82, fopAcM_GetRoomNo(actor));
                     }
@@ -3611,12 +3527,9 @@ static void action_check(npc_ks_class* i_this) {
                         if (JMAFastSqrt(mae.x * mae.x + mae.z * mae.z) < 200.0f) {
                             dComIfGs_onSwitch(82, fopAcM_GetRoomNo(actor));
                             for (int i = 0; i < 4; i++) {
-                                npc_ks_class* saru = saru_get(i);
-                                if (saru != NULL) {
-                                    saru->action = 111;
-                                    saru->mode = 0;
-                                    saru->field_0xaec = 1;
-                                }
+                                saru_p[i]->action = 111;
+                                saru_p[i]->mode = 0;
+                                saru_p[i]->field_0xaec = 1;
                             }
                             i_this->demo_mode = 80;
                         }
@@ -3652,7 +3565,7 @@ static void action_check(npc_ks_class* i_this) {
             break;
 
         case 1:
-            if (!dComIfGp_event_runCheck() && i_this->set_id == 0 && saru_get(1) == NULL && actor->field_0x567 == 0) {
+            if (!dComIfGp_event_runCheck() && i_this->set_id == 0 && saru_p[1] == NULL && actor->field_0x567 == 0) {
                 mae.x = actor->current.pos.x - 5334.0f;
                 mae.z = actor->current.pos.z - 7609.0f;
                 if (JMAFastSqrt(mae.x * mae.x + mae.z * mae.z) < 700.0f) {
@@ -3669,14 +3582,8 @@ static void action_check(npc_ks_class* i_this) {
             if (saru_count_check(i_this) != 0) {
                 int iVar1 = 1;
                 if (fopAcM_GetRoomNo(actor) == 2) {
-                    int count = saru_clamp_count(i_this->child_no->field_0x91c);
-                    for (int i = 0; i < count; i++) {
-                        npc_ks_class* saru = saru_get(i);
-                        if (saru == NULL) {
-                            continue;
-                        }
-
-                        mae = player->current.pos - saru->actor.current.pos;
+                    for (int i = 0; i < i_this->child_no->field_0x91c; i++) {
+                        mae = player->current.pos - saru_p[i]->actor.current.pos;
                         if (mae.abs() > 400.0f) {
                             iVar1 = 0;
                         }
@@ -4962,14 +4869,8 @@ static int npc_ks_guide_02(npc_ks_class* i_this) {
             if (guide_path_02[i_this->path_no].field_0x0 < 0 && i_this->set_id == 0 && saru_count_check(i_this) != 0) {
                 fopAc_ac_c* player_2 = (fopAc_ac_c*) dComIfGp_getPlayer(0);
                 int iVar1 = 0;
-                int count = saru_clamp_count(i_this->child_no->field_0x91c);
-                for (int i = 0; i < count; i++) {
-                    npc_ks_class* saru = saru_get(i);
-                    if (saru == NULL) {
-                        continue;
-                    }
-
-                    mae = player_2->current.pos - saru->actor.current.pos;
+                for (int i = 0; i < i_this->child_no->field_0x91c; i++) {
+                    mae = player_2->current.pos - saru_p[i]->actor.current.pos;
                     if (mae.abs() > 400.0f) {
                         iVar1 = 1;
                     }
@@ -4991,13 +4892,10 @@ static int npc_ks_guide_02(npc_ks_class* i_this) {
 
                     mae = i_this->child_no->field_0x904[1] - i_this->field_0xbc8;
                     leader->field_0xbd4 = cM_atan2s(mae.x, mae.z);
-                    npc_ks_class* saru = saru_get(1);
-                    if (saru != NULL) {
-                        saru_count_check(saru);
-                        saru->action = 22;
-                        saru->mode = 0;
-                        saru->field_0x930 = leader;
-                    }
+                    saru_count_check(saru_p[1]);
+                    saru_p[1]->action = 22;
+                    saru_p[1]->mode = 0;
+                    saru_p[1]->field_0x930 = leader;
                 }
             }
     }
@@ -6975,14 +6873,6 @@ static int daNpc_Ks_Delete(npc_ks_class* i_this) {
     fopAcM_RegisterDeleteID(i_this, "Npc_Ks");
     dComIfG_resDelete(&i_this->mPhase, i_this->res_name);
 
-    // Clear the global slot so that execute-path calls to saru_get() after this
-    // actor is freed do not dereference a dangling pointer.  Guard with an
-    // identity check so that a replacement actor that already took the slot
-    // (possible with insta/fast loads) is not accidentally cleared.
-    if (saru_get(i_this->set_id) == i_this) {
-        saru_set(i_this->set_id, NULL);
-    }
-
     if (i_this->hio_init != 0) {
         hio_set = 0;
         mDoHIO_DELETE_CHILD(l_HIO.no);
@@ -6990,6 +6880,10 @@ static int daNpc_Ks_Delete(npc_ks_class* i_this) {
 
     if (actor->heap != NULL) {
         i_this->model->stopZelAnime();
+    }
+   
+    if (saru_p[i_this->set_id] == i_this) {
+        saru_p[i_this->set_id] = NULL;
     }
 
     return 1;
@@ -7415,10 +7309,6 @@ static BOOL start_check(npc_ks_class* i_this) {
 }
 
 static void* s_check_sub(void* i_actor, void* i_data) {
-    if (i_actor == NULL || i_data == NULL) {
-        return NULL;
-    }
-
     if (fopAcM_IsActor(i_actor) && fopAcM_GetName(i_actor) == fpcNm_NPC_KS_e) {
         if (fopAcM_GetID(i_actor) != fopAcM_GetID(i_data) && ((npc_ks_class*)i_actor)->set_id == ((npc_ks_class*)i_data)->set_id) {
             return i_actor;
@@ -7527,7 +7417,7 @@ static int daNpc_Ks_Create(fopAc_ac_c* actor) {
                                 &i_this->AcchCir, fopAcM_GetSpeed_p(actor), NULL, NULL);
         i_this->AcchCir.SetWall(50.0f, 50.0f);
         i_this->count = cM_rndF(65536.0f);
-        saru_set(i_this->set_id, i_this);
+        saru_p[i_this->set_id] = i_this;
 
         if (arg0 != 0 && i_this->monkey_room_no < 8) {
             actor->current.angle.y = actor->home.angle.y + 0x4000;
@@ -7546,7 +7436,7 @@ static int daNpc_Ks_Create(fopAc_ac_c* actor) {
             i_this->hang_time = 30;
         } else {
             if (!start_check(i_this)) {
-                saru_set(i_this->set_id, NULL);
+                saru_p[i_this->set_id] = NULL;
                 return cPhs_ERROR_e;
             }
         }

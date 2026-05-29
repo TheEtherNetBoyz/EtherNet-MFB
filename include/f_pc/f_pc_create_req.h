@@ -43,8 +43,4 @@ int fpcCtRq_Handler();
 create_request* fpcCtRq_Create(layer_class* i_layer, u32 i_size,
                                create_request_method_class* i_methods);
 
-#if TARGET_PC
-void fpcCtRq_DumpRequestForProcess(const char* i_op, const base_process_class* i_proc);
-#endif
-
 #endif
