@@ -7319,7 +7319,7 @@ static void* s_check_sub(void* i_actor, void* i_data) {
 }
 
 static int daNpc_Ks_Create(fopAc_ac_c* actor) {
-    static dCcD_SrcCyl cc_cyl_src = {
+    static DUSK_CONSTEXPR dCcD_SrcCyl cc_cyl_src = {
         {
             {0x0, {{0x0, 0x0, 0x0}, {0xd8fafd3f, 0x3}, 0x79}}, // mObj
             {dCcD_SE_NONE, 0x0, 0x0, 0x0, 0x0}, // mGObjAt
@@ -7459,7 +7459,7 @@ static int daNpc_Ks_Create(fopAc_ac_c* actor) {
 
 AUDIO_INSTANCES;
 
-static actor_method_class l_daNpc_Ks_Method = {
+static DUSK_CONST actor_method_class l_daNpc_Ks_Method = {
     (process_method_func)daNpc_Ks_Create,
     (process_method_func)daNpc_Ks_Delete,
     (process_method_func)daNpc_Ks_Execute,
@@ -7467,7 +7467,7 @@ static actor_method_class l_daNpc_Ks_Method = {
     (process_method_func)daNpc_Ks_Draw,
 };
 
-actor_process_profile_definition g_profile_NPC_KS = {
+DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_NPC_KS = {
     /* Layer ID     */ fpcLy_CURRENT_e,
     /* List ID      */ 3,
     /* List Prio    */ fpcPi_CURRENT_e,

@@ -238,7 +238,7 @@ static leafdraw_method_class l_dOvlpFd_Method = {
     (process_method_func)dOvlpFd_Draw,
 };
 
-overlap_process_profile_definition g_profile_OVERLAP0 = {
+DUSK_PROFILE overlap_process_profile_definition DUSK_CONST g_profile_OVERLAP0 = {
     /* Layer ID    */ fpcLy_ROOT_e,
     /* List ID     */ 0,
     /* List Prio   */ fpcPi_CURRENT_e,
@@ -252,7 +252,7 @@ overlap_process_profile_definition g_profile_OVERLAP0 = {
     /* Fade SubMtd */ &l_dOvlpFd_Method,
 };
 
-overlap_process_profile_definition g_profile_OVERLAP1 = {
+DUSK_PROFILE overlap_process_profile_definition DUSK_CONST g_profile_OVERLAP1 = {
     /* Layer ID    */ fpcLy_ROOT_e,
     /* List ID     */ 0,
     /* List Prio   */ fpcPi_CURRENT_e,
@@ -266,7 +266,7 @@ overlap_process_profile_definition g_profile_OVERLAP1 = {
     /* Fade SubMtd */ &l_dOvlpFd_Method,
 };
 
-overlap_process_profile_definition g_profile_OVERLAP6 = {
+DUSK_PROFILE overlap_process_profile_definition DUSK_CONST g_profile_OVERLAP6 = {
     /* Layer ID    */ fpcLy_ROOT_e,
     /* List ID     */ 0,
     /* List Prio   */ fpcPi_CURRENT_e,
@@ -280,7 +280,7 @@ overlap_process_profile_definition g_profile_OVERLAP6 = {
     /* Fade SubMtd */ &l_dOvlpFd_Method,
 };
 
-overlap_process_profile_definition g_profile_OVERLAP7 = {
+DUSK_PROFILE overlap_process_profile_definition DUSK_CONST g_profile_OVERLAP7 = {
     /* Layer ID    */ fpcLy_ROOT_e,
     /* List ID     */ 0,
     /* List Prio   */ fpcPi_CURRENT_e,
@@ -294,7 +294,7 @@ overlap_process_profile_definition g_profile_OVERLAP7 = {
     /* Fade SubMtd */ &l_dOvlpFd_Method,
 };
 
-overlap_process_profile_definition g_profile_OVERLAP8 = {
+DUSK_PROFILE overlap_process_profile_definition DUSK_CONST g_profile_OVERLAP8 = {
     /* Layer ID    */ fpcLy_ROOT_e,
     /* List ID     */ 0,
     /* List Prio   */ fpcPi_CURRENT_e,
@@ -308,7 +308,7 @@ overlap_process_profile_definition g_profile_OVERLAP8 = {
     /* Fade SubMtd */ &l_dOvlpFd_Method,
 };
 
-overlap_process_profile_definition g_profile_OVERLAP9 = {
+DUSK_PROFILE overlap_process_profile_definition DUSK_CONST g_profile_OVERLAP9 = {
     /* Layer ID    */ fpcLy_ROOT_e,
     /* List ID     */ 0,
     /* List Prio   */ fpcPi_CURRENT_e,
@@ -322,7 +322,7 @@ overlap_process_profile_definition g_profile_OVERLAP9 = {
     /* Fade SubMtd */ &l_dOvlpFd_Method,
 };
 
-overlap_process_profile_definition g_profile_OVERLAP10 = {
+DUSK_PROFILE overlap_process_profile_definition DUSK_CONST g_profile_OVERLAP10 = {
     /* Layer ID    */ fpcLy_ROOT_e,
     /* List ID     */ 0,
     /* List Prio   */ fpcPi_CURRENT_e,
@@ -336,7 +336,7 @@ overlap_process_profile_definition g_profile_OVERLAP10 = {
     /* Fade SubMtd */ &l_dOvlpFd_Method,
 };
 
-overlap_process_profile_definition g_profile_OVERLAP11 = {
+DUSK_PROFILE overlap_process_profile_definition DUSK_CONST g_profile_OVERLAP11 = {
     /* Layer ID    */ fpcLy_ROOT_e,
     /* List ID     */ 0,
     /* List Prio   */ fpcPi_CURRENT_e,

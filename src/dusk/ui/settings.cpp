@@ -13,7 +13,6 @@
 #include "dusk/imgui/ImGuiEngine.hpp"
 #include "dusk/io.hpp"
 #include "dusk/livesplit.h"
-#include "dusk/main.h"
 #include "dusk/discord_presence.hpp"
 #include "dusk/vector_rsqrt.h"
 #include "graphics_tuner.hpp"
@@ -766,6 +765,8 @@ const Rml::String kDepthOfFieldHelpText =
 const Rml::String kUnlockFramerateHelpText =
     "Uses inter-frame interpolation to enable higher frame rates. "
     "May introduce minor visual artifacts or animation glitches.";
+const Rml::String kTextureReplacementHelpText =
+    "Enable installed texture replacements.";
 
 constexpr std::array kFrameRateLimitValues = {30, 60, 120, 240, 360, 480, 0};
 constexpr std::array kFrameRateLimitNames = {
@@ -1389,12 +1390,17 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             mPrelaunch);
 
         leftPane.add_section("Rendering");
-        config_bool_select(leftPane, rightPane, getSettings().game.enableTextureReplacements,
-            {
-                .key = "Use Texture Pack",
-                .helpText = "Enable installed texture replacements.",
-                .onChange = [](bool value) { aurora_set_texture_replacements_enabled(value); },
-            });
+        graphics_tuner_control(*this, leftPane, rightPane,
+            getSettings().game.enableTextureReplacements,
+            GraphicsTunerProps{
+                .option = GraphicsOption::TextureReplacements,
+                .title = "Enable Texture Replacements",
+                .helpText = kTextureReplacementHelpText,
+                .valueMin = static_cast<int>(false),
+                .valueMax = static_cast<int>(true),
+                .defaultValue = static_cast<int>(false),
+            },
+            mPrelaunch);
         leftPane.register_control(
             leftPane.add_select_button({
                 .key = "Frame Rate Limit",
@@ -1581,6 +1587,10 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Invert vertical gyro aiming.", [] { return !gyro_enabled(); });
         addOption("Invert Gyro Yaw", getSettings().game.gyroInvertYaw,
             "Invert horizontal gyro aiming.", [] { return !gyro_enabled(); });
+        
+        leftPane.add_section("Gameplay");
+        addOption("Swap Direct Select Input", getSettings().game.swapDirectSelect,
+            "Swap the controls for using Direct Select on the item wheel, making Direct Select the default and holding L to scroll the wheel.");
 
         leftPane.add_section("Tools");
         addOption("Turbo Speed Key", getSettings().game.enableTurboKeybind,
@@ -1879,6 +1889,8 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Lets the magic armor work without consuming rupees.");
         addCheat("Invincible Enemies", getSettings().game.invincibleEnemies,
             "Prevents enemies from taking damage.");
+        addCheat("Transform without Shadow Crystal", getSettings().game.transformWithoutShadowCrystal,
+            "Allows Link to transform without the Shadow Crystal (Only using Quick Transform.)");
     });
 
     add_tab("Interface", [this](Rml::Element* content) {
@@ -2091,6 +2103,11 @@ void SettingsWindow::update() {
     }
 
     Window::update();
+}
+
+void SettingsWindow::hide(bool close) {
+    config::Save();
+    Window::hide(close);
 }
 
 }  // namespace dusk::ui

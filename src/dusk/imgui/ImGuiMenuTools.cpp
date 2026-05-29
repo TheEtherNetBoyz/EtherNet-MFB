@@ -422,6 +422,8 @@ namespace dusk {
                 SliderFloatItem("Gyro Deadband", s.game.gyroDeadband, 0.0f, 0.5f);
                 MenuCheckbox("Invert Gyro Pitch", s.game.gyroInvertPitch);
                 MenuCheckbox("Invert Gyro Yaw", s.game.gyroInvertYaw);
+                ImGui::Separator();
+                MenuCheckbox("Swap Direct Select", s.game.swapDirectSelect);
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Cheats")) {

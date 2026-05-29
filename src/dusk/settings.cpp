@@ -108,6 +108,13 @@ UserSettings g_userSettings = {
         .debugFlyCamLockEvents {"game.debugFlyCamLockEvents", true},
         .allowBackgroundInput {"game.allowBackgroundInput", true},
         .inputLagMs {"game.inputLagMs", 0},
+        .enableLED {
+            ConfigVar<bool>{"game.enableLED_port0", true},
+            ConfigVar<bool>{"game.enableLED_port1", true},
+            ConfigVar<bool>{"game.enableLED_port2", true},
+            ConfigVar<bool>{"game.enableLED_port3", true},
+        },
+        .swapDirectSelect {"game.swapDirectSelect", false},
 
         // Cheats
         .infiniteHearts {"game.infiniteHearts", false},
@@ -127,6 +134,7 @@ UserSettings g_userSettings = {
         .fastSpinner {"game.fastSpinner", false},
         .freeMagicArmor {"game.freeMagicArmor", false},
         .invincibleEnemies {"game.invincibleEnemies", false},
+        .transformWithoutShadowCrystal {"game.transformWithoutShadowCrystal", false},
 
         // Technical
         .restoreWiiGlitches {"game.restoreWiiGlitches", false},
@@ -304,6 +312,7 @@ void registerSettings() {
     // Game
     Register(g_userSettings.game.language);
     Register(g_userSettings.game.enableQuickTransform);
+    Register(g_userSettings.game.transformWithoutShadowCrystal);
     Register(g_userSettings.game.hideTvSettingsScreen);
     Register(g_userSettings.game.biggerWallets);
     Register(g_userSettings.game.noReturnRupees);
@@ -404,6 +413,11 @@ void registerSettings() {
     Register(g_userSettings.game.debugFlyCamLockEvents);
     Register(g_userSettings.game.allowBackgroundInput);
     Register(g_userSettings.game.inputLagMs);
+    Register(g_userSettings.game.enableLED[0]);
+    Register(g_userSettings.game.enableLED[1]);
+    Register(g_userSettings.game.enableLED[2]);
+    Register(g_userSettings.game.enableLED[3]);
+    Register(g_userSettings.game.swapDirectSelect);
 
     Register(g_userSettings.backend.isoPath);
     Register(g_userSettings.backend.isoVerification);
