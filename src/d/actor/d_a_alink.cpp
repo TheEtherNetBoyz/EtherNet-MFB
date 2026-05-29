@@ -17831,6 +17831,11 @@ void daAlink_c::duskForceHumanFormAfterCutscene() {
     cancelOriginalDemo();
 }
 
+void daAlink_c::duskCancelHeldItemForPracticeSave() {
+    deleteEquipItem(FALSE, FALSE);
+    commonProcInit(checkWolf() ? PROC_WOLF_WAIT : PROC_WAIT);
+}
+
 int daAlink_c::procFloorDownReboundInit() {
     commonProcInit(PROC_FLOOR_DOWN_REBOUND);
     setSingleAnime(ANM_JUMP_LAND, 0.69999999f, mpHIO->mAutoJump.m.mLandAnm.mStartFrame,

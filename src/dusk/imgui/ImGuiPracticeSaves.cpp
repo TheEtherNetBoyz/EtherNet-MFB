@@ -9,6 +9,7 @@
 #include "d/d_com_inf_game.h"
 #include "d/d_event.h"
 #include "d/d_kankyo.h"
+#include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_b_ds.h"
 #include "d/actor/d_a_e_zs.h"
 #include "d/actor/d_a_player.h"
@@ -1481,6 +1482,9 @@ void ImGuiPracticeSaves::tickPendingApply() {
         m_pendingSavedata.reset();
 
         dComIfGs_getSave(g_dComIfG_gameInfo.info.getDan().mStageNo);
+        if (auto* alink = daAlink_getAlinkActorClass()) {
+            alink->duskCancelHeldItemForPracticeSave();
+        }
         if (m_pendingStageInitCallback != static_cast<int>(PracticeSaveCallback::None)) {
             apply_post_save_inject_callback(static_cast<PracticeSaveCallback>(m_pendingStageInitCallback));
             m_pendingStageInitCallback = static_cast<int>(PracticeSaveCallback::None);

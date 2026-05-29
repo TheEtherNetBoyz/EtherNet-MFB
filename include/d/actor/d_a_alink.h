@@ -1801,6 +1801,7 @@ public:
     int procCoMetamorphoseOnlyInit();
     int procCoMetamorphoseOnly();
     void duskForceHumanFormAfterCutscene();
+    void duskCancelHeldItemForPracticeSave();
     int procFloorDownReboundInit();
     int procFloorDownRebound();
     int procGoronRideWaitInit(fopAc_ac_c* i_goronActor);
