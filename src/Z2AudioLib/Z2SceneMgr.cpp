@@ -3,6 +3,9 @@
 #include "JSystem/JAudio2/JASBasicWaveBank.h"
 #include "JSystem/JAudio2/JAUSectionHeap.h"
 #include "JSystem/JAudio2/JAUSoundTable.h"
+#if TARGET_PC
+#include "Z2AudioLib/DuskMusicResolver.h"
+#endif
 #include "Z2AudioLib/Z2SceneMgr.h"
 #include "Z2AudioLib/Z2Param.h"
 #include "Z2AudioLib/Z2SeMgr.h"
@@ -1686,6 +1689,10 @@ void Z2SceneMgr::setSceneName(char* spot, s32 room, s32 layer) {
     Z2GetSeqMgr()->setTimeProcVolMod(time_proc_vol_mod, 0);
     Z2GetSeqMgr()->setFieldBgmPlay(field_bgm_play);
     Z2GetEnvSeMgr()->initSceneEnvSe(spotNo, room, fVar1);
+
+#if TARGET_PC
+    dusk::music::ApplySceneResolution(bgm_id, bgm_wave1, bgm_wave2);
+#endif
 
     if (sceneNum != spotNo || bgm_id != BGM_ID || se_wave1 != loadedSeWave_1
         || se_wave2 != loadedSeWave_2 || bgm_wave1 != loadedBgmWave_1

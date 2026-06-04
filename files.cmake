@@ -255,6 +255,7 @@ set(Z2AUDIOLIB_FILES
         src/Z2AudioLib/Z2SoundStarter.cpp
         src/Z2AudioLib/Z2SoundHandles.cpp
         src/Z2AudioLib/Z2SeMgr.cpp
+        src/Z2AudioLib/DuskMusicResolver.cpp
         src/Z2AudioLib/Z2SeqMgr.cpp
         src/Z2AudioLib/Z2StatusMgr.cpp
         src/Z2AudioLib/Z2SceneMgr.cpp

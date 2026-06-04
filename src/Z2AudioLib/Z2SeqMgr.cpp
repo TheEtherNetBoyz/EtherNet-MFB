@@ -1,4 +1,7 @@
 #include "Z2AudioLib/Z2SeqMgr.h"
+#if TARGET_PC
+#include "Z2AudioLib/DuskMusicResolver.h"
+#endif
 #include "Z2AudioLib/Z2LinkMgr.h"
 #include "Z2AudioLib/Z2Param.h"
 #include "Z2AudioLib/Z2SceneMgr.h"
@@ -73,7 +76,12 @@ void Z2SeqMgr::bgmStart(u32 bgmID, u32 fadeTime, s32 param_2) {
         setBattleBgmOff(true);
         Z2GetSoundMgr()->getSeqMgr()->stop(0);
         Z2GetSoundMgr()->getStreamMgr()->stop(0);
+#if TARGET_PC
+        Z2GetSoundMgr()->startSound(dusk::music::ResolvePlaybackAndLoad(dusk::music::Route::Main, bgmID),
+                                    &mMainBgmHandle, NULL);
+#else
         Z2GetSoundMgr()->startSound(bgmID, &mMainBgmHandle, NULL);
+#endif
         mBgmStatus = 0xff;
         return;
     case Z2BGM_LAKE:
@@ -116,7 +124,12 @@ void Z2SeqMgr::bgmStart(u32 bgmID, u32 fadeTime, s32 param_2) {
     if (bgmID == Z2BGM_FIELD_LINK_DAY || bgmID == Z2BGM_FIELD_LINK_NIGHT) {
         fieldBgmStart();
     } else {
+#if TARGET_PC
+        Z2GetSoundMgr()->startSound(dusk::music::ResolvePlaybackAndLoad(dusk::music::Route::Main, bgmID),
+                                    &mMainBgmHandle, NULL);
+#else
         Z2GetSoundMgr()->startSound(bgmID, &mMainBgmHandle, NULL);
+#endif
         mBgmStatus = 0xff;
     }
 
@@ -326,7 +339,12 @@ void Z2SeqMgr::subBgmStart(u32 bgmID) {
         subBgmStopInner();
     }
 
+#if TARGET_PC
+    Z2GetSoundMgr()->startSound(dusk::music::ResolvePlaybackAndLoad(dusk::music::Route::Sub, bgmID),
+                                &mSubBgmHandle, NULL);
+#else
     Z2GetSoundMgr()->startSound(bgmID, &mSubBgmHandle, NULL);
+#endif
     mSubBgmStatus = 0xff;
 
     switch (bgmID) {
@@ -1311,13 +1329,23 @@ void Z2SeqMgr::fanfareFramework() {
         mFanfareCount = 150;
         // fallthrough
     case Z2BGM_KOMONJO_GET_INTRO:
+#if TARGET_PC
+        Z2GetSoundMgr()->startSound(dusk::music::ResolvePlaybackAndLoad(dusk::music::Route::Fanfare, mFanfareID),
+                                    &mFanfareHandle, 0);
+#else
         Z2GetSoundMgr()->startSound(mFanfareID, &mFanfareHandle, 0);
+#endif
         mFanfareMute.fadeOut(1);
         mFanfareID.setAnonymous();
         break;
     case Z2BGM_ITEM_GET_ME:
         if (mFanfareCount == 0) {
+#if TARGET_PC
+            Z2GetSoundMgr()->startSound(dusk::music::ResolvePlaybackAndLoad(dusk::music::Route::Fanfare, mFanfareID),
+                                        &mFanfareHandle, 0);
+#else
             Z2GetSoundMgr()->startSound(mFanfareID, &mFanfareHandle, 0);
+#endif
             mFanfareCount = 25;
         }
         if (mFanfareCount == 1) {
@@ -1341,7 +1369,12 @@ void Z2SeqMgr::fanfareFramework() {
     case Z2BGM_ITEM_GET_ME_S:
         r30 = mFanfareCount;
         if (mFanfareCount == 0) {
+#if TARGET_PC
+            Z2GetSoundMgr()->startSound(dusk::music::ResolvePlaybackAndLoad(dusk::music::Route::Fanfare, mFanfareID),
+                                        &mFanfareHandle, 0);
+#else
             Z2GetSoundMgr()->startSound(mFanfareID, &mFanfareHandle, 0);
+#endif
             mFanfareMute.fadeOut(1);
             mFanfareID.setAnonymous();
         }
@@ -1365,7 +1398,12 @@ void Z2SeqMgr::fanfareFramework() {
             mFanfareCount = 50;
             mFanfareMute.fadeOut(30);
         } else if (mFanfareCount == 1) {
+#if TARGET_PC
+            Z2GetSoundMgr()->startSound(dusk::music::ResolvePlaybackAndLoad(dusk::music::Route::Fanfare, mFanfareID),
+                                        &mFanfareHandle, 0);
+#else
             Z2GetSoundMgr()->startSound(mFanfareID, &mFanfareHandle, 0);
+#endif
             mFanfareID.setAnonymous();
         }
         break;
