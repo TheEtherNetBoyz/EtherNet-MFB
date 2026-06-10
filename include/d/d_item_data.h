@@ -86,9 +86,21 @@ struct dItem_data {
 
     static u16 getFieldHeapSize(u8 index) { return field_item_res[index].mHeapSize; } 
 
+#if TARGET_PC
+    // dItemNo_NONE_e == 0xFF (255) is a valid u8 item value, but the original tables
+    // are only [255] (indices 0..254). Any accessor called with a "none"/corrupted
+    // item (reachable via inventory glitches) read one entry past the end and returned
+    // garbage resource names, which the model/animation loader then choked on (OOB
+    // construct in J3DAnmFullLoader, only triggered under insta-load). One extra
+    // defined-empty entry makes every accessor in-bounds for all u8 indices.
+    static dItem_itemResource item_resource[256];
+    static dItem_fieldItemResource field_item_res[256];
+    static dItem_itemInfo item_info[256];
+#else
     static dItem_itemResource item_resource[255];
     static dItem_fieldItemResource field_item_res[255];
     static dItem_itemInfo item_info[255];
+#endif
 };
 
 enum {
