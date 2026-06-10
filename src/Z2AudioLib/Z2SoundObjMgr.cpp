@@ -1,4 +1,5 @@
 #include "Z2AudioLib/Z2SoundObjMgr.h"
+#include "Z2AudioLib/DuskMusicResolver.h"
 #include "Z2AudioLib/Z2Creature.h"
 #include "Z2AudioLib/Z2SeqMgr.h"
 #include "Z2AudioLib/Z2Calc.h"
@@ -110,6 +111,12 @@ void Z2SoundObjMgr::searchEnemy() {
     #if TARGET_PC
     if (Z2GetSeqMgr()->checkBgmIDPlaying(Z2BGM_MIDNA_SOS) &&
         dusk::getSettings().game.midnasLamentNonStop)
+    {
+        Z2GetSeqMgr()->changeSubBgmStatus(0);
+        return;
+    }
+    if (dusk::music::IsAllEnemyMusicDisabled() ||
+        dusk::music::IsEnemyMusicDisabledFor(JAISoundID(Z2GetSeqMgr()->getMainBgmID())))
     {
         Z2GetSeqMgr()->changeSubBgmStatus(0);
         return;

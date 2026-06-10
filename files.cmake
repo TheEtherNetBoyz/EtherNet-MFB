@@ -1444,6 +1444,9 @@ set(DUSK_FILES
         src/dusk/latency_trace.cpp
         src/dusk/logging.cpp
         src/dusk/settings.cpp
+        src/dusk/custom_music/CustomMusicProject.cpp
+        src/dusk/custom_music/CustomMusicService.cpp
+        src/dusk/custom_music/CustomMusicIsoTransaction.cpp
         src/dusk/speedrun.cpp
         src/dusk/string.cpp
         src/dusk/stubs.cpp
@@ -1459,6 +1462,7 @@ set(DUSK_FILES
         src/dusk/imgui/ImGuiBloomWindow.hpp
         src/dusk/imgui/ImGuiMenuTools.cpp
         src/dusk/imgui/ImGuiMenuTools.hpp
+        src/dusk/imgui/ImGuiCustomMusic.cpp
         src/dusk/imgui/ImGuiActorSpawner.cpp
         src/dusk/imgui/ImGuiProcessOverlay.cpp
         src/dusk/imgui/ImGuiCameraOverlay.cpp

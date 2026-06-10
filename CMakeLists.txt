@@ -144,6 +144,14 @@ target_compile_options(aurora_mtx PRIVATE
 
 add_subdirectory(libs/freeverb)
 
+option(DUSK_BUILD_CUSTOM_MUSIC_TESTS "Build embedded custom-music core tests" OFF)
+set(TPCM_BUILD_TESTS ${DUSK_BUILD_CUSTOM_MUSIC_TESTS} CACHE BOOL "Build embedded custom-music core tests" FORCE)
+if(DUSK_BUILD_CUSTOM_MUSIC_TESTS)
+    enable_testing()
+endif()
+add_subdirectory(libs/tpcm_core)
+add_library(dusk_custom_music_core ALIAS tpcm_core)
+
 option(DUSK_BUILD_WARNINGS "Enable compiler warnings (off by default)")
 option(DUSK_SELECTED_OPT "If on, selected parts of the project will be compiled with optimizations on Debug, intending to make the game run at 30 FPS. Note for MSVC: you will need to remove '/RTC1' from your debug flags in CMake.")
 option(DUSK_MOVIE_SUPPORT "If on, compile against libjpeg-turbo to enable THP file decoding" ON)
@@ -352,6 +360,7 @@ set(GAME_LIBS aurora::core aurora::gx aurora::gd aurora::si aurora::vi aurora::p
     Threads::Threads)
 
 list(APPEND GAME_LIBS libzstd_static)
+list(APPEND GAME_LIBS dusk_custom_music_core)
 
 if (DUSK_ENABLE_SENTRY_NATIVE)
     list(APPEND GAME_LIBS sentry)

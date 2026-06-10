@@ -487,6 +487,7 @@ namespace dusk {
         }
 
         m_menuTools.ShowInputViewer();
+        m_menuTools.ShowCustomMusic();
 
         if (dusk::IsGameLaunched && !dusk::getSettings().game.speedrunMode) {
             m_menuTools.ShowDebugOverlay();

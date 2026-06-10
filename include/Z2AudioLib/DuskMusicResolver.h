@@ -30,6 +30,8 @@ ResolvedMusic Resolve(Route route, JAISoundID originalId);
 void ApplySceneResolution(JAISoundID& bgm, u8& bgmWave1, u8& bgmWave2);
 JAISoundID ResolvePlaybackAndLoad(Route route, JAISoundID originalId);
 void LoadResolvedBgmWaves(const ResolvedMusic& resolved, size_t startIndex = 0);
+bool IsEnemyMusicDisabledFor(JAISoundID bgmId);
+bool IsAllEnemyMusicDisabled();
 
 } // namespace dusk::music
 

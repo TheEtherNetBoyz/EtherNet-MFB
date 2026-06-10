@@ -18,7 +18,6 @@ namespace {
 
 using json = nlohmann::json;
 
-constexpr char ManifestFileName[] = "dusk_music_manifest.json";
 constexpr u32 SeqIdMask = 0xFF000000;
 constexpr u32 SeqIdPrefix = 0x01000000;
 
@@ -27,10 +26,13 @@ struct ManifestEntry {
     u32 originalId = 0;
     u32 replacementId = 0;
     std::vector<u32> bgmWaves;
+    bool noEnemyMusic = false;
 };
 
 std::vector<ManifestEntry> s_entries;
+bool s_disableAllEnemyMusic = false;
 std::filesystem::path s_loadedPath;
+std::filesystem::file_time_type s_loadedMtime;
 bool s_loaded = false;
 
 std::filesystem::path manifestPath() {
@@ -38,7 +40,9 @@ std::filesystem::path manifestPath() {
     if (isoPath.empty()) {
         return {};
     }
-    return std::filesystem::path(isoPath).parent_path() / ManifestFileName;
+    const std::filesystem::path iso(isoPath);
+    return iso.parent_path()
+        / (iso.stem().string() + ".dusk_music_manifest.json");
 }
 
 std::optional<u32> readId(const json& value) {
@@ -108,12 +112,19 @@ void appendWaves(ManifestEntry& entry, const json& value) {
 
 void ensureLoaded() {
     const std::filesystem::path path = manifestPath();
-    if (s_loaded && path == s_loadedPath) {
+    std::error_code ec;
+    const std::filesystem::file_time_type mtime =
+        std::filesystem::exists(path, ec) && !ec
+            ? std::filesystem::last_write_time(path, ec)
+            : std::filesystem::file_time_type{};
+    if (s_loaded && path == s_loadedPath && mtime == s_loadedMtime) {
         return;
     }
 
     s_entries.clear();
+    s_disableAllEnemyMusic = false;
     s_loadedPath = path;
+    s_loadedMtime = mtime;
     s_loaded = true;
 
     if (path.empty() || !std::filesystem::exists(path)) {
@@ -149,12 +160,14 @@ void ensureLoaded() {
             entry.route = *route;
             entry.originalId = *originalId;
             entry.replacementId = *replacementId;
+            entry.noEnemyMusic = row.value("no_enemy_music", false);
             appendWaves(entry, row.value("bgm_waves", json::array()));
             appendWaves(entry, row.value("extra_bgm_waves", json::array()));
             appendWaves(entry, row.value("preserve_bgm_waves", json::array()));
             s_entries.push_back(std::move(entry));
         }
 
+        s_disableAllEnemyMusic = manifest.value("disable_all_enemy_music", false);
         OS_REPORT("[DuskMusicResolver] Loaded %u manifest entries from %s\n",
                   static_cast<u32>(s_entries.size()), path.string().c_str());
     } catch (const std::exception& e) {
@@ -277,6 +290,22 @@ JAISoundID ResolvePlaybackAndLoad(Route route, JAISoundID originalId) {
               static_cast<u32>(resolved.replacementId),
               static_cast<u32>(resolved.bgmWaveCount));
     return resolved.replacementId;
+}
+
+bool IsAllEnemyMusicDisabled() {
+    ensureLoaded();
+    return s_disableAllEnemyMusic;
+}
+
+bool IsEnemyMusicDisabledFor(JAISoundID bgmId) {
+    ensureLoaded();
+    const u32 id = static_cast<u32>(bgmId);
+    for (const ManifestEntry& entry : s_entries) {
+        if (entry.noEnemyMusic && entry.replacementId == id) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace dusk::music
