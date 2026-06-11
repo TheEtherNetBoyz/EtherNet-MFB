@@ -255,9 +255,35 @@ namespace dusk {
                 dl->AddRectFilled(rStart, p2, darkGray);
             }
 
+            // Draw raw stick value readouts. Matches decompgz's gz_manager_tools.cpp
+            // drawInputViewer(), which prints the raw s8 X/Y of mMainStick (white) and
+            // mSubStick (yellow) with a "%d  %d" format. JUTGamePad::CStick has the same
+            // mRawX/mRawY layout here, so these values are identical to gz's.
+            // Each readout sits just below its own stick, centered horizontally under it.
+            float leftReadoutY = leftStickCenter.y + leftStickRadius + 6 * scale;
+            float rightReadoutY = rightStickCenter.y + rightStickRadius + 6 * scale;
+            if (JUTGamePad* pad = mDoCPd_c::getGamePad(PAD_1)) {
+                char buf[32];
+
+                auto drawCentered = [&](float centerX, float y, ImU32 col, const char* s) {
+                    ImVec2 ts = ImGui::CalcTextSize(s);
+                    dl->AddText(ImVec2(centerX - ts.x * 0.5f, y), col, s);
+                };
+
+                snprintf(buf, sizeof(buf), "%d  %d", pad->mMainStick.mRawX, pad->mMainStick.mRawY);
+                drawCentered(leftStickCenter.x, leftReadoutY, white, buf);
+
+                snprintf(buf, sizeof(buf), "%d  %d", pad->mSubStick.mRawX, pad->mSubStick.mRawY);
+                drawCentered(rightStickCenter.x, rightReadoutY, yellow, buf);
+            }
+
+            // Reserve enough height that the auto-resizing window doesn't clip the
+            // lowest readout (the cursor sits 20*scale above p).
+            ImVec2 cursor0 = ImGui::GetCursorScreenPos();
+            float readoutBottom = std::max(leftReadoutY, rightReadoutY) + ImGui::GetTextLineHeight();
             ImVec2 size;
             size.x = 270 * scale;
-            size.y = 130 * scale;
+            size.y = std::max(130 * scale, readoutBottom - cursor0.y);
             ImGui::Dummy(size);
 
             if (getSettings().game.showInputViewerGyro)
