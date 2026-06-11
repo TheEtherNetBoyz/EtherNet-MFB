@@ -1755,7 +1755,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         config_bool_select(leftPane, rightPane, getSettings().game.enableInstaLoads,
             {
                 .key = "Insta Loads",
-                .helpText = "Experimental near-instant area transitions.",
+                .helpText = "Loads areas in 1 frame, will break some cutscenes if you skip too fast.",
                 .onChange = [](bool value) {
                     if (value) {
                         getSettings().game.enableFastLoads.setValue(false);
