@@ -37,8 +37,6 @@ private:
                                                               remain(duration) {}
     };
 
-    float mouseHideTimer = 0.0f;
-
     bool m_isHidden = true;
     bool m_isLaunchInitialized = false;
     ImGuiWindow* m_dragScrollWindow = nullptr;

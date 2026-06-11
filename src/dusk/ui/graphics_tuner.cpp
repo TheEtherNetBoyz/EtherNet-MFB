@@ -11,6 +11,7 @@
 
 #include "dusk/config.hpp"
 #include "dusk/settings.h"
+#include "dusk/texture_replacements.hpp"
 
 #include <algorithm>
 #include <string>
@@ -99,7 +100,7 @@ void set_value(GraphicsOption option, int value) {
         break;
     case GraphicsOption::TextureReplacements:
         getSettings().game.enableTextureReplacements.setValue(static_cast<bool>(value));
-        aurora_set_texture_replacements_enabled(static_cast<bool>(value));
+        texture_replacements::set_enabled(static_cast<bool>(value));
         break;
     }
 }

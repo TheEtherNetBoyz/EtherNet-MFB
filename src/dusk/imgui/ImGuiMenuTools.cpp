@@ -87,7 +87,7 @@ namespace dusk {
             s.game.canTransformAnywhere.setSpeedrunValue(false);
             s.game.fastRoll.setSpeedrunValue(false);
             s.game.fastSpinner.setSpeedrunValue(false);
-            s.game.freeMagicArmor.setSpeedrunValue(false);
+            s.game.armorRupeeDrain.setSpeedrunValue(dusk::MagicArmorMode::NORMAL);
             s.game.invincibleEnemies.setSpeedrunValue(false);
 
             s.game.pauseOnFocusLost.setSpeedrunValue(false);
@@ -444,7 +444,6 @@ namespace dusk {
                 MenuCheckbox("Transform Anywhere", s.game.canTransformAnywhere);
                 MenuCheckbox("Fast Roll", s.game.fastRoll);
                 MenuCheckbox("Fast Spinner", s.game.fastSpinner);
-                MenuCheckbox("Free Magic Armor", s.game.freeMagicArmor);
                 MenuCheckbox("Invincible Enemies", s.game.invincibleEnemies);
                 ImGui::EndDisabled();
                 ImGui::EndMenu();
