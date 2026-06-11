@@ -757,7 +757,7 @@ namespace dusk {
 
             ImGuiStringViewText(
                  player != nullptr
-                 ? fmt::format("Angle: {0}\n", player->shape_angle.y)
+                 ? fmt::format("Angle: {0}\n", static_cast<u16>(player->shape_angle.y))
                  : "Angle: ?\n"
             );
 
@@ -795,7 +795,7 @@ namespace dusk {
 
             ImGuiStringViewText(
                 horse != nullptr
-                ? fmt::format("Angle: {0}\n", horse->shape_angle.y)
+                ? fmt::format("Angle: {0}\n", static_cast<u16>(horse->shape_angle.y))
                 : "Angle: ?\n"
             );
 
