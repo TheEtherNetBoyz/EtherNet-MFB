@@ -762,6 +762,12 @@ namespace dusk {
             );
 
             ImGuiStringViewText(
+                 player != nullptr
+                 ? fmt::format("V-Angle: {0}\n", player->mBodyAngle.x)
+                 : "V-Angle: ?\n"
+            );
+
+            ImGuiStringViewText(
                 player != nullptr
                 ? fmt::format("Room: {0}\n", fopAcM_GetRoomNo(player))
                 : "Room: ?\n"
