@@ -9,6 +9,7 @@ extern bool IsRunning;
 extern bool IsShuttingDown;
 extern bool IsGameLaunched;
 extern bool RestartRequested;
+extern bool ReturnToPrelaunchRequested;
 extern std::filesystem::path ConfigPath;
 extern std::filesystem::path CachePath;
 
@@ -20,6 +21,11 @@ inline constexpr bool SupportsProcessRestart = true;
 #endif
 
 void RequestRestart() noexcept;
+
+// Restart the process and return to the startup (prelaunch) screen, where disc image,
+// language, and other startup-only options can be changed. Forces the prelaunch screen to
+// appear even if "Skip Dusklight Main Menu" is enabled.
+void RequestReturnToPrelaunch() noexcept;
 
 }  // namespace dusk
 

@@ -127,6 +127,7 @@ bool dusk::IsRunning = true;
 bool dusk::IsShuttingDown = false;
 bool dusk::IsGameLaunched = false;
 bool dusk::RestartRequested = false;
+bool dusk::ReturnToPrelaunchRequested = false;
 std::filesystem::path dusk::ConfigPath;
 std::filesystem::path dusk::CachePath;
 #endif
@@ -134,6 +135,11 @@ std::filesystem::path dusk::CachePath;
 void dusk::RequestRestart() noexcept {
     RestartRequested = SupportsProcessRestart;
     IsRunning = false;
+}
+
+void dusk::RequestReturnToPrelaunch() noexcept {
+    ReturnToPrelaunchRequested = SupportsProcessRestart;
+    RequestRestart();
 }
 
 s32 LOAD_COPYDATE(void*) {
@@ -557,6 +563,7 @@ int game_main(int argc, char* argv[]) {
             ("console", "Show the Windows console window for logs", cxxopts::value<bool>()->default_value("false")->implicit_value("true"))
             ("dvd", "Path to DVD image file", cxxopts::value<std::string>())
             ("backend", "Graphics API backend to use (auto, d3d12, d3d11, metal, vulkan, null)", cxxopts::value<std::string>())
+            ("prelaunch", "Force the startup screen to appear even if it is set to be skipped", cxxopts::value<bool>()->default_value("false")->implicit_value("true"))
             ("cvar", "Override configuration variables without modifying config", cxxopts::value<std::vector<std::string>>());
 
         arg_options.parse_positional({"dvd"});
@@ -723,6 +730,10 @@ int game_main(int argc, char* argv[]) {
     bool forcePreLaunchUI = false;
     bool saveConfigBeforePrelaunch = false;
 
+    // Requested via the in-game "Return to Startup Screen" option (or --prelaunch). Show the
+    // startup screen even if "Skip Dusklight Main Menu" is enabled, without persisting that change.
+    const bool forceShowPrelaunch = parsed_arg_options.count("prelaunch") > 0;
+
     const std::string p = dusk::getSettings().backend.isoPath;
     dusk::iso::DiscInfo discInfo{};
     if (!p.empty() &&
@@ -737,7 +748,7 @@ int game_main(int argc, char* argv[]) {
 
     std::string dvd_path;
     bool dvd_opened = false;
-    if (parsed_arg_options.count("dvd")) {
+    if (!forceShowPrelaunch && parsed_arg_options.count("dvd")) {
         dvd_path = parsed_arg_options["dvd"].as<std::string>();
         if (dusk::iso::inspect(dvd_path.c_str(), discInfo) == dusk::iso::ValidationError::Success) {
             DuskLog.info("Loading DVD image from command line: {}", dvd_path);
@@ -775,7 +786,7 @@ int game_main(int argc, char* argv[]) {
             dusk::config::Save();
         }
 
-        if (!dusk::getSettings().backend.skipPreLaunchUI) {
+        if (forceShowPrelaunch || !dusk::getSettings().backend.skipPreLaunchUI) {
             dusk::ui::push_document(std::make_unique<dusk::ui::Prelaunch>(), true);
 
             // pre game launch ui main loop

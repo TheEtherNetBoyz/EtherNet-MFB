@@ -13,6 +13,7 @@
 #include "dusk/imgui/ImGuiEngine.hpp"
 #include "dusk/io.hpp"
 #include "dusk/livesplit.h"
+#include "dusk/main.h"
 #include "dusk/discord_presence.hpp"
 #include "dusk/vector_rsqrt.h"
 #include "graphics_tuner.hpp"
@@ -1037,6 +1038,35 @@ void graphics_tuner_control(Window& window, Pane& leftPane, Pane& rightPane, Con
             pane.clear();
             pane.add_text(helpText);
         });
+}
+
+void confirm_return_to_startup() {
+    auto dismiss = [](Modal& modal) {
+        mDoAud_seStartMenu(kSoundWindowClose);
+        modal.pop();
+    };
+    push_document(std::make_unique<Modal>(Modal::Props{
+        .title = "Return to Startup Screen",
+        .bodyRml = "Dusklight will restart and return to the startup screen, where you can change "
+                   "your disc image, language, graphics backend, and other startup options."
+                   "<br/><br/>Any unsaved progress will be lost.",
+        .actions =
+            {
+                ModalAction{
+                    .label = "Cancel",
+                    .onPressed = dismiss,
+                },
+                ModalAction{
+                    .label = "Restart",
+                    .onPressed = [](Modal&) { dusk::RequestReturnToPrelaunch(); },
+                },
+            },
+        .onDismiss = dismiss,
+        .icon = "warning",
+    }));
+    if (auto* doc = top_document()) {
+        doc->focus();
+    }
 }
 
 }  // namespace
@@ -2131,6 +2161,23 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.recordingMode,
             "Recording Mode",
             "Disables the game HUD and all background music.<br/><br/>Useful for recording footage.");
+
+        if (!mPrelaunch) {
+            if constexpr (dusk::SupportsProcessRestart) {
+                leftPane.add_section("System");
+                leftPane.register_control(
+                    leftPane.add_button("Return to Startup Screen").on_pressed([] {
+                        mDoAud_seStartMenu(kSoundClick);
+                        confirm_return_to_startup();
+                    }),
+                    rightPane, [](Pane& pane) {
+                        pane.add_text(
+                            "Restart Dusklight and return to the startup screen, where you can "
+                            "change your disc image, language, graphics backend, and other startup "
+                            "options.");
+                    });
+            }
+        }
     });
 }
 
