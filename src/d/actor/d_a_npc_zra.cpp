@@ -20,6 +20,10 @@
 #include "d/actor/d_a_obj_zraMark.h"
 #include <cstring>
 
+#if TARGET_PC
+#include "dusk/randomizer/game/verify_item_functions.h"
+#endif
+
 static NPC_ZRA_HIO_CLASS l_HIO;
 
 daNpc_zrA_HIOParam const daNpc_zrA_Param_c::m = {

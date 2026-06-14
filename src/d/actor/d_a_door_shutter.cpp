@@ -10,6 +10,9 @@
 #include "d/actor/d_a_midna.h"
 #include "d/d_door_param2.h"
 #include "d/actor/d_a_player.h"
+#if TARGET_PC
+#include "d/actor/d_a_alink.h"
+#endif
 #include "d/d_com_inf_game.h"
 #include "d/d_msg_object.h"
 #include "d/d_map_path_dmap.h"
@@ -313,7 +316,17 @@ int daDoor20_c::checkOpenMsgDoor(int* param_1) {
         return 1;
     }
     field_0x624.init(NULL, msgNo, 0, NULL);
+#if TARGET_PC
+    int rv = 1;
+
+    // If we are in SPR, we don't want Yeta's msg flow to prevent us from opening the door if we haven't talked to her.
+    if (randomizer_IsActive() && !daAlink_c::checkStageName("D_MN11"))
+    {
+        rv = field_0x624.checkOpenDoor(this, param_1);
+    }
+#else
     int rv = field_0x624.checkOpenDoor(this, param_1);
+#endif
     dMsgObject_endFlowGroup();
     return rv;
 }

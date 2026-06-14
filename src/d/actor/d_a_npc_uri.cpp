@@ -1165,6 +1165,12 @@ int daNpc_Uri_c::cutEndCarryTutorial(int param_1) {
             (s32)mFlow.getEventId(&local_48) == 1)
         {
             if (mItemPartnerId == fpcM_ERROR_PROCESS_ID_e) {
+#if TARGET_PC
+                if (randomizer_IsActive()) {
+                    local_48 = randomizer_getItemAtLocation("Uli Cradle Delivery");
+                    randomizer_setTempFlagForLocation("Uli Cradle Delivery");
+                }
+#endif
                 mItemPartnerId =
                     fopAcM_createItemForPresentDemo(&current.pos, local_48, 0, -1, -1, NULL, NULL);
             }

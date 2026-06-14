@@ -22,9 +22,14 @@
 #include <cstdio>
 #include <cstring>
 
+
+#if TARGET_PC
 #include "dusk/logging.h"
 #include "dusk/string.hpp"
-#if TARGET_PC
+#include "dusk/randomizer/game/randomizer_context.hpp"
+#include "dusk/randomizer/game/flags.h"
+#include "dusk/randomizer/game/stages.h"
+#include "dusk/randomizer/game/tools.h"
 #include <format>
 #include <fmt/ranges.h>
 #endif
@@ -1593,6 +1598,60 @@ u8 dStage_roomControl_c::mNoArcBank;
 #endif
 
 static void dStage_actorCreate(stage_actor_data_class* i_actorData, fopAcM_prm_class* i_actorPrm) {
+#if TARGET_PC
+    // In rando, potentially override this object's data
+    if (randomizer_IsActive()) {
+
+        s8 roomNo = i_actorPrm->room_no;
+        // certain objects (like PLYR spawns) have the room set to -1.
+        // In this case, use dComIfGp_getStartStageRoomNo()
+        if (roomNo == -1) {
+            roomNo = dComIfGp_getStartStageRoomNo();
+        }
+
+        // Get the current stage/room/layer key
+        auto currentStageKey = getActorPatchesCurrentStageKey(roomNo);
+        // Iterate twice, once with the current room number, and once with the room set to 0xFF
+        // to indicate overriding an actor in the stage file instead of room file
+        for (auto i = 0; i < 2; ++i) {
+            // change to check for stage objects for 2nd iteration
+            if (i == 1) {
+                currentStageKey |= RandomizerContext::ROOM_STAGE << 8;
+            }
+            // If we have patches for this stage/room/layer
+            if (randomizer_GetContext().mObjectPatches.contains(currentStageKey)) {
+                auto& patches = randomizer_GetContext().mObjectPatches.at(currentStageKey);
+
+                auto actrKey = getStageObjCRC32(reinterpret_cast<u8*>(i_actorData), RandomizerContext::ACTR_CRC_SIZE);
+                auto tgscKey = getStageObjCRC32(reinterpret_cast<u8*>(i_actorData), RandomizerContext::TGSC_CRC_SIZE);
+                std::vector<u8>* bytes = NULL;
+                // See if the patches contain either key and the correct size for the key
+                if (patches.contains(actrKey) &&
+                    (patches[actrKey].size() == RandomizerContext::ACTR_CRC_SIZE || patches[actrKey].size() == RandomizerContext::OBJ_DELETE_SIZE))
+                {
+                    bytes = &patches.at(actrKey);
+                } else if (patches.contains(tgscKey) &&
+                        (patches[tgscKey].size() == RandomizerContext::TGSC_CRC_SIZE  || patches[tgscKey].size() == RandomizerContext::OBJ_DELETE_SIZE))
+                {
+                    bytes = &patches.at(tgscKey);
+                }
+
+                // If we found a match with a size of OBJ_DELETE_SIZE, this is a signal to delete the actor.
+                // Return early so we just don't spawn it
+                if (bytes != NULL && bytes->size() == RandomizerContext::OBJ_DELETE_SIZE) {
+                    return;
+                }
+                // If we found a match, override the actor data
+                if (bytes != NULL) {
+                    std::memcpy(i_actorPrm, bytes->data() + 8, bytes->size() - 8);
+                    std::memcpy(i_actorData, bytes->data(), bytes->size());
+                }
+            }
+        }
+
+    }
+#endif
+
     dStage_objectNameInf* actorInf = dStage_searchName(i_actorData->name);
 
     if (actorInf == NULL) {
@@ -1612,6 +1671,34 @@ static void dStage_actorCreate(stage_actor_data_class* i_actorData, fopAcM_prm_c
         fopAcM_Create(actorInf->procname, NULL, i_actorPrm);
     }
 }
+
+#if TARGET_PC
+// Custom function to spawn additional objects in randomizer
+static void dStage_createObjectAdditions(dStage_dt_c* i_stage) {
+    if (randomizer_IsActive()) {
+        u32 stageRoomLayer = getActorPatchesCurrentStageKey(i_stage->getRoomNo());
+        const auto& objectAdditions = randomizer_GetContext().mObjectAdditions;
+        if (objectAdditions.contains(stageRoomLayer)) {
+            for (const auto& actorData : objectAdditions.at(stageRoomLayer)) {
+                stage_tgsc_data_class object{};
+                std::memcpy(&object, actorData.data(), actorData.size());
+                // Code below copied from base game
+                fopAcM_prm_class* appen = fopAcM_CreateAppend();
+
+                if (appen != NULL) {
+                    appen->base = object.base;
+                    appen->room_no = (int)i_stage->getRoomNo();
+                    // Only set scale for objects which have it
+                    if (actorData.size() > RandomizerContext::ACTR_CRC_SIZE) {
+                        appen->scale = object.scale;
+                    }
+                    dStage_actorCreate(reinterpret_cast<stage_actor_data_class*>(&object), appen);
+                }
+            }
+        }
+    }
+}
+#endif
 
 static int dStage_cameraCreate(stage_camera2_data_class* i_cameraData, int i_cameraIdx,
                                int param_2) {
@@ -1646,6 +1733,41 @@ static int dStage_playerInit(dStage_dt_c* i_stage, void* i_data, int num, void* 
     stage_actor_data_class* player_data = player->m_entries;
     i_stage->setPlayer(player);
     i_stage->setPlayerNum(num);
+
+#if TARGET_PC
+    // Modify entrance types in certain situations to avoid crashes
+    if (randomizer_IsActive()) {
+        for (size_t i = 0; i < num; ++i) {
+            u8& entranceType = reinterpret_cast<u8*>(&player_data[i].base.parameters)[2];
+            switch (entranceType) {
+            // Only replace the entrance type if it is a door.
+            case 0x80:
+            case 0xA0:
+            case 0xB0:
+            {
+                if (dComIfGs_getTransformStatus() == TF_STATUS_WOLF) {
+                    // Change the entrance type to play the animation of walking out of the loading zone instead of entering
+                    // through the door.
+                    entranceType = 0x50;
+                }
+                break;
+            }
+
+            // Water swimming entrance. If we have this, but there isn't any water to spawn in, the game hangs
+            case 0xD0:
+            {
+                // If there's no water, change to non-swimming entrance
+                if (getStageID() == Lake_Hylia && !dComIfGs_isEventBit(WARPED_METEOR_TO_ZORAS_DOMAIN)) {
+                    entranceType = 0x50;
+                }
+                break;
+            }
+            default:
+                break;
+            }
+        }
+    }
+#endif
 
     if (dComIfGp_getPlayer(0) != NULL || dComIfGp_getStartStageRoomNo() != i_stage->getRoomNo()) {
         return 1;
@@ -2707,6 +2829,12 @@ void dStage_dt_c_roomReLoader(void* i_data, dStage_dt_c* i_stage, int param_2) {
     };
 
     dStage_dt_c_decode(i_data, i_stage, l_funcTable, ARRAY_SIZEU(l_funcTable));
+#if TARGET_PC
+    // Spawn our custom actors in randomizer
+    if (randomizer_IsActive()) {
+        dStage_createObjectAdditions(i_stage);
+    }
+#endif
     layerActorLoader(i_data, i_stage, param_2);
 }
 
@@ -2929,6 +3057,16 @@ int dStage_changeScene4Event(int i_exitId, s8 room_no, int i_wipe, bool param_3,
     }
 
     if (timeH < 31) {
+#if TARGET_PC
+        // If randomizer is active and we're loading the first spawn, set our starting time of day
+        if (randomizer_IsActive() && strcmp(scls_info->mStage, "F_SP103") == 0 &&
+            scls_info->mRoom == 1 && scls_info->mStart == 1)
+        {
+            timeH = randomizer_GetContext().mStartHour;
+            g_randomizerState.mUpdateTracker = true;
+        }
+
+#endif
         dKy_set_nexttime(15.0f * timeH);
     }
 

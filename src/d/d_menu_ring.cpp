@@ -28,6 +28,10 @@
 #include <cstring>
 
 #include <cstdio>
+#if TARGET_PC
+#include "dusk/randomizer/game/verify_item_functions.h"
+#include "dusk/randomizer/game/tools.h"
+#endif
 
 #if TARGET_PC
 #include "dusk/game_clock.h"
@@ -196,6 +200,7 @@ dMenu_Ring_c::dMenu_Ring_c(JKRExpHeap* i_heap, STControl* i_stick, CSTControl* i
     mCursorInterpPrevAngular = false;
     mCursorInterpCurrAngular = false;
     mCursorInterpInit = false;
+    mDpadIcon = JKR_NEW J2DPicture((ResTIMG*)dComIfGp_getMain2DArchive()->getResource('TIMG', "font_51.bti"));
 #endif
     for (int i = 0; i < 4; i++) {
         field_0x674[i] = 0;
@@ -591,6 +596,11 @@ dMenu_Ring_c::~dMenu_Ring_c() {
 
     JKR_DELETE(mpItemExplain);
     mpItemExplain = NULL;
+
+#if TARGET_PC
+    JKR_DELETE(mDpadIcon);
+    mDpadIcon = NULL;
+#endif
 
     dComIfGp_getRingResArchive()->removeResourceAll();
 }
@@ -1298,6 +1308,19 @@ void dMenu_Ring_c::setActiveCursor() {
             // If the player is a wolf or somehow manages to access an item slot with no item, error
             Z2GetAudioMgr()->seStart(Z2SE_SYS_ERROR, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
         }
+#if TARGET_PC
+        else if (randomizer_IsActive() && mItemSlots[mCurrentSlot] == 0x15) {
+            // Draw d-pad icon to indicate switching between items
+            if (getWarashibeItemCount() >= 2) {
+                mDpadIcon->draw(mCenterPosX + 330.f, mCenterPosY + 194.f, 30.f, 30.f, false, false, false);
+            }
+
+            if (mDoCPd_c::getTrigRight(PAD_1)) {
+                setNextWarashibeItem();
+                updateSlotImage(0x15);
+            }
+        }
+#endif
     }
 }
 
@@ -1779,6 +1802,14 @@ u8 dMenu_Ring_c::getItemNum(u8 i_slotNo) {
     case dItemNo_PACHINKO_e:
         ret = dComIfGs_getPachinkoNum();
         break;
+#if TARGET_PC
+    case dItemNo_Randomizer_ANCIENT_DOCUMENT_e:
+    case dItemNo_Randomizer_AIR_LETTER_e:
+    case dItemNo_Randomizer_ANCIENT_DOCUMENT2_e:
+        if (randomizer_IsActive())
+            ret = dComIfGs_getAncientDocumentNum();
+        break;
+#endif
     }
     return ret;
 }
@@ -1818,6 +1849,14 @@ u8 dMenu_Ring_c::getItemMaxNum(u8 i_slotNo) {
     case dItemNo_PACHINKO_e:
         ret = dComIfGs_getPachinkoMax();
         break;
+#if TARGET_PC
+    case dItemNo_Randomizer_ANCIENT_DOCUMENT_e:
+    case dItemNo_Randomizer_AIR_LETTER_e:
+    case dItemNo_Randomizer_ANCIENT_DOCUMENT2_e:
+        if (randomizer_IsActive())
+            ret = 6;
+        break;
+#endif
     }
     return ret;
 }
@@ -2238,3 +2277,33 @@ u8 dMenu_Ring_c::openExplain(u8 param_0) {
     static const u32 i_expID[2] = {0x4DF, 0x4E1};
     return mpItemExplain->openExplainTx(i_nameID[idx], i_expID[idx]);
 }
+
+#if TARGET_PC
+void dMenu_Ring_c::updateSlotImage(u8 slot) {
+    for (int i = 0; i < mTotalItemTexToAlloc; i++) {
+        if (mItemSlots[i] == slot) {
+            u8 item = dComIfGs_getItem(mItemSlots[i], false);
+
+            s32 i_textureNum =
+                dMeter2Info_readItemTexture(item, mpItemBuf[i][0], NULL, mpItemBuf[i][1], NULL,
+                                            mpItemBuf[i][2], NULL, NULL, NULL, -1);
+            for (int k = 0; k < i_textureNum; k++) {
+                // Delete old texture so we aren't leaking memory
+                if (mpItemTex[i][k] != NULL) {
+                    JKR_DELETE(mpItemTex[i][k]);
+                }
+
+                mpItemTex[i][k] = JKR_NEW J2DPicture(mpItemBuf[i][k]);
+                mpItemTex[i][k]->setBasePosition(J2DBasePosition_4);
+            }
+            dMeter2Info_setItemColor(item, mpItemTex[i][0], mpItemTex[i][1], mpItemTex[i][2], NULL);
+            u8 texScale = dItem_data::getTexScale(item);
+            f32 fVar1 = (texScale / 100.0f);
+            f32 fVar2 = (mpItemBuf[i][0]->width / 48.0f);
+            fVar1 = fVar2 * fVar1;
+            mItemSlotParam1[i] = fVar1;
+            mItemSlotParam2[i] = (mpItemBuf[i][0]->height / 48.0f * (texScale / 100.0f));
+        }
+    }
+}
+#endif

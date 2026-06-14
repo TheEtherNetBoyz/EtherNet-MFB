@@ -26,11 +26,16 @@
 #include <cstring>
 
 #include "JSystem/JKernel/JKRExpHeap.h"
-#include "dusk/version.hpp"
 #include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_lib.h"
 
 #if TARGET_PC
+#include "d/d_item.h"
+#include "dusk/randomizer/game/messages.hpp"
+#include "dusk/randomizer/game/stages.h"
+#include "dusk/randomizer/game/tools.h"
+#include "dusk/randomizer/game/verify_item_functions.h"
+#include "dusk/version.hpp"
 #include "dusk/settings.h"
 #include <vector>
 #include <array>
@@ -700,6 +705,16 @@ void dMsgObject_c::setMessageIndex(u32 revoIndex, u32 param_2, bool param_3) {
             mpRefer->setSelMsgPtr(NULL);
         } else {
             char* my_ptr = (char*) (iVar2 + pMsg->entries[msgIndex].string_offset + 8);
+#if TARGET_PC
+            // This is where the game sets the pointer to the string for message choices.
+            // If any of our custom messages are for message choices, override them here
+            if (randomizer_IsActive()) {
+                auto override = GetTextOverride(groupID, field_0x15c);
+                if (override != NULL) {
+                    my_ptr = override;
+                }
+            }
+#endif
             mpRefer->setSelMsgPtr(my_ptr);
         }
     }
@@ -756,7 +771,35 @@ u32 dMsgObject_c::getMessageIndex(u32 param_0) {
 }
 
 u32 dMsgObject_c::getRevoMessageIndex(u32 param_1) {
-#if TARGET_PC 
+#if TARGET_PC
+    if (randomizer_IsActive()) {
+        // Special case for Ilia Memory Reward Text (param_1 is msgId)
+        // If we're in the sanctuary cutscene where we get the reward, override the text.
+        // Otherwise, the regular item text for the horse call would be overridden if we find it
+        if (param_1 == 233 && playerIsInRoomStage(0, "R_SP109") && dComIfGp_getLayerNo() == 9) {
+            u8 itemId = verifyProgressiveItem(randomizer_getItemAtLocation("Ilia Memory Reward"));
+            param_1 = getItemMessageID(itemId);
+            // Store this itemId so that we can give the item when the textbox closes
+            g_randomizerState.mFlowMessageItemId = itemId;
+            // Set flag for tracker/AP
+            randomizer_setTempFlagForLocation("Ilia Memory Reward");
+        } else {
+            // Else override the text if we have an override
+            u32 key = (dMsgObject_getGroupID() << 16) | param_1;
+            auto& flowItemOverrides = randomizer_GetContext().mFlowItemMessageOverrides;
+            if (flowItemOverrides.contains(key)) {
+                u8 itemId = verifyProgressiveItem(flowItemOverrides[key].itemId);
+                param_1 = getItemMessageID(itemId);
+                // Store this itemId so that we can give the item when the textbox closes
+                g_randomizerState.mFlowMessageItemId = itemId;
+                // Set flag for tracker/AP
+                randomizer_setTempFlagForFLWOverride(key);
+            }
+        }
+    }
+#endif
+
+#if TARGET_PC
     if (!dusk::getSettings().game.enableMirrorMode) { 
         if (!g_MsgObject_HIO_c.mMessageDisplay) { return param_1; } } 
     if (param_1 == getMirrorMsgOverride(param_1)) { return param_1; } 
@@ -858,6 +901,14 @@ void dMsgObject_c::waitProc() {
             }
         }
     }
+#if TARGET_PC
+    // If we have a randomizer item to give because of a flow message override
+    // then give it if the textbox has been fully closed.
+    if (randomizer_IsActive() && g_randomizerState.mFlowMessageItemId != 0 && mpScrnDraw == NULL) {
+        execItemGet(g_randomizerState.mFlowMessageItemId);
+        g_randomizerState.mFlowMessageItemId = 0;
+    }
+#endif
 }
 
 void dMsgObject_c::openProc() {

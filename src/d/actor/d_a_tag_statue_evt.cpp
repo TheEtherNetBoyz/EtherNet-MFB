@@ -9,6 +9,8 @@
 #include "d/actor/d_a_tag_statue_evt.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_debug_viewer.h"
+#include "dusk/randomizer/game/tools.h"
+#include "dusk/randomizer/game/verify_item_functions.h"
 
 class daTagStatue_HIO_c : public mDoHIO_entry_c {
 public:
@@ -352,15 +354,26 @@ int daTagStatue_c::demoProc() {
                 }
                 break;
             case DEMO_ACTION_AWARD_ITEM:
-                // If the player already has 5 Sky Characters, reward them with the completed
-                // Ancient Sky Book, otherwise, reward another character
-                if (getLetterCount() == 5) {
-                    item = dItemNo_ANCIENT_DOCUMENT2_e;
-                    /* Sky character - Sky character 6 */
-                    dComIfGs_onEventBit(dSv_event_flag_c::F_0796);
+#if TARGET_PC
+                if (randomizer_IsActive()) {
+                    u8 stageIdx = getStageID();
+                    u8 roomNo = dStage_roomControl_c::mStayNo;
+                    u16 key = (stageIdx << 8) | roomNo;
+                    item = verifyProgressiveItem(randomizer_GetContext().mSkyCharacterOverrides[key]);
                 } else {
-                    item = dItemNo_AIR_LETTER_e;
+#endif
+                    // If the player already has 5 Sky Characters, reward them with the completed
+                    // Ancient Sky Book, otherwise, reward another character
+                    if (getLetterCount() == 5) {
+                        item = dItemNo_ANCIENT_DOCUMENT2_e;
+                        /* Sky character - Sky character 6 */
+                        dComIfGs_onEventBit(dSv_event_flag_c::F_0796);
+                    } else {
+                        item = dItemNo_AIR_LETTER_e;
+                    }
+#if TARGET_PC
                 }
+#endif
 
                 mItemId =
                     fopAcM_createItemForTrBoxDemo(&current.pos, item, -1,

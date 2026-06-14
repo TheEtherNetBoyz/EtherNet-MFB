@@ -3914,6 +3914,12 @@ public:
     u16 getReadyItem() { return dComIfGp_getSelectItem(mSelectItemId); }
 
     static u32 getOtherHeapSize() { return 0xF0A60; }
+    
+#if TARGET_PC
+    u16 getEventId() { return mMsgFlow.getEventId(); }
+
+    bool checkSwimming() {return checkModeFlg(MODE_SWIMMING);}
+#endif
 
     static daAlink_BckData const m_mainBckShield[20];
     static daAlink_BckData const m_mainBckSword[5];

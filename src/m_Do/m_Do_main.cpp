@@ -70,6 +70,7 @@
 #include "dusk/ui/prelaunch.hpp"
 #include "dusk/ui/preset.hpp"
 #include "dusk/ui/ui.hpp"
+#include "dusk/ui/rando_config.hpp"
 #include "version.h"
 
 #include <aurora/aurora.h>
@@ -103,6 +104,11 @@
 
 #if DUSK_ENABLE_SENTRY_NATIVE
 #include "dusk/ui/reporting.hpp"
+#endif
+
+#if RANDOMIZER_ONLY
+#include "dusk/randomizer/generator/randomizer.hpp"
+#include "dusk/randomizer/generator/test/test.hpp"
 #endif
 
 // --- GLOBALS ---
@@ -542,6 +548,17 @@ static void log_build_info() {
 // PC ENTRY POINT
 // =========================================================================
 int game_main(int argc, char* argv[]) {
+
+    #if RANDOMIZER_ONLY
+    #ifdef LOGIC_TESTS
+    randomizer::test::test::RunTests();
+    #else
+    randomizer::Randomizer rando{dusk::ui::GetRandomizerPath()};
+    rando.Generate();
+    #endif
+    exit(0);
+    #endif
+        
     // On iOS, when connected to an external monitor, SDLUIKitSceneDelegate scene:willConnectToSession:
     // can call our main function again. Explicitly guard against this reinitialization.
     if (mainCalled) {

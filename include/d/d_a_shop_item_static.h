@@ -74,7 +74,17 @@ public:
     s16 getAngleY() const { return mAngleY; }
     void setAngleY(s16 angle) { mAngleY = angle;}
 
+#if TARGET_PC
+    BOOL isRandomized() const;
+#endif
+
     static ResourceData const mData[23];
+#if TARGET_PC
+    static ResourceData mRandoData[23];
+    #define M_SHOP_DATA (isRandomized() ? mRandoData : mData)
+#else
+    #define M_SHOP_DATA mData
+#endif
     static f32 const m_cullfar_max;
 
     enum {

@@ -1463,6 +1463,8 @@ set(DUSK_FILES
         src/dusk/imgui/ImGuiBloomWindow.hpp
         src/dusk/imgui/ImGuiMenuTools.cpp
         src/dusk/imgui/ImGuiMenuTools.hpp
+        src/dusk/imgui/ImGuiMenuRandomizer.cpp
+        src/dusk/imgui/ImGuiMenuRandomizer.hpp
         src/dusk/imgui/ImGuiActorSpawner.cpp
         src/dusk/imgui/ImGuiProcessOverlay.cpp
         src/dusk/imgui/ImGuiCameraOverlay.cpp
@@ -1526,6 +1528,10 @@ set(DUSK_FILES
         src/dusk/ui/warp.hpp
         src/dusk/ui/window.cpp
         src/dusk/ui/window.hpp
+        src/dusk/ui/rando_config.cpp
+        src/dusk/ui/rando_config.hpp
+        src/dusk/ui/rando_seed_generation.cpp
+        src/dusk/ui/rando_seed_generation.hpp
         src/dusk/achievements.cpp
         src/dusk/iso_validate.cpp
         src/dusk/livesplit.cpp
@@ -1539,6 +1545,93 @@ set(DUSK_FILES
         src/dusk/discord_presence.cpp
         src/dusk/version.cpp
         src/dusk/action_bindings.cpp
+        # Randomizer files
+        src/dusk/randomizer/game/flags.cpp
+        src/dusk/randomizer/game/flags.h
+        src/dusk/randomizer/game/messages.cpp
+        src/dusk/randomizer/game/messages.hpp
+        src/dusk/randomizer/game/stages.cpp
+        src/dusk/randomizer/game/stages.h
+        src/dusk/randomizer/game/tools.cpp
+        src/dusk/randomizer/game/tools.h
+        src/dusk/randomizer/game/verify_item_functions.cpp
+        src/dusk/randomizer/game/verify_item_functions.h
+        src/dusk/randomizer/game/randomizer_context.cpp
+        src/dusk/randomizer/game/randomizer_context.hpp
+        src/dusk/randomizer/generator/logic/area.cpp
+        src/dusk/randomizer/generator/logic/area.hpp
+        src/dusk/randomizer/generator/logic/dungeon.cpp
+        src/dusk/randomizer/generator/logic/dungeon.hpp
+        src/dusk/randomizer/generator/logic/entrance.cpp
+        src/dusk/randomizer/generator/logic/entrance.hpp
+        src/dusk/randomizer/generator/logic/entrance_shuffle.cpp
+        src/dusk/randomizer/generator/logic/entrance_shuffle.hpp
+        src/dusk/randomizer/generator/logic/fill.cpp
+        src/dusk/randomizer/generator/logic/fill.hpp
+        src/dusk/randomizer/generator/logic/flatten/bits.cpp
+        src/dusk/randomizer/generator/logic/flatten/bits.hpp
+        src/dusk/randomizer/generator/logic/flatten/flatten.cpp
+        src/dusk/randomizer/generator/logic/flatten/flatten.hpp
+        src/dusk/randomizer/generator/logic/flatten/simplify_algebraic.cpp
+        src/dusk/randomizer/generator/logic/flatten/simplify_algebraic.hpp
+        src/dusk/randomizer/generator/logic/hints.cpp
+        src/dusk/randomizer/generator/logic/hints.hpp
+        src/dusk/randomizer/generator/logic/item.cpp
+        src/dusk/randomizer/generator/logic/item.hpp
+        src/dusk/randomizer/generator/logic/item_pool.cpp
+        src/dusk/randomizer/generator/logic/item_pool.hpp
+        src/dusk/randomizer/generator/logic/location.cpp
+        src/dusk/randomizer/generator/logic/location.hpp
+        src/dusk/randomizer/generator/logic/plandomizer.cpp
+        src/dusk/randomizer/generator/logic/plandomizer.hpp
+        src/dusk/randomizer/generator/logic/requirement.cpp
+        src/dusk/randomizer/generator/logic/requirement.hpp
+        src/dusk/randomizer/generator/logic/search.cpp
+        src/dusk/randomizer/generator/logic/search.hpp
+        src/dusk/randomizer/generator/logic/spoiler_log.cpp
+        src/dusk/randomizer/generator/logic/spoiler_log.hpp
+        src/dusk/randomizer/generator/logic/world.cpp
+        src/dusk/randomizer/generator/logic/world.hpp
+        src/dusk/randomizer/generator/randomizer.cpp
+        src/dusk/randomizer/generator/randomizer.hpp
+        src/dusk/randomizer/generator/seedgen/config.cpp
+        src/dusk/randomizer/generator/seedgen/config.hpp
+        src/dusk/randomizer/generator/seedgen/packed_bits.hpp
+        src/dusk/randomizer/generator/seedgen/seed.cpp
+        src/dusk/randomizer/generator/seedgen/seed.hpp
+        src/dusk/randomizer/generator/seedgen/settings.cpp
+        src/dusk/randomizer/generator/seedgen/settings.hpp
+        src/dusk/randomizer/generator/test/test.cpp
+        src/dusk/randomizer/generator/test/test.hpp
+        src/dusk/randomizer/generator/utility/color.cpp
+        src/dusk/randomizer/generator/utility/color.hpp
+        src/dusk/randomizer/generator/utility/crc32.hpp
+        src/dusk/randomizer/generator/utility/common.cpp
+        src/dusk/randomizer/generator/utility/common.hpp
+        src/dusk/randomizer/generator/utility/container.hpp
+        src/dusk/randomizer/generator/utility/endian.cpp
+        src/dusk/randomizer/generator/utility/endian.hpp
+        src/dusk/randomizer/generator/utility/exception.hpp
+        src/dusk/randomizer/generator/utility/file.cpp
+        src/dusk/randomizer/generator/utility/file.hpp
+        src/dusk/randomizer/generator/utility/general.hpp
+        src/dusk/randomizer/generator/utility/log.cpp
+        src/dusk/randomizer/generator/utility/log.hpp
+        src/dusk/randomizer/generator/utility/math.hpp
+        src/dusk/randomizer/generator/utility/path.cpp
+        src/dusk/randomizer/generator/utility/path.hpp
+        src/dusk/randomizer/generator/utility/platform.cpp
+        src/dusk/randomizer/generator/utility/platform.hpp
+        src/dusk/randomizer/generator/utility/random.cpp
+        src/dusk/randomizer/generator/utility/random.hpp
+        src/dusk/randomizer/generator/utility/string.cpp
+        src/dusk/randomizer/generator/utility/string.hpp
+        src/dusk/randomizer/generator/utility/text.cpp
+        src/dusk/randomizer/generator/utility/text.hpp
+        src/dusk/randomizer/generator/utility/thread_local.hpp
+        src/dusk/randomizer/generator/utility/time.cpp
+        src/dusk/randomizer/generator/utility/time.hpp
+        src/dusk/randomizer/generator/utility/yaml.hpp
 )
 
 set(DUSK_HTTP_BACKEND_FILES

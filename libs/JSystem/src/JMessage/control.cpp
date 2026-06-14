@@ -7,6 +7,10 @@
 
 #include "JSystem/JMessage/control.h"
 
+#if TARGET_PC
+#include "dusk/randomizer/game/messages.hpp"
+#endif
+
 JMessage::TControl::TControl()
     : pSequenceProcessor_(NULL),
       pRenderingProcessor_(NULL),
@@ -90,6 +94,10 @@ bool JMessage::TControl::setMessageCode_inSequence_(JMessage::TProcessor const* 
     JUT_ASSERT(155, pResourceCache_!=NULL);
 
     pMessageText_begin_ = pResourceCache_->getMessageText_messageEntry(pEntry_);
+#if TARGET_PC
+    // Feels kinda hacky to have to hijack this deep into JSystem, but works for now
+    HandleTextOverrides(this, pProcessor, uMessageGroupID_, uMessageID_);
+#endif
     pMessageText_current_ = pMessageText_begin_;
     oStack_renderingProcessor_.clear();
     return true;

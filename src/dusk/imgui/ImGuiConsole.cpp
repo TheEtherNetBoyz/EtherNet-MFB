@@ -409,6 +409,7 @@ namespace dusk {
         // so make the window bg fully transparent temporarily
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
         if (showMenu && ImGui::BeginMainMenuBar()) {
+            m_menuRandomizer.draw();
             m_menuTools.draw();
 
             ImGui::EndMainMenuBar();
@@ -504,6 +505,9 @@ namespace dusk {
             m_menuTools.ShowStateShare();
             m_menuTools.ShowActorSpawner();
         }
+        m_menuRandomizer.windowRandoStats();
+        m_menuRandomizer.windowRandoGeneration();
+        m_menuRandomizer.windowRandoTracker();
 
     }
 

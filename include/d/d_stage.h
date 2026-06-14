@@ -1292,6 +1292,9 @@ public:
     void set(const char*, s8, s16, s8, s8, u8);
     void offEnable() { enabled = 0; }
     BOOL isEnable() const { return enabled; }
+#if TARGET_PC
+    void setEnable() { enabled |= 0x1; }
+#endif
     s8 getWipe() const { return wipe; }
     u8 getWipeSpeed() const { return wipe_speed; }
     dStage_startStage_c* getStartStage() { return this; }

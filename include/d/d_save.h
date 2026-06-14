@@ -10,6 +10,10 @@
 #include "JSystem/JHostIO/JORReflexible.h"
 #include "dusk/endian.h"
 
+#if TARGET_PC
+#include <unordered_map>
+#endif
+
 static const int DEFAULT_SELECT_ITEM_INDEX = 0;
 static const int MAX_SELECT_ITEM = 4;
 static const int SELECT_ITEM_NUM = 2;
@@ -199,6 +203,9 @@ public:
     void setTime(f32 i_time) { mTime = i_time; }
     u16 getDate() const { return mDate; }
     void setDate(u16 i_date) { mDate = i_date; }
+#if TARGET_PC
+    u8 getDarkClearLV() const { return mDarkClearLevelFlag; }
+#endif
 
     /* 0x00 */ BE(OSTime) mDateIpl;
     /* 0x08 */ u8 mTransformLevelFlag;
@@ -272,6 +279,9 @@ public:
     bool isFieldDataExistFlag() const { return mFieldDataExistFlag ? true : false; }
     void offFieldDataExistFlag() { mFieldDataExistFlag = false; }
     void onFieldDataExistFlag() { mFieldDataExistFlag = true; }
+#if TARGET_PC
+    void setRegionBit(u8 region) { mRegion |= region;}
+#endif
 
 #if TARGET_PC
     /* 0x00 */ BE(Vec) mPos;
@@ -376,12 +386,21 @@ public:
     void setArrowNum(u8 i_num) { mArrowNum = i_num; }
     u8 getPachinkoNum() const { return mPachinkoNum; }
     void setPachinkoNum(u8 i_num) { mPachinkoNum = i_num; }
+#if TARGET_PC
+    u8 getAncientDocumentNum() const { return mAncientDocumentNum; }
+    void setAncientDocumentNum(u8 i_num) { mAncientDocumentNum = i_num; }
+#endif
 
     /* 0x0 */ u8 mArrowNum;
     /* 0x1 */ u8 mBombNum[3];
     /* 0x4 */ u8 mBottleNum[4];
     /* 0x8 */ u8 mPachinkoNum;
+#if TARGET_PC
+    /* 0x9 */ u8 mAncientDocumentNum; // Custom Field for Randomizer
+    /* 0x9 */ u8 unk5[2];
+#else
     /* 0x9 */ u8 unk5[3];
+#endif
 };  // Size: 0xC
 
 class dSv_player_item_max_c {
@@ -413,7 +432,11 @@ public:
     u8 getPohNum() const { return mPohNum; }
 
     void addPohNum() {
+#if TARGET_PC
+        if (mPohNum < 0x3D) {
+#else
         if (mPohNum < 0xFF) {
+#endif
             mPohNum++;
         }
     }
@@ -458,6 +481,11 @@ public:
     int isLetterReadFlag(int i_no) const;
     u8 getGetNumber(int i_no) { return mGetNumber[i_no]; }
     void setGetNumber(int i_no, u8 i_value) { mGetNumber[i_no] = i_value; }
+#if TARGET_PC
+    // For rando
+    void setAllLetterGet() { mLetterGetFlags[0] |= 0xFFFF;}
+    void setAllLetterRead() { mLetterReadFlags[0] |= 0xFFFF;}
+#endif
 
     /* 0x00 */ BE(u32) mLetterGetFlags[2];
     /* 0x08 */ BE(u32) mLetterReadFlags[2];
@@ -664,10 +692,14 @@ public:
     void onDungeonItemBossKey() { onDungeonItem(BOSS_KEY); }
     void offDungeonItemBossKey() { offDungeonItem(BOSS_KEY); }
     s32 isDungeonItemBossKey() const { return isDungeonItem(BOSS_KEY); }
+#if TARGET_PC
+    void onStageBossEnemy();
+#else
         void onStageBossEnemy() {
         onDungeonItem(STAGE_BOSS_ENEMY);
         onDungeonItem(OOCCOO_NOTE);
     }
+#endif
     void offStageBossEnemy() { offDungeonItem(STAGE_BOSS_ENEMY); }
     s32 isStageBossEnemy() const { return isDungeonItem(STAGE_BOSS_ENEMY); }
     void onStageLife() { onDungeonItem(STAGE_LIFE); }
@@ -947,6 +979,7 @@ public:
     /* 0x6 */ u16 m_flags;
     /* 0x8 */ s8 m_no;
 };
+
 
 class dSv_info_c {
 public:

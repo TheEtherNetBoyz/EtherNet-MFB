@@ -65,6 +65,13 @@
 #include <dusk/string.hpp>
 #endif
 
+#include "dusk/randomizer/game/flags.h"
+#include "dusk/randomizer/game/stages.h"
+
+#if TARGET_PC
+#include "dusk/randomizer/game/tools.h"
+#endif
+
 static int daAlink_Create(fopAc_ac_c* i_this);
 static int daAlink_Delete(daAlink_c* i_this);
 static int daAlink_Execute(daAlink_c* i_this);
@@ -10673,9 +10680,16 @@ void daAlink_c::decideDoStatus() {
                                (actor_name == fpcNm_TAG_KMSG_e &&
                                 static_cast<daTag_KMsg_c*>(field_0x27f4)->getType() == 3))
                     {
-                        if (!checkEquipAnime() && checkMasterSwordEquip()) {
+                        // Don't check vanilla condition in randomizer
+                        if (!checkEquipAnime() && checkMasterSwordEquip() IF_DUSK(&& !randomizer_IsActive())) {
                             setDoStatus(BUTTON_STATUS_STRIKE);
                         }
+#if TARGET_PC
+                        // Separate check for striking sword into the pedestal for randomizer
+                        if (!checkEquipAnime() && randomizer_IsActive() && randomizer_checkTempleOfTimeRequirement()) {
+                            setDoStatus(BUTTON_STATUS_STRIKE);
+                        }
+#endif
                     }
                 } else if (mTargetedActor != NULL && checkGoatCatchActor(mTargetedActor) &&
                            mAttention->getActionBtnB() != NULL &&
@@ -11583,6 +11597,14 @@ int daAlink_c::orderTalk(int i_checkZTalk) {
 static void* daAlink_searchBouDoor(fopAc_ac_c* i_actor, void* i_data) {
     UNUSED(i_data);
 
+#if TARGET_PC
+    // In randomizer, we don't want Bo preventing us from entering his house on Day 2
+    if (randomizer_IsActive() && daAlink_c::checkStageName("F_SP103"))
+    {
+        return NULL;
+    }
+#endif
+
     if (fopAcM_GetName(i_actor) == fpcNm_NPC_BOU_e && ((daNpc_Bou_c*)i_actor)->speakTo()) {
         return i_actor;
     }
@@ -12363,6 +12385,14 @@ BOOL daAlink_c::checkGroundSpecialMode() {
     if (mLinkAcch.ChkGroundHit() && !checkModeFlg(MODE_PLAYER_FLY) && !checkMagneBootsOn() &&
         checkEndResetFlg0(ERFLG0_FORCE_WOLF_CHANGE))
     {
+#if TARGET_PC
+        u8 stage = getStageID();
+        // In rando, don't transform in twilight fog unless we have shadow crystal
+        if (randomizer_IsActive() && !dComIfGs_isEventBit(TRANSFORMING_UNLOCKED) &&
+            (stage == Palace_of_Twilight || stage == Phantom_Zant_1 || stage == Phantom_Zant_2)) {
+            return 0;
+        }
+#endif
         return procCoMetamorphoseInit();
     }
 

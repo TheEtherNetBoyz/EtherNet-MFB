@@ -444,6 +444,8 @@ if (DUSK_MOVIE_SUPPORT)
     list(APPEND GAME_COMPILE_DEFS MOVIE_SUPPORT=1)
 endif ()
 
+include(src/dusk/randomizer/randomizer.cmake)
+
 set(DUSK_ENABLE_DISCORD_DEFAULT ON)
 if (DEFINED DUSK_ENABLE_DISCORD_RPC AND NOT DEFINED DUSK_ENABLE_DISCORD)
     set(DUSK_ENABLE_DISCORD_DEFAULT ${DUSK_ENABLE_DISCORD_RPC})
@@ -526,6 +528,22 @@ endif ()
 if (ENABLE_ASAN)
     target_sources(dusklight PRIVATE src/dusk/asan_options.c)
 endif ()
+
+# Add embedded data to target
+
+file(GLOB_RECURSE RANDOMIZER_DATA "src/dusk/randomizer/generator/data/*")
+set(RANDO_ROOT_DATA_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+
+foreach (RANDOMIZER_FILE IN LISTS RANDOMIZER_DATA)
+    file(RELATIVE_PATH REL_PATH ${RANDO_ROOT_DATA_DIR} ${RANDOMIZER_FILE})
+    if(REL_PATH MATCHES "^src/dusk/randomizer/generator/data/tests")
+        message(STATUS "Skipping Embed: ${REL_PATH}")
+        continue()
+    endif ()
+
+    message(STATUS "Embedding File: ${REL_PATH}")
+    b_embed(dusklight ${REL_PATH})
+endforeach ()
 
 target_compile_definitions(dusklight PRIVATE ${GAME_COMPILE_DEFS})
 target_include_directories(dusklight PRIVATE ${GAME_INCLUDE_DIRS})

@@ -114,6 +114,10 @@ public:
 
     bool checkBoomWindTgTimer() { return mBoomWindTgTimer == 0; }
 
+#if TARGET_PC
+    void setRandomizerItem(bool setFoolishItemModel = false);
+#endif
+
     static procFunc mFuncPtr[];
     static const dCcD_SrcCyl m_cyl_src;
     static s32 m_timer_max;
