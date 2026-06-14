@@ -13,6 +13,10 @@ UserSettings g_userSettings = {
         .forcedAspectRatio {"video.forcedAspectRatio", AspectRatioMode::Off},
         .enableFpsOverlay {"game.enableFpsOverlay", false},
         .fpsOverlayCorner {"game.fpsOverlayCorner", 0},
+        .maxFrameRate {"video.maxFrameRate", 240},
+        .rememberWindowSize {"video.rememberWindowSize", false},
+        .lastWindowWidth {"video.lastWindowWidth", 0},
+        .lastWindowHeight {"video.lastWindowHeight", 0},
     },
 
     .audio = {
@@ -304,6 +308,10 @@ void registerSettings() {
     Register(g_userSettings.video.forcedAspectRatio);
     Register(g_userSettings.video.enableFpsOverlay);
     Register(g_userSettings.video.fpsOverlayCorner);
+    Register(g_userSettings.video.maxFrameRate);
+    Register(g_userSettings.video.rememberWindowSize);
+    Register(g_userSettings.video.lastWindowWidth);
+    Register(g_userSettings.video.lastWindowHeight);
 
     // Audio
     Register(g_userSettings.audio.masterVolume);
