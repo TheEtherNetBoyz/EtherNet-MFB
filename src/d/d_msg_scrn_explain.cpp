@@ -14,6 +14,12 @@
 #include <cstdio>
 #include <cstring>
 
+#if TARGET_PC
+#include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_player.h"
+#include "dusk/settings.h"
+#endif
+
 #if VERSION == VERSION_GCN_JPN
 #define STR_BUF_LEN 528
 #else
@@ -506,6 +512,14 @@ void dMsgScrnExplain_c::move_select_proc() {
             if (field_0x64 == 2) {
                 if (mSelCursor == 0) {
                     dMeter2Info_setWarpStatus(3);
+#if TARGET_PC
+                    // "Warp as Human": Link is still human at this confirmation. Latch a
+                    // request so the warp's forced wolf metamorphose is skipped (loadModelDVD)
+                    // and the warp-in does not force wolf (create()), keeping Link human.
+                    if (dusk::getSettings().game.humanMidnaWarp && !daPy_py_c::checkNowWolf()) {
+                        daAlink_c::sDuskHumanWarpRequest = true;
+                    }
+#endif
                     Z2GetAudioMgr()->seStart(Z2SE_WARP_MAP_DECIDE, NULL, 0, 0, 1.0f, 1.0f, -1.0f,
                                              -1.0f, 0);
                 } else {

@@ -173,6 +173,7 @@ struct UserSettings {
 
         // QoL
         ConfigVar<bool> enableQuickTransform;
+        ConfigVar<bool> humanMidnaWarp;
         ConfigVar<bool> hideTvSettingsScreen;
         ConfigVar<bool> biggerWallets;
         ConfigVar<bool> noReturnRupees;

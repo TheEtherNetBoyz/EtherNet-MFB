@@ -353,6 +353,7 @@ namespace dusk {
             }
             if (ImGui::BeginMenu("Quality of Life")) {
                 MenuCheckbox("Quick Transform (R+Y)", s.game.enableQuickTransform);
+                MenuCheckbox("Warp as Human", s.game.humanMidnaWarp);
                 MenuCheckbox("Bigger Wallets", s.game.biggerWallets);
                 MenuCheckbox("Disable Rupee Cutscenes", s.game.disableRupeeCutscenes);
                 MenuCheckbox("Skip All Cutscenes", s.game.skipAllCutscenes);

@@ -87,7 +87,15 @@ int daAlink_c::loadModelDVD() {
                 mpArcHeap->freeAll();
 
                 if (mProcID == PROC_METAMORPHOSE || mProcID == PROC_METAMORPHOSE_ONLY) {
-                    setArcName(!checkWolf());
+                    BOOL targetIsWolf = !checkWolf();
+#if TARGET_PC
+                    // "Warp as Human": this metamorphose is the wolf change forced by a map
+                    // warp - keep Link's current (human) arc instead of switching to wolf.
+                    if (sDuskHumanWarpRequest && !checkWolf()) {
+                        targetIsWolf = checkWolf();
+                    }
+#endif
+                    setArcName(targetIsWolf);
                 } else {
                     setArcName(checkWolf());
                 }
@@ -102,7 +110,14 @@ int daAlink_c::loadModelDVD() {
                     mClothesChangeWaitTimer = 0;
 
                     if (mProcID == PROC_METAMORPHOSE || mProcID == PROC_METAMORPHOSE_ONLY) {
-                        if (checkWolf()) {
+#if TARGET_PC
+                        // "Warp as Human": route the warp's wolf change through changeLink so
+                        // Link stays human (form flag + transform status + models all human).
+                        const bool duskKeepHuman = sDuskHumanWarpRequest && !checkWolf();
+#else
+                        const bool duskKeepHuman = false;
+#endif
+                        if (checkWolf() || duskKeepHuman) {
                             changeLink(0);
                         } else {
                             changeWolf();

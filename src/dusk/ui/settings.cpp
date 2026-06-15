@@ -1836,6 +1836,9 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Allows Wolf Link to howl and change the time of day.");
         addOption("Quick Transform (R+Y)", getSettings().game.enableQuickTransform,
             "Transform instantly by pressing R and Y simultaneously.");
+        addOption("Warp as Human", getSettings().game.humanMidnaWarp,
+            "Map/Midna warps no longer force Wolf Link transformation; human Link warps "
+            "as-is, like the Ooccoo warp.");
 
         leftPane.add_section("Speedrunning");
         config_bool_select(leftPane, rightPane, getSettings().game.speedrunMode,

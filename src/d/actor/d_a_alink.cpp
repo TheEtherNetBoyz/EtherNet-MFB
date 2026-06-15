@@ -71,6 +71,9 @@ static int daAlink_Execute(daAlink_c* i_this);
 static int daAlink_Draw(daAlink_c* i_this);
 static fopAc_ac_c* daAlink_searchTagKandelaar(fopAc_ac_c* i_actor, void* i_data);
 static bool s_duskForceHumanFormWaitInit;
+#if TARGET_PC
+bool daAlink_c::sDuskHumanWarpRequest = false;
+#endif
 
 static bool isCastleBarrierApproachStage() {
     const char* stageName = dComIfGp_getStartStageName();
@@ -4787,6 +4790,12 @@ BOOL daAlink_c::checkHorseStart(u32 i_lastMode, int i_startMode) {
 }
 
 int daAlink_c::setStartProcInit() {
+#if TARGET_PC
+    // The "Warp as Human" request (if any) has been honored by create() above; consume it
+    // now that arrival is complete so it never affects a later transform.
+    sDuskHumanWarpRequest = false;
+#endif
+
     BOOL sp10 = FALSE;
     int start_mode = getStartMode();
     u32 last_mode = getLastSceneMode();
@@ -5045,7 +5054,12 @@ int daAlink_c::create() {
                 #if DEBUG
                 g_playerKind == 1 ||
                 #endif
-                startPoint == -4
+                (startPoint == -4
+                #if TARGET_PC
+                 // "Warp as Human": don't force the wolf form on a -4 warp-in arrival.
+                 && !sDuskHumanWarpRequest
+                #endif
+                )
             )
             || sceneMode == 9
             )
