@@ -344,6 +344,9 @@ struct UserSettings {
 
     // Randomizer seed hashes, 1 per file
     struct {
+        // Master switch for all randomizer functionality. When disabled, the game
+        // behaves exactly like vanilla (no play-type prompt, no seed loading, no menu).
+        ConfigVar<bool> enabled;
         std::array<ConfigVar<std::string>, 3> seedHashes;
     } randomizer;
 };

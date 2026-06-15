@@ -1838,6 +1838,24 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Transform instantly by pressing R and Y simultaneously.");
 
         leftPane.add_section("Speedrunning");
+        config_bool_select(leftPane, rightPane, getSettings().randomizer.enabled,
+            {
+                .key = "Enable Randomizer",
+                .helpText =
+                    "Turn off to completely disable the randomizer. The game starts and plays "
+                    "exactly like vanilla: no play-type prompt when creating a file, no seed "
+                    "loading, and the Randomizer menu is hidden.",
+                .onChange =
+                    [](bool) {
+                        // Rebuild the menu bar so the Randomizer tab is added/removed live.
+                        for (auto& doc : get_document_stack()) {
+                            if (dynamic_cast<MenuBar*>(doc.get())) {
+                                doc = std::make_unique<MenuBar>();
+                                break;
+                            }
+                        }
+                    },
+            });
         config_bool_select(leftPane, rightPane, getSettings().game.speedrunMode,
             {
                 .key = "Speedrun Mode",

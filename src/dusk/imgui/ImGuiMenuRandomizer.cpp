@@ -5,9 +5,13 @@
 #include "imgui_internal.h"
 
 #include "dusk/logging.h"
+#include "dusk/config.hpp"
+#include "dusk/settings.h"
 #include "dusk/data.hpp"
 #include "dusk/map_loader_definitions.h"
 #include "dusk/ui/rando_config.hpp"
+#include "dusk/ui/ui.hpp"
+#include "dusk/ui/menu_bar.hpp"
 #include "dusk/randomizer/generator/logic/search.hpp"
 #include "dusk/randomizer/generator/utility/string.hpp"
 #include "dusk/randomizer/game/randomizer_context.hpp"
@@ -150,15 +154,23 @@ namespace dusk {
                 ImGui::EndMenu();
             }
 
-            std::string name = "Deactivate Randomizer";
-            if (!playerIsOnTitleScreen()) {
-                name += " (Must be on title screen)";
-            }
-
-            if (ImGui::MenuItem(name.c_str(), nullptr, false, playerIsOnTitleScreen())) {
-                // Reset the main randomizer context only if we're not active
-                if (!randomizer_IsActive()) {
+            // Master switch for all randomizer functionality, shared with the
+            // "Enable Randomizer" option in the Gameplay settings.
+            bool randoEnabled = getSettings().randomizer.enabled.getValue();
+            if (ImGui::Checkbox("Randomizer Enabled", &randoEnabled)) {
+                getSettings().randomizer.enabled.setValue(randoEnabled);
+                config::Save();
+                // When turning it off, clear the loaded seed if it's safe to do so
+                // (i.e. we're not mid-playthrough on an active randomizer save).
+                if (!randoEnabled && !randomizer_IsActive()) {
                     randomizer_GetContext() = RandomizerContext();
+                }
+                // Rebuild the in-game menu bar so the Randomizer tab is added/removed live.
+                for (auto& doc : ui::get_document_stack()) {
+                    if (dynamic_cast<ui::MenuBar*>(doc.get())) {
+                        doc = std::make_unique<ui::MenuBar>();
+                        break;
+                    }
                 }
             }
             ImGui::Checkbox("Show Rando Stats", &m_showRandoStats);

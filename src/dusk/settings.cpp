@@ -296,9 +296,12 @@ UserSettings g_userSettings = {
     },
 
     .randomizer = {
-        ConfigVar<std::string>{"randomizer.file1SeedHash", ""},
-         ConfigVar<std::string>{"randomizer.file2SeedHash", ""},
-        ConfigVar<std::string>{"randomizer.file3SeedHash", ""},
+        .enabled {"randomizer.enabled", true},
+        .seedHashes = {
+            ConfigVar<std::string>{"randomizer.file1SeedHash", ""},
+            ConfigVar<std::string>{"randomizer.file2SeedHash", ""},
+            ConfigVar<std::string>{"randomizer.file3SeedHash", ""},
+        },
     }
 };
 
@@ -524,6 +527,7 @@ void registerSettings() {
     Register(g_userSettings.actionBindings.turboSpeedButton[2]);
     Register(g_userSettings.actionBindings.turboSpeedButton[3]);
 
+    Register(g_userSettings.randomizer.enabled);
     Register(g_userSettings.randomizer.seedHashes[0]);
     Register(g_userSettings.randomizer.seedHashes[1]);
     Register(g_userSettings.randomizer.seedHashes[2]);

@@ -885,6 +885,10 @@ void dFile_select_c::dataSelectStart() {
 #if TARGET_PC
         // Load the randomizer seed if one is tied to this file
         auto curFileSeedHash = dusk::getSettings().randomizer.seedHashes.at(mSelectNum).getValue();
+        // When the randomizer is disabled, always play vanilla regardless of any stored seed
+        if (!dusk::getSettings().randomizer.enabled.getValue()) {
+            curFileSeedHash.clear();
+        }
         // If this is a vanilla file, clear rando data structures
         if (curFileSeedHash.empty()) {
             g_randomizerState = RandomizerState();
@@ -1206,6 +1210,18 @@ void dFile_select_c::selectDataPlayTypeMove() {
     else if (isHeaderTxtChange == true && isFileRecScale == true &&
         isModoruTxtDisp == true)
     {
+        // If the randomizer is disabled entirely, skip the play-type prompt and go
+        // straight to vanilla name entry (same flow as choosing "Vanilla").
+        if (!dusk::getSettings().randomizer.enabled.getValue()) {
+            randomizer_GetContext() = RandomizerContext();
+            mDusk.mBackToFileSelect = false;
+            mDusk.mStartNameAnm = true;
+            mDusk.mPendingRmlCloseFrames = 0;
+            field_0x0128 = false;
+            mNameBasePane->hide();
+            return;
+        }
+
         // Push our modal for selecting the play type
         auto& playTypeModal = dusk::ui::push_document(std::make_unique<dusk::ui::Modal>(dusk::ui::Modal::Props{
             .title = "Play Type",
