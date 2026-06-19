@@ -166,6 +166,8 @@ UserSettings g_userSettings = {
         .removeQuestMapMarkers {"game.removeQuestMapMarkers", false},
         .showInputViewer {"game.showInputViewer", false},
         .showInputViewerGyro {"game.showInputViewerGyro", false},
+        .nativeInputViewer {"game.nativeInputViewer", false},
+        .nativeLinkDebugInfo {"game.nativeLinkDebugInfo", false},
         .nativePracticeMenu {"game.nativePracticeMenu", true}
     },
 
@@ -401,6 +403,8 @@ void registerSettings() {
     Register(g_userSettings.game.removeQuestMapMarkers);
     Register(g_userSettings.game.showInputViewer);
     Register(g_userSettings.game.showInputViewerGyro);
+    Register(g_userSettings.game.nativeInputViewer);
+    Register(g_userSettings.game.nativeLinkDebugInfo);
     Register(g_userSettings.game.nativePracticeMenu);
     Register(g_userSettings.game.fastSpinner);
     Register(g_userSettings.game.infiniteHearts);

@@ -299,6 +299,8 @@ struct UserSettings {
         ConfigVar<bool> removeQuestMapMarkers;
         ConfigVar<bool> showInputViewer;
         ConfigVar<bool> showInputViewerGyro;
+        ConfigVar<bool> nativeInputViewer;
+        ConfigVar<bool> nativeLinkDebugInfo;
         // When true, the practice-tools menu renders natively (J2D/GX), which
         // scales with resolution but is controller-only. When false, it uses
         // the imgui menu (mouse-capable).

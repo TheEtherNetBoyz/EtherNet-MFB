@@ -502,8 +502,13 @@ namespace dusk {
     }
 
     void ImGuiMenuTools::drawPracticeSavesNative() {
-        if (m_showPracticeSaves) {
-            m_practiceSaves.drawNative();
+        if (getSettings().game.speedrunMode) {
+            m_showPracticeSaves = false;
+            getTransientSettings().practiceMenuInputCapture = false;
+            return;
+        }
+        if (getSettings().game.nativePracticeMenu) {
+            m_practiceSaves.drawNative(m_showPracticeSaves);
         }
     }
 

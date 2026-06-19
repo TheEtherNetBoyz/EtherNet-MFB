@@ -13,7 +13,7 @@ namespace dusk {
 class ImGuiPracticeSaves {
 public:
     void draw(bool& open);
-    void drawNative();
+    void drawNative(bool menuOpen);
     void suppressControllerInput();
 
     struct PracticeSavePlacement {
