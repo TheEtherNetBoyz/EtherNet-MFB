@@ -35,6 +35,7 @@ UserSettings g_userSettings = {
 
         // Quality of Life
         .enableQuickTransform {"game.enableQuickTransform", false},
+        .humanMidnaWarp {"game.humanMidnaWarp", false},
         .hideTvSettingsScreen {"game.hideTvSettingsScreen", true},
         .biggerWallets {"game.biggerWallets", false},
         .noReturnRupees {"game.noReturnRupees", false},
@@ -164,7 +165,10 @@ UserSettings g_userSettings = {
         .recordingMode {"game.recordingMode", false},
         .removeQuestMapMarkers {"game.removeQuestMapMarkers", false},
         .showInputViewer {"game.showInputViewer", false},
-        .showInputViewerGyro {"game.showInputViewerGyro", false}
+        .showInputViewerGyro {"game.showInputViewerGyro", false},
+        .nativeInputViewer {"game.nativeInputViewer", false},
+        .nativeLinkDebugInfo {"game.nativeLinkDebugInfo", false},
+        .nativePracticeMenu {"game.nativePracticeMenu", true}
     },
 
     .backend = {
@@ -335,6 +339,7 @@ void registerSettings() {
     // Game
     Register(g_userSettings.game.language);
     Register(g_userSettings.game.enableQuickTransform);
+    Register(g_userSettings.game.humanMidnaWarp);
     Register(g_userSettings.game.transformWithoutShadowCrystal);
     Register(g_userSettings.game.hideTvSettingsScreen);
     Register(g_userSettings.game.biggerWallets);
@@ -407,6 +412,9 @@ void registerSettings() {
     Register(g_userSettings.game.removeQuestMapMarkers);
     Register(g_userSettings.game.showInputViewer);
     Register(g_userSettings.game.showInputViewerGyro);
+    Register(g_userSettings.game.nativeInputViewer);
+    Register(g_userSettings.game.nativeLinkDebugInfo);
+    Register(g_userSettings.game.nativePracticeMenu);
     Register(g_userSettings.game.fastSpinner);
     Register(g_userSettings.game.infiniteHearts);
     Register(g_userSettings.game.infiniteArrows);

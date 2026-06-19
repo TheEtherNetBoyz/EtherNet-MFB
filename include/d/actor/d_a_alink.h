@@ -1805,6 +1805,12 @@ public:
     int procCoMetamorphoseOnlyInit();
     int procCoMetamorphoseOnly();
     void duskForceHumanFormAfterCutscene();
+#if TARGET_PC
+    // Set by the map "Warp here?" confirmation when "Warp as Human" is on and Link is
+    // human. While set, the warp's metamorphose keeps Link human (loadModelDVD) and the
+    // -4 warp-in does not force wolf (create()); cleared once on arrival (setStartProcInit).
+    static bool sDuskHumanWarpRequest;
+#endif
     void duskCancelHeldItemForPracticeSave();
     int procFloorDownReboundInit();
     int procFloorDownRebound();

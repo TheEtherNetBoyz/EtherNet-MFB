@@ -9,7 +9,7 @@
 
 namespace dusk {
     void ImGuiMenuTools::ShowInputViewer() {
-        if (!getSettings().game.showInputViewer) {
+        if (getSettings().game.speedrunMode || !getSettings().game.showInputViewer) {
             return;
         }
 

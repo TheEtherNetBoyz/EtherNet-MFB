@@ -1836,6 +1836,8 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Allows Wolf Link to howl and change the time of day.");
         addOption("Quick Transform (R+Y)", getSettings().game.enableQuickTransform,
             "Transform instantly by pressing R and Y simultaneously.");
+        addOption("Warp as Human", getSettings().game.humanMidnaWarp,
+            "Map/Midna warps no longer force Wolf Link transformation.");
 
         leftPane.add_section("Speedrunning");
         config_bool_select(leftPane, rightPane, getSettings().randomizer.enabled,
@@ -2132,6 +2134,14 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .key = "Show Gyro Input Viewer",
                 .helpText = "Show gyro sensor values in the input viewer.",
                 .isDisabled = [] { return !getSettings().game.showInputViewer; },
+            });
+        config_bool_select(leftPane, rightPane, getSettings().game.nativePracticeMenu,
+            {
+                .key = "Native Practice Menu",
+                .helpText = "Draw the practice tools menu with the game's own engine so it scales "
+                            "with the resolution (controller only). When off, the practice menu "
+                            "uses the ImGui interface, which supports the mouse but does not scale "
+                            "at low resolutions.",
             });
         leftPane.add_section("Game");
         leftPane.register_control(

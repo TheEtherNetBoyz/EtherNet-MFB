@@ -353,6 +353,7 @@ namespace dusk {
             }
             if (ImGui::BeginMenu("Quality of Life")) {
                 MenuCheckbox("Quick Transform (R+Y)", s.game.enableQuickTransform);
+                MenuCheckbox("Warp as Human", s.game.humanMidnaWarp);
                 MenuCheckbox("Bigger Wallets", s.game.biggerWallets);
                 MenuCheckbox("Disable Rupee Cutscenes", s.game.disableRupeeCutscenes);
                 MenuCheckbox("Skip All Cutscenes", s.game.skipAllCutscenes);
@@ -498,6 +499,17 @@ namespace dusk {
 
     void ImGuiMenuTools::togglePracticeSaves() {
         m_showPracticeSaves = !m_showPracticeSaves;
+    }
+
+    void ImGuiMenuTools::drawPracticeSavesNative() {
+        if (getSettings().game.speedrunMode) {
+            m_showPracticeSaves = false;
+            getTransientSettings().practiceMenuInputCapture = false;
+            return;
+        }
+        if (getSettings().game.nativePracticeMenu) {
+            m_practiceSaves.drawNative(m_showPracticeSaves);
+        }
     }
 
     void ImGuiMenuTools::draw() {
