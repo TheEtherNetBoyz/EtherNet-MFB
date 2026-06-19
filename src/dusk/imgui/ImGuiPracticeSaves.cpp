@@ -4,6 +4,12 @@
 #include "imgui.h"
 #include "fmt/format.h"
 
+#include "JSystem/J2DGraph/J2DGrafContext.h"
+#include "JSystem/J2DGraph/J2DTextBox.h"
+#include "JSystem/JUtility/JUTResFont.h"
+#include "JSystem/JUtility/TColor.h"
+#include "m_Do/m_Do_ext.h"
+
 #include "c/c_damagereaction.h"
 #include "SSystem/SComponent/c_counter.h"
 #include "d/d_com_inf_game.h"
@@ -113,6 +119,14 @@ int category_index(ImGuiPracticeSaves::SaveCategory category) {
 
 int main_category_index(ImGuiPracticeSaves::MainCategory category) {
     return static_cast<int>(category);
+}
+
+// Native menu: which categories present a sub-category list (gz-style) before
+// their rows/saves, rather than going straight to rows.
+bool category_has_sublist(ImGuiPracticeSaves::MainCategory category) {
+    return category == ImGuiPracticeSaves::MainCategory::Practice ||
+           category == ImGuiPracticeSaves::MainCategory::Tools ||
+           category == ImGuiPracticeSaves::MainCategory::Scene;
 }
 
 uint32_t read_be32(const u8* data) {
@@ -1237,6 +1251,172 @@ void ImGuiPracticeSaves::handleController(bool& open) {
     }
 }
 
+// gz-style nested navigation for the native menu: main category list ->
+// (optional) sub-category list -> rows/saves, with B walking back up one level
+// at a time. No tabs / no L/R switching.
+void ImGuiPracticeSaves::handleControllerNative(bool& open) {
+    const u32 hold = raw_pad_hold() | raw_pad_trig();
+    const double now = ImGui::GetTime();
+    if (now < m_nextControllerInputTime) {
+        return;
+    }
+    auto accept = [&](u32 button, double cooldown = 0.16) {
+        if ((hold & button) == 0) {
+            return false;
+        }
+        m_nextControllerInputTime = now + cooldown;
+        return true;
+    };
+
+    const bool hasSub = category_has_sublist(m_mainCategory);
+
+    // Sub-category list accessors (Practice -> save category, Tools/Scene -> tab).
+    auto subCount = [&]() -> int {
+        if (m_mainCategory == MainCategory::Practice) {
+            return static_cast<int>(SaveCategory::Count);
+        }
+        return 3;  // tools / scene
+    };
+    auto subIndex = [&]() -> int {
+        if (m_mainCategory == MainCategory::Practice) {
+            return category_index(m_saveCategory);
+        }
+        return m_mainCategory == MainCategory::Tools ? s_gzToolsTab : s_gzSceneTab;
+    };
+    auto setSubIndex = [&](int v) {
+        if (m_mainCategory == MainCategory::Practice) {
+            m_saveCategory = static_cast<SaveCategory>(v);
+            m_selectedSave = 0;
+            m_scrollSelectedSave = true;
+        } else if (m_mainCategory == MainCategory::Tools) {
+            s_gzToolsTab = v;
+        } else {
+            s_gzSceneTab = v;
+        }
+    };
+
+    // B: back out one level.
+    if (accept(PAD_BUTTON_B, 0.18)) {
+        if (!m_focusSaveList) {
+            open = false;
+        } else if (hasSub && m_inSubList) {
+            m_inSubList = false;
+        } else {
+            m_focusSaveList = false;
+        }
+        return;
+    }
+
+    // Level 0: main category list.
+    if (!m_focusSaveList) {
+        const int cat = main_category_index(m_mainCategory);
+        if (accept(PAD_BUTTON_UP, 0.18)) {
+            m_mainCategory = static_cast<MainCategory>(std::max(0, cat - 1));
+            return;
+        }
+        if (accept(PAD_BUTTON_DOWN, 0.18)) {
+            m_mainCategory = static_cast<MainCategory>(
+                std::min(static_cast<int>(MainCategory::Count) - 1, cat + 1));
+            return;
+        }
+        if (accept(PAD_BUTTON_A)) {
+            m_focusSaveList = true;
+            m_inSubList = !category_has_sublist(m_mainCategory);
+            m_selectedSave = 0;
+            m_selectedGenericRow = 0;
+            m_scrollSelectedSave = true;
+            m_scrollSelectedGenericRow = true;
+        }
+        return;
+    }
+
+    // Level 1: sub-category list (Practice/Tools/Scene).
+    if (hasSub && !m_inSubList) {
+        const int count = subCount();
+        const int idx = subIndex();
+        if (accept(PAD_BUTTON_UP, 0.18)) {
+            setSubIndex(std::max(0, idx - 1));
+            return;
+        }
+        if (accept(PAD_BUTTON_DOWN, 0.18)) {
+            setSubIndex(std::min(count - 1, idx + 1));
+            return;
+        }
+        if (accept(PAD_BUTTON_A)) {
+            m_inSubList = true;
+            m_selectedSave = 0;
+            m_selectedGenericRow = 0;
+            m_scrollSelectedSave = true;
+            m_scrollSelectedGenericRow = true;
+        }
+        return;
+    }
+
+    // Level 2: saves (Practice) or rows (everything else).
+    if (m_mainCategory == MainCategory::Practice) {
+        const int count = static_cast<int>(currentSaves().size());
+        if (count > 0) {
+            if (accept(PAD_BUTTON_UP)) {
+                m_selectedSave = std::max(0, m_selectedSave - 1);
+                m_scrollSelectedSave = true;
+                return;
+            }
+            if (accept(PAD_BUTTON_DOWN)) {
+                m_selectedSave = std::min(count - 1, m_selectedSave + 1);
+                m_scrollSelectedSave = true;
+                return;
+            }
+            if (accept(PAD_BUTTON_LEFT)) {
+                m_selectedSave = std::max(0, m_selectedSave - 10);
+                m_scrollSelectedSave = true;
+                return;
+            }
+            if (accept(PAD_BUTTON_RIGHT)) {
+                m_selectedSave = std::min(count - 1, m_selectedSave + 10);
+                m_scrollSelectedSave = true;
+                return;
+            }
+            if (accept(PAD_BUTTON_A, 0.22) && !m_loadInProgress &&
+                !getTransientSettings().stateShareLoadActive) {
+                if (loadPracticeSave(currentSaves()[m_selectedSave])) {
+                    open = false;
+                }
+                return;
+            }
+        }
+        return;
+    }
+
+    const int count = gz_generic_row_count(m_mainCategory);
+    if (count > 0) {
+        m_selectedGenericRow = std::clamp(m_selectedGenericRow, 0, count - 1);
+        if (accept(PAD_BUTTON_UP, 0.18)) {
+            m_selectedGenericRow = std::max(0, m_selectedGenericRow - 1);
+            return;
+        }
+        if (accept(PAD_BUTTON_DOWN, 0.18)) {
+            m_selectedGenericRow = std::min(count - 1, m_selectedGenericRow + 1);
+            return;
+        }
+        // Combo categories (Warping) adjust the value with left/right; other
+        // categories have no per-row adjust (their sub-lists are level 1).
+        if (m_mainCategory == MainCategory::Warping) {
+            if (accept(PAD_BUTTON_LEFT)) {
+                gz_adjust_generic_row(m_mainCategory, m_selectedGenericRow, -1);
+                return;
+            }
+            if (accept(PAD_BUTTON_RIGHT)) {
+                gz_adjust_generic_row(m_mainCategory, m_selectedGenericRow, 1);
+                return;
+            }
+        }
+        if (accept(PAD_BUTTON_A, 0.20)) {
+            gz_activate_generic_row(m_mainCategory, m_selectedGenericRow);
+            return;
+        }
+    }
+}
+
 void ImGuiPracticeSaves::drawCategoryList() {
     ImGui::BeginChild("##gz_main_categories", ImVec2(170.0f, 0.0f), false);
     for (int i = 0; i < static_cast<int>(MainCategory::Count); i++) {
@@ -1582,10 +1762,23 @@ void ImGuiPracticeSaves::draw(bool& open) {
         return;
     }
 
-    handleController(open);
+    const bool nativeMode = getSettings().game.nativePracticeMenu;
+    if (nativeMode) {
+        handleControllerNative(open);
+    } else {
+        handleController(open);
+    }
     m_lastControllerHold = raw_pad_hold() | raw_pad_trig();
     consumeControllerInput();
     if (!open) {
+        return;
+    }
+
+    // In native mode the menu is drawn (resolution-independently) from the
+    // game's 2D pass by drawNative(); the input/state handling above still runs
+    // here every frame. In imgui mode we fall through and render the imgui
+    // window, which is mouse-capable. Both share the same state and load logic.
+    if (nativeMode) {
         return;
     }
 
@@ -1612,6 +1805,269 @@ void ImGuiPracticeSaves::draw(bool& open) {
     }
 
     ImGui::End();
+}
+
+namespace {
+
+// Draws one line of menu text with a black drop shadow, matching the tpgz look.
+// All positions are in the game's virtual 2D space (608x448), so output scales
+// with resolution. setString stores the string raw (it does NOT printf-format;
+// J2DTextBox::draw re-prints it with "%s", which safely handles any '%' in the
+// text), so pass the literal string here.
+void draw_native_text(JUTFont* font, float x, float y, float size,
+                      const JUtility::TColor& color, const char* str) {
+    J2DTextBox tb;
+    tb.setFont(font);
+    tb.setFontSize(size, size);
+    tb.setString(str);
+
+    const JUtility::TColor shadow(0, 0, 0, color.a);
+    tb.setFontColor(shadow, shadow);
+    tb.draw(x + 2.0f, y + 2.0f);
+
+    tb.setFontColor(color, color);
+    tb.draw(x, y);
+}
+
+}  // namespace
+
+void ImGuiPracticeSaves::drawNative() {
+    // Only the native renderer; in imgui mode draw() renders the window instead.
+    if (!getSettings().game.nativePracticeMenu) {
+        return;
+    }
+    // Guard: the message font lives in the font archive, absent on boot/title
+    // screens. Touching it there would lazily init it without data and crash.
+    if (dComIfGp_getFontArchive() == nullptr) {
+        return;
+    }
+    JUTFont* font = mDoExt_getMesgFont();
+    if (font == nullptr) {
+        return;
+    }
+    J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
+    if (port == nullptr) {
+        return;
+    }
+    // Re-establish the active HUD ortho (viewport + projection + pos matrix).
+    port->setPort();
+
+    const JUtility::TColor kWhite(0xFF, 0xFF, 0xFF, 0xFF);
+    const JUtility::TColor kGreen(26, 230, 26, 0xFF);  // imgui (0.1, 0.9, 0.1)
+
+    const float left = 24.0f;
+    const float headerSize = 18.0f;
+    const float itemSize = 15.0f;
+    const float lineH = 19.0f;
+    float y = 24.0f;
+
+    draw_native_text(font, left, y, headerSize, kGreen, "practice tools");
+    y += 32.0f;
+
+    if (!m_focusSaveList) {
+        // Top-level category list. The cursor (green) follows m_mainCategory.
+        for (int i = 0; i < static_cast<int>(MainCategory::Count); i++) {
+            const bool cursor = (i == main_category_index(m_mainCategory));
+            draw_native_text(font, left, y, itemSize, cursor ? kGreen : kWhite,
+                             kMainCategoryNames[i]);
+            y += lineH;
+        }
+    } else if (category_has_sublist(m_mainCategory) && !m_inSubList) {
+        // Level 1: the sub-category list (gz-style). The cursor follows the
+        // active sub index; A enters its rows/saves, B returns to the category
+        // list. No tabs.
+        if (m_mainCategory == MainCategory::Practice) {
+            for (int i = 0; i < static_cast<int>(SaveCategory::Count); i++) {
+                const bool cursor = (i == category_index(m_saveCategory));
+                draw_native_text(font, left, y, itemSize, cursor ? kGreen : kWhite,
+                                 kSaveCategories[i].label);
+                y += lineH;
+            }
+        } else {
+            static const char* const kToolsTabs[] = {"checkers", "displays", "link"};
+            static const char* const kSceneTabs[] = {"environment", "viewers", "audio"};
+            const char* const* labels =
+                (m_mainCategory == MainCategory::Tools) ? kToolsTabs : kSceneTabs;
+            const int cur = (m_mainCategory == MainCategory::Tools) ? s_gzToolsTab : s_gzSceneTab;
+            for (int i = 0; i < 3; i++) {
+                draw_native_text(font, left, y, itemSize, i == cur ? kGreen : kWhite, labels[i]);
+                y += lineH;
+            }
+        }
+    } else if (m_mainCategory == MainCategory::Practice) {
+        // Level 2: the save list for the chosen category.
+        const auto& saves = currentSaves();
+        const int count = static_cast<int>(saves.size());
+        if (count == 0) {
+            draw_native_text(font, left, y, itemSize, kWhite, "No saves found.");
+        } else {
+            // Window the list so the cursor row stays visible when it overflows.
+            const int visible = 15;
+            int start = 0;
+            if (count > visible) {
+                start = std::clamp(m_selectedSave - visible / 2, 0, count - visible);
+            }
+            const int end = std::min(count, start + visible);
+            for (int i = start; i < end; i++) {
+                const bool cursor = (i == m_selectedSave);
+                draw_native_text(font, left, y, itemSize, cursor ? kGreen : kWhite,
+                                 saves[i].name.c_str());
+                y += lineH;
+            }
+            // Bottom hint line: description of the hovered save (imgui tooltip ->
+            // tpgz's bottom line, e.g. "Hangin' with Hugo").
+            if (m_selectedSave >= 0 && m_selectedSave < count &&
+                !saves[m_selectedSave].description.empty()) {
+                draw_native_text(font, left, 410.0f, itemSize, kWhite,
+                                 saves[m_selectedSave].description.c_str());
+            }
+        }
+    } else {
+        // Generic category panels. Row order/count must match
+        // gz_generic_row_count + gz_activate/adjust_generic_row so the cursor
+        // (m_selectedGenericRow, driven by handleController) and the actions
+        // line up. The actions are already applied by handleController; here we
+        // only render. Disabled rows stay greyed, exactly as in the imgui panels.
+        auto& s = getSettings();
+        const JUtility::TColor kGrey(150, 150, 150, 0xFF);
+        const float checkX = left + 248.0f;  // checkbox column for bool rows
+        const float valueX = left + 96.0f;   // value column for combo rows
+
+        int rowIdx = 0;
+        auto rowCol = [&](bool disabled) -> JUtility::TColor {
+            if (rowIdx == m_selectedGenericRow) return kGreen;
+            return disabled ? kGrey : kWhite;
+        };
+        // A bool option: label on the left, [X]/[ ] in a fixed right column.
+        auto boolRow = [&](const char* label, bool on, bool disabled) {
+            const JUtility::TColor col = rowCol(disabled);
+            draw_native_text(font, left, y, itemSize, col, label);
+            draw_native_text(font, checkX, y, itemSize, col, on ? "[X]" : "[ ]");
+            y += lineH;
+            ++rowIdx;
+        };
+        auto disabledBool = [&](const char* label) { boolRow(label, false, true); };
+        // A plain row (buttons / the warp action): label only.
+        auto plainRow = [&](const char* label, bool disabled) {
+            draw_native_text(font, left, y, itemSize, rowCol(disabled), label);
+            y += lineH;
+            ++rowIdx;
+        };
+        // A combo row: label + current value (switched with L/R).
+        auto comboRow = [&](const char* label, const std::string& value) {
+            const JUtility::TColor col = rowCol(false);
+            draw_native_text(font, left, y, itemSize, col, label);
+            draw_native_text(font, valueX, y, itemSize, col, value.c_str());
+            y += lineH;
+            ++rowIdx;
+        };
+        switch (m_mainCategory) {
+        case MainCategory::Cheats: {
+            const bool en = !s.game.speedrunMode;
+            boolRow("disable item timer", s.game.enableIndefiniteItemDrops.getValue(), !en);
+            disabledBool("disable walls");
+            disabledBool("fast bonk recovery");
+            disabledBool("fast movement");
+            boolRow("infinite air", s.game.infiniteOxygen.getValue(), !en);
+            boolRow("infinite arrows", s.game.infiniteArrows.getValue(), !en);
+            boolRow("infinite bombs", s.game.infiniteBombs.getValue(), !en);
+            boolRow("infinite hearts", s.game.infiniteHearts.getValue(), !en);
+            boolRow("infinite lantern oil", s.game.infiniteOil.getValue(), !en);
+            boolRow("infinite rupees", s.game.infiniteRupees.getValue(), !en);
+            boolRow("infinite slingshot seeds", s.game.infiniteSeeds.getValue(), !en);
+            disabledBool("invincible link");
+            boolRow("invincible enemies", s.game.invincibleEnemies.getValue(), !en);
+            boolRow("moon jump", s.game.moonJump.getValue(), !en);
+            disabledBool("no sinking in sand");
+            boolRow("super clawshot", s.game.superClawshot.getValue(), !en);
+            boolRow("transform anywhere", s.game.canTransformAnywhere.getValue(), !en);
+            disabledBool("unrestricted items");
+            break;
+        }
+        case MainCategory::Tools: {
+            if (s_gzToolsTab == 0) {
+                disabledBool("coro td");
+                disabledBool("ebmb");
+                disabledBool("elevator escape");
+                boolRow("gorge void", s.game.gorgeVoidChecker.getValue(), false);
+                disabledBool("ladder freezard cancel");
+                disabledBool("rolls");
+                disabledBool("universal map delay");
+            } else if (s_gzToolsTab == 1) {
+                disabledBool("a/b mash rate");
+                boolRow("in-game timer", s.game.showSpeedrunRTATimer.getValue(),
+                        !s.game.speedrunMode);
+                boolRow("input viewer", s.game.showInputViewer.getValue(), false);
+                disabledBool("link debug info");
+                disabledBool("load timer");
+                disabledBool("stage info");
+                disabledBool("timer");
+            } else {
+                boolRow("free cam", s.game.freeCamera.getValue(), false);
+                boolRow("move link", s.game.moveLink.getValue(), s.game.speedrunMode);
+                disabledBool("teleport");
+            }
+            break;
+        }
+        case MainCategory::Scene: {
+            if (s_gzSceneTab == 0) {
+                disabledBool("freeze time");
+                disabledBool("freeze actors");
+                disabledBool("freeze camera");
+            } else if (s_gzSceneTab == 1) {
+                disabledBool("viewers");
+            } else {
+                disabledBool("mute bgm");
+                disabledBool("mute sfx");
+            }
+            break;
+        }
+        case MainCategory::Settings: {
+            disabledBool("boot to menu");
+            disabledBool("cursor type");
+            disabledBool("display mode");
+            disabledBool("drop shadows");
+            disabledBool("menu pauses game");
+            disabledBool("menu sfx");
+            disabledBool("reload type");
+            disabledBool("state streaming");
+            disabledBool("swap equips");
+            disabledBool("theme");
+            plainRow("command combos", true);
+            plainRow("menu positions", true);
+            plainRow("start gdb server", true);
+            plainRow("save settings", true);
+            plainRow("load settings", true);
+            plainRow("delete settings", true);
+            break;
+        }
+        case MainCategory::Warping: {
+            clamp_gz_warp_state(s_gzWarpState);
+            const auto& region = gameRegions[s_gzWarpState.region];
+            const auto& map = region.maps[s_gzWarpState.map];
+            const auto& room = map.mapRooms[s_gzWarpState.room];
+            comboRow("type", region.regionName);
+            comboRow("stage", map.mapName);
+            comboRow("room", fmt::format("{}", room.roomNo));
+            comboRow("spawn", fmt::format("{}", room.roomPoints[s_gzWarpState.spawn]));
+            comboRow("layer", s_gzWarpState.layer < 0 ? std::string("default")
+                                                      : fmt::format("{}", s_gzWarpState.layer));
+            plainRow("warp", !dusk::IsGameLaunched);
+            break;
+        }
+        case MainCategory::Flags:
+            for (const char* r : kFlagRows) disabledBool(r);
+            break;
+        case MainCategory::Inventory:
+            for (const char* r : kInventoryRows) disabledBool(r);
+            break;
+        case MainCategory::Memory:
+            for (const char* r : kMemoryRows) disabledBool(r);
+            break;
+        default:
+            break;
+        }
+    }
 }
 
 void ImGuiMenuTools::ShowPracticeSaves() {

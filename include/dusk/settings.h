@@ -299,6 +299,10 @@ struct UserSettings {
         ConfigVar<bool> removeQuestMapMarkers;
         ConfigVar<bool> showInputViewer;
         ConfigVar<bool> showInputViewerGyro;
+        // When true, the practice-tools menu renders natively (J2D/GX), which
+        // scales with resolution but is controller-only. When false, it uses
+        // the imgui menu (mouse-capable).
+        ConfigVar<bool> nativePracticeMenu;
     } game;
 
     struct {

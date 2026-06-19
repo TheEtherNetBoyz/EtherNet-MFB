@@ -513,6 +513,10 @@ namespace dusk {
         ShowToasts();
     }
 
+    void ImGuiConsole::DrawPracticeSavesNative() {
+        m_menuTools.drawPracticeSavesNative();
+    }
+
     void ImGuiConsole::AddToast(std::string_view message, float duration) {
         m_toasts.emplace_back(std::string(message), duration);
     }

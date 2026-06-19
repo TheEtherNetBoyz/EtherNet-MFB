@@ -501,6 +501,12 @@ namespace dusk {
         m_showPracticeSaves = !m_showPracticeSaves;
     }
 
+    void ImGuiMenuTools::drawPracticeSavesNative() {
+        if (m_showPracticeSaves) {
+            m_practiceSaves.drawNative();
+        }
+    }
+
     void ImGuiMenuTools::draw() {
         if (ImGui::BeginMenu("Game")) {
             DrawGameMenu();

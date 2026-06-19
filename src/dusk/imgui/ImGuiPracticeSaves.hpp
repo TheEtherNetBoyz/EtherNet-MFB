@@ -13,6 +13,7 @@ namespace dusk {
 class ImGuiPracticeSaves {
 public:
     void draw(bool& open);
+    void drawNative();
     void suppressControllerInput();
 
     struct PracticeSavePlacement {
@@ -60,6 +61,7 @@ private:
     void executeGorgeVoidChecker();
     void drawGorgeVoidCheckerResult();
     void handleController(bool& open);
+    void handleControllerNative(bool& open);
     void consumeControllerInput();
     void drawCategoryList();
     void drawPracticePanel(bool& open);
@@ -78,6 +80,11 @@ private:
     MainCategory m_mainCategory = MainCategory::Practice;
     SaveCategory m_saveCategory = SaveCategory::Any;
     bool m_focusSaveList = false;
+    // Native menu only: gz-style nesting depth within a category. For categories
+    // with a sub-list (Practice/Tools/Scene), false = showing the sub-category
+    // list, true = showing that sub-category's saves/rows. Categories without a
+    // sub-list go straight to rows (treated as true).
+    bool m_inSubList = false;
     int m_selectedSave = 0;
     double m_nextControllerInputTime = 0.0;
     u32 m_lastControllerHold = 0;
