@@ -178,7 +178,7 @@ static void anm_init(npc_ks_class* i_this, int param_2, f32 i_morf, u8 i_attr, f
             param_2 = 42;
         } else {
             // bug: developers meant to set equal to 44?
-            param_2 == 44;
+            IF_NOT_DUSK(param_2 == 44);
             dComIfGs_shake_kandelaar();
         }
     }
@@ -6885,6 +6885,16 @@ static int daNpc_Ks_Delete(npc_ks_class* i_this) {
     if (saru_p[i_this->set_id] == i_this) {
         saru_p[i_this->set_id] = NULL;
     }
+
+#if TARGET_PC
+    if (leader == i_this) {
+        leader = NULL;
+    }
+
+    if (saru_p[i_this->set_id] == i_this) {
+        saru_p[i_this->set_id] = NULL;
+    }
+#endif
 
     return 1;
 }

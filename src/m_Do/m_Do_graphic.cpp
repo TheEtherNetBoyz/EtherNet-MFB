@@ -239,6 +239,26 @@ static void drawHeapMap() {
 
 #endif
 
+#if TARGET_PC
+// --- Native practice-saves menu ----------------------------------------------
+// Renders the practice-saves menu through the GX 2D pass using the game's own
+// message font, instead of imgui. Because it draws in the game's virtual 2D
+// space it scales with output resolution like the HUD, unlike imgui which
+// positions in raw output pixels. The draw object is queued into the 2D
+// translucent list; the actual rendering lives in ImGuiPracticeSaves::drawNative
+// (reached via the ImGuiConsole bridge) and no-ops when the menu is closed.
+class dDlst_duskPracticeMenu_c : public dDlst_base_c {
+public:
+    virtual void draw() { dusk::g_imguiConsole.DrawPracticeSavesNative(); }
+};
+
+static dDlst_duskPracticeMenu_c l_duskPracticeMenu;
+
+static void drawDuskPracticeMenu() {
+    dComIfGd_set2DXlu(&l_duskPracticeMenu);
+}
+#endif
+
 static ResTIMG* createTimg(u16 width, u16 height, u32 format) {
     u32 bufferSize = GXGetTexBufferSize(width, height, format, GX_FALSE, 0) + 0x20;
     ResTIMG* timg;
@@ -2265,6 +2285,10 @@ int mDoGph_Painter() {
 
     #if DEBUG
     drawHeapMap();
+    #endif
+
+    #if TARGET_PC
+    drawDuskPracticeMenu();
     #endif
 
 #ifdef TARGET_PC

@@ -38,6 +38,11 @@ bool RestartProcess(int argc, char* argv[]) {
     return false;
 #elif _WIN32
     std::wstring commandLine = GetCommandLineW();
+    if (dusk::ReturnToPrelaunchRequested &&
+        commandLine.find(L"--prelaunch") == std::wstring::npos)
+    {
+        commandLine += L" --prelaunch";
+    }
     STARTUPINFOW startupInfo{};
     startupInfo.cb = sizeof(startupInfo);
     PROCESS_INFORMATION processInfo{};
@@ -95,6 +100,11 @@ bool RestartProcess(int argc, char* argv[]) {
     args.push_back(dusk::io::fs_path_to_string(executablePath));
     for (int i = 1; i < argc; ++i) {
         args.emplace_back(argv[i] != nullptr ? argv[i] : "");
+    }
+    if (dusk::ReturnToPrelaunchRequested &&
+        std::find(args.begin(), args.end(), "--prelaunch") == args.end())
+    {
+        args.emplace_back("--prelaunch");
     }
 
     std::vector<char*> execArgv;

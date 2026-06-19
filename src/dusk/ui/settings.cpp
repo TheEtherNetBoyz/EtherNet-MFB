@@ -13,6 +13,7 @@
 #include "dusk/imgui/ImGuiEngine.hpp"
 #include "dusk/io.hpp"
 #include "dusk/livesplit.h"
+#include "dusk/main.h"
 #include "dusk/discord_presence.hpp"
 #include "dusk/vector_rsqrt.h"
 #include "graphics_tuner.hpp"
@@ -463,6 +464,14 @@ constexpr std::array kMenuScalingModeLabels = {
     "Dusklight",
 };
 
+constexpr std::array kMagicArmorModes = {
+    "Normal",
+    "On Damage",
+    "Double Defense",
+    "Invincible",
+    "Cosmetic",
+};
+
 bool try_parse_backend(std::string_view backend, AuroraBackend& outBackend) {
     if (backend == "auto") {
         outBackend = BACKEND_AUTO;
@@ -599,7 +608,7 @@ void reset_for_speedrun_mode() {
     getSettings().game.canTransformAnywhere.setSpeedrunValue(false);
     getSettings().game.fastRoll.setSpeedrunValue(false);
     getSettings().game.fastSpinner.setSpeedrunValue(false);
-    getSettings().game.freeMagicArmor.setSpeedrunValue(false);
+    getSettings().game.armorRupeeDrain.setSpeedrunValue(MagicArmorMode::NORMAL);
     getSettings().game.invincibleEnemies.setSpeedrunValue(false);
 
     getSettings().game.pauseOnFocusLost.setSpeedrunValue(false);
@@ -763,8 +772,8 @@ const Rml::String kDepthOfFieldHelpText =
     "Configure the post-processing depth-of-field effect. Classic uses the original depth-of-field pass;"
     " Dusklight uses a higher-quality depth-of-field pass.";
 const Rml::String kUnlockFramerateHelpText =
-    "Uses inter-frame interpolation to enable higher frame rates. "
-    "May introduce minor visual artifacts or animation glitches.";
+    "<br/>Uses inter-frame interpolation to enable higher frame rates.<br/><br/>May introduce minor "
+    "visual artifacts or animation glitches.";
 const Rml::String kTextureReplacementHelpText =
     "Enable installed texture replacements.";
 
@@ -874,9 +883,7 @@ int float_setting_percent(ConfigVar<float>& var) {
 }
 
 bool gyro_enabled() {
-    return getSettings().game.enableGyroAim ||
-           (getSettings().game.enableGyroRollgoal &&
-            getSettings().game.gyroMode.getValue() != GyroMode::Mouse);
+    return getSettings().game.enableGyroAim || getSettings().game.enableGyroRollgoal;
 }
 
 struct ConfigBoolProps {
@@ -944,7 +951,7 @@ SelectButton& config_percent_select(Pane& leftPane, Pane& rightPane, ConfigVar<f
     });
     leftPane.register_control(button, rightPane, [helpText = std::move(helpText)](Pane& pane) {
         pane.clear();
-        pane.add_text(helpText);
+        pane.add_rml(helpText);
     });
     return button;
 }
@@ -1031,6 +1038,35 @@ void graphics_tuner_control(Window& window, Pane& leftPane, Pane& rightPane, Con
             pane.clear();
             pane.add_text(helpText);
         });
+}
+
+void confirm_return_to_startup() {
+    auto dismiss = [](Modal& modal) {
+        mDoAud_seStartMenu(kSoundWindowClose);
+        modal.pop();
+    };
+    push_document(std::make_unique<Modal>(Modal::Props{
+        .title = "Return to Startup Screen",
+        .bodyRml = "Dusklight will restart and return to the startup screen, where you can change "
+                   "your disc image, language, graphics backend, and other startup options."
+                   "<br/><br/>Any unsaved progress will be lost.",
+        .actions =
+            {
+                ModalAction{
+                    .label = "Cancel",
+                    .onPressed = dismiss,
+                },
+                ModalAction{
+                    .label = "Restart",
+                    .onPressed = [](Modal&) { dusk::RequestReturnToPrelaunch(); },
+                },
+            },
+        .onDismiss = dismiss,
+        .icon = "warning",
+    }));
+    if (auto* doc = top_document()) {
+        doc->focus();
+    }
 }
 
 }  // namespace
@@ -1326,6 +1362,21 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 pane.add_rml(
                     "<br/>Display the current framerate in a corner of the screen while playing.");
             });
+        config_bool_select(leftPane, rightPane, getSettings().video.rememberWindowSize,
+            {
+                .key = "Remember Window Size",
+                .helpText = "Save and restore the previous session's window size when opening Dusklight.",
+                .onChange =
+                    [](bool value) {
+                        if (value && !dusk::getSettings().video.enableFullscreen) {
+                            const auto windowSize = aurora::window::get_window_size();
+                            dusk::getSettings().video.lastWindowWidth.setValue(windowSize.width);
+                            dusk::getSettings().video.lastWindowHeight.setValue(windowSize.height);
+                            dusk::config::Save();
+                        }
+                    },
+                .isDisabled = [] { return IsMobile; },
+            });
         leftPane.add_section("Resolution");
         graphics_tuner_control(*this, leftPane, rightPane,
             getSettings().game.internalResolutionScale,
@@ -1484,12 +1535,11 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
 
         leftPane.add_section("Camera");
         addOption("Free Camera", getSettings().game.freeCamera,
-            "Enables twin-stick camera control, letting the C-Stick move the camera vertically as "
-            "well as horizontally.");
+            "Enables free camera control, letting you control the camera fully with the C-Stick.");
         addOption("Invert Camera X Axis", getSettings().game.invertCameraXAxis,
-            "Invert horizontal camera movement.");
+            "Invert horizontal camera movement.<br/><br/>Applies to the control stick only.");
         addOption("Invert Camera Y Axis", getSettings().game.invertCameraYAxis,
-            "Invert vertical camera movement when Free Camera is enabled.",
+            "Invert vertical camera movement.<br/><br/>Applies to the control stick only.",
             [] { return !getSettings().game.freeCamera; });
         addOption("Custom Camera Speeds", getSettings().game.enableCameraSpeedControls,
             "Enable camera speed controls. When disabled, all camera speeds use the default value.");
@@ -1511,59 +1561,17 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Adjusts stick and gyro sensitivity while aiming items or using first person camera.",
             [] { return !getSettings().game.enableCameraSpeedControls; });
         addOption("Invert First Person X Axis", getSettings().game.invertFirstPersonXAxis,
-            "Invert horizontal movement while aiming with items or first person camera. Applies only to the control stick (the gyroscope can be inverted in Input settings).");
+            "Invert horizontal movement while aiming with items or first person camera.<br/><br/>Applies to the control stick only.");
         addOption("Invert First Person Y Axis", getSettings().game.invertFirstPersonYAxis,
-            "Invert vertical movement while aiming with items or first person camera. Applies only to the control stick (the gyroscope can be inverted in Input settings).");
-        addOption("Invert Air/Swim X Axis", getSettings().game.invertAirSwimX,
-            "Invert horizontal movement while flying or swimming.");
-        addOption("Invert Air/Swim Y Axis", getSettings().game.invertAirSwimY,
-            "Invert vertical movement while flying or swimming.");
+            "Invert vertical movement while aiming with items or first person camera.<br/><br/>Applies to the control stick only.");
 
         leftPane.add_section("Gyro");
-        leftPane.register_control(
-            leftPane.add_select_button({
-                .key = "Gyro Input Method",
-                .getValue =
-                    [] {
-                        const auto mode = getSettings().game.gyroMode.getValue();
-                        const auto idx = static_cast<size_t>(mode);
-                        return Rml::String{kGyroInputModeLabels[idx]};
-                    },
-                .isModified =
-                    [] {
-                        return getSettings().game.gyroMode.getValue() !=
-                               getSettings().game.gyroMode.getDefaultValue();
-                    },
-            }),
-            rightPane, [](Pane& pane) {
-                for (size_t i = 0; i < kGyroInputModeLabels.size(); i++) {
-                    pane
-                        .add_button({
-                            .text = Rml::String{kGyroInputModeLabels[i]},
-                            .isSelected =
-                                [i] {
-                                    return getSettings().game.gyroMode.getValue() == static_cast<GyroMode>(i);
-                                },
-                        })
-                        .on_pressed([i] {
-                            mDoAud_seStartMenu(kSoundItemChange);
-                            const GyroMode mode = static_cast<GyroMode>(i);
-                            getSettings().game.gyroMode.setValue(mode);
-                            config::Save();
-                        });
-                }
-                pane.add_rml(
-                    "<br/><b>Sensor</b> reads motion directly from a supported controller's gyro via SDL.<br/>"
-                    "<br/><b>Mouse</b> treats mouse input as gyro, intended for use with the Steam Deck.<br/>"
-                    "<br/>Mouse input cannot currently be used with Gyro Rollgoal.");
-            });
         addOption("Gyro Aim", getSettings().game.enableGyroAim,
             "Enables gyro controls while in look mode, aiming a hawk, and aiming "
             "supported items.<br/><br/>Supported items include the Slingshot, Gale Boomerang, "
             "Hero's Bow, Clawshot(s), Ball and Chain, and Dominion Rod.");
         addOption("Gyro Rollgoal", getSettings().game.enableGyroRollgoal,
-            "Enables gyro controls for Rollgoal in Hena's Cabin.",
-            [] { return getSettings().game.gyroMode.getValue() == GyroMode::Mouse; });
+            "Enables gyro controls for Rollgoal in Hena's Cabin.");
         config_percent_select(leftPane, rightPane, getSettings().game.gyroSensitivityY,
             "Gyro Pitch Sensitivity", "Controls vertical gyro aiming sensitivity.", 25, 400, 5,
             [] { return !gyro_enabled(); });
@@ -1573,10 +1581,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         config_percent_select(leftPane, rightPane, getSettings().game.gyroSensitivityRollgoal,
             "Rollgoal Sensitivity", "Controls how strongly gyro input tilts the Rollgoal table.",
             25, 400, 5,
-            [] {
-                return !getSettings().game.enableGyroRollgoal ||
-                       getSettings().game.gyroMode.getValue() == GyroMode::Mouse;
-            });
+            [] { return !getSettings().game.enableGyroRollgoal; });
         config_percent_select(leftPane, rightPane, getSettings().game.gyroDeadband, "Gyro Deadband",
             "Ignores small gyro movement to reduce drift and jitter.", 0, 50, 1,
             [] { return !gyro_enabled(); });
@@ -1589,6 +1594,31 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Invert horizontal gyro aiming.", [] { return !gyro_enabled(); });
         
         leftPane.add_section("Gameplay");
+        addOption("Swap Direct Select Input", getSettings().game.swapDirectSelect,
+            "Swap the controls for using Direct Select on the item wheel, making Direct Select the default and holding L to scroll the wheel.");
+
+        leftPane.add_section("Mouse");
+        addOption("Mouse Aim", getSettings().game.enableMouseAim,
+            "Enables mouse input while in look mode, aiming a hawk, and aiming "
+            "supported items.<br/><br/>Supported items include the Slingshot, Gale Boomerang, "
+            "Hero's Bow, Clawshot(s), Ball and Chain, and Dominion Rod.");
+        addOption("Mouse Camera", getSettings().game.enableMouseCamera,
+            "Enables mouse input for controlling the third-person camera.");
+        config_percent_select(leftPane, rightPane, getSettings().game.mouseAimSensitivity,
+            "Mouse Aim Sensitivity", "Controls mouse aim sensitivity.", 25, 400, 5,
+            [] { return !getSettings().game.enableMouseAim; });
+        config_percent_select(leftPane, rightPane, getSettings().game.mouseCameraSensitivity,
+            "Mouse Camera Sensitivity", "Controls mouse camera sensitivity.", 25, 400, 5,
+            [] { return !getSettings().game.enableMouseCamera; });
+        addOption("Invert Mouse Y", getSettings().game.invertMouseY,
+            "Invert vertical mouse control for both aiming and camera.",
+            [] { return !getSettings().game.enableMouseAim || !getSettings().game.enableMouseCamera; });
+
+        leftPane.add_section("Gameplay");
+        addOption("Invert Air/Swim X Axis", getSettings().game.invertAirSwimX,
+            "Invert horizontal movement while flying or swimming.");
+        addOption("Invert Air/Swim Y Axis", getSettings().game.invertAirSwimY,
+            "Invert vertical movement while flying or swimming.");
         addOption("Swap Direct Select Input", getSettings().game.swapDirectSelect,
             "Swap the controls for using Direct Select on the item wheel, making Direct Select the default and holding L to scroll the wheel.");
 
@@ -1695,6 +1725,11 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         addOption("Minimal HUD", getSettings().game.minimalHUD,
             "Disables the elements of the main HUD of the game.<br/>Useful for a more immersive "
             "experience.");
+        config_percent_select(leftPane, rightPane, getSettings().game.hudScale,
+            "HUD Scale",
+            "Scales the size of the gameplay HUD (hearts, buttons, mini-map, etc.). Does not affect dialog boxes or menus.",
+            50, 200, 5,
+            [] { return getSettings().game.minimalHUD.getValue(); });
         addOption("Restore Wii 1.0 Glitches", getSettings().game.restoreWiiGlitches,
             "Restores patched glitches from Wii USA 1.0, the first released version.");
         config_bool_select(leftPane, rightPane, getSettings().game.usePpcFastInvSqrt,
@@ -1765,7 +1800,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         config_bool_select(leftPane, rightPane, getSettings().game.enableInstaLoads,
             {
                 .key = "Insta Loads",
-                .helpText = "Experimental near-instant area transitions.",
+                .helpText = "Loads areas in 1 frame, will break some cutscenes if you skip too fast.",
                 .onChange = [](bool value) {
                     if (value) {
                         getSettings().game.enableFastLoads.setValue(false);
@@ -1793,12 +1828,16 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Link will not recoil when his sword hits walls.");
         addOption("No 2nd Fish for Cat", getSettings().game.no2ndFishForCat,
             "Skip needing to catch a second fish for Sera's cat.");
+        addOption("Button Fishing", getSettings().game.buttonFishing,
+            "Allow fishing with the Fishing Rod using the button the item is assigned to.");
         addOption("Show Poe Count on Map", getSettings().game.enhancedMapMenus,
             "Displays collected/total number of Poe Souls for a region on the map.");
         addSpeedrunDisabledOption("Sun's Song (R+X)", getSettings().game.sunsSong,
             "Allows Wolf Link to howl and change the time of day.");
         addOption("Quick Transform (R+Y)", getSettings().game.enableQuickTransform,
             "Transform instantly by pressing R and Y simultaneously.");
+        addOption("Warp as Human", getSettings().game.humanMidnaWarp,
+            "Map/Midna warps no longer force Wolf Link transformation.");
 
         leftPane.add_section("Speedrunning");
         config_bool_select(leftPane, rightPane, getSettings().game.speedrunMode,
@@ -1885,8 +1924,38 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Makes Link's roll animation and movement twice as fast.");
         addCheat("Fast Spinner", getSettings().game.fastSpinner,
             "Speeds up Spinner movement while holding R.");
-        addCheat("Free Magic Armor", getSettings().game.freeMagicArmor,
-            "Lets the magic armor work without consuming rupees.");
+        leftPane.register_control(
+            leftPane.add_select_button({
+                .key = "Magic Armor Behavior",
+                .getValue =
+                    [] {
+                        return kMagicArmorModes[static_cast<u8>(getSettings().game.armorRupeeDrain.getValue())];
+                    },
+                .isDisabled = [] { return getSettings().game.speedrunMode; },
+                .isModified =
+                    [] {
+                        return getSettings().game.armorRupeeDrain.getValue() !=
+                               getSettings().game.armorRupeeDrain.getDefaultValue();
+                    },
+            }),
+            rightPane, [](Pane& pane) {
+                for (int i = 0; i < kMagicArmorModes.size(); i++) {
+                    pane.add_button({
+                            .text = kMagicArmorModes[i],
+                            .isSelected =
+                                [i] {
+                                    return getSettings().game.armorRupeeDrain.getValue() == static_cast<MagicArmorMode>(i);
+                                },
+                        })
+                        .on_pressed([i] {
+                            mDoAud_seStartMenu(kSoundItemChange);
+                            getSettings().game.armorRupeeDrain.setValue(static_cast<MagicArmorMode>(i));
+                            config::Save();
+                        });
+                }
+                pane.add_rml(
+                    "<br/>Control the behavior of the Magic Armor.");
+            });
         addCheat("Invincible Enemies", getSettings().game.invincibleEnemies,
             "Prevents enemies from taking damage.");
         addCheat("Transform without Shadow Crystal", getSettings().game.transformWithoutShadowCrystal,
@@ -2048,6 +2117,14 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .helpText = "Show gyro sensor values in the input viewer.",
                 .isDisabled = [] { return !getSettings().game.showInputViewer; },
             });
+        config_bool_select(leftPane, rightPane, getSettings().game.nativePracticeMenu,
+            {
+                .key = "Native Practice Menu",
+                .helpText = "Draw the practice tools menu with the game's own engine so it scales "
+                            "with the resolution (controller only). When off, the practice menu "
+                            "uses the ImGui interface, which supports the mouse but does not scale "
+                            "at low resolutions.",
+            });
         leftPane.add_section("Game");
         leftPane.register_control(
             leftPane.add_select_button({
@@ -2094,6 +2171,23 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.recordingMode,
             "Recording Mode",
             "Disables the game HUD and all background music.<br/><br/>Useful for recording footage.");
+
+        if (!mPrelaunch) {
+            if constexpr (dusk::SupportsProcessRestart) {
+                leftPane.add_section("System");
+                leftPane.register_control(
+                    leftPane.add_button("Return to Startup Screen").on_pressed([] {
+                        mDoAud_seStartMenu(kSoundClick);
+                        confirm_return_to_startup();
+                    }),
+                    rightPane, [](Pane& pane) {
+                        pane.add_text(
+                            "Restart Dusklight and return to the startup screen, where you can "
+                            "change your disc image, language, graphics backend, and other startup "
+                            "options.");
+                    });
+            }
+        }
     });
 }
 

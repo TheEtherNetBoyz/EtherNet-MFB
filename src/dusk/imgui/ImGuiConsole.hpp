@@ -24,6 +24,11 @@ public:
     void PreDraw();
     void PostDraw();
 
+    // Renders the practice-saves menu natively (J2D/GX) instead of through
+    // imgui, so it scales with output resolution. Called from the game's 2D
+    // draw pass (m_Do_graphic). No-ops when the menu is closed.
+    void DrawPracticeSavesNative();
+
     static bool CheckMenuViewToggle(ImGuiKey key, bool& active);
     static bool CheckMenuViewToggle(const UserSettings::HotkeyBinding& binding, bool& active);
     void AddToast(std::string_view message, float duration = 3.f);
@@ -36,8 +41,6 @@ private:
         Toast(std::string message, float duration) noexcept : message(std::move(message)),
                                                               remain(duration) {}
     };
-
-    float mouseHideTimer = 0.0f;
 
     bool m_isHidden = true;
     bool m_isLaunchInitialized = false;

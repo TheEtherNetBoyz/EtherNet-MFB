@@ -59,6 +59,7 @@
 #include "dusk/frame_interpolation.h"
 #include "dusk/game_clock.h"
 #include "dusk/gyro.h"
+#include "dusk/mouse.h"
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/imgui/ImGuiEngine.hpp"
 #include "dusk/iso_validate.hpp"
@@ -79,7 +80,6 @@
 #include <dolphin/dvd.h>
 
 #include "SDL3/SDL_init.h"
-#include "SDL3/SDL_filesystem.h"
 #include "SDL3/SDL_iostream.h"
 #include "SDL3/SDL_misc.h"
 #include "cxxopts.hpp"
@@ -90,6 +90,7 @@
 #include "dusk/speedrun.h"
 #include "dusk/settings.h"
 #include "dusk/vector_rsqrt.h"
+#include "dusk/texture_replacements.hpp"
 #include "dusk/io.hpp"
 #include "dusk/version.hpp"
 #include "dusk/discord_presence.hpp"
@@ -127,6 +128,7 @@ bool dusk::IsRunning = true;
 bool dusk::IsShuttingDown = false;
 bool dusk::IsGameLaunched = false;
 bool dusk::RestartRequested = false;
+bool dusk::ReturnToPrelaunchRequested = false;
 std::filesystem::path dusk::ConfigPath;
 std::filesystem::path dusk::CachePath;
 #endif
@@ -134,6 +136,11 @@ std::filesystem::path dusk::CachePath;
 void dusk::RequestRestart() noexcept {
     RestartRequested = SupportsProcessRestart;
     IsRunning = false;
+}
+
+void dusk::RequestReturnToPrelaunch() noexcept {
+    ReturnToPrelaunchRequested = SupportsProcessRestart;
+    RequestRestart();
 }
 
 s32 LOAD_COPYDATE(void*) {
@@ -174,6 +181,7 @@ bool launchUILoop() {
             switch (event->type) {
             case AURORA_SDL_EVENT:
                 dusk::latency_trace::on_sdl_event(event->sdl);
+                dusk::mouse::handle_event(event->sdl);
                 dusk::ui::handle_event(event->sdl);
                 dusk::g_imguiConsole.HandleSDLEvent(event->sdl);
                 break;
@@ -252,15 +260,25 @@ void main01(void) {
                 goto eventsDone;
             case AURORA_PAUSED:
                 dusk::audio::SetPaused(true);
+                dusk::mouse::onFocusLost();
                 break;
             case AURORA_UNPAUSED:
                 dusk::audio::SetPaused(false);
                 dusk::game_clock::reset_frame_timer();
+                dusk::mouse::onFocusGained();
                 break;
             case AURORA_SDL_EVENT:
                 dusk::latency_trace::on_sdl_event(event->sdl);
+                dusk::mouse::handle_event(event->sdl);
                 dusk::ui::handle_event(event->sdl);
                 dusk::g_imguiConsole.HandleSDLEvent(event->sdl);
+                break;
+            case AURORA_WINDOW_RESIZED:
+                if (dusk::getSettings().video.rememberWindowSize && !dusk::getSettings().video.enableFullscreen) {
+                    dusk::getSettings().video.lastWindowWidth.setValue(event->windowSize.width);
+                    dusk::getSettings().video.lastWindowHeight.setValue(event->windowSize.height);
+                    dusk::config::Save();
+                }
                 break;
             case AURORA_DISPLAY_SCALE_CHANGED:
                 dusk::ImGuiEngine_Initialize(event->windowSize.scale);
@@ -309,6 +327,7 @@ void main01(void) {
                     const float stickX = mDoCPd_c::getStickX(PAD_1);
                     const float stickY = mDoCPd_c::getStickY(PAD_1);
                     dusk::latency_trace::pad_snapshot("mDoCPd_read_after", padHold, padTrig, stickX, stickY);
+                    dusk::mouse::read();
                     dusk::gyro::read(pacing.sim_pace);
                     dusk::latency_trace::mark("fapGm_Execute_before");
                     fapGm_Execute();
@@ -356,6 +375,7 @@ void main01(void) {
             dusk::latency_trace::pad_snapshot("mDoCPd_read_after", mDoCPd_c::getHold(PAD_1),
                                               mDoCPd_c::getTrig(PAD_1), mDoCPd_c::getStickX(PAD_1),
                                               mDoCPd_c::getStickY(PAD_1));
+            dusk::mouse::read();
             dusk::gyro::read(pacing.presentation_dt_seconds);
 
             // EXECUTE GAME LOGIC & RENDER
@@ -514,14 +534,6 @@ static void LanguageInit() {
     selectedLanguage = static_cast<u8>(dusk::getSettings().game.language.getValue());
 }
 
-static std::string asset_path(const char* assetName) {
-    const char* basePath = SDL_GetBasePath();
-    if (basePath != nullptr && basePath[0] != '\0') {
-        return std::string(basePath) + "res/" + assetName;
-    }
-    return std::string("res/") + assetName;
-}
-
 static void log_build_info() {
     DuskLog.info("Build: {} (rev {}, built {}, type {})", DUSK_WC_DESCRIBE, DUSK_WC_REVISION, DUSK_WC_DATE, DUSK_BUILD_TYPE);
     DuskLog.info("Platform: {}", DUSK_PLATFORM_NAME);
@@ -552,6 +564,7 @@ int game_main(int argc, char* argv[]) {
             ("console", "Show the Windows console window for logs", cxxopts::value<bool>()->default_value("false")->implicit_value("true"))
             ("dvd", "Path to DVD image file", cxxopts::value<std::string>())
             ("backend", "Graphics API backend to use (auto, d3d12, d3d11, metal, vulkan, null)", cxxopts::value<std::string>())
+            ("prelaunch", "Force the startup screen to appear even if it is set to be skipped", cxxopts::value<bool>()->default_value("false")->implicit_value("true"))
             ("cvar", "Override configuration variables without modifying config", cxxopts::value<std::vector<std::string>>());
 
         arg_options.parse_positional({"dvd"});
@@ -603,10 +616,17 @@ int game_main(int argc, char* argv[]) {
     // PADSetDefaultMapping(&defaultPadMapping, PAD_TYPE_STANDARD);
 
     {
-        // Load mappings from https://github.com/mdqinc/SDL_GameControllerDB
-        const auto mappingsPath = asset_path("gamecontrollerdb.txt");
-        if (SDL_AddGamepadMappingsFromFile(mappingsPath.c_str()) < 0) {
-            DuskLog.warn("Failed to load gamecontrollerdb.txt: {}", SDL_GetError());
+        const auto mappingsPath = dusk::ConfigPath / "gamecontrollerdb.txt";
+        std::error_code ec;
+        if (std::filesystem::exists(mappingsPath, ec)) {
+            const auto mappingsPathString = dusk::io::fs_path_to_string(mappingsPath);
+            if (SDL_AddGamepadMappingsFromFile(mappingsPathString.c_str()) < 0) {
+                DuskLog.warn("Failed to load gamecontrollerdb.txt from '{}': {}",
+                    mappingsPathString, SDL_GetError());
+            }
+        } else if (ec) {
+            DuskLog.warn("Failed to inspect gamecontrollerdb.txt in data folder '{}': {}",
+                dusk::io::fs_path_to_string(mappingsPath), ec.message());
         }
     }
 
@@ -620,12 +640,25 @@ int game_main(int argc, char* argv[]) {
         config.appName = dusk::AppName;
         config.userPath = reinterpret_cast<const char*>(userPathString.c_str());
         config.cachePath = reinterpret_cast<const char*>(cachePathString.c_str());
+#ifdef DUSK_ASSET_DIR
+        config.resourcesPath = DUSK_ASSET_DIR;
+#endif
         config.vsync = dusk::getSettings().video.enableVsync;
         config.startFullscreen = dusk::getSettings().video.enableFullscreen;
         config.windowPosX = -1;
         config.windowPosY = -1;
-        config.windowWidth = defaultWindowWidth * 2;
-        config.windowHeight = defaultWindowHeight * 2;
+
+        const int lastWindowWidth = dusk::getSettings().video.lastWindowWidth.getValue();
+        const int lastWindowHeight = dusk::getSettings().video.lastWindowHeight.getValue();
+
+        if (dusk::getSettings().video.rememberWindowSize && lastWindowWidth > 0 && lastWindowHeight > 0) {
+            config.windowWidth = lastWindowWidth;
+            config.windowHeight = lastWindowHeight;
+        } else {
+            config.windowWidth = defaultWindowWidth * 2;
+            config.windowHeight = defaultWindowHeight * 2;
+        }
+
         config.desiredBackend = ResolveDesiredBackend(parsed_arg_options);
         config.logCallback = &aurora_log_callback;
         config.logLevel = startupLogLevel;
@@ -634,7 +667,6 @@ int game_main(int argc, char* argv[]) {
         config.allowJoystickBackgroundEvents = dusk::getSettings().game.allowBackgroundInput;
         config.pauseOnFocusLost = dusk::getSettings().game.pauseOnFocusLost;
         config.imGuiInitCallback = &aurora_imgui_init_callback;
-        config.allowTextureReplacements = dusk::getSettings().game.enableTextureReplacements;
         config.allowTextureDumps = false;
         auroraInfo = aurora_initialize(argc, argv, &config);
     }
@@ -700,6 +732,7 @@ int game_main(int argc, char* argv[]) {
         return 0;
     }
 
+    dusk::texture_replacements::reload();
     dusk::ui::initialize();
     dusk::ui::push_document(std::make_unique<dusk::ui::Overlay>(), true, true);
     dusk::ui::push_document(std::make_unique<dusk::ui::MenuBar>(), false);
@@ -708,6 +741,10 @@ int game_main(int argc, char* argv[]) {
     // This is only a metadata check; full hash verification is handled by the prelaunch UI.
     bool forcePreLaunchUI = false;
     bool saveConfigBeforePrelaunch = false;
+
+    // Requested via the in-game "Return to Startup Screen" option (or --prelaunch). Show the
+    // startup screen even if "Skip Dusklight Main Menu" is enabled, without persisting that change.
+    const bool forceShowPrelaunch = parsed_arg_options.count("prelaunch") > 0;
 
     const std::string p = dusk::getSettings().backend.isoPath;
     dusk::iso::DiscInfo discInfo{};
@@ -723,7 +760,7 @@ int game_main(int argc, char* argv[]) {
 
     std::string dvd_path;
     bool dvd_opened = false;
-    if (parsed_arg_options.count("dvd")) {
+    if (!forceShowPrelaunch && parsed_arg_options.count("dvd")) {
         dvd_path = parsed_arg_options["dvd"].as<std::string>();
         if (dusk::iso::inspect(dvd_path.c_str(), discInfo) == dusk::iso::ValidationError::Success) {
             DuskLog.info("Loading DVD image from command line: {}", dvd_path);
@@ -761,7 +798,7 @@ int game_main(int argc, char* argv[]) {
             dusk::config::Save();
         }
 
-        if (!dusk::getSettings().backend.skipPreLaunchUI) {
+        if (forceShowPrelaunch || !dusk::getSettings().backend.skipPreLaunchUI) {
             dusk::ui::push_document(std::make_unique<dusk::ui::Prelaunch>(), true);
 
             // pre game launch ui main loop
@@ -848,6 +885,7 @@ int game_main(int argc, char* argv[]) {
     dusk::discord::shutdown();
 #endif
     dusk::ui::shutdown();
+    dusk::texture_replacements::shutdown();
     aurora_shutdown();
 
     return 0;

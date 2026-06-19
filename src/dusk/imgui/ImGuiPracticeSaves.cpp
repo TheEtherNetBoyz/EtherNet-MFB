@@ -4,6 +4,14 @@
 #include "imgui.h"
 #include "fmt/format.h"
 
+#include "JSystem/J2DGraph/J2DGrafContext.h"
+#include "JSystem/J2DGraph/J2DTextBox.h"
+#include "JSystem/JUtility/JUTResFont.h"
+#include "JSystem/JUtility/TColor.h"
+#include "SSystem/SComponent/c_math.h"
+#include "dolphin/gx.h"
+#include "m_Do/m_Do_ext.h"
+
 #include "c/c_damagereaction.h"
 #include "SSystem/SComponent/c_counter.h"
 #include "d/d_com_inf_game.h"
@@ -27,6 +35,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -113,6 +122,14 @@ int category_index(ImGuiPracticeSaves::SaveCategory category) {
 
 int main_category_index(ImGuiPracticeSaves::MainCategory category) {
     return static_cast<int>(category);
+}
+
+// Native menu: which categories present a sub-category list (gz-style) before
+// their rows/saves, rather than going straight to rows.
+bool category_has_sublist(ImGuiPracticeSaves::MainCategory category) {
+    return category == ImGuiPracticeSaves::MainCategory::Practice ||
+           category == ImGuiPracticeSaves::MainCategory::Tools ||
+           category == ImGuiPracticeSaves::MainCategory::Scene;
 }
 
 uint32_t read_be32(const u8* data) {
@@ -1237,6 +1254,182 @@ void ImGuiPracticeSaves::handleController(bool& open) {
     }
 }
 
+// gz-style nested navigation for the native menu: main category list ->
+// (optional) sub-category list -> rows/saves, with B walking back up one level
+// at a time. No tabs / no L/R switching.
+void ImGuiPracticeSaves::handleControllerNative(bool& open) {
+    const u32 hold = raw_pad_hold() | raw_pad_trig();
+    const double now = ImGui::GetTime();
+    if (now < m_nextControllerInputTime) {
+        return;
+    }
+    auto accept = [&](u32 button, double cooldown = 0.16) {
+        if ((hold & button) == 0) {
+            return false;
+        }
+        m_nextControllerInputTime = now + cooldown;
+        return true;
+    };
+
+    const bool hasSub = category_has_sublist(m_mainCategory);
+
+    // Sub-category list accessors (Practice -> save category, Tools/Scene -> tab).
+    auto subCount = [&]() -> int {
+        if (m_mainCategory == MainCategory::Practice) {
+            return static_cast<int>(SaveCategory::Count);
+        }
+        return 3;  // tools / scene
+    };
+    auto subIndex = [&]() -> int {
+        if (m_mainCategory == MainCategory::Practice) {
+            return category_index(m_saveCategory);
+        }
+        return m_mainCategory == MainCategory::Tools ? s_gzToolsTab : s_gzSceneTab;
+    };
+    auto setSubIndex = [&](int v) {
+        if (m_mainCategory == MainCategory::Practice) {
+            m_saveCategory = static_cast<SaveCategory>(v);
+            m_selectedSave = 0;
+            m_scrollSelectedSave = true;
+        } else if (m_mainCategory == MainCategory::Tools) {
+            s_gzToolsTab = v;
+        } else {
+            s_gzSceneTab = v;
+        }
+    };
+
+    // B: back out one level.
+    if (accept(PAD_BUTTON_B, 0.18)) {
+        if (!m_focusSaveList) {
+            open = false;
+        } else if (hasSub && m_inSubList) {
+            m_inSubList = false;
+        } else {
+            m_focusSaveList = false;
+        }
+        return;
+    }
+
+    // Level 0: main category list.
+    if (!m_focusSaveList) {
+        const int cat = main_category_index(m_mainCategory);
+        if (accept(PAD_BUTTON_UP, 0.18)) {
+            m_mainCategory = static_cast<MainCategory>(std::max(0, cat - 1));
+            return;
+        }
+        if (accept(PAD_BUTTON_DOWN, 0.18)) {
+            m_mainCategory = static_cast<MainCategory>(
+                std::min(static_cast<int>(MainCategory::Count) - 1, cat + 1));
+            return;
+        }
+        if (accept(PAD_BUTTON_A)) {
+            m_focusSaveList = true;
+            m_inSubList = !category_has_sublist(m_mainCategory);
+            m_selectedSave = 0;
+            m_selectedGenericRow = 0;
+            m_scrollSelectedSave = true;
+            m_scrollSelectedGenericRow = true;
+        }
+        return;
+    }
+
+    // Level 1: sub-category list (Practice/Tools/Scene).
+    if (hasSub && !m_inSubList) {
+        const int count = subCount();
+        const int idx = subIndex();
+        if (accept(PAD_BUTTON_UP, 0.18)) {
+            setSubIndex(std::max(0, idx - 1));
+            return;
+        }
+        if (accept(PAD_BUTTON_DOWN, 0.18)) {
+            setSubIndex(std::min(count - 1, idx + 1));
+            return;
+        }
+        if (accept(PAD_BUTTON_A)) {
+            m_inSubList = true;
+            m_selectedSave = 0;
+            m_selectedGenericRow = 0;
+            m_scrollSelectedSave = true;
+            m_scrollSelectedGenericRow = true;
+        }
+        return;
+    }
+
+    // Level 2: saves (Practice) or rows (everything else).
+    if (m_mainCategory == MainCategory::Practice) {
+        const int count = static_cast<int>(currentSaves().size());
+        if (count > 0) {
+            if (accept(PAD_BUTTON_UP)) {
+                m_selectedSave = std::max(0, m_selectedSave - 1);
+                m_scrollSelectedSave = true;
+                return;
+            }
+            if (accept(PAD_BUTTON_DOWN)) {
+                m_selectedSave = std::min(count - 1, m_selectedSave + 1);
+                m_scrollSelectedSave = true;
+                return;
+            }
+            if (accept(PAD_BUTTON_LEFT)) {
+                m_selectedSave = std::max(0, m_selectedSave - 10);
+                m_scrollSelectedSave = true;
+                return;
+            }
+            if (accept(PAD_BUTTON_RIGHT)) {
+                m_selectedSave = std::min(count - 1, m_selectedSave + 10);
+                m_scrollSelectedSave = true;
+                return;
+            }
+            if (accept(PAD_BUTTON_A, 0.22) && !m_loadInProgress &&
+                !getTransientSettings().stateShareLoadActive) {
+                if (loadPracticeSave(currentSaves()[m_selectedSave])) {
+                    open = false;
+                }
+                return;
+            }
+        }
+        return;
+    }
+
+    const int count = gz_generic_row_count(m_mainCategory);
+    if (count > 0) {
+        m_selectedGenericRow = std::clamp(m_selectedGenericRow, 0, count - 1);
+        if (accept(PAD_BUTTON_UP, 0.18)) {
+            m_selectedGenericRow = std::max(0, m_selectedGenericRow - 1);
+            return;
+        }
+        if (accept(PAD_BUTTON_DOWN, 0.18)) {
+            m_selectedGenericRow = std::min(count - 1, m_selectedGenericRow + 1);
+            return;
+        }
+        // Combo categories (Warping) adjust the value with left/right; other
+        // categories have no per-row adjust (their sub-lists are level 1).
+        if (m_mainCategory == MainCategory::Warping) {
+            if (accept(PAD_BUTTON_LEFT)) {
+                gz_adjust_generic_row(m_mainCategory, m_selectedGenericRow, -1);
+                return;
+            }
+            if (accept(PAD_BUTTON_RIGHT)) {
+                gz_adjust_generic_row(m_mainCategory, m_selectedGenericRow, 1);
+                return;
+            }
+        }
+        if (accept(PAD_BUTTON_A, 0.20)) {
+            if (m_mainCategory == MainCategory::Tools && s_gzToolsTab == 1) {
+                if (m_selectedGenericRow == 2) {
+                    gz_set_bool(getSettings().game.nativeInputViewer, !getSettings().game.speedrunMode);
+                    return;
+                }
+                if (m_selectedGenericRow == 3) {
+                    gz_set_bool(getSettings().game.nativeLinkDebugInfo, !getSettings().game.speedrunMode);
+                    return;
+                }
+            }
+            gz_activate_generic_row(m_mainCategory, m_selectedGenericRow);
+            return;
+        }
+    }
+}
+
 void ImGuiPracticeSaves::drawCategoryList() {
     ImGui::BeginChild("##gz_main_categories", ImVec2(170.0f, 0.0f), false);
     for (int i = 0; i < static_cast<int>(MainCategory::Count); i++) {
@@ -1582,10 +1775,23 @@ void ImGuiPracticeSaves::draw(bool& open) {
         return;
     }
 
-    handleController(open);
+    const bool nativeMode = getSettings().game.nativePracticeMenu;
+    if (nativeMode) {
+        handleControllerNative(open);
+    } else {
+        handleController(open);
+    }
     m_lastControllerHold = raw_pad_hold() | raw_pad_trig();
     consumeControllerInput();
     if (!open) {
+        return;
+    }
+
+    // In native mode the menu is drawn (resolution-independently) from the
+    // game's 2D pass by drawNative(); the input/state handling above still runs
+    // here every frame. In imgui mode we fall through and render the imgui
+    // window, which is mouse-capable. Both share the same state and load logic.
+    if (nativeMode) {
         return;
     }
 
@@ -1612,6 +1818,675 @@ void ImGuiPracticeSaves::draw(bool& open) {
     }
 
     ImGui::End();
+}
+
+namespace {
+
+// Draws one line of menu text with a black drop shadow, matching the tpgz look.
+// All positions are in the game's virtual 2D space (608x448), so output scales
+// with resolution. setString stores the string raw (it does NOT printf-format;
+// J2DTextBox::draw re-prints it with "%s", which safely handles any '%' in the
+// text), so pass the literal string here.
+void draw_native_text(JUTFont* font, float x, float y, float size,
+                      const JUtility::TColor& color, const char* str) {
+    if (font == nullptr) {
+        return;
+    }
+
+    J2DTextBox tb;
+    tb.setFont(font);
+    tb.setFontSize(size, size);
+    tb.setString(str);
+
+    const JUtility::TColor shadow(0, 0, 0, color.a);
+    tb.setFontColor(shadow, shadow);
+    tb.draw(x + 2.0f, y + 2.0f);
+
+    tb.setFontColor(color, color);
+    tb.draw(x, y);
+}
+
+void draw_native_text_centered(JUTFont* font, float cx, float y, float size,
+                               const JUtility::TColor& color, const char* str) {
+    const float width = static_cast<float>(std::strlen(str)) * size * 0.55f;
+    draw_native_text(font, cx - width * 0.5f, y, size, color, str);
+}
+
+void draw_native_text_plain(JUTFont* font, float x, float y, float size,
+                            const JUtility::TColor& color, const char* str) {
+    if (font == nullptr) {
+        return;
+    }
+
+    J2DTextBox tb;
+    tb.setFont(font);
+    tb.setFontSize(size, size);
+    tb.setString(str);
+    tb.setFontColor(color, color);
+    tb.draw(x, y);
+}
+
+void draw_native_text_centered_plain(JUTFont* font, float cx, float y, float size,
+                                     const JUtility::TColor& color, const char* str) {
+    const float width = static_cast<float>(std::strlen(str)) * size * 0.55f;
+    draw_native_text_plain(font, cx - width * 0.5f, y, size, color, str);
+}
+
+GXColor gx_color(const JUtility::TColor& color) {
+    return {color.r, color.g, color.b, color.a};
+}
+
+void setup_native_shape_gx() {
+    GXClearVtxDesc();
+    GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XY, GX_F32, 0);
+    GXSetNumChans(1);
+    GXSetChanCtrl(GX_COLOR0A0, GX_FALSE, GX_SRC_REG, GX_SRC_REG, GX_LIGHT_NULL, GX_DF_NONE,
+                  GX_AF_NONE);
+    GXSetNumTexGens(0);
+    GXSetNumTevStages(1);
+    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
+    GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_C0);
+    GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_ENABLE, GX_TEVPREV);
+    GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_A0);
+    GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_ENABLE, GX_TEVPREV);
+    GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_SET);
+    GXSetZCompLoc(GX_ENABLE);
+    GXSetZMode(GX_DISABLE, GX_ALWAYS, GX_DISABLE);
+    GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_OR, GX_ALWAYS, 0);
+    GXSetCullMode(GX_CULL_NONE);
+    GXSetClipMode(GX_CLIP_DISABLE);
+    GXLoadPosMtxImm(cMtx_getIdentity(), 0);
+    GXSetCurrentMtx(0);
+}
+
+void set_shape_color(const JUtility::TColor& color) {
+    GXSetTevColor(GX_TEVREG0, gx_color(color));
+}
+
+void fill_rect(float x, float y, float w, float h, const JUtility::TColor& color) {
+    set_shape_color(color);
+    GXBegin(GX_QUADS, GX_VTXFMT0, 4);
+    GXPosition2f32(x, y);
+    GXPosition2f32(x + w, y);
+    GXPosition2f32(x + w, y + h);
+    GXPosition2f32(x, y + h);
+    GXEnd();
+}
+
+void outline_rect_line(float x, float y, float w, float h, const JUtility::TColor& color) {
+    set_shape_color(color);
+    GXSetLineWidth(0x10, GX_TO_ZERO);
+    GXBegin(GX_LINESTRIP, GX_VTXFMT0, 5);
+    GXPosition2f32(x, y);
+    GXPosition2f32(x + w, y);
+    GXPosition2f32(x + w, y + h);
+    GXPosition2f32(x, y + h);
+    GXPosition2f32(x, y);
+    GXEnd();
+}
+
+void outline_rect(float x, float y, float w, float h, float t, const JUtility::TColor& color) {
+    fill_rect(x, y, w, t, color);
+    fill_rect(x, y + h - t, w, t, color);
+    fill_rect(x, y, t, h, color);
+    fill_rect(x + w - t, y, t, h, color);
+}
+
+void fill_segment(float x0, float y0, float x1, float y1, float t, const JUtility::TColor& color) {
+    const float dx = x1 - x0;
+    const float dy = y1 - y0;
+    const float len = std::sqrt(dx * dx + dy * dy);
+    if (len <= 0.01f) {
+        return;
+    }
+
+    const float nx = -dy / len * t * 0.5f;
+    const float ny = dx / len * t * 0.5f;
+    set_shape_color(color);
+    GXBegin(GX_QUADS, GX_VTXFMT0, 4);
+    GXPosition2f32(x0 + nx, y0 + ny);
+    GXPosition2f32(x1 + nx, y1 + ny);
+    GXPosition2f32(x1 - nx, y1 - ny);
+    GXPosition2f32(x0 - nx, y0 - ny);
+    GXEnd();
+}
+
+void fill_poly(const std::array<std::pair<float, float>, 16>& points, int count,
+               const JUtility::TColor& color) {
+    set_shape_color(color);
+    GXBegin(GX_TRIANGLEFAN, GX_VTXFMT0, count);
+    for (int i = 0; i < count; i++) {
+        GXPosition2f32(points[i].first, points[i].second);
+    }
+    GXEnd();
+}
+
+void make_regular_poly(std::array<std::pair<float, float>, 16>& points, int count,
+                       float cx, float cy, float radius, float rotation) {
+    constexpr float kPi = 3.14159265358979323846f;
+    for (int i = 0; i < count; i++) {
+        const float a = rotation + kPi * 2.0f * static_cast<float>(i) / static_cast<float>(count);
+        points[i] = {cx + std::cos(a) * radius, cy + std::sin(a) * radius};
+    }
+}
+
+void outline_poly(const std::array<std::pair<float, float>, 16>& points, int count, float t,
+                  const JUtility::TColor& color) {
+    for (int i = 0; i < count; i++) {
+        const auto& a = points[i];
+        const auto& b = points[(i + 1) % count];
+        fill_segment(a.first, a.second, b.first, b.second, t, color);
+    }
+}
+
+void outline_poly_line(const std::array<std::pair<float, float>, 16>& points, int count,
+                       const JUtility::TColor& color) {
+    set_shape_color(color);
+    GXSetLineWidth(0x10, GX_TO_ZERO);
+    GXBegin(GX_LINESTRIP, GX_VTXFMT0, count + 1);
+    for (int i = 0; i < count; i++) {
+        GXPosition2f32(points[i].first, points[i].second);
+    }
+    GXPosition2f32(points[0].first, points[0].second);
+    GXEnd();
+}
+
+void fill_regular_poly(float cx, float cy, float radius, int count,
+                       const JUtility::TColor& color) {
+    std::array<std::pair<float, float>, 16> points{};
+    make_regular_poly(points, count, cx, cy, radius, 0.0f);
+    fill_poly(points, count, color);
+}
+
+void outline_regular_poly(float cx, float cy, float radius, int count, float t,
+                          const JUtility::TColor& color, float rotation = 0.0f) {
+    std::array<std::pair<float, float>, 16> points{};
+    make_regular_poly(points, count, cx, cy, radius, rotation);
+    outline_poly(points, count, t, color);
+}
+
+void outline_regular_poly_line(float cx, float cy, float radius, int count,
+                               const JUtility::TColor& color, float rotation = 0.0f) {
+    std::array<std::pair<float, float>, 16> points{};
+    make_regular_poly(points, count, cx, cy, radius, rotation);
+    outline_poly_line(points, count, color);
+}
+
+void draw_ellipse(float cx, float cy, float w, float h, const JUtility::TColor& color) {
+    constexpr int kPoints = 16;
+    constexpr float kPi = 3.14159265358979323846f;
+    set_shape_color(color);
+    GXBegin(GX_TRIANGLEFAN, GX_VTXFMT0, kPoints);
+    for (int i = 0; i < kPoints; i++) {
+        const float a = kPi * 2.0f * static_cast<float>(i) / static_cast<float>(kPoints);
+        GXPosition2f32(cx + std::cos(a) * w * 0.5f, cy + std::sin(a) * h * 0.5f);
+    }
+    GXEnd();
+}
+
+void draw_trigger(float x, float y, float w, float h, float value, bool digital, bool fillFromRight,
+                  const JUtility::TColor& outline, const JUtility::TColor& active) {
+    outline_rect_line(x, y, w, h, outline);
+    const float clamped = std::clamp(value, 0.0f, 1.0f);
+    if (clamped > 0.01f) {
+        const float fillW = w * clamped;
+        fill_rect(fillFromRight ? x + w - fillW : x, y, fillW, h, digital ? active : outline);
+    }
+}
+
+void draw_button_box(JUTFont* font, float x, float y, float w, float h, const char* label,
+                     const JUtility::TColor& color, bool filled, float charSize) {
+    setup_native_shape_gx();
+    outline_rect_line(x, y, w, h, color);
+    if (filled) {
+        fill_rect(x, y, w, h, color);
+    }
+    const JUtility::TColor pressedText(0, 0, 0, 0x60);
+    draw_native_text_centered_plain(font, x + w * 0.5f, y + (h + charSize * 0.5f) * 0.5f,
+                                    charSize, filled ? pressedText : color, label);
+}
+
+void draw_dpad_button(JUTFont* font, float x, float y, float w, float h, const char* label,
+                      bool held, const JUtility::TColor& color, float charSize) {
+    draw_button_box(font, x, y, w, h, label, color, held, charSize);
+}
+
+void draw_dpad(JUTFont* font, float x, float y, float size, const JUtility::TColor& white,
+               u32 hold) {
+    const JUtility::TColor kMarker(80, 80, 80, 0xB0);
+    const JUtility::TColor kHeldMarker(0, 0, 0, 0x60);
+    const float branchW = 3.0f * size / 11.0f;
+    const float branchL = 4.0f * size / 11.0f;
+    const float charSize = 8.0f * size / 25.0f;
+    const float vCharSize = 4.0f * size / 25.0f;
+    const bool left = (hold & PAD_BUTTON_LEFT) != 0;
+    const bool up = (hold & PAD_BUTTON_UP) != 0;
+    const bool right = (hold & PAD_BUTTON_RIGHT) != 0;
+    const bool down = (hold & PAD_BUTTON_DOWN) != 0;
+
+    draw_dpad_button(font, x, y + branchL, branchL, branchW, "", left, white, charSize);
+    draw_dpad_button(font, x + branchL, y, branchW, branchL, "", up, white, vCharSize);
+    draw_dpad_button(font, x + branchL + branchW, y + branchL, branchL, branchW, "", right, white,
+                     charSize);
+    draw_dpad_button(font, x + branchL, y + branchL + branchW, branchW, branchL, "", down, white,
+                     vCharSize);
+
+    const float hMarkerW = branchL * 0.42f;
+    const float hMarkerH = 1.6f;
+    const float vMarkerW = 1.6f;
+    const float vMarkerH = branchL * 0.42f;
+    setup_native_shape_gx();
+    fill_rect(x + (branchL - hMarkerW) * 0.5f, y + branchL + (branchW - hMarkerH) * 0.5f,
+              hMarkerW, hMarkerH, left ? kHeldMarker : kMarker);
+    fill_rect(x + branchL + (branchW - vMarkerW) * 0.5f, y + (branchL - vMarkerH) * 0.5f,
+              vMarkerW, vMarkerH, up ? kHeldMarker : kMarker);
+    fill_rect(x + branchL + branchW + (branchL - hMarkerW) * 0.5f,
+              y + branchL + (branchW - hMarkerH) * 0.5f, hMarkerW, hMarkerH,
+              right ? kHeldMarker : kMarker);
+    fill_rect(x + branchL + (branchW - vMarkerW) * 0.5f,
+              y + branchL + branchW + (branchL - vMarkerH) * 0.5f, vMarkerW, vMarkerH,
+              down ? kHeldMarker : kMarker);
+}
+
+struct NativePadDisplayState {
+    u32 hold = 0;
+    float stickX = 0.0f;
+    float stickY = 0.0f;
+    float cStickX = 0.0f;
+    float cStickY = 0.0f;
+    float analogL = 0.0f;
+    float analogR = 0.0f;
+    int mainRawX = 0;
+    int mainRawY = 0;
+    int subRawX = 0;
+    int subRawY = 0;
+};
+
+NativePadDisplayState read_native_pad_display_state() {
+    NativePadDisplayState state;
+    if (JUTGamePad* pad = mDoCPd_c::getGamePad(PAD_1)) {
+        state.hold = pad->getButton();
+        state.stickX = pad->getMainStickX();
+        state.stickY = pad->getMainStickY();
+        state.cStickX = pad->getSubStickX();
+        state.cStickY = pad->getSubStickY();
+        state.analogL = std::min(1.0f, static_cast<float>(pad->getAnalogL()) * (1.0f / 140.0f));
+        state.analogR = std::min(1.0f, static_cast<float>(pad->getAnalogR()) * (1.0f / 140.0f));
+        state.mainRawX = pad->mMainStick.mRawX;
+        state.mainRawY = pad->mMainStick.mRawY;
+        state.subRawX = pad->mSubStick.mRawX;
+        state.subRawY = pad->mSubStick.mRawY;
+        return state;
+    }
+
+    state.hold = mDoCPd_c::getHold(PAD_1);
+    state.stickX = mDoCPd_c::getStickX(PAD_1);
+    state.stickY = mDoCPd_c::getStickY(PAD_1);
+    state.cStickX = mDoCPd_c::getSubStickX(PAD_1);
+    state.cStickY = mDoCPd_c::getSubStickY(PAD_1);
+    state.analogL = mDoCPd_c::getAnalogL(PAD_1);
+    state.analogR = mDoCPd_c::getAnalogR(PAD_1);
+    return state;
+}
+
+void draw_native_input_display(JUTFont* font) {
+    const JUtility::TColor kWhite(0xFF, 0xFF, 0xFF, 0xFF);
+    const JUtility::TColor kYellow(0xFF, 0xD1, 0x38, 0xFF);
+    const JUtility::TColor kGreen(0, 230, 120, 0xFF);
+    const JUtility::TColor kRed(0xFF, 0, 0, 0xFF);
+    const JUtility::TColor kPurple(0x8A, 0x2B, 0xE2, 0xFF);
+    const NativePadDisplayState pad = read_native_pad_display_state();
+
+    constexpr float x = 220.0f;
+    constexpr float y = 376.0f;
+    constexpr float scale = 1.0f;
+    constexpr float stickGateRadius = 17.5f * scale;
+    constexpr float stickDotSize = 20.0f * scale;
+    constexpr float stickMove = 10.0f * scale;
+
+    setup_native_shape_gx();
+    draw_trigger(x, y, 35.0f * scale, 7.0f * scale, pad.analogL,
+                 (pad.hold & PAD_TRIGGER_L) != 0, false, kWhite, kGreen);
+    draw_trigger(x + 45.0f * scale, y, 35.0f * scale, 7.0f * scale, pad.analogR,
+                 (pad.hold & PAD_TRIGGER_R) != 0, true, kWhite, kGreen);
+
+    const float mainCx = x + 17.5f * scale;
+    const float mainCy = y + 30.0f * scale;
+    const float cCx = x + 62.5f * scale;
+    const float cCy = y + 30.0f * scale;
+    outline_regular_poly_line(mainCx, mainCy, stickGateRadius, 8, kWhite, -1.57079632679f);
+    outline_regular_poly_line(cCx, cCy, stickGateRadius, 8, kYellow, -1.57079632679f);
+    draw_ellipse(mainCx + pad.stickX * stickMove, mainCy - pad.stickY * stickMove,
+                 stickDotSize, stickDotSize, kWhite);
+    draw_ellipse(cCx + pad.cStickX * stickMove, cCy - pad.cStickY * stickMove,
+                 stickDotSize, stickDotSize, kYellow);
+
+    draw_dpad(font, x + 95.0f * scale, y + 10.0f * scale, 25.0f * scale, kWhite, pad.hold);
+    draw_button_box(font, x + 87.5f * scale, y + 40.0f * scale, 10.0f * scale, 10.0f * scale, "",
+                    kWhite, (pad.hold & PAD_BUTTON_START) != 0, 8.0f * scale);
+    draw_button_box(font, x + 130.0f * scale, y + 7.5f * scale, 30.0f * scale,
+                    15.0f * scale, "Y", kWhite, (pad.hold & PAD_BUTTON_Y) != 0,
+                    8.0f * scale);
+    draw_button_box(font, x + 167.5f * scale, y + 7.5f * scale, 15.0f * scale,
+                    15.0f * scale, "Z",
+                    kPurple, (pad.hold & PAD_TRIGGER_Z) != 0, 8.0f * scale);
+    draw_button_box(font, x + 130.0f * scale, y + 30.0f * scale, 30.0f * scale,
+                    30.0f * scale, "A", kGreen, (pad.hold & PAD_BUTTON_A) != 0,
+                    8.0f * scale);
+    draw_button_box(font, x + 108.5f * scale, y + 45.0f * scale, 13.0f * scale,
+                    13.0f * scale, "B", kRed, (pad.hold & PAD_BUTTON_B) != 0,
+                    8.0f * scale);
+    draw_button_box(font, x + 167.5f * scale, y + 30.0f * scale, 15.0f * scale,
+                    30.0f * scale, "X", kWhite, (pad.hold & PAD_BUTTON_X) != 0,
+                    8.0f * scale);
+
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%3d", pad.mainRawX);
+    draw_native_text_plain(font, x, y + 65.0f * scale, 13.0f * scale, kWhite, buf);
+    std::snprintf(buf, sizeof(buf), "%3d", pad.mainRawY);
+    draw_native_text_plain(font, x + 23.0f * scale, y + 65.0f * scale, 13.0f * scale, kWhite,
+                           buf);
+    std::snprintf(buf, sizeof(buf), "%3d", pad.subRawX);
+    draw_native_text_plain(font, x + 45.0f * scale, y + 65.0f * scale, 13.0f * scale, kYellow,
+                           buf);
+    std::snprintf(buf, sizeof(buf), "%3d", pad.subRawY);
+    draw_native_text_plain(font, x + 70.0f * scale, y + 65.0f * scale, 13.0f * scale, kYellow,
+                           buf);
+}
+
+void draw_native_link_debug(JUTFont* font) {
+    const JUtility::TColor kWhite(0xFF, 0xFF, 0xFF, 0xFF);
+    daAlink_c* player = daAlink_getAlinkActorClass();
+    if (player == nullptr) {
+        draw_native_text(font, 452.0f, 178.0f, 14.0f, kWhite, "link: ?");
+        return;
+    }
+
+    const float speed3d = std::sqrt(player->speed.x * player->speed.x +
+                                    player->speed.y * player->speed.y +
+                                    player->speed.z * player->speed.z);
+    float hours = dComIfGs_getTime() * (1.0f / 15.0f);
+    while (hours >= 24.0f) hours -= 24.0f;
+    while (hours < 0.0f) hours += 24.0f;
+    const int hour = static_cast<int>(hours);
+    const int minute = static_cast<int>((hours - static_cast<float>(hour)) * 60.0f);
+
+    char lines[7][40];
+    std::snprintf(lines[0], sizeof(lines[0]), "time: %02d:%02d", hour, minute);
+    std::snprintf(lines[1], sizeof(lines[1]), "angle: %u", static_cast<u16>(player->shape_angle.y));
+    std::snprintf(lines[2], sizeof(lines[2]), "y-angle: %d", player->mBodyAngle.x);
+    std::snprintf(lines[3], sizeof(lines[3]), "speed: %.4f", speed3d);
+    std::snprintf(lines[4], sizeof(lines[4]), "x-pos: %.4f", player->current.pos.x);
+    std::snprintf(lines[5], sizeof(lines[5]), "y-pos: %.4f", player->current.pos.y);
+    std::snprintf(lines[6], sizeof(lines[6]), "z-pos: %.4f", player->current.pos.z);
+
+    float y = 182.0f;
+    for (const auto& line : lines) {
+        draw_native_text(font, 452.0f, y, 14.0f, kWhite, line);
+        y += 20.0f;
+    }
+}
+
+}  // namespace
+
+void ImGuiPracticeSaves::drawNative(bool menuOpen) {
+    // Only the native renderer; in imgui mode draw() renders the window instead.
+    auto& settings = getSettings();
+    if (!settings.game.nativePracticeMenu || settings.game.speedrunMode) {
+        return;
+    }
+    const bool nativeLinkDebugInfo = settings.game.nativeLinkDebugInfo.getValue();
+    const bool nativeInputViewer = settings.game.nativeInputViewer.getValue();
+    if (!menuOpen && !nativeLinkDebugInfo && !nativeInputViewer) {
+        return;
+    }
+    J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
+    if (port == nullptr) {
+        return;
+    }
+    // Re-establish the active HUD ortho (viewport + projection + pos matrix).
+    port->setPort();
+
+    // Guard: the message font lives in the font archive, absent on some
+    // transition/title frames. Avoid lazy init there; shape-only overlays can
+    // still draw without labels when the native menu is closed.
+    JUTFont* font = nullptr;
+    if (dComIfGp_getFontArchive() != nullptr) {
+        font = mDoExt_getMesgFont();
+    }
+    if (font == nullptr && menuOpen) {
+        return;
+    }
+
+    const JUtility::TColor kWhite(0xFF, 0xFF, 0xFF, 0xFF);
+    const JUtility::TColor kGreen(26, 230, 26, 0xFF);  // imgui (0.1, 0.9, 0.1)
+
+    const float left = 24.0f;
+    const float headerSize = 18.0f;
+    const float itemSize = 15.0f;
+    const float lineH = 19.0f;
+    float y = 24.0f;
+
+    if (menuOpen) {
+        draw_native_text(font, left, y, headerSize, kGreen, "practice tools");
+        y += 32.0f;
+    }
+
+    if (!menuOpen) {
+        // Overlay-only frame; keep drawing selected native displays below.
+    } else if (!m_focusSaveList) {
+        // Top-level category list. The cursor (green) follows m_mainCategory.
+        for (int i = 0; i < static_cast<int>(MainCategory::Count); i++) {
+            const bool cursor = (i == main_category_index(m_mainCategory));
+            draw_native_text(font, left, y, itemSize, cursor ? kGreen : kWhite,
+                             kMainCategoryNames[i]);
+            y += lineH;
+        }
+    } else if (category_has_sublist(m_mainCategory) && !m_inSubList) {
+        // Level 1: the sub-category list (gz-style). The cursor follows the
+        // active sub index; A enters its rows/saves, B returns to the category
+        // list. No tabs.
+        if (m_mainCategory == MainCategory::Practice) {
+            for (int i = 0; i < static_cast<int>(SaveCategory::Count); i++) {
+                const bool cursor = (i == category_index(m_saveCategory));
+                draw_native_text(font, left, y, itemSize, cursor ? kGreen : kWhite,
+                                 kSaveCategories[i].label);
+                y += lineH;
+            }
+        } else {
+            static const char* const kToolsTabs[] = {"checkers", "displays", "link"};
+            static const char* const kSceneTabs[] = {"environment", "viewers", "audio"};
+            const char* const* labels =
+                (m_mainCategory == MainCategory::Tools) ? kToolsTabs : kSceneTabs;
+            const int cur = (m_mainCategory == MainCategory::Tools) ? s_gzToolsTab : s_gzSceneTab;
+            for (int i = 0; i < 3; i++) {
+                draw_native_text(font, left, y, itemSize, i == cur ? kGreen : kWhite, labels[i]);
+                y += lineH;
+            }
+        }
+    } else if (m_mainCategory == MainCategory::Practice) {
+        // Level 2: the save list for the chosen category.
+        const auto& saves = currentSaves();
+        const int count = static_cast<int>(saves.size());
+        if (count == 0) {
+            draw_native_text(font, left, y, itemSize, kWhite, "No saves found.");
+        } else {
+            // Window the list so the cursor row stays visible when it overflows.
+            const int visible = 15;
+            int start = 0;
+            if (count > visible) {
+                start = std::clamp(m_selectedSave - visible / 2, 0, count - visible);
+            }
+            const int end = std::min(count, start + visible);
+            for (int i = start; i < end; i++) {
+                const bool cursor = (i == m_selectedSave);
+                draw_native_text(font, left, y, itemSize, cursor ? kGreen : kWhite,
+                                 saves[i].name.c_str());
+                y += lineH;
+            }
+            // Bottom hint line: description of the hovered save (imgui tooltip ->
+            // tpgz's bottom line, e.g. "Hangin' with Hugo").
+            if (m_selectedSave >= 0 && m_selectedSave < count &&
+                !saves[m_selectedSave].description.empty()) {
+                draw_native_text(font, left, 410.0f, itemSize, kWhite,
+                                 saves[m_selectedSave].description.c_str());
+            }
+        }
+    } else {
+        // Generic category panels. Row order/count must match
+        // gz_generic_row_count + gz_activate/adjust_generic_row so the cursor
+        // (m_selectedGenericRow, driven by handleController) and the actions
+        // line up. The actions are already applied by handleController; here we
+        // only render. Disabled rows stay greyed, exactly as in the imgui panels.
+        auto& s = settings;
+        const JUtility::TColor kGrey(150, 150, 150, 0xFF);
+        const float checkX = left + 248.0f;  // checkbox column for bool rows
+        const float valueX = left + 96.0f;   // value column for combo rows
+
+        int rowIdx = 0;
+        auto rowCol = [&](bool disabled) -> JUtility::TColor {
+            if (rowIdx == m_selectedGenericRow) return kGreen;
+            return disabled ? kGrey : kWhite;
+        };
+        // A bool option: label on the left, [X]/[ ] in a fixed right column.
+        auto boolRow = [&](const char* label, bool on, bool disabled) {
+            const JUtility::TColor col = rowCol(disabled);
+            draw_native_text(font, left, y, itemSize, col, label);
+            draw_native_text(font, checkX, y, itemSize, col, on ? "[X]" : "[ ]");
+            y += lineH;
+            ++rowIdx;
+        };
+        auto disabledBool = [&](const char* label) { boolRow(label, false, true); };
+        // A plain row (buttons / the warp action): label only.
+        auto plainRow = [&](const char* label, bool disabled) {
+            draw_native_text(font, left, y, itemSize, rowCol(disabled), label);
+            y += lineH;
+            ++rowIdx;
+        };
+        // A combo row: label + current value (switched with L/R).
+        auto comboRow = [&](const char* label, const std::string& value) {
+            const JUtility::TColor col = rowCol(false);
+            draw_native_text(font, left, y, itemSize, col, label);
+            draw_native_text(font, valueX, y, itemSize, col, value.c_str());
+            y += lineH;
+            ++rowIdx;
+        };
+        switch (m_mainCategory) {
+        case MainCategory::Cheats: {
+            const bool en = !s.game.speedrunMode;
+            boolRow("disable item timer", s.game.enableIndefiniteItemDrops.getValue(), !en);
+            disabledBool("disable walls");
+            disabledBool("fast bonk recovery");
+            disabledBool("fast movement");
+            boolRow("infinite air", s.game.infiniteOxygen.getValue(), !en);
+            boolRow("infinite arrows", s.game.infiniteArrows.getValue(), !en);
+            boolRow("infinite bombs", s.game.infiniteBombs.getValue(), !en);
+            boolRow("infinite hearts", s.game.infiniteHearts.getValue(), !en);
+            boolRow("infinite lantern oil", s.game.infiniteOil.getValue(), !en);
+            boolRow("infinite rupees", s.game.infiniteRupees.getValue(), !en);
+            boolRow("infinite slingshot seeds", s.game.infiniteSeeds.getValue(), !en);
+            disabledBool("invincible link");
+            boolRow("invincible enemies", s.game.invincibleEnemies.getValue(), !en);
+            boolRow("moon jump", s.game.moonJump.getValue(), !en);
+            disabledBool("no sinking in sand");
+            boolRow("super clawshot", s.game.superClawshot.getValue(), !en);
+            boolRow("transform anywhere", s.game.canTransformAnywhere.getValue(), !en);
+            disabledBool("unrestricted items");
+            break;
+        }
+        case MainCategory::Tools: {
+            if (s_gzToolsTab == 0) {
+                disabledBool("coro td");
+                disabledBool("ebmb");
+                disabledBool("elevator escape");
+                boolRow("gorge void", s.game.gorgeVoidChecker.getValue(), false);
+                disabledBool("ladder freezard cancel");
+                disabledBool("rolls");
+                disabledBool("universal map delay");
+            } else if (s_gzToolsTab == 1) {
+                disabledBool("a/b mash rate");
+                boolRow("in-game timer", s.game.showSpeedrunRTATimer.getValue(),
+                        !s.game.speedrunMode);
+                boolRow("input viewer", s.game.nativeInputViewer.getValue(), s.game.speedrunMode);
+                boolRow("link debug info", s.game.nativeLinkDebugInfo.getValue(),
+                        s.game.speedrunMode);
+                disabledBool("load timer");
+                disabledBool("stage info");
+                disabledBool("timer");
+            } else {
+                boolRow("free cam", s.game.freeCamera.getValue(), false);
+                boolRow("move link", s.game.moveLink.getValue(), s.game.speedrunMode);
+                disabledBool("teleport");
+            }
+            break;
+        }
+        case MainCategory::Scene: {
+            if (s_gzSceneTab == 0) {
+                disabledBool("freeze time");
+                disabledBool("freeze actors");
+                disabledBool("freeze camera");
+            } else if (s_gzSceneTab == 1) {
+                disabledBool("viewers");
+            } else {
+                disabledBool("mute bgm");
+                disabledBool("mute sfx");
+            }
+            break;
+        }
+        case MainCategory::Settings: {
+            disabledBool("boot to menu");
+            disabledBool("cursor type");
+            disabledBool("display mode");
+            disabledBool("drop shadows");
+            disabledBool("menu pauses game");
+            disabledBool("menu sfx");
+            disabledBool("reload type");
+            disabledBool("state streaming");
+            disabledBool("swap equips");
+            disabledBool("theme");
+            plainRow("command combos", true);
+            plainRow("menu positions", true);
+            plainRow("start gdb server", true);
+            plainRow("save settings", true);
+            plainRow("load settings", true);
+            plainRow("delete settings", true);
+            break;
+        }
+        case MainCategory::Warping: {
+            clamp_gz_warp_state(s_gzWarpState);
+            const auto& region = gameRegions[s_gzWarpState.region];
+            const auto& map = region.maps[s_gzWarpState.map];
+            const auto& room = map.mapRooms[s_gzWarpState.room];
+            comboRow("type", region.regionName);
+            comboRow("stage", map.mapName);
+            comboRow("room", fmt::format("{}", room.roomNo));
+            comboRow("spawn", fmt::format("{}", room.roomPoints[s_gzWarpState.spawn]));
+            comboRow("layer", s_gzWarpState.layer < 0 ? std::string("default")
+                                                      : fmt::format("{}", s_gzWarpState.layer));
+            plainRow("warp", !dusk::IsGameLaunched);
+            break;
+        }
+        case MainCategory::Flags:
+            for (const char* r : kFlagRows) disabledBool(r);
+            break;
+        case MainCategory::Inventory:
+            for (const char* r : kInventoryRows) disabledBool(r);
+            break;
+        case MainCategory::Memory:
+            for (const char* r : kMemoryRows) disabledBool(r);
+            break;
+        default:
+            break;
+        }
+    }
+
+    if (nativeLinkDebugInfo && font != nullptr) {
+        draw_native_link_debug(font);
+    }
+    if (nativeInputViewer) {
+        draw_native_input_display(font);
+    }
 }
 
 void ImGuiMenuTools::ShowPracticeSaves() {

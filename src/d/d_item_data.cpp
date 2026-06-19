@@ -258,6 +258,11 @@ dItem_itemResource dItem_data::item_resource[] = {
     {"T_gD_key", 0x0003,-0x0001,-0x0001,-0x0001,-0x0001, -0x1, -0x1, 0x006E, 0x64, 0x0000},
     {"O_gD_Mkey", 0x0003,-0x0001,-0x0001,-0x0001,-0x0001, -0x1, -0x1, 0x0017, 0x78, 0x0000},
     {"T_gD_key", 0x0003,-0x0001,-0x0001,-0x0001,-0x0001, -0x1, -0x1, 0x006E, 0x64, 0x0000},
+#if TARGET_PC
+    // 0xFF dItemNo_NONE_e: defined-empty entry so getArcName(0xFF)==NULL triggers the
+    // caller's existing "no model" fallback instead of reading past the array.
+    {NULL, -0x0001,-0x0001,-0x0001,-0x0001,-0x0001, -0x1, -0x1, 0x0000, 0x00, 0x0000},
+#endif
 };
 
 dItem_fieldItemResource dItem_data::field_item_res[] = {
@@ -516,6 +521,10 @@ dItem_fieldItemResource dItem_data::field_item_res[] = {
     {NULL,-0x0001,-0x0001,-0x0001, 0xFF, 0x1000},
     {NULL,-0x0001,-0x0001,-0x0001, 0xFF, 0x1000},
     {"T_g_key", 0x0003,-0x0001,-0x0001, 0xFF, 0x1000},
+#if TARGET_PC
+    // 0xFF dItemNo_NONE_e: defined-empty field-item entry (NULL arc) — see header note.
+    {NULL, -0x0001,-0x0001,-0x0001, 0xFF, 0x1000},
+#endif
 };
 
 dItem_itemInfo dItem_data::item_info[] = {
@@ -570,4 +579,8 @@ dItem_itemInfo dItem_data::item_info[] = {
     {0, 0, 0, 4},    {0, 0, 0, 4},    {0, 0, 0, 4},      {0, 0, 0, 0},       {0, 0, 0, 4},
     {0, 0, 0, 0},    {0, 0, 0, 4},    {0, 0, 0, 4},      {150, 50, 20, 21},  {0, 0, 0, 0},
     {0, 0, 0, 0},    {0, 0, 0, 0},    {0, 0, 0, 0},      {0, 0, 0, 0},       {0, 0, 0, 0},
+#if TARGET_PC
+    // 0xFF dItemNo_NONE_e: defined-empty info entry — see header note.
+    {0, 0, 0, 0},
+#endif
 };

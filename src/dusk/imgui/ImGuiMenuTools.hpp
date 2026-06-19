@@ -17,6 +17,7 @@ namespace dusk {
         void draw();
         void afterDraw();
         void togglePracticeSaves();
+        void drawPracticeSavesNative();
 
 		void ShowDebugOverlay();
 		void ShowCameraOverlay();

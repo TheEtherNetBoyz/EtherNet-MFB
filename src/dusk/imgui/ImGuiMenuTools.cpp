@@ -87,7 +87,7 @@ namespace dusk {
             s.game.canTransformAnywhere.setSpeedrunValue(false);
             s.game.fastRoll.setSpeedrunValue(false);
             s.game.fastSpinner.setSpeedrunValue(false);
-            s.game.freeMagicArmor.setSpeedrunValue(false);
+            s.game.armorRupeeDrain.setSpeedrunValue(dusk::MagicArmorMode::NORMAL);
             s.game.invincibleEnemies.setSpeedrunValue(false);
 
             s.game.pauseOnFocusLost.setSpeedrunValue(false);
@@ -353,6 +353,7 @@ namespace dusk {
             }
             if (ImGui::BeginMenu("Quality of Life")) {
                 MenuCheckbox("Quick Transform (R+Y)", s.game.enableQuickTransform);
+                MenuCheckbox("Warp as Human", s.game.humanMidnaWarp);
                 MenuCheckbox("Bigger Wallets", s.game.biggerWallets);
                 MenuCheckbox("Disable Rupee Cutscenes", s.game.disableRupeeCutscenes);
                 MenuCheckbox("Skip All Cutscenes", s.game.skipAllCutscenes);
@@ -444,7 +445,6 @@ namespace dusk {
                 MenuCheckbox("Transform Anywhere", s.game.canTransformAnywhere);
                 MenuCheckbox("Fast Roll", s.game.fastRoll);
                 MenuCheckbox("Fast Spinner", s.game.fastSpinner);
-                MenuCheckbox("Free Magic Armor", s.game.freeMagicArmor);
                 MenuCheckbox("Invincible Enemies", s.game.invincibleEnemies);
                 ImGui::EndDisabled();
                 ImGui::EndMenu();
@@ -499,6 +499,17 @@ namespace dusk {
 
     void ImGuiMenuTools::togglePracticeSaves() {
         m_showPracticeSaves = !m_showPracticeSaves;
+    }
+
+    void ImGuiMenuTools::drawPracticeSavesNative() {
+        if (getSettings().game.speedrunMode) {
+            m_showPracticeSaves = false;
+            getTransientSettings().practiceMenuInputCapture = false;
+            return;
+        }
+        if (getSettings().game.nativePracticeMenu) {
+            m_practiceSaves.drawNative(m_showPracticeSaves);
+        }
     }
 
     void ImGuiMenuTools::draw() {
@@ -761,8 +772,14 @@ namespace dusk {
 
             ImGuiStringViewText(
                  player != nullptr
-                 ? fmt::format("Angle: {0}\n", player->shape_angle.y)
+                 ? fmt::format("Angle: {0}\n", static_cast<u16>(player->shape_angle.y))
                  : "Angle: ?\n"
+            );
+
+            ImGuiStringViewText(
+                 player != nullptr
+                 ? fmt::format("V-Angle: {0}\n", player->mBodyAngle.x)
+                 : "V-Angle: ?\n"
             );
 
             ImGuiStringViewText(
@@ -799,7 +816,7 @@ namespace dusk {
 
             ImGuiStringViewText(
                 horse != nullptr
-                ? fmt::format("Angle: {0}\n", horse->shape_angle.y)
+                ? fmt::format("Angle: {0}\n", static_cast<u16>(horse->shape_angle.y))
                 : "Angle: ?\n"
             );
 

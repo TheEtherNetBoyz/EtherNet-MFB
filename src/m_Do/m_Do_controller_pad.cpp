@@ -45,6 +45,8 @@ struct InputDelaySample {
 
 static std::array<InputDelaySample, kInputDelayHistorySize> sInputDelayHistory;
 static size_t sInputDelayHistoryWriteIndex = 0;
+static std::array<interface_of_controller_pad, 4> sInputDelayLastDeliveredPads{};
+static bool sInputDelayHasLastDeliveredPads = false;
 
 static bool checkCtrlRSoftReset() {
     int keyCount = 0;
@@ -79,6 +81,21 @@ static void resetInputDelayHistory() {
         sample.valid = false;
     }
     sInputDelayHistoryWriteIndex = 0;
+    sInputDelayHasLastDeliveredPads = false;
+}
+
+static void finalizeDelayedInput(interface_of_controller_pad* pads) {
+    for (size_t i = 0; i < sInputDelayLastDeliveredPads.size(); ++i) {
+        const interface_of_controller_pad previous =
+            sInputDelayHasLastDeliveredPads ? sInputDelayLastDeliveredPads[i] : interface_of_controller_pad{};
+
+        pads[i].mPressedButtonFlags = pads[i].mButtonFlags & ~previous.mButtonFlags;
+        pads[i].mTrigLockL = pads[i].mHoldLockL && !previous.mHoldLockL;
+        pads[i].mTrigLockR = pads[i].mHoldLockR && !previous.mHoldLockR;
+
+        sInputDelayLastDeliveredPads[i] = pads[i];
+    }
+    sInputDelayHasLastDeliveredPads = true;
 }
 
 static void applyInputDelay(interface_of_controller_pad* pads) {
@@ -129,6 +146,7 @@ static void applyInputDelay(interface_of_controller_pad* pads) {
     for (size_t i = 0; i < bestSample->pads.size(); ++i) {
         pads[i] = bestSample->pads[i];
     }
+    finalizeDelayedInput(pads);
 }
 #endif
 

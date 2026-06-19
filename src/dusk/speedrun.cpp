@@ -33,8 +33,8 @@ void resetForSpeedrunMode() {
     getSettings().game.canTransformAnywhere.setSpeedrunValue(false);
     getSettings().game.fastRoll.setSpeedrunValue(false);
     getSettings().game.fastSpinner.setSpeedrunValue(false);
-    getSettings().game.freeMagicArmor.setSpeedrunValue(false);
     getSettings().game.invincibleEnemies.setSpeedrunValue(false);
+    getSettings().game.armorRupeeDrain.setSpeedrunValue(MagicArmorMode::NORMAL);
 
     getSettings().game.pauseOnFocusLost.setSpeedrunValue(false);
     aurora_set_pause_on_focus_lost(false);

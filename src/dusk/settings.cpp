@@ -13,6 +13,10 @@ UserSettings g_userSettings = {
         .forcedAspectRatio {"video.forcedAspectRatio", AspectRatioMode::Off},
         .enableFpsOverlay {"game.enableFpsOverlay", false},
         .fpsOverlayCorner {"game.fpsOverlayCorner", 0},
+        .maxFrameRate {"video.maxFrameRate", 240},
+        .rememberWindowSize {"video.rememberWindowSize", false},
+        .lastWindowWidth {"video.lastWindowWidth", 0},
+        .lastWindowHeight {"video.lastWindowHeight", 0},
     },
 
     .audio = {
@@ -31,6 +35,7 @@ UserSettings g_userSettings = {
 
         // Quality of Life
         .enableQuickTransform {"game.enableQuickTransform", false},
+        .humanMidnaWarp {"game.humanMidnaWarp", false},
         .hideTvSettingsScreen {"game.hideTvSettingsScreen", true},
         .biggerWallets {"game.biggerWallets", false},
         .noReturnRupees {"game.noReturnRupees", false},
@@ -46,6 +51,7 @@ UserSettings g_userSettings = {
         .no2ndFishForCat {"game.no2ndFishForCat", false},
         .enableFastLoads {"game.enableFastLoads", false},
         .enableInstaLoads {"game.enableInstaLoads", false},
+        .buttonFishing {"game.buttonFishing", false},
         .instantSaves {"game.instantSaves", false},
         .instantText {"game.instantText", false},
         .sunsSong {"game.sunsSong", false},
@@ -55,6 +61,7 @@ UserSettings g_userSettings = {
         // Preferences
         .enableMirrorMode {"game.enableMirrorMode", false},
         .minimalHUD {"game.minimalHUD", false},
+        .hudScale {"game.hudScale", 1.0f},
         .pauseOnFocusLost {"game.pauseOnFocusLost", false},
         .enableLinkDollRotation {"game.enableLinkDollRotation", false},
         .enableAchievementToasts {"game.enableAchievementToasts", true},
@@ -82,7 +89,6 @@ UserSettings g_userSettings = {
         .midnasLamentNonStop {"game.midnasLamentNonStop", false},
 
         // Input
-        .gyroMode {"game.gyroMode", GyroMode::Sensor},
         .enableGyroAim {"game.enableGyroAim", false},
         .enableGyroRollgoal {"game.enableGyroRollgoal", false},
         .gyroSensitivityX {"game.gyroSensitivityX", 1.0f},
@@ -92,6 +98,11 @@ UserSettings g_userSettings = {
         .gyroDeadband {"game.gyroDeadband", 0.04f},
         .gyroInvertPitch {"game.gyroInvertPitch", false},
         .gyroInvertYaw {"game.gyroInvertYaw", false},
+        .enableMouseCamera {"game.enableMouseCamera", false},
+        .enableMouseAim {"game.enableMouseAim", false},
+        .mouseAimSensitivity {"game.mouseAimSensitivity", 1.0f},
+        .mouseCameraSensitivity {"game.mouseCameraSensitivity", 1.0f},
+        .invertMouseY {"game.invertMouseY", false},
         .freeCamera {"game.freeCamera", false},
         .invertCameraXAxis {"game.invertCameraXAxis", false},
         .invertCameraYAxis {"game.invertCameraYAxis", false},
@@ -132,7 +143,7 @@ UserSettings g_userSettings = {
         .canTransformAnywhere {"game.canTransformAnywhere", false},
         .fastRoll {"game.fastRoll", false},
         .fastSpinner {"game.fastSpinner", false},
-        .freeMagicArmor {"game.freeMagicArmor", false},
+        .armorRupeeDrain {"game.armorRupeeDrain", MagicArmorMode::NORMAL},
         .invincibleEnemies {"game.invincibleEnemies", false},
         .transformWithoutShadowCrystal {"game.transformWithoutShadowCrystal", false},
 
@@ -154,7 +165,10 @@ UserSettings g_userSettings = {
         .recordingMode {"game.recordingMode", false},
         .removeQuestMapMarkers {"game.removeQuestMapMarkers", false},
         .showInputViewer {"game.showInputViewer", false},
-        .showInputViewerGyro {"game.showInputViewerGyro", false}
+        .showInputViewerGyro {"game.showInputViewerGyro", false},
+        .nativeInputViewer {"game.nativeInputViewer", false},
+        .nativeLinkDebugInfo {"game.nativeLinkDebugInfo", false},
+        .nativePracticeMenu {"game.nativePracticeMenu", true}
     },
 
     .backend = {
@@ -298,6 +312,10 @@ void registerSettings() {
     Register(g_userSettings.video.forcedAspectRatio);
     Register(g_userSettings.video.enableFpsOverlay);
     Register(g_userSettings.video.fpsOverlayCorner);
+    Register(g_userSettings.video.maxFrameRate);
+    Register(g_userSettings.video.rememberWindowSize);
+    Register(g_userSettings.video.lastWindowWidth);
+    Register(g_userSettings.video.lastWindowHeight);
 
     // Audio
     Register(g_userSettings.audio.masterVolume);
@@ -312,6 +330,7 @@ void registerSettings() {
     // Game
     Register(g_userSettings.game.language);
     Register(g_userSettings.game.enableQuickTransform);
+    Register(g_userSettings.game.humanMidnaWarp);
     Register(g_userSettings.game.transformWithoutShadowCrystal);
     Register(g_userSettings.game.hideTvSettingsScreen);
     Register(g_userSettings.game.biggerWallets);
@@ -327,6 +346,7 @@ void registerSettings() {
     Register(g_userSettings.game.no2ndFishForCat);
     Register(g_userSettings.game.enableFastLoads);
     Register(g_userSettings.game.enableInstaLoads);
+    Register(g_userSettings.game.buttonFishing);
     Register(g_userSettings.game.instantSaves);
     Register(g_userSettings.game.instantText);
     Register(g_userSettings.game.sunsSong);
@@ -345,6 +365,7 @@ void registerSettings() {
     Register(g_userSettings.game.freeCameraSensitivityLevel);
     Register(g_userSettings.game.regularCameraSensitivityLevel);
     Register(g_userSettings.game.minimalHUD);
+    Register(g_userSettings.game.hudScale);
     Register(g_userSettings.game.pauseOnFocusLost);
     Register(g_userSettings.game.enableDiscordPresence);
     Register(g_userSettings.game.bloomMode);
@@ -360,7 +381,7 @@ void registerSettings() {
     Register(g_userSettings.game.enableFastIronBoots);
     Register(g_userSettings.game.canTransformAnywhere);
     Register(g_userSettings.game.fastRoll);
-    Register(g_userSettings.game.freeMagicArmor);
+    Register(g_userSettings.game.armorRupeeDrain);
     Register(g_userSettings.game.restoreWiiGlitches);
     Register(g_userSettings.game.usePpcFastInvSqrt);
     Register(g_userSettings.game.enableLatencyTrace);
@@ -382,6 +403,9 @@ void registerSettings() {
     Register(g_userSettings.game.removeQuestMapMarkers);
     Register(g_userSettings.game.showInputViewer);
     Register(g_userSettings.game.showInputViewerGyro);
+    Register(g_userSettings.game.nativeInputViewer);
+    Register(g_userSettings.game.nativeLinkDebugInfo);
+    Register(g_userSettings.game.nativePracticeMenu);
     Register(g_userSettings.game.fastSpinner);
     Register(g_userSettings.game.infiniteHearts);
     Register(g_userSettings.game.infiniteArrows);
@@ -398,7 +422,6 @@ void registerSettings() {
     Register(g_userSettings.game.enableFrameInterpolation);
     Register(g_userSettings.game.frameRateLimit);
     Register(g_userSettings.game.lowLatencyPresentation);
-    Register(g_userSettings.game.gyroMode);
     Register(g_userSettings.game.enableGyroAim);
     Register(g_userSettings.game.enableGyroRollgoal);
     Register(g_userSettings.game.gyroSensitivityX);
@@ -408,6 +431,11 @@ void registerSettings() {
     Register(g_userSettings.game.gyroSmoothing);
     Register(g_userSettings.game.gyroInvertPitch);
     Register(g_userSettings.game.gyroInvertYaw);
+    Register(g_userSettings.game.enableMouseCamera);
+    Register(g_userSettings.game.enableMouseAim);
+    Register(g_userSettings.game.mouseAimSensitivity);
+    Register(g_userSettings.game.mouseCameraSensitivity);
+    Register(g_userSettings.game.invertMouseY);
     Register(g_userSettings.game.freeCamera);
     Register(g_userSettings.game.debugFlyCam);
     Register(g_userSettings.game.debugFlyCamLockEvents);
