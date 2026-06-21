@@ -1,8 +1,5 @@
 #include "rando_config.hpp"
 
-#include <mutex>
-#include <thread>
-
 #include "bool_button.hpp"
 #include "dusk/config.hpp"
 #include "dusk/data.hpp"
@@ -15,8 +12,11 @@
 #include "pane.hpp"
 #include "rando_seed_generation.hpp"
 #include "string_button.hpp"
-
 #include "d/d_file_select.h"
+#include "SDL3/SDL_clipboard.h"
+
+#include <mutex>
+#include <thread>
 
 namespace dusk::ui {
 struct ConfigBoolProps {
@@ -652,39 +652,14 @@ void RandomizerWindow::rando_excluded_locations_update_left_pane(Pane& innerLeft
 
 // Focus the closest child in the next Pane. Returns true if a child was found to focus
 bool focus_closest_child_on_next_pane(Pane& currentPane, Pane& nextPane) {
-    float childToFocusY = 0.f;
-    for (const auto& child : currentPane.children()) {
-        if (child->root()->IsPseudoClassSet("focus")) {
-            childToFocusY = child->root()->GetAbsoluteTop();
-        }
-    }
-
-    Rml::Element* closestchild = nullptr;
-    // If there was no focused child in this pane, select the middle one of the next pane
-    if (childToFocusY == 0.f && !nextPane.children().empty()) {
-        closestchild = nextPane.children().at(nextPane.children().size() / 2)->root();
-    // Otherwise, choose the closest one
-    } else if (childToFocusY > 0.f) {
-        float closestRightChildDistance = 100000.f;
-        for (const auto& child : nextPane.children()) {
-            float distance = std::abs(childToFocusY - child->root()->GetAbsoluteTop());
-            if (distance < closestRightChildDistance) {
-                closestchild = child->root();
-                closestRightChildDistance = distance;
-            }
-        }
-    }
-
-    if (closestchild) {
-        closestchild->SetPseudoClass("focus-visible", true);
-        closestchild->Focus();
-        return true;
-    }
-
-    return false;
+    auto childToFocusY = currentPane.get_focused_child_y();
+    return nextPane.focus_closest_child(childToFocusY);
 }
 
 void delete_seed_callback(Pane& pane) {
+    // Get the Y position to focus the child nearest to after we rebuild this pane
+    auto childToFocusY = pane.get_focused_child_y();
+
     pane.clear();
     std::filesystem::path seedDirectory = GetRandomizerSeedsPath();
 
@@ -710,7 +685,6 @@ void delete_seed_callback(Pane& pane) {
                 }
             }
 
-            // TODO: our ui lib doesnt have an easy way to either refresh or remove values from the right pane
             pane.add_button(
                 {
                     .text = hash,
@@ -724,6 +698,9 @@ void delete_seed_callback(Pane& pane) {
                 });
         }
     }
+
+    // Refocus the closest child to the seed we just deleted
+    pane.focus_closest_child(childToFocusY);
 };
 
 RandomizerWindow::RandomizerWindow(dFile_select_c* fileSelect /*= nullptr*/) : mFileSelectMenu(fileSelect) {
@@ -731,6 +708,9 @@ RandomizerWindow::RandomizerWindow(dFile_select_c* fileSelect /*= nullptr*/) : m
     // Create rando directories if they don't exist
     if (!std::filesystem::exists(GetRandomizerSeedsPath())) {
         std::filesystem::create_directories(GetRandomizerSeedsPath());
+    }
+    if (!std::filesystem::exists(GetRandomizerPresetsPath())) {
+        std::filesystem::create_directories(GetRandomizerPresetsPath());
     }
 
     // If we're bringing this menu up during file selection
@@ -842,11 +822,97 @@ RandomizerWindow::RandomizerWindow(dFile_select_c* fileSelect /*= nullptr*/) : m
             leftPane.add_button("Delete Seeds"),
             rightPane, delete_seed_callback
             );
+
+        leftPane.add_section("Permalink");
+        leftPane.register_control(
+            leftPane.add_button("Copy Permalink")
+            .on_pressed([] {
+                CopyPermalinkToClipboard();
+            }),
+            rightPane, [](Pane& pane) {
+                pane.clear();
+                pane.add_text("Copy your current settings permalink to share with others.");
+                auto text = pane.add_text(fmt::format("Current Permalink: {}", GetRandomizerConfig().GetPermalink()));
+                text->SetProperty("word-break", "break-word");
+        });
+
+        leftPane.register_control(
+            leftPane.add_button("Paste Permalink")
+            .on_pressed([] {
+                PastePermalinkFromClipboard();
+            }),
+            rightPane, [](Pane& pane) {
+                pane.clear();
+                pane.add_text("Paste in a permalink from your clipboard. This will overwrite your current settings.");
+        });
+
+        leftPane.add_section("Presets");
+        leftPane.register_control(
+            leftPane.add_button("Save Current Settings as Preset")
+            .on_pressed([] {
+                push_document(std::make_unique<TextInputModal>(Modal::Props{
+                    .title = "Preset Name",
+                    .bodyRml = "",
+                    .actions = {
+                        ModalAction{
+                            .label = "Save",
+                            .onPressed = [](Modal& modal) {
+                                auto textModal = dynamic_cast<TextInputModal*>(&modal);
+                                if (!textModal->get_input_text().empty()) {
+                                    modal.pop();
+                                    SaveNewRandomizerPreset(textModal->get_input_text());
+                                }
+                            },
+                        },
+                        ModalAction{
+                            .label = "Cancel",
+                            .onPressed = [](Modal& modal) {
+                                modal.pop();
+                            },
+                        },
+                    },
+                    .icon = "information"
+                }));
+
+            }),
+            rightPane, [](Pane& pane) {
+                pane.clear();
+                pane.add_text("Save the current settings to your list of presets.");
+        });
+
+        leftPane.register_control(
+            leftPane.add_button("Load Preset"),
+            rightPane, [](Pane& pane) {
+                pane.clear();
+                pane.add_text("Choose an existing preset to load from.");
+
+                for (const auto& file : std::filesystem::directory_iterator{GetRandomizerPresetsPath()}) {
+                    const auto& filepath = file.path();
+                    auto presetName = file.path().stem().generic_string();
+                    pane.add_button(ControlledButton::Props{
+                        .text = presetName,
+                    })
+                    .on_pressed([filepath] {
+                        ApplyExistingRandomizerPreset(filepath);
+                    });
+                }
+        });
     });
 
     add_tab("Seed Options", [this](Rml::Element* content) {
         auto& leftPane = add_child<Pane>(content, Pane::Type::Controlled);
         auto& rightPane = add_child<Pane>(content, Pane::Type::Uncontrolled);
+
+        leftPane.register_control(leftPane.add_button("Reset Settings to Default")
+            .on_pressed([] {
+                GetRandomizerConfig().ResetSettingsToDefault();
+                SaveRandomizerConfig();
+            }),
+            rightPane, [](Pane& pane) {
+            pane.clear();
+            pane.add_rml(
+                "Reset all settings to their default values. This will also clear starting items and excluded locations.");
+        });
 
         leftPane.add_section("Logic Settings");
 
@@ -1176,6 +1242,139 @@ bool FileSelectRandomizerWindow::consume_close_request() {
     return true;
 }
 
+void SaveNewRandomizerPreset(const std::string& presetName, bool overwriteExisting /*= false*/) {
+    auto presetFilepath = GetRandomizerPresetsPath() / (presetName + ".yaml");
+
+    // If the preset exists, ask the user if they want to overwrite it. If so, call this function
+    // again but force overwrite the existing preset
+    if (std::filesystem::exists(presetFilepath) && !overwriteExisting) {
+        push_document(std::make_unique<Modal>(Modal::Props{
+            .title = "Overwrite Existing Preset",
+            .bodyRml = "A preset with the name " + presetName + " already exists. Do you wish to overwrite it?",
+            .actions = {
+                ModalAction{
+                    .label = "Yes",
+                    .onPressed = [presetName](Modal& modal) {
+                        modal.pop();
+                        SaveNewRandomizerPreset(presetName, true);
+                    }
+                },
+                ModalAction{
+                    .label = "No",
+                    .onPressed = [](Modal& modal) {
+                        modal.pop();
+                    }
+                }
+            }
+        }));
+    }
+
+    // If there was an error trying to save, let the user know
+    try {
+        GetRandomizerConfig().WriteSettingsToFile(presetFilepath);
+    } catch (std::exception& e) {
+        push_document(std::make_unique<Modal>(Modal::Props{
+            .title = "Error Saving Preset",
+            .bodyRml = fmt::format("Error: {}", e.what()),
+            .actions = {
+                ModalAction{
+                    .label = "Okay",
+                    .onPressed = [](Modal& modal) {
+                        modal.pop();
+                    }
+                }
+            },
+            .icon = "error"
+        }));
+        return;
+    }
+
+    push_toast(Toast{
+        .title = "",
+        .content = fmt::format("Saved preset {}", presetName),
+        .duration = std::chrono::seconds(3)
+    });
+}
+
+void ApplyExistingRandomizerPreset(const std::filesystem::path& presetFilePath) {
+    // Don't overwrite the seed with the one from the preset
+    auto seed = GetRandomizerConfig().GetSeed();
+    try {
+        GetRandomizerConfig().LoadFromFile(presetFilePath, GetRandomizerPreferencesPath(), false, true);
+        GetRandomizerConfig().SetSeed(seed);
+    } catch (std::exception& e) {
+        push_document(std::make_unique<Modal>(Modal::Props{
+            .title = "Error Loading Preset",
+            .bodyRml = fmt::format("Error: {}", e.what()),
+            .actions = {
+                ModalAction{
+                    .label = "Okay",
+                    .onPressed = [](Modal& modal) {
+                        modal.pop();
+                    }
+                }
+            },
+            .icon = "error"
+        }));
+        return;
+    }
+
+    push_toast(Toast{
+        .title = "",
+        .content = fmt::format("Loaded preset {}", presetFilePath.stem().generic_string()),
+        .duration = std::chrono::seconds(3)
+    });
+}
+
+void CopyPermalinkToClipboard() {
+    if (SDL_SetClipboardText(GetRandomizerConfig().GetPermalink().data())) {
+        push_toast(Toast{
+            .content = "Permalink Copied",
+            .duration = std::chrono::seconds(3)
+        });
+    } else {
+        push_document(std::make_unique<Modal>(Modal::Props{
+            .title = "Permalink Error",
+            .bodyRml = fmt::format("Could not copy permalink to clipboard. Reason: {}", SDL_GetError()),
+            .actions = {
+                ModalAction{
+                    .label = "Okay",
+                    .onPressed = [](Modal& modal) {
+                        modal.pop();
+                    }
+                }
+            },
+            .icon = "error"
+        }));
+    }
+}
+
+void PastePermalinkFromClipboard() {
+    if (SDL_HasClipboardText()) {
+        std::string clipBoardText = SDL_GetClipboardText();
+        auto result = GetRandomizerConfig().LoadFromPermalink(clipBoardText);
+        if (result.has_value()) {
+            auto modal = dynamic_cast<Modal*>(&push_document(std::make_unique<Modal>(Modal::Props{
+                .title = "Permalink Error",
+                .bodyRml = result.value(),
+                .actions = {
+                    ModalAction{
+                        .label = "Okay",
+                        .onPressed = [](Modal& modal) {
+                            modal.pop();
+                        }
+                    }
+                },
+                .icon = "error"
+            })));
+            modal->root()->SetProperty("white-space", "pre-line");
+        } else {
+            push_toast(Toast{.content = "Applied Permalink", .duration = std::chrono::seconds(3)});
+            SaveRandomizerConfig();
+        }
+    }
+}
+
 std::filesystem::path GetRandomizerPath() {
     return data::configured_data_path() / "randomizer";
 }
@@ -1186,6 +1385,10 @@ std::filesystem::path GetRandomizerSettingsPath() {
 
 std::filesystem::path GetRandomizerPreferencesPath() {
     return GetRandomizerPath() / "preferences.yaml";
+}
+
+std::filesystem::path GetRandomizerPresetsPath() {
+    return GetRandomizerPath() / "presets";
 }
 
 std::filesystem::path GetRandomizerSeedsPath() {

@@ -50,6 +50,7 @@
 #include <system_error>
 #include <thread>
 #include "SSystem/SComponent/c_API.h"
+#include "dusk/android_frame_rate.hpp"
 #include "dusk/app_info.hpp"
 #include "dusk/crash_handler.h"
 #include "dusk/crash_reporting.h"
@@ -69,6 +70,7 @@
 #include "dusk/ui/overlay.hpp"
 #include "dusk/ui/prelaunch.hpp"
 #include "dusk/ui/preset.hpp"
+#include "dusk/ui/touch_controls.hpp"
 #include "dusk/ui/ui.hpp"
 #include "dusk/ui/rando_config.hpp"
 #include "version.h"
@@ -320,7 +322,7 @@ void main01(void) {
                                          pacingDetail.c_str());
         if (pacing.is_interpolating) {
             if (pacing.sim_ticks_to_run > 0) {
-                dusk::frame_interp::begin_frame(dusk::getSettings().game.enableFrameInterpolation, true, 0.0f);
+                dusk::frame_interp::begin_frame(dusk::getSettings().game.enableFrameInterpolation.getValue() != dusk::FrameInterpMode::Off, true, 0.0f);
                 dusk::frame_interp::set_ui_tick_pending(true);
 
                 for (int sim_tick = 0; sim_tick < pacing.sim_ticks_to_run; ++sim_tick) {
@@ -345,7 +347,7 @@ void main01(void) {
             const float interpolationStep = dusk::game_clock::sample_interpolation_step();
             const std::string interpolationDetail = fmt::format("step={:.3f}", interpolationStep);
             dusk::latency_trace::mark_detail("interp_step", interpolationDetail.c_str());
-            dusk::frame_interp::begin_frame(dusk::getSettings().game.enableFrameInterpolation, false,
+            dusk::frame_interp::begin_frame(dusk::getSettings().game.enableFrameInterpolation.getValue() != dusk::FrameInterpMode::Off, false,
                                             interpolationStep);
             static int sLastWindowStatus = -1;
             const int windowStatus = dMeter2Info_getWindowStatus();
@@ -615,6 +617,7 @@ int game_main(int argc, char* argv[]) {
     }
     ApplyCVarOverrides(parsed_arg_options["cvar"]);
     dusk_set_native_vector_rsqrt(!dusk::getSettings().game.usePpcFastInvSqrt.getValue());
+    dusk::android::update_surface_frame_rate();
     dusk::crash_reporting::initialize();
     dusk::crash_handler::install();
     // TODO: How to handle this?
@@ -740,6 +743,7 @@ int game_main(int argc, char* argv[]) {
     dusk::texture_replacements::reload();
     dusk::ui::initialize();
     dusk::ui::push_document(std::make_unique<dusk::ui::Overlay>(), true, true);
+    dusk::ui::push_document(std::make_unique<dusk::ui::TouchControls>(), false, true);
     dusk::ui::push_document(std::make_unique<dusk::ui::MenuBar>(), false);
 
     // Invalidate a bad saved isoPath so that Dusklight can't get blocked from starting up.

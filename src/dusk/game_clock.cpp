@@ -35,7 +35,7 @@ int selected_frame_rate_limit() {
         return 0;
     }
 
-    if (!dusk::getSettings().game.enableFrameInterpolation) {
+    if (dusk::getSettings().game.enableFrameInterpolation.getValue() == FrameInterpMode::Off) {
         return 30;
     }
 
@@ -84,7 +84,7 @@ MainLoopPacer advance_main_loop() {
     out.presentation_dt_seconds = presentation_dt;
 
     const bool should_interpolate = !dusk::getTransientSettings().forceThirtyFpsLimit &&
-                                    dusk::getSettings().game.enableFrameInterpolation &&
+                                    dusk::getSettings().game.enableFrameInterpolation.getValue() != FrameInterpMode::Off &&
                                     !dusk::getTransientSettings().skipFrameRateLimit;
     out.is_interpolating = should_interpolate;
     out.sim_pace = sim_pace();
@@ -157,7 +157,7 @@ namespace dusk {
 
 bool low_latency_presentation_enabled() {
     const bool is_thirty_fps_mode = getTransientSettings().forceThirtyFpsLimit ||
-                                    !getSettings().game.enableFrameInterpolation.getValue();
+                                    getSettings().game.enableFrameInterpolation.getValue() == FrameInterpMode::Off;
     return is_thirty_fps_mode && getSettings().game.lowLatencyPresentation.getValue();
 }
 

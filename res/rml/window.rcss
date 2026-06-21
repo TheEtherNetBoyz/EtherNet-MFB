@@ -490,6 +490,7 @@ window.modal.danger .modal-header icon {
     font-size: 20dp;
     color: #FFFFFF;
     font-weight: normal;
+    word-break: break-word;
 }
 
 .modal-body span.tip {

@@ -10,10 +10,15 @@ class dFile_select_c;
 namespace dusk::ui {
 class Pane;
 
+    void SaveNewRandomizerPreset(const std::string& presetName, bool overwriteExisting = false);
+    void ApplyExistingRandomizerPreset(const std::filesystem::path& presetFilePath);
+    void CopyPermalinkToClipboard();
+    void PastePermalinkFromClipboard();
     std::filesystem::path GetRandomizerPath();
     std::filesystem::path GetRandomizerSettingsPath();
     std::filesystem::path GetRandomizerPreferencesPath();
     std::filesystem::path GetRandomizerSeedsPath();
+    std::filesystem::path GetRandomizerPresetsPath();
     randomizer::seedgen::config::Config& GetRandomizerConfig();
 
 

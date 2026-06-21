@@ -13,39 +13,11 @@ namespace YAML
 
 namespace randomizer::seedgen::config
 {
-    enum struct [[nodiscard]] ConfigError
-    {
-        NONE = 0,
-        COULD_NOT_OPEN,
-        MISSING_KEY,
-        DIFFERENT_FILE_VERSION,
-        DIFFERENT_RANDO_VERSION,
-        BAD_PERMALINK,
-        INVALID_VALUE,
-        MODEL_ERROR,
-        UNKNOWN,
-        COUNT
-    };
-
-    enum struct [[nodiscard]] PermalinkError
-    {
-        NONE = 0,
-        EMPTY,
-        BAD_ENCODING,
-        MISSING_PARTS,
-        INVALID_VERSION,
-        INCORRECT_LENGTH,
-        COULD_NOT_READ,
-        UNHANDLED_OPTION,
-        COULD_NOT_LOAD_LOCATIONS,
-        UNKNOWN,
-        COUNT
-    };
 
     class Config
     {
        public:
-        Config() = default;
+        Config();
         Config(const fspath& settingsPath, const fspath& preferencesPath);
 
         fspath GetPlandomizerPath() const { return this->_plandomizerPath; }
@@ -55,21 +27,22 @@ namespace randomizer::seedgen::config
         auto& GetSettings() { return this->_settingsList.front();}
         bool IsUsingPlandomizer() const { return this->_isUsingPlandomizer; }
         bool IsGeneratingSpoilerLog() const { return this->_isGeneratingSpoilerLog; }
+        void ResetSettingsToDefault();
+        void ResetPreferencesToDefault();
 
-        // void resetDefaultSettings();
-        // void resetDefaultPreferences(const bool& paths = false);
         void LoadFromFile(const fspath& settingsPath,
                           const fspath& preferencesPath,
-                          const bool& createIfNotFound = true,
-                          const bool& allowRewrite = true);
+                          bool createIfNotFound = true,
+                          bool allowRewrite = true);
         YAML::Node SettingsToYaml();
         YAML::Node PreferencesToYaml();
         void WriteSettingsToFile(const fspath& filePath);
         void WritePreferencesToFile(const fspath& preferencesPath);
         void WriteToFile(const fspath& filePath, const fspath& preferencesPath);
 
-        // PermalinkError loadPermalink(std::string b64permalink);
-        // std::string getPermalink(const bool& internal = false) const;
+        std::optional<std::string> LoadFromPermalink(std::string b64permalink);
+        std::string GetPermalink();
+        void SetPermalink(const std::string& newPermalink) { this->_permalink = newPermalink; }
 
         /**
          *  @brief Returns the hash for the config.
@@ -85,20 +58,11 @@ namespace randomizer::seedgen::config
 
         std::string _seed;
         std::string _hash;
+        std::string _permalink;
         std::list<settings::Settings> _settingsList;
         bool _isUsingPlandomizer = false;
         bool _isGeneratingSpoilerLog = true;
-
-        // bool _converted = false;
-        // bool _updated = false;
-        // bool _configSet = false;
     };
 
-    int WriteDefaultSettings(const fspath& filePath);
-    int WriteDefaultPreferences(const fspath& filePath);
-
-    std::string ConfigErrorGetName(ConfigError err);
-    std::string PermalinkErrorGetName(ConfigError err);
-
-    int SeedRNG(Config& config, const bool& resolvePreferenceRandom = false, const bool& ignoreInvalidPlandomizer = true);
+    int SeedRNG(Config& config, bool resolveNonStandardRandom = false, bool ignoreInvalidPlandomizer = true);
 } // namespace randomizer::seedgen::config

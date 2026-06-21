@@ -6,6 +6,7 @@
 #include "dusk/app_info.hpp"
 #include "dusk/audio/DuskAudioSystem.h"
 #include "dusk/audio/DuskDsp.hpp"
+#include "dusk/android_frame_rate.hpp"
 #include "dusk/config.hpp"
 #include "dusk/hotkeys.h"
 #include "dusk/data.hpp"
@@ -24,6 +25,7 @@
 #include "menu_bar.hpp"
 #include "pane.hpp"
 #include "prelaunch.hpp"
+#include "touch_controls_editor.hpp"
 #include "ui.hpp"
 
 #include <aurora/lib/window.hpp>
@@ -42,6 +44,17 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+#if defined(TARGET_ANDROID) || defined(__ANDROID__) || \
+    (defined(__APPLE__) && TARGET_OS_IOS && !TARGET_OS_MACCATALYST)
+#define TOUCH_CONTROLS_AVAILABLE true
+#else
+#define TOUCH_CONTROLS_AVAILABLE false
+#endif
 
 namespace dusk::ui {
 namespace {
@@ -858,7 +871,7 @@ void set_aspect_ratio_mode_index(int index) {
 }
 
 int frame_rate_limit_index() {
-    if (!getSettings().game.enableFrameInterpolation.getValue()) {
+    if (getSettings().game.enableFrameInterpolation.getValue() == FrameInterpMode::Off) {
         return 0;
     }
 
@@ -873,7 +886,8 @@ int frame_rate_limit_index() {
 
 void set_frame_rate_limit_index(int index) {
     index = std::clamp(index, 0, static_cast<int>(kFrameRateLimitValues.size()) - 1);
-    getSettings().game.enableFrameInterpolation.setValue(index != 0);
+    getSettings().game.enableFrameInterpolation.setValue(index == 0 ? FrameInterpMode::Off :
+        (kFrameRateLimitValues[index] == 0 ? FrameInterpMode::Unlimited : FrameInterpMode::Capped));
     getSettings().game.frameRateLimit.setValue(index == 0 ? 0 : kFrameRateLimitValues[index]);
     config::Save();
 }
@@ -956,29 +970,41 @@ SelectButton& config_percent_select(Pane& leftPane, Pane& rightPane, ConfigVar<f
     return button;
 }
 
-SelectButton& config_milliseconds_select(Pane& leftPane, Pane& rightPane, ConfigVar<int>& var,
-    Rml::String key, Rml::String helpText, int min, int max, int step = 1,
-    std::function<bool()> isDisabled = {}) {
+SelectButton& config_int_select(Pane& leftPane, Pane& rightPane, ConfigVar<int>& var,
+    Rml::String key, Rml::String helpText, int min, int max, int step = 5,
+    std::function<bool()> isDisabled = {}, std::function<void(int)> onChange = {},
+    std::string suffix = "") {
     auto& button = leftPane.add_child<NumberButton>(NumberButton::Props{
         .key = std::move(key),
         .getValue = [&var] { return var.getValue(); },
         .setValue =
-            [&var, min, max](int value) {
-                var.setValue(std::clamp(value, min, max));
+            [&var, min, max, callback = std::move(onChange)](int value) {
+                const int clampedValue = std::clamp(value, min, max);
+                var.setValue(clampedValue);
                 config::Save();
+                if (callback) {
+                    callback(clampedValue);
+                }
             },
         .isDisabled = std::move(isDisabled),
         .isModified = [&var] { return var.getValue() != var.getDefaultValue(); },
         .min = min,
         .max = max,
         .step = step,
-        .suffix = " ms",
+        .suffix = std::move(suffix),
     });
     leftPane.register_control(button, rightPane, [helpText = std::move(helpText)](Pane& pane) {
         pane.clear();
         pane.add_text(helpText);
     });
     return button;
+}
+
+SelectButton& config_milliseconds_select(Pane& leftPane, Pane& rightPane, ConfigVar<int>& var,
+    Rml::String key, Rml::String helpText, int min, int max, int step = 1,
+    std::function<bool()> isDisabled = {}) {
+    return config_int_select(leftPane, rightPane, var, std::move(key), std::move(helpText), min, max,
+        step, std::move(isDisabled), {}, " ms");
 }
 
 SelectButton& config_level_select(Pane& leftPane, Pane& rightPane, ConfigVar<float>& var,
@@ -1196,7 +1222,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             leftPane.register_control(
                 leftPane.add_select_button({
                     .key = "Graphics Backend",
-                    .getValue = [] { return Rml::String{backend_name(configured_backend())}; },
+                    .getValue = [] { return Rml::String{backend_name(aurora_get_backend())}; },
                     .isModified =
                         [] {
                             return getSettings().backend.graphicsBackend.getValue() !=
@@ -1472,6 +1498,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                     }).on_pressed([i] {
                         mDoAud_seStartMenu(kSoundItemChange);
                         set_frame_rate_limit_index(i);
+                        android::update_surface_frame_rate();
                     });
                 }
                 pane.add_text(kUnlockFramerateHelpText);
@@ -1482,10 +1509,11 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .helpText = "Reduces the extra presentation delay used by the PC port's normal frame pacing. "
                             "Only available in 30 FPS mode.",
                 .isDisabled = [] {
-                    return getSettings().game.enableFrameInterpolation.getValue() &&
+                    return getSettings().game.enableFrameInterpolation.getValue() != FrameInterpMode::Off &&
                            !getTransientSettings().forceThirtyFpsLimit;
                 },
             });
+
         config_bool_select(leftPane, rightPane, getSettings().game.enableMapBackground,
             {
                 .key = "Enable Mini-Map Shadows",
@@ -1532,6 +1560,31 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Input Lag", "Adds a controller delay between 0-150ms. "
                          "25-45ms matches GameCube latency.",
             0, 150, 1);
+
+#if TOUCH_CONTROLS_AVAILABLE
+        leftPane.add_section("Touch");
+        addOption("Touch Controls", getSettings().game.enableTouchControls,
+            "Enables controls overlay for touch screens.<br/><br/>Press and drag on the left side "
+            "of the screen to move, and on the right side of the screen to control the camera.");
+        auto& customizeTouchLayout = leftPane.add_button(ControlledButton::Props{
+            .text = "Customize Layout",
+            .isDisabled = [] { return !getSettings().game.enableTouchControls; },
+        });
+        leftPane.register_control(customizeTouchLayout.on_pressed(
+                                      [this] { push(std::make_unique<TouchControlsEditor>()); }),
+            rightPane, [](Pane& pane) {
+                pane.clear();
+                pane.add_text("Open the touch controls layout editor.");
+            });
+        config_percent_select(leftPane, rightPane, getSettings().game.touchCameraXSensitivity,
+            "Touch Camera X Sensitivity",
+            "Adjusts touch camera horizontal sensitivity.<br/><br/>Applies to touch input only.",
+            25, 400, 5, [] { return !getSettings().game.enableTouchControls; });
+        config_percent_select(leftPane, rightPane, getSettings().game.touchCameraYSensitivity,
+            "Touch Camera Y Sensitivity",
+            "Adjusts touch camera vertical sensitivity.<br/><br/>Applies to touch input only.", 25,
+            400, 5, [] { return !getSettings().game.enableTouchControls; });
+#endif
 
         leftPane.add_section("Camera");
         addOption("Free Camera", getSettings().game.freeCamera,
@@ -1615,6 +1668,8 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             [] { return !getSettings().game.enableMouseAim || !getSettings().game.enableMouseCamera; });
 
         leftPane.add_section("Gameplay");
+        addOption("Mouse/Touch in Menus", getSettings().game.enableMenuPointer,
+            "Enables mouse and touch input for supported in-game menus.");
         addOption("Invert Air/Swim X Axis", getSettings().game.invertAirSwimX,
             "Invert horizontal movement while flying or swimming.");
         addOption("Invert Air/Swim Y Axis", getSettings().game.invertAirSwimY,

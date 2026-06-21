@@ -35,9 +35,7 @@ namespace randomizer::logic::spoiler_log
     {
         log << "Dusklight Version: " << DUSK_WC_DESCRIBE << std::endl;
         log << "Seed: " << randomizer->GetConfig().GetSeed() << std::endl;
-
-        // TODO: Setting string
-
+        log << "Permalink: " << randomizer->GetConfig().GetPermalink() << std::endl;
         log << "Hash: " << randomizer->GetConfig().GetHash() << std::endl;
     }
 
@@ -78,7 +76,7 @@ namespace randomizer::logic::spoiler_log
         // Print starting inventories if there are any
         if (!worldswithStartingInventories.empty())
         {
-            spoilerLog << std::endl << "Starting Inventory:" << std::endl;
+            spoilerLog << std::endl << "All Starting Items:" << std::endl;
             for (const auto& world : worldswithStartingInventories)
             {
                 spoilerLog << "    World " << world->GetID() << ":" << std::endl;

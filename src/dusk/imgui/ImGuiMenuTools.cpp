@@ -315,7 +315,7 @@ namespace dusk {
 
         int FrameRateLimitIndex() {
             auto& s = getSettings();
-            if (!s.game.enableFrameInterpolation.getValue()) {
+            if (s.game.enableFrameInterpolation.getValue() == FrameInterpMode::Off) {
                 return 0;
             }
             const int limit = s.game.frameRateLimit.getValue();
@@ -336,7 +336,8 @@ namespace dusk {
             if (ImGui::SliderInt("##FrameRateLimit", &index, 0,
                     IM_ARRAYSIZE(kFrameRateLimitValues) - 1, kFrameRateLimitNames[index]))
             {
-                s.game.enableFrameInterpolation.setValue(index != 0);
+                s.game.enableFrameInterpolation.setValue(index == 0 ? FrameInterpMode::Off :
+                    (kFrameRateLimitValues[index] == 0 ? FrameInterpMode::Unlimited : FrameInterpMode::Capped));
                 s.game.frameRateLimit.setValue(index == 0 ? 0 : kFrameRateLimitValues[index]);
                 config::Save();
             }
@@ -460,7 +461,7 @@ namespace dusk {
             ImGui::Separator();
             FrameRateLimitSlider();
             MenuCheckbox("Low Latency Presentation", s.game.lowLatencyPresentation,
-                         getTransientSettings().forceThirtyFpsLimit || !s.game.enableFrameInterpolation.getValue());
+                         getTransientSettings().forceThirtyFpsLimit || s.game.enableFrameInterpolation.getValue() == FrameInterpMode::Off);
             DepthOfFieldModeControl();
             MenuCheckbox("Map Background", s.game.enableMapBackground);
             MenuCheckbox("Disable Water Refraction", s.game.disableWaterRefraction);

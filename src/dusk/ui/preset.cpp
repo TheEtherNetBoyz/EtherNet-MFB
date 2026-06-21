@@ -20,12 +20,13 @@ void applyPresetClassic() {
     s.game.enableControllerToasts.setValue(false);
     s.game.enableFastLoads.setValue(false);
     s.game.enableInstaLoads.setValue(false);
-    s.game.enableFrameInterpolation.setValue(false);
+    s.game.enableFrameInterpolation.setValue(FrameInterpMode::Off);
     s.game.frameRateLimit.setValue(0);
     s.game.internalResolutionScale.setValue(1);
     s.game.shadowResolutionMultiplier.setValue(1);
     s.game.hideTvSettingsScreen.setValue(false);
     s.game.menuScalingMode.setValue(MenuScaling::GameCube);
+    s.game.enableMenuPointer.setValue(false);
     AuroraSetViewportPolicy(AURORA_VIEWPORT_FIT);
 }
 
@@ -50,7 +51,7 @@ void applyPresetDusk() {
     s.game.enableInstaLoads.setValue(false);
     s.game.instantSaves.setValue(true);
     s.game.midnasLamentNonStop.setValue(true);
-    s.game.enableFrameInterpolation.setValue(true);
+    s.game.enableFrameInterpolation.setValue(FrameInterpMode::Unlimited);
     s.game.frameRateLimit.setValue(0);
     s.game.sunsSong.setValue(true);
     s.game.bloomMode.setValue(BloomMode::Dusk);
@@ -61,6 +62,7 @@ void applyPresetDusk() {
     s.game.autoSave.setValue(true);
     s.game.menuScalingMode.setValue(MenuScaling::Dusklight);
     s.game.enhancedMapMenus.setValue(true);
+    s.game.enableMenuPointer.setValue(true);
 }
 
 }  // namespace
