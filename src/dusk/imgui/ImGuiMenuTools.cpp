@@ -184,19 +184,19 @@ namespace dusk {
             switch (getSettings().video.forcedAspectRatio.getValue()) {
             case AspectRatioMode::Ratio16x9:
                 AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
-                AuroraSetForcedAspectRatio(16, 9);
+                VILockAspectRatio(16, 9);
                 break;
             case AspectRatioMode::Ratio21x9:
                 AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
-                AuroraSetForcedAspectRatio(43, 18);
+                VILockAspectRatio(43, 18);
                 break;
             case AspectRatioMode::Ratio3x2:
                 AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
-                AuroraSetForcedAspectRatio(3, 2);
+                VILockAspectRatio(3, 2);
                 break;
             case AspectRatioMode::Off:
             default:
-                AuroraSetForcedAspectRatio(0, 0);
+                VIUnlockAspectRatio();
                 AuroraSetViewportPolicy(getSettings().video.lockAspectRatio.getValue() ?
                                             AURORA_VIEWPORT_FIT :
                                             AURORA_VIEWPORT_STRETCH);

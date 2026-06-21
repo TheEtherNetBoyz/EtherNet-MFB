@@ -680,19 +680,19 @@ int game_main(int argc, char* argv[]) {
     switch (dusk::getSettings().video.forcedAspectRatio.getValue()) {
     case dusk::AspectRatioMode::Ratio16x9:
         AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
-        AuroraSetForcedAspectRatio(16, 9);
+        VILockAspectRatio(16, 9);
         break;
     case dusk::AspectRatioMode::Ratio21x9:
         AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
-        AuroraSetForcedAspectRatio(43, 18);
+        VILockAspectRatio(43, 18);
         break;
     case dusk::AspectRatioMode::Ratio3x2:
         AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
-        AuroraSetForcedAspectRatio(3, 2);
+        VILockAspectRatio(3, 2);
         break;
     case dusk::AspectRatioMode::Off:
     default:
-        AuroraSetForcedAspectRatio(0, 0);
+        VIUnlockAspectRatio();
         break;
     }
     VISetFrameBufferScale(dusk::getSettings().game.internalResolutionScale.getValue());
