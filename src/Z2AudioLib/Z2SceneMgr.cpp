@@ -124,6 +124,91 @@ static void z2LogWaveLoadResult(const char* label, u32 wave, JASWaveArc* wave_ar
         available ? (ok ? "requested" : "already_or_pending") : "missing_or_failed",
         mode, fileSize, static_cast<int>(allocated), linearFree, totalFree);
 }
+
+// SE-wave async completion tracking (PC instrumentation).
+// loadSeWave() only kicks off an async load, so its request log always reads
+// status 1(loading). These helpers poll the SE wave bank once per frame so we
+// can see whether a requested wave actually reaches 2(loaded), or silently
+// drops back to 0(not_loaded) (evicted / never fit). Without this the log
+// dead-ends at "loading" and a failed SFX load is invisible.
+static s32 z2QuerySeWaveStatus(u32 wave) {
+    JAUSectionHeap* sectionHeap = JASGlobalInstance<JAUSectionHeap>::getInstance();
+    if (sectionHeap == NULL) {
+        return -1;
+    }
+    JASWaveBank* wave_bank = sectionHeap->getWaveBankTable().getWaveBank(0);
+    if (wave_bank == NULL) {
+        return -1;
+    }
+    JASWaveArc* wave_arc = wave_bank->getWaveArc(wave);
+    if (wave_arc == NULL) {
+        return -1;
+    }
+    return wave_arc->getStatus();
+}
+
+struct Z2PendingSeWave {
+    u32 wave;
+    s32 lastStatus;
+    bool active;
+};
+
+static const int Z2_MAX_PENDING_SE_WAVES = 16;
+static Z2PendingSeWave s_pendingSeWaves[Z2_MAX_PENDING_SE_WAVES];
+
+static void z2TrackPendingSeWave(u32 wave, s32 statusAfterRequest) {
+    // Only waves still loading need a completion watch; loaded/failed are terminal.
+    if (statusAfterRequest != 1) {
+        return;
+    }
+    int freeSlot = -1;
+    for (int i = 0; i < Z2_MAX_PENDING_SE_WAVES; ++i) {
+        if (s_pendingSeWaves[i].active && s_pendingSeWaves[i].wave == wave) {
+            s_pendingSeWaves[i].lastStatus = statusAfterRequest;
+            return;
+        }
+        if (freeSlot < 0 && !s_pendingSeWaves[i].active) {
+            freeSlot = i;
+        }
+    }
+    if (freeSlot < 0) {
+        Z2_MUSIC_LOG("seWave watch full, not tracking completion of wave %u\n", wave);
+        return;
+    }
+    s_pendingSeWaves[freeSlot].wave = wave;
+    s_pendingSeWaves[freeSlot].lastStatus = statusAfterRequest;
+    s_pendingSeWaves[freeSlot].active = true;
+}
+
+static void z2PollPendingSeWaves() {
+    for (int i = 0; i < Z2_MAX_PENDING_SE_WAVES; ++i) {
+        if (!s_pendingSeWaves[i].active) {
+            continue;
+        }
+        const u32 wave = s_pendingSeWaves[i].wave;
+        const s32 status = z2QuerySeWaveStatus(wave);
+        if (status < 0) {
+            // Bank/arc transiently unavailable; re-check next frame.
+            continue;
+        }
+        if (status == s_pendingSeWaves[i].lastStatus) {
+            continue;
+        }
+        if (status == 2) {
+            Z2_MUSIC_LOG("loadSeWave(%u) COMPLETE: %d(%s) -> 2(loaded)\n", wave,
+                         s_pendingSeWaves[i].lastStatus,
+                         z2WaveStatusName(s_pendingSeWaves[i].lastStatus));
+            s_pendingSeWaves[i].active = false;
+        } else if (status == 0) {
+            Z2_MUSIC_LOG("loadSeWave(%u) LOST: %d(%s) -> 0(not_loaded) (evicted or never fit)\n",
+                         wave, s_pendingSeWaves[i].lastStatus,
+                         z2WaveStatusName(s_pendingSeWaves[i].lastStatus));
+            s_pendingSeWaves[i].active = false;
+        } else {
+            s_pendingSeWaves[i].lastStatus = status;
+        }
+    }
+}
 #endif
 
 Z2SceneMgr::Z2SceneMgr() : JASGlobalInstance<Z2SceneMgr>(true) {
@@ -1821,6 +1906,9 @@ void Z2SceneMgr::sceneChange(JAISoundID bgm, u8 seWave1, u8 seWave2, u8 bgmWave1
 }
 
 void Z2SceneMgr::framework() {
+#if TARGET_PC
+    z2PollPendingSeWaves();
+#endif
     if (load1stWait > 0) {
         load1stWait--;
         if (load1stWait == 0 && timer == 0) {
@@ -1937,7 +2025,7 @@ void Z2SceneMgr::_load1stWaveInner_2() {
     }
 
 #if TARGET_PC
-    dusk::music::LoadSceneRequiredBgmWaves();
+    dusk::music::LoadSceneRequiredBgmWaves(2);
 #endif
 }
 
@@ -1988,6 +2076,10 @@ void Z2SceneMgr::load2ndDynamicWave() {
             loadedBgmWave_2 = 0;
         }
     }
+
+#if TARGET_PC
+    dusk::music::LoadSceneRequiredBgmWaves(2);
+#endif
 }
 
 void Z2SceneMgr::sceneBgmStart() {
@@ -2110,7 +2202,15 @@ bool Z2SceneMgr::eraseSeWave(u32 wave) {
     if (wave_bank != NULL) {
         JASWaveArc* wave_arc = wave_bank->getWaveArc(wave);
         if (wave_arc != NULL) {
+#if TARGET_PC
+            const s32 before = wave_arc->getStatus();
+            const bool erased = wave_arc->erase();
+            Z2_MUSIC_LOG("eraseSeWave(%u): %d(%s) -> erase %s\n", wave, before,
+                         z2WaveStatusName(before), erased ? "ok" : "failed");
+            return erased;
+#else
             return wave_arc->erase();
+#endif
         }
     }
     return false;
@@ -2203,6 +2303,7 @@ bool Z2SceneMgr::loadSeWave(u32 wave) {
 
     const bool available = ok || z2WaveAvailableOrLoading(after);
     z2LogWaveLoadResult("loadSeWave", wave, wave_arc, before, after, ok, "head");
+    z2TrackPendingSeWave(wave, after);
 
     return available;
 #else

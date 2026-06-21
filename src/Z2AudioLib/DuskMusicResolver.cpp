@@ -834,17 +834,17 @@ void ReleaseUnneededSceneBgmWaves() {
     }
 }
 
-void LoadSceneRequiredBgmWaves() {
-    if (s_sceneRequiredBgmWaveCount == 0) {
+void LoadSceneRequiredBgmWaves(size_t startIndex) {
+    if (s_sceneRequiredBgmWaveCount == 0 || startIndex >= s_sceneRequiredBgmWaveCount) {
         return;
     }
 
-    MUSIC_LOG("scene residency load original=0x%08x(%s) playback=0x%08x(%s) required_bgm=[%s]\n",
+    MUSIC_LOG("scene residency load original=0x%08x(%s) playback=0x%08x(%s) start=%u required_bgm=[%s]\n",
               static_cast<u32>(s_sceneOriginalId), bgmName(static_cast<u32>(s_sceneOriginalId)),
               static_cast<u32>(s_sceneReplacementId), bgmName(static_cast<u32>(s_sceneReplacementId)),
-              activeSceneRequiredBgmWaveList().c_str());
+              static_cast<u32>(startIndex), activeSceneRequiredBgmWaveList().c_str());
 
-    for (size_t i = 0; i < s_sceneRequiredBgmWaveCount; ++i) {
+    for (size_t i = startIndex; i < s_sceneRequiredBgmWaveCount; ++i) {
         requestBgmWaveForId(static_cast<u32>(s_sceneReplacementId), s_sceneRequiredBgmWaves[i],
                             "scene residency");
     }
@@ -861,9 +861,23 @@ JAISoundID ResolvePlaybackAndLoad(Route route, JAISoundID originalId) {
     }
 
     const ResolvedMusic resolved = makeResolved(*match.entry);
-    LoadResolvedBgmWaves(resolved);
     const JAISoundID playback = match.alreadyPlayback ? originalId : resolved.replacementId;
-    MUSIC_LOG("%s match=%s/%s requested=0x%08x(%s) original=0x%08x(%s) playback=0x%08x(%s) banks=[%s] target_bgm=[%s] target_se=[%s]\n",
+
+    if (route == Route::Main && match.matchedRoute == Route::Scene && match.alreadyPlayback) {
+        MUSIC_LOG("%s match=%s/%s requested=0x%08x(%s) original=0x%08x(%s) playback=0x%08x(%s) banks=[%s] target_bgm=[%s] target_se=[%s] load=scene-managed\n",
+                  routeName(route), match.kind, routeName(match.matchedRoute),
+                  static_cast<u32>(originalId), bgmName(static_cast<u32>(originalId)),
+                  static_cast<u32>(resolved.originalId),
+                  bgmName(static_cast<u32>(resolved.originalId)),
+                  static_cast<u32>(playback), bgmName(static_cast<u32>(playback)),
+                  waveListStr(resolved.bgmWaves, resolved.bgmWaveCount).c_str(),
+                  waveListStr(resolved.targetBgmWaves, resolved.targetBgmWaveCount).c_str(),
+                  waveListStr(resolved.targetSeWaves, resolved.targetSeWaveCount).c_str());
+        return playback;
+    }
+
+    LoadResolvedBgmWaves(resolved);
+    MUSIC_LOG("%s match=%s/%s requested=0x%08x(%s) original=0x%08x(%s) playback=0x%08x(%s) banks=[%s] target_bgm=[%s] target_se=[%s] load=resolver\n",
               routeName(route), match.kind, routeName(match.matchedRoute),
               static_cast<u32>(originalId), bgmName(static_cast<u32>(originalId)),
               static_cast<u32>(resolved.originalId),

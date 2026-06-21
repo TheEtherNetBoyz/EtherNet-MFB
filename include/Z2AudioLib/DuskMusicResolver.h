@@ -48,7 +48,7 @@ void RestoreEvictedMainBgmWaves();
 bool ReleaseBgmWavesForSeRetry(u32 seWave);
 void LoadResolvedBgmWaves(const ResolvedMusic& resolved, size_t startIndex = 0);
 void ReleaseUnneededSceneBgmWaves();
-void LoadSceneRequiredBgmWaves();
+void LoadSceneRequiredBgmWaves(size_t startIndex = 0);
 bool IsEnemyMusicDisabledFor(JAISoundID bgmId);
 bool IsAllEnemyMusicDisabled();
 
