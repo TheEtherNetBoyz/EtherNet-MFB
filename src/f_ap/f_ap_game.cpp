@@ -39,6 +39,7 @@
 #include "tracy/Tracy.hpp"
 #include <dusk/gamepad_color.h>
 #include <dusk/autosave.h>
+#include "dusk/menu_pointer.h"
 #endif
 
 fapGm_HIO_c::fapGm_HIO_c() {
@@ -829,6 +830,7 @@ static void fapGm_AfterRecord() {
 BOOL isRecording = false;
 
 static void duskExecute() {
+    dusk::menu_pointer::begin_game_frame();
     dusk::input::handleGamepadColor();
     updateAutoSave();
 
@@ -928,6 +930,7 @@ void fapGm_Execute() {
 #ifdef TARGET_PC
     dusk::speedrun::onGameFrame();
     dusk::AchievementSystem::get().tick();
+    dusk::menu_pointer::end_game_frame();
 #endif
 }
 
