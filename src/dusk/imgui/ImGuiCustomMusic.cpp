@@ -84,6 +84,10 @@ const char* poolName(tpcm::MusicBgmPoolMode mode) {
     }
 }
 
+bool isReplacementTargetEntry(const tpcm::BgmEntry& entry) {
+    return tpcm::RuntimeInfoForBgm(entry).targetAllowed;
+}
+
 void drawLibrary(CustomMusicService& service) {
     auto& project = service.project();
     if (ImGui::BeginTable("##custom_music_library", 3,
@@ -130,11 +134,11 @@ void drawReplacement(CustomMusicService& service) {
     ImGui::SetNextItemWidth(310);
     const char* target = project.replacementTarget >= 0
         && project.replacementTarget < static_cast<int>(tpcm::BGM_TABLE_SIZE)
-        && tpcm::BGM_TABLE[project.replacementTarget].bmsName != nullptr
+        && isReplacementTargetEntry(tpcm::BGM_TABLE[project.replacementTarget])
         ? tpcm::BGM_TABLE[project.replacementTarget].displayName : "Select target";
     if (ImGui::BeginCombo("Target song", target)) {
         for (std::size_t i = 0; i < tpcm::BGM_TABLE_SIZE; ++i) {
-            if (tpcm::BGM_TABLE[i].bmsName == nullptr) continue;
+            if (!isReplacementTargetEntry(tpcm::BGM_TABLE[i])) continue;
             if (ImGui::Selectable(tpcm::BGM_TABLE[i].displayName,
                     project.replacementTarget == static_cast<int>(i))) {
                 project.replacementTarget = static_cast<int>(i);
@@ -147,7 +151,7 @@ void drawReplacement(CustomMusicService& service) {
         && project.library[static_cast<std::size_t>(project.selectedSong)].available;
     const bool targetReplaceable = project.replacementTarget >= 0
         && project.replacementTarget < static_cast<int>(tpcm::BGM_TABLE_SIZE)
-        && tpcm::BGM_TABLE[project.replacementTarget].bmsName != nullptr;
+        && isReplacementTargetEntry(tpcm::BGM_TABLE[project.replacementTarget]);
     const bool blocked = service.status().running || !selectedAvailable
         || !targetReplaceable || project.cleanSourceIso.empty();
     ImGui::BeginDisabled(blocked);
@@ -201,9 +205,16 @@ void drawRandomizer(CustomMusicService& service) {
     const auto replacements = tpcm::selectMusicBgmPool(project.poolMode);
     const auto targets = tpcm::selectReliableMusicTargets(project.poolMode);
     const auto customSlots = tpcm::selectCustomMusicSlots(project.poolMode);
+    const auto compatibility = tpcm::buildMusicCompatibilityReport(project.poolMode);
+    const auto targetOnlyCount = static_cast<std::size_t>(std::count_if(
+        compatibility.begin(), compatibility.end(), [](const tpcm::MusicCompatibilityEntry& entry) {
+            return entry.compatibility == tpcm::MusicSlotCompatibility::TargetOnly;
+        }));
     const auto availableCustom = static_cast<std::size_t>(std::count_if(
         project.library.begin(), project.library.end(),
         [](const CustomSong& song) { return song.available; }));
+    ImGui::TextDisabled("%d automatic slots; %d contextual targets for forced assignments.",
+        static_cast<int>(replacements.size()), static_cast<int>(targetOnlyCount));
     ImGui::TextDisabled("%d of %d available custom songs will be universal candidates.",
         static_cast<int>(std::min(availableCustom, customSlots.size())),
         static_cast<int>(availableCustom));

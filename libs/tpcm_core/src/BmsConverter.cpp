@@ -419,9 +419,13 @@ void addTempoTrack(MidiFile& midi, std::uint16_t bpm) {
 std::uint8_t midiBankForGameBank(std::uint8_t bank, std::uint8_t program) {
     if (bank == 11 && program >= 128) return 111;
     if (bank == 11) return 11;
+    if (bank == 12 && program >= 128) return 112;
     if (bank == 12) return 12;
+    if (bank == 13 && program >= 128) return 113;
     if (bank == 13) return 13;
+    if (bank == 50 && program >= 128) return 150;
     if (bank == 50) return 50;
+    if (bank == 51 && program >= 128) return 151;
     if (bank == 51) return 51;
     if (bank == 52 && program >= 128) return 152;
     if (bank == 52) return 52;
@@ -431,7 +435,9 @@ std::uint8_t midiBankForGameBank(std::uint8_t bank, std::uint8_t program) {
 }
 
 std::uint8_t midiProgramForGameProgram(std::uint8_t bank, std::uint8_t program) {
-    if (bank == 11 && program >= 128) {
+    if ((bank == 11 || bank == 12 || bank == 13 || bank == 50 || bank == 51 || bank == 52
+         || bank == 53)
+        && program >= 128) {
         return static_cast<std::uint8_t>(program - 128);
     }
     return static_cast<std::uint8_t>(std::min<int>(program, 127));
@@ -481,10 +487,15 @@ bool isTempoMeta(const std::vector<std::uint8_t>& bytes) {
 }
 
 std::uint8_t gameBankForMidiBank(std::uint8_t midiBank) {
+    if (midiBank == 111) return 11;
     if (midiBank == 12)  return 12;
+    if (midiBank == 112) return 12;
     if (midiBank == 13)  return 13;
+    if (midiBank == 113) return 13;
     if (midiBank == 50)  return 50;
+    if (midiBank == 150) return 50;
     if (midiBank == 51)  return 51;
+    if (midiBank == 151) return 51;
     if (midiBank == 52)  return 52;
     if (midiBank == 53)  return 53;
     if (midiBank == 152) return 52;
@@ -493,7 +504,8 @@ std::uint8_t gameBankForMidiBank(std::uint8_t midiBank) {
 }
 
 std::uint8_t gameProgramForMidi(std::uint8_t midiBank, std::uint8_t midiProgram) {
-    if (midiBank == 111 || midiBank == 152 || midiBank == 153) {
+    if (midiBank == 111 || midiBank == 112 || midiBank == 113 || midiBank == 150
+        || midiBank == 151 || midiBank == 152 || midiBank == 153) {
         return static_cast<std::uint8_t>(midiProgram + 128);
     }
     return midiProgram;
@@ -974,13 +986,16 @@ std::vector<std::uint8_t> midiToBms(const MidiFile& midi, MidiToBmsOptions optio
         if (overrideIt != options.channelOverrides.end()) {
             const MidiToBmsOptions::ChannelOverride& edit = overrideIt->second;
             if (edit.mute) continue;
-            if (edit.bank >= 0) {
-                channel.bank = static_cast<std::uint8_t>(
-                    midiBankForGameBank(static_cast<std::uint8_t>(edit.bank),
-                                       edit.program >= 0 ? static_cast<std::uint8_t>(edit.program) : 0));
+            if (edit.bank >= 0 || edit.program >= 0) {
+                const std::uint8_t gameBank = edit.bank >= 0
+                    ? static_cast<std::uint8_t>(edit.bank)
+                    : gameBankForMidiBank(channel.bank);
+                const std::uint8_t gameProgram = edit.program >= 0
+                    ? static_cast<std::uint8_t>(edit.program)
+                    : gameProgramForMidi(channel.bank, channel.program);
+                channel.bank = midiBankForGameBank(gameBank, gameProgram);
+                channel.program = midiProgramForGameProgram(gameBank, gameProgram);
             }
-            if (edit.program >= 0)
-                channel.program = static_cast<std::uint8_t>(edit.program & 0x7F);
             if (edit.volume >= 0) channel.volume = static_cast<std::uint8_t>(edit.volume & 0x7F);
             if (edit.pan >= 0) {
                 channel.pan = static_cast<std::uint8_t>(edit.pan & 0x7F);

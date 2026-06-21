@@ -1,6 +1,7 @@
 #include "d/dolzel.h" // IWYU pragma: keep
 
 #include "JSystem/JAudio2/JASBasicWaveBank.h"
+#include "JSystem/JAudio2/JASWaveArcLoader.h"
 #include "JSystem/JAudio2/JAUSectionHeap.h"
 #include "JSystem/JAudio2/JAUSoundTable.h"
 #if TARGET_PC
@@ -20,6 +21,28 @@
 #endif
 #include <cstring>
 #include "Z2AudioLib/SpotName.h"
+#include <cstdio>
+
+#if TARGET_PC
+#include <cstdarg>
+#include <cstdio>
+#include "dusk/logging.h"
+
+static void Z2MusicLogPrintf(const char* fmt, ...) {
+    char buffer[2048];
+
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buffer, sizeof(buffer), fmt, args);
+    va_end(args);
+
+    DuskLog.debug("[music] {}", buffer);
+}
+
+#define Z2_MUSIC_LOG(...) Z2MusicLogPrintf(__VA_ARGS__)
+#else
+#define Z2_MUSIC_LOG(...)
+#endif
 
 #if TARGET_PC
 static bool z2IsAcceleratedLoadAudio() {
@@ -37,6 +60,26 @@ static u32 z2FastLoadAudioFrames(u32 frames) {
 #endif
 }
 
+#if TARGET_PC
+static bool z2IsRandomizedScenePlayback(JAISoundID bgm) {
+    return dusk::music::IsCurrentSceneReplacementPlayback(bgm);
+}
+
+static s32 z2SceneBgmDynamicStatus(JAISoundID bgm, s32 sceneNum, s32 roomNum) {
+    if (z2IsRandomizedScenePlayback(bgm)) {
+        Z2_MUSIC_LOG("scene dynamic status normalized for randomized playback bgm=0x%08x scene=%d room=%d -> status=0\n",
+                     static_cast<u32>(bgm), sceneNum, roomNum);
+        return 0;
+    }
+
+    if (sceneNum == Z2SCENE_CASTLE_TOWN_SHOPS) {
+        return 5;
+    }
+
+    return roomNum;
+}
+#endif
+
 static u32 z2FastLoadAudioFadeFrames(u32 frames) {
 #if TARGET_PC
     if (!z2IsAcceleratedLoadAudio()) {
@@ -48,6 +91,40 @@ static u32 z2FastLoadAudioFadeFrames(u32 frames) {
     return frames;
 #endif
 }
+
+#if TARGET_PC
+static const char* z2WaveStatusName(s32 status) {
+    switch (status) {
+    case 0:
+        return "not_loaded";
+    case 1:
+        return "loading";
+    case 2:
+        return "loaded";
+    }
+    return "unknown";
+}
+
+static bool z2WaveAvailableOrLoading(s32 status) {
+    return status == 1 || status == 2;
+}
+
+static void z2LogWaveLoadResult(const char* label, u32 wave, JASWaveArc* wave_arc,
+                                s32 before, s32 after, bool ok, const char* mode) {
+    const bool available = ok || z2WaveAvailableOrLoading(after);
+    JASHeap* rootHeap = JASWaveArcLoader::getRootHeap();
+    const u32 linearFree = rootHeap != NULL ? rootHeap->getFreeSize() : 0;
+    const u32 totalFree = rootHeap != NULL ? rootHeap->getTotalFreeSize() : 0;
+    const u32 fileSize = wave_arc != NULL ? wave_arc->getFileSize() : 0;
+    const bool allocated = wave_arc != NULL && wave_arc->getHeap()->isAllocated();
+
+    Z2_MUSIC_LOG(
+        "%s(%u): status %d(%s) -> %d(%s) result=%s mode=%s fileSize=%u allocated=%d aramLinearFree=%u aramTotalFree=%u\n",
+        label, wave, before, z2WaveStatusName(before), after, z2WaveStatusName(after),
+        available ? (ok ? "requested" : "already_or_pending") : "missing_or_failed",
+        mode, fileSize, static_cast<int>(allocated), linearFree, totalFree);
+}
+#endif
 
 Z2SceneMgr::Z2SceneMgr() : JASGlobalInstance<Z2SceneMgr>(true) {
     sceneNum = -1;
@@ -1733,6 +1810,9 @@ void Z2SceneMgr::sceneChange(JAISoundID bgm, u8 seWave1, u8 seWave2, u8 bgmWave1
     requestBgmWave_1 = bgmWave1;
     requestBgmWave_2 = bgmWave2;
     requestDemoWave = demoWave;
+#if TARGET_PC
+    dusk::music::ClearRuntimeSupportWavesForScene(bgmWave1, bgmWave2);
+#endif
     BGM_ID = bgm;
     Z2GetFxLineMgr()->setSceneFx(sceneNum);
 }
@@ -1830,6 +1910,10 @@ void Z2SceneMgr::_load1stWaveInner_1() {
 void Z2SceneMgr::_load1stWaveInner_2() {
     OS_REPORT("[Z2SceneMgr::_load1stWaveInner_2] requestBgm:%d loadedBgm:%d\n", requestBgmWave_1, loadedBgmWave_1);
 
+#if TARGET_PC
+    dusk::music::ReleaseUnneededSceneBgmWaves();
+#endif
+
     if (loadedBgmWave_2 != 0 && requestBgmWave_2 != loadedBgmWave_2) {
         eraseBgmWave(loadedBgmWave_2);
         loadedBgmWave_2 = 0;
@@ -1848,10 +1932,18 @@ void Z2SceneMgr::_load1stWaveInner_2() {
             loadedBgmWave_1 = 0;
         }
     }
+
+#if TARGET_PC
+    dusk::music::LoadSceneRequiredBgmWaves();
+#endif
 }
 
 bool Z2SceneMgr::check1stDynamicWave() {
-    return load1stWait != 0 || getSeLoadStatus(requestSeWave_1) == 1 || getBgmLoadStatus(requestBgmWave_1) == 1;
+    return load1stWait != 0 || getSeLoadStatus(requestSeWave_1) == 1 || getBgmLoadStatus(requestBgmWave_1) == 1
+#if TARGET_PC
+           || dusk::music::SceneResolvedWavesStillLoading()
+#endif
+        ;
 }
 
 void Z2SceneMgr::load2ndDynamicWave() {
@@ -1931,11 +2023,15 @@ void Z2SceneMgr::sceneBgmStart() {
             case Z2BGM_DUNGEON_LV8:
             case Z2BGM_DUNGEON_LV9_02:
             case Z2BGM_SNOW_MOUNTAIN:
+#if TARGET_PC
+                Z2GetSeqMgr()->changeBgmStatus(z2SceneBgmDynamicStatus(BGM_ID, sceneNum, roomNum));
+#else
                 if (sceneNum == Z2SCENE_CASTLE_TOWN_SHOPS) {
                     Z2GetSeqMgr()->changeBgmStatus(5);
                 } else {
                     Z2GetSeqMgr()->changeBgmStatus(roomNum);
                 }
+#endif
                 break;
             case Z2BGM_HOLY_FOREST:
             case Z2BGM_LUTERA2:
@@ -2018,6 +2114,13 @@ bool Z2SceneMgr::eraseSeWave(u32 wave) {
 }
 
 bool Z2SceneMgr::eraseBgmWave(u32 wave) {
+#if TARGET_PC
+    if (dusk::music::IsBgmWaveLocked(wave)) {
+        Z2_MUSIC_LOG("keep scene-required BGM bank %u (eviction blocked)\n", wave);
+        return false;
+    }
+#endif
+
     JAUSectionHeap* sectionHeap = JASGlobalInstance<JAUSectionHeap>::getInstance();
     JUT_ASSERT(2988, sectionHeap);
 
@@ -2066,15 +2169,42 @@ bool Z2SceneMgr::loadSeWave(u32 wave) {
     JUT_ASSERT(3030, sectionHeap);
 
     JASWaveBank* wave_bank = sectionHeap->getWaveBankTable().getWaveBank(0);
-    if (wave_bank != NULL) {
-        JASWaveArc* wave_arc = wave_bank->getWaveArc(wave);
-        if (wave_arc != NULL) {
-            return wave_arc->load(NULL);
-        }
+    if (wave_bank == NULL) {
+        Z2_MUSIC_LOG("loadSeWave(%u) FAILED: wave_bank=NULL\n", wave);
+        return false;
     }
 
-    JUT_WARN_DEVICE(3038, 1, "Z2SceneMgr::cannot load SE wave:%d\n", wave);
-    return false;
+    JASWaveArc* wave_arc = wave_bank->getWaveArc(wave);
+    if (wave_arc == NULL) {
+        Z2_MUSIC_LOG("loadSeWave(%u) FAILED: wave_arc=NULL\n", wave);
+        return false;
+    }
+
+    const s32 before = wave_arc->getStatus();
+#if TARGET_PC
+    if (z2WaveAvailableOrLoading(before)) {
+        Z2_MUSIC_LOG("loadSeWave(%u): already %d(%s)\n", wave, before, z2WaveStatusName(before));
+        return true;
+    }
+#endif
+    bool ok = wave_arc->load(NULL);
+    s32 after = wave_arc->getStatus();
+#if TARGET_PC
+    if (!ok && !z2WaveAvailableOrLoading(after)
+        && dusk::music::ReleaseBgmWavesForSeRetry(wave))
+    {
+        ok = wave_arc->load(NULL);
+        after = wave_arc->getStatus();
+        z2LogWaveLoadResult("loadSeWaveRetry", wave, wave_arc, before, after, ok, "head");
+    }
+
+    const bool available = ok || z2WaveAvailableOrLoading(after);
+    z2LogWaveLoadResult("loadSeWave", wave, wave_arc, before, after, ok, "head");
+
+    return available;
+#else
+    return ok;
+#endif
 }
 
 bool Z2SceneMgr::loadBgmWave(u32 wave) {
@@ -2082,13 +2212,39 @@ bool Z2SceneMgr::loadBgmWave(u32 wave) {
     JUT_ASSERT(3047, sectionHeap);
 
     JASWaveBank* wave_bank = sectionHeap->getWaveBankTable().getWaveBank(1);
-    if (wave_bank != NULL) {
-        JASWaveArc* wave_arc = wave_bank->getWaveArc(wave);
-        if (wave_arc != NULL) {
-            return wave_arc->loadTail(NULL);
-        }
+    if (wave_bank == NULL) {
+        Z2_MUSIC_LOG("loadBgmWave(%u) FAILED: wave_bank=NULL\n", wave);
+        return false;
     }
 
-    JUT_WARN_DEVICE(3055, 1, "Z2SceneMgr::cannot load BGM wave:%d\n", wave);
-    return false;
+    JASWaveArc* wave_arc = wave_bank->getWaveArc(wave);
+    if (wave_arc == NULL) {
+        Z2_MUSIC_LOG("loadBgmWave(%u) FAILED: wave_arc=NULL\n", wave);
+        return false;
+    }
+
+    const s32 before = wave_arc->getStatus();
+#if TARGET_PC
+    if (z2WaveAvailableOrLoading(before)) {
+        Z2_MUSIC_LOG("loadBgmWave(%u): already %d(%s)\n", wave, before, z2WaveStatusName(before));
+        return true;
+    }
+#endif
+    bool ok = wave_arc->loadTail(NULL);
+    const char* mode = "tail";
+#if TARGET_PC
+    if (!ok && wave_arc->getStatus() == 0) {
+        ok = wave_arc->load(NULL);
+        mode = ok ? "tail+head" : "tail+head_failed";
+    }
+#endif
+    const s32 after = wave_arc->getStatus();
+#if TARGET_PC
+    const bool available = ok || z2WaveAvailableOrLoading(after);
+    z2LogWaveLoadResult("loadBgmWave", wave, wave_arc, before, after, ok, mode);
+
+    return available;
+#else
+    return ok;
+#endif
 }

@@ -14,6 +14,7 @@ struct GeneratedBank {
     std::uint32_t bankId;
     std::string ownerBms;
     bool active;
+    std::uint32_t waveCount = 0;  // number of source waves packed into this bank
 };
 
 struct ManifestEntry {
@@ -21,6 +22,9 @@ struct ManifestEntry {
     std::uint32_t originalBgmId;
     std::uint32_t replacementBgmId;
     std::vector<std::uint32_t> bgmWaves;
+    std::vector<std::uint32_t> targetBgmWaves;
+    std::vector<std::uint32_t> targetSeWaves;
+    std::vector<std::uint32_t> preserveBgmWaves;
     std::string kind;
     bool noEnemyMusic = false;
 };

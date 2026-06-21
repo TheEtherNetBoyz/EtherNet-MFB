@@ -49,9 +49,13 @@ void writeBytes(const fs::path& path, const std::vector<std::uint8_t>& bytes) {
 std::pair<int, int> midiBankProgram(int gameBank, int gameProgram) {
     if (gameBank == 11 && gameProgram >= 128) return {111, gameProgram - 128};
     if (gameBank == 11) return {11, gameProgram};
+    if (gameBank == 12 && gameProgram >= 128) return {112, gameProgram - 128};
     if (gameBank == 12) return {12, gameProgram};
+    if (gameBank == 13 && gameProgram >= 128) return {113, gameProgram - 128};
     if (gameBank == 13) return {13, gameProgram};
+    if (gameBank == 50 && gameProgram >= 128) return {150, gameProgram - 128};
     if (gameBank == 50) return {50, gameProgram};
+    if (gameBank == 51 && gameProgram >= 128) return {151, gameProgram - 128};
     if (gameBank == 51) return {51, gameProgram};
     if (gameBank == 52 && gameProgram >= 128) return {152, gameProgram - 128};
     if (gameBank == 52) return {52, gameProgram};
@@ -123,6 +127,29 @@ bool isTprsExt(const fs::path& path) {
 bool supported(const fs::path& path) {
     const std::string ext = lowerExt(path);
     return ext == ".mid" || ext == ".midi" || ext == ".tprs";
+}
+
+std::vector<fs::path> scanSupportedFiles(const fs::path& directory) {
+    std::vector<fs::path> paths;
+    for (const auto& entry : fs::directory_iterator(directory)) {
+        if (entry.is_regular_file() && supported(entry.path())) {
+            paths.push_back(entry.path());
+        }
+    }
+    std::sort(paths.begin(), paths.end());
+    return paths;
+}
+
+void preserveEditableSettings(CustomSong& refreshed, const CustomSong& previous) {
+    refreshed.title = previous.title;
+    refreshed.author = previous.author;
+    refreshed.masterVolume = previous.masterVolume;
+    refreshed.loopEnabled = previous.loopEnabled;
+    refreshed.loopStart = previous.loopStart;
+    refreshed.loopEnd = previous.loopEnd;
+    refreshed.drumChannels = previous.drumChannels;
+    refreshed.overrides = previous.overrides;
+    refreshed.noEnemyMusic = previous.noEnemyMusic;
 }
 
 // When a MIDI and a TPRS share the same name in the same folder, the TPRS wins:
@@ -237,28 +264,53 @@ void CustomMusicProject::importPath(const fs::path& path) {
     std::vector<fs::path> paths;
     if (fs::is_directory(path)) {
         lastImportDirectory = path;
-        for (const auto& entry : fs::directory_iterator(path)) {
-            if (entry.is_regular_file() && supported(entry.path())) {
-                paths.push_back(entry.path());
-            }
-        }
-        std::sort(paths.begin(), paths.end());
+        mirrorImportDirectory = true;
+        paths = scanSupportedFiles(path);
     } else if (fs::is_regular_file(path) && supported(path)) {
         lastImportDirectory = path.parent_path();
+        mirrorImportDirectory = false;
         paths.push_back(path);
     } else {
         throw std::runtime_error("No supported MIDI or TPRS files found at " + path.string());
     }
 
-    for (const fs::path& songPath : paths) {
-        const auto existing = std::find_if(library.begin(), library.end(), [&](const CustomSong& song) {
-            return song.path == songPath;
-        });
-        CustomSong loaded = readSong(songPath);
-        if (existing == library.end()) {
+    fs::path selectedPath;
+    if (selectedSong >= 0 && selectedSong < static_cast<int>(library.size())) {
+        selectedPath = library[static_cast<std::size_t>(selectedSong)].path;
+    }
+
+    if (mirrorImportDirectory) {
+        std::vector<CustomSong> previous = std::move(library);
+        library.clear();
+        library.reserve(paths.size());
+        for (const fs::path& songPath : paths) {
+            const auto existing = std::find_if(previous.begin(), previous.end(), [&](const CustomSong& song) {
+                return song.path == songPath;
+            });
+            CustomSong loaded = readSong(songPath);
+            if (existing != previous.end()) preserveEditableSettings(loaded, *existing);
             library.push_back(std::move(loaded));
-        } else {
-            *existing = std::move(loaded);
+        }
+        selectedSong = -1;
+        if (!selectedPath.empty()) {
+            const auto match = std::find_if(library.begin(), library.end(),
+                [&](const CustomSong& song) { return song.path == selectedPath; });
+            if (match != library.end()) {
+                selectedSong = static_cast<int>(std::distance(library.begin(), match));
+            }
+        }
+    } else {
+        for (const fs::path& songPath : paths) {
+            const auto existing = std::find_if(library.begin(), library.end(), [&](const CustomSong& song) {
+                return song.path == songPath;
+            });
+            CustomSong loaded = readSong(songPath);
+            if (existing == library.end()) {
+                library.push_back(std::move(loaded));
+            } else {
+                preserveEditableSettings(loaded, *existing);
+                *existing = std::move(loaded);
+            }
         }
     }
     dropShadowedMidis(library, selectedSong);
@@ -274,13 +326,25 @@ void CustomMusicProject::refresh() {
         selectedPath = library[static_cast<std::size_t>(selectedSong)].path;
     }
 
-    // Re-read entries that still exist (preserving in-memory metadata edits) and
-    // drop any whose backing file has been deleted.
+    std::vector<fs::path> directoryPaths;
+    const bool syncToImportDirectory = mirrorImportDirectory
+        && !lastImportDirectory.empty() && fs::is_directory(lastImportDirectory);
+    if (syncToImportDirectory) {
+        directoryPaths = scanSupportedFiles(lastImportDirectory);
+    }
+
+    // Re-read entries that still exist (preserving in-memory metadata edits).
+    // When an import directory is known, mirror that directory exactly so files
+    // removed from it (including all files in an empty folder) disappear here.
     std::vector<CustomSong> updated;
-    updated.reserve(library.size());
+    updated.reserve(syncToImportDirectory ? directoryPaths.size() : library.size());
     for (CustomSong& song : library) {
         fs::path pathToTry = song.path;
-        if (!fs::is_regular_file(pathToTry) && !lastImportDirectory.empty()) {
+        if (syncToImportDirectory) {
+            const bool stillInDirectory = std::binary_search(
+                directoryPaths.begin(), directoryPaths.end(), pathToTry);
+            if (!stillInDirectory) continue;
+        } else if (!lastImportDirectory.empty()) {
             const fs::path candidate = lastImportDirectory / song.path.filename();
             if (fs::is_regular_file(candidate))
                 pathToTry = candidate;
@@ -291,14 +355,7 @@ void CustomMusicProject::refresh() {
         try {
             CustomSong refreshed = readSong(pathToTry);
             if (!refreshed.available) continue;
-            refreshed.title = song.title;
-            refreshed.author = song.author;
-            refreshed.masterVolume = song.masterVolume;
-            refreshed.loopEnabled = song.loopEnabled;
-            refreshed.loopStart = song.loopStart;
-            refreshed.loopEnd = song.loopEnd;
-            refreshed.drumChannels = song.drumChannels;
-            refreshed.overrides = song.overrides;
+            preserveEditableSettings(refreshed, song);
             refreshed.path = pathToTry;
             updated.push_back(std::move(refreshed));
         } catch (...) {
@@ -308,15 +365,8 @@ void CustomMusicProject::refresh() {
     library = std::move(updated);
 
     // Pick up files newly added to the import directory.
-    if (!lastImportDirectory.empty() && fs::is_directory(lastImportDirectory)) {
-        std::vector<fs::path> paths;
-        for (const auto& entry : fs::directory_iterator(lastImportDirectory)) {
-            if (entry.is_regular_file() && supported(entry.path())) {
-                paths.push_back(entry.path());
-            }
-        }
-        std::sort(paths.begin(), paths.end());
-        for (const fs::path& songPath : paths) {
+    if (syncToImportDirectory) {
+        for (const fs::path& songPath : directoryPaths) {
             const bool known = std::any_of(library.begin(), library.end(),
                 [&](const CustomSong& song) { return song.path == songPath; });
             if (known) continue;
@@ -410,6 +460,7 @@ void CustomMusicProject::load(const fs::path& path) {
     }
     cleanSourceIso = root.value("clean_source_iso", "");
     lastImportDirectory = root.value("last_import_directory", "");
+    mirrorImportDirectory = root.value("mirror_import_directory", false);
     randomizerSeed = root.value("randomizer_seed", 12345);
     poolMode = static_cast<tpcm::MusicBgmPoolMode>(root.value("pool_mode", 2));
     replacementTarget = root.value("replacement_target", 0);
@@ -439,6 +490,7 @@ void CustomMusicProject::save(const fs::path& path) const {
         {"version", 1},
         {"clean_source_iso", cleanSourceIso.string()},
         {"last_import_directory", lastImportDirectory.string()},
+        {"mirror_import_directory", mirrorImportDirectory},
         {"randomizer_seed", randomizerSeed},
         {"pool_mode", static_cast<int>(poolMode)},
         {"replacement_target", replacementTarget},

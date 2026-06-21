@@ -31,6 +31,7 @@ struct CustomSong {
 struct CustomMusicProject {
     std::filesystem::path cleanSourceIso;
     std::filesystem::path lastImportDirectory;
+    bool mirrorImportDirectory = false;
     std::vector<CustomSong> library;
     std::vector<tpcm::ForcedAssignment> forcedAssignments;
     int selectedSong = -1;

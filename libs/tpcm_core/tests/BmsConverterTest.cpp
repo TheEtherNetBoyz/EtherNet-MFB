@@ -162,5 +162,24 @@ int main() {
     assert(summaries[0].channel == 0);
     assert(summaries[0].noteCount == 2);
     assert(summaries[0].volume == 100);
+
+    tpcm::MidiFile highProgramMidi;
+    highProgramMidi.ticksPerQuarter = 120;
+    tpcm::MidiTrack highProgramTrack;
+    highProgramTrack.events.push_back({0, {0xB0, 0, 111}});
+    highProgramTrack.events.push_back({0, {0xC0, 29}});
+    highProgramTrack.events.push_back({0, {0x90, 60, 100}});
+    highProgramTrack.events.push_back({60, {0x80, 60, 0}});
+    highProgramMidi.tracks.push_back(highProgramTrack);
+
+    tpcm::MidiToBmsOptions highProgramOptions;
+    highProgramOptions.channelOverrides[0].program = 157;
+    const tpcm::BmsSequence highProgramSequence =
+        tpcm::parseBms(tpcm::midiToBms(highProgramMidi, highProgramOptions));
+    assert(highProgramSequence.tracks[1].bank == 11);
+    assert(highProgramSequence.tracks[1].program == 0);
+    assert(highProgramSequence.tracks[2].bank == 11);
+    assert(highProgramSequence.tracks[2].program == 157);
+
     return 0;
 }

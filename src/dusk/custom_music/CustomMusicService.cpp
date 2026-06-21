@@ -41,7 +41,25 @@ bool isActiveIso(const fs::path& path) {
 std::vector<std::uint32_t> collectWaveIds(
     const tpcm::MidiFile& midi, const tpcm::InstrumentMap& instruments,
     const tpcm::MidiToBmsOptions& options) {
-    std::set<std::uint32_t> ids;
+    struct KeyRange {
+        std::uint8_t lo = 127;
+        std::uint8_t hi = 0;
+    };
+
+    const auto mergeKey = [](KeyRange& range, std::uint8_t key) {
+        constexpr int kKeyMargin = 1;
+        const int lo = std::max(0, static_cast<int>(key) - kKeyMargin);
+        const int hi = std::min(127, static_cast<int>(key) + kKeyMargin);
+        range.lo = static_cast<std::uint8_t>(std::min<int>(range.lo, lo));
+        range.hi = static_cast<std::uint8_t>(std::max<int>(range.hi, hi));
+    };
+
+    // Collect the game (bank, program, key range) actually used by the song.
+    // TP instruments are multi-region, so collecting a single wave per note is
+    // too brittle; however, packing every zone of every touched instrument can
+    // make custom banks so large that scene SE banks no longer fit in ARAM.
+    // Pack all zones overlapping the played key range, plus a small margin.
+    std::map<std::uint16_t, KeyRange> usedRanges;  // key = (gameBank << 8) | gameProgram
     for (const auto& track : midi.tracks) {
         std::uint8_t bankCc0[16] = {};
         std::uint8_t program[16] = {};
@@ -58,11 +76,15 @@ std::vector<std::uint32_t> collectWaveIds(
                 std::uint8_t gameBank = 11;
                 std::uint8_t gameProgram = program[channel];
                 const std::uint8_t cc0 = bankCc0[channel];
-                if (cc0 == 12 || cc0 == 13 || cc0 == 50 || cc0 == 51) gameBank = cc0;
+                if (cc0 == 12 || cc0 == 112) gameBank = 12;
+                else if (cc0 == 13 || cc0 == 113) gameBank = 13;
+                else if (cc0 == 50 || cc0 == 150) gameBank = 50;
+                else if (cc0 == 51 || cc0 == 151) gameBank = 51;
                 else if (cc0 == 52 || cc0 == 152) gameBank = 52;
                 else if (cc0 == 53 || cc0 == 153) gameBank = 53;
                 else gameBank = 11;
-                if (cc0 == 111 || cc0 == 152 || cc0 == 153)
+                if (cc0 == 111 || cc0 == 112 || cc0 == 113 || cc0 == 150 || cc0 == 151
+                    || cc0 == 152 || cc0 == 153)
                     gameProgram = static_cast<std::uint8_t>(gameProgram + 128);
                 const auto overrideIt = options.channelOverrides.find(channel);
                 if (overrideIt != options.channelOverrides.end()) {
@@ -70,8 +92,19 @@ std::vector<std::uint32_t> collectWaveIds(
                     if (overrideIt->second.bank >= 0) gameBank = static_cast<std::uint8_t>(overrideIt->second.bank);
                     if (overrideIt->second.program >= 0) gameProgram = static_cast<std::uint8_t>(overrideIt->second.program);
                 }
-                const std::uint16_t id = instruments.findWaveId(gameBank, gameProgram, event.bytes[1]);
-                if (id != 0xffff) ids.insert(id);
+                mergeKey(usedRanges[static_cast<std::uint16_t>((gameBank << 8) | gameProgram)],
+                         event.bytes[1] & 0x7f);
+            }
+        }
+    }
+
+    std::set<std::uint32_t> ids;
+    for (const auto& [key, range] : usedRanges) {
+        const std::uint8_t bank = static_cast<std::uint8_t>(key >> 8);
+        const std::uint8_t program = static_cast<std::uint8_t>(key & 0xff);
+        for (const auto& zone : instruments.zonesFor(bank, program)) {
+            if (zone.waveId != 0xffff && zone.loKey <= range.hi && zone.hiKey >= range.lo) {
+                ids.insert(zone.waveId);
             }
         }
     }
@@ -79,7 +112,7 @@ std::vector<std::uint32_t> collectWaveIds(
 }
 
 void injectWaveBank(tpcm::IsoFileSystem& iso, const std::vector<std::uint32_t>& ids,
-                    const TransactionLog& log) {
+                    std::uint8_t bankIndex, const TransactionLog& log) {
     if (ids.empty()) return;
     const auto baa = iso.readFile("Z2Sound.baa");
     auto loader = [&](std::uint32_t bank) {
@@ -89,10 +122,28 @@ void injectWaveBank(tpcm::IsoFileSystem& iso, const std::vector<std::uint32_t>& 
             return std::vector<std::uint8_t>{};
         }
     };
+    const std::string bankName = "Z2BgmWave_" + std::to_string(bankIndex) + ".aw";
     const auto output = tpcm::generateWaveBankInMemory(
-        baa, loader, ids, "Z2BgmWave_90.aw", 90, {0}, log);
+        baa, loader, ids, bankName, bankIndex, {0}, log);
     iso.replaceFile("Z2Sound.baa", output.baaData);
-    iso.writeFile("Z2BgmWave_90.aw", output.awData);
+    iso.writeFile(bankName, output.awData);
+}
+
+struct CustomBankPlan {
+    std::uint8_t bankIndex = 90;
+    std::uint32_t hostBgmId = 0;
+    std::string ownerBms;
+    std::vector<std::uint32_t> waves;
+};
+
+std::vector<tpcm::GeneratedBank> manifestBanksFor(const std::vector<CustomBankPlan>& plans) {
+    std::vector<tpcm::GeneratedBank> banks;
+    banks.reserve(plans.size());
+    for (const CustomBankPlan& plan : plans) {
+        banks.push_back({plan.bankIndex, plan.ownerBms, true,
+                         static_cast<std::uint32_t>(plan.waves.size())});
+    }
+    return banks;
 }
 
 std::string applyReplacement(const fs::path& isoPath, const CustomMusicProject& project,
@@ -109,8 +160,8 @@ std::string applyReplacement(const fs::path& isoPath, const CustomMusicProject& 
     if (!song.available) {
         throw std::runtime_error("Selected custom song is unavailable.");
     }
-    if (target.bmsName == nullptr) {
-        throw std::runtime_error("Selected target does not have a replaceable BMS file.");
+    if (!tpcm::RuntimeInfoForBgm(target).targetAllowed) {
+        throw std::runtime_error("Selected target is not a supported music playback slot.");
     }
     const auto midi = tpcm::parseMidi(loadSongMidi(song));
     const auto options = buildSongOptions(song);
@@ -121,36 +172,38 @@ std::string applyReplacement(const fs::path& isoPath, const CustomMusicProject& 
             "Custom song has no supported playable instruments: " + song.title);
     }
 
-    // Find a host slot distinct from the target. Storing the custom BMS under a
-    // different BGM ID means getMainBgmID() returns that ID at runtime, so
-    // per-BGM track volume logic in Z2SeqMgr (cutscene mutes, etc.) doesn't
-    // fire against the custom track layout.
-    const auto allSlots = tpcm::selectCustomMusicSlots(tpcm::MusicBgmPoolMode::All);
-    const tpcm::BgmEntry* hostSlot = nullptr;
-    for (const tpcm::BgmEntry* s : allSlots) {
-        if (s->bgmId != target.bgmId) {
-            hostSlot = s;
-            break;
-        }
-    }
-    if (hostSlot == nullptr) {
-        throw std::runtime_error("No available host slot for custom song injection.");
+    // Store the custom BMS under the TARGET's own sequence slot so it plays
+    // with the target's real BGM identity. getMainBgmID() then returns the
+    // target id at runtime, so the game applies that scene's default dynamic
+    // state via changeBgmStatus exactly as it does for a vanilla->vanilla swap
+    // in the TP randomizer. A neutral host slot was previously used to dodge
+    // the target's per-BGM cutscene mutes, but it also suppressed the song's
+    // default-state muting and left dynamic layers (e.g. the Sacred Grove
+    // trumpet) stuck on. We match the randomizer and accept the target's
+    // per-BGM logic.
+    if (target.bmsName == nullptr) {
+        throw std::runtime_error("Replacement target has no sequence slot.");
     }
 
     tpcm::IsoFileSystem iso = tpcm::IsoFileSystem::open(isoPath.string());
     tpcm::RarcArchive archive(tpcm::yaz0Decompress(iso.readFile("Z2SoundSeqs.arc")));
     log(std::string("Replacing ") + target.displayName + " with " + song.title + "...");
-    archive.replaceFile(hostSlot->bmsName, bms);
+    archive.replaceFile(target.bmsName, bms);
     iso.replaceFile("Z2SoundSeqs.arc", tpcm::yaz0Compress(archive.toBytes()));
-    injectWaveBank(iso, waves, log);
+    constexpr std::uint8_t customBank = 90;
+    injectWaveBank(iso, waves, customBank, log);
 
     tpcm::MusicSlotAssignment assignment{
-        target.bgmId, hostSlot->bgmId,
-        std::uint8_t{90}, std::uint8_t{0},
+        target.bgmId, target.bgmId,
+        customBank, std::uint8_t{0},
         tpcm::MusicAssignmentKind::CustomTprs,
         song.noEnemyMusic,
     };
-    auto manifest = tpcm::buildManifest({assignment}, {}, tpcm::BGM_TABLE, tpcm::BGM_TABLE_SIZE);
+    const std::vector<tpcm::GeneratedBank> generatedBanks = {
+        {customBank, target.bmsName ? target.bmsName : "", true,
+         static_cast<std::uint32_t>(waves.size())},
+    };
+    auto manifest = tpcm::buildManifest({assignment}, generatedBanks, tpcm::BGM_TABLE, tpcm::BGM_TABLE_SIZE);
     manifest.disableAllEnemyMusic = project.disableEnemyMusicGlobal;
     return tpcm::toJson(manifest);
 }
@@ -163,12 +216,16 @@ std::string applyRandomizer(const fs::path& isoPath, const CustomMusicProject& p
     tpcm::IsoFileSystem iso = tpcm::IsoFileSystem::open(isoPath.string());
     tpcm::RarcArchive archive(tpcm::yaz0Decompress(iso.readFile("Z2SoundSeqs.arc")));
     const auto instruments = tpcm::InstrumentMap::fromBuiltin();
-    std::set<std::uint32_t> allWaves;
+    std::vector<CustomBankPlan> customBanks;
     std::size_t slotIndex = 0;
     for (const CustomSong& song : project.library) {
         if (!song.available) continue;
         if (slotIndex >= slots.size()) break;
         const auto* slot = slots[slotIndex++];
+        const std::size_t bankNumber = 90 + customBanks.size();
+        if (bankNumber > 0xFF) {
+            throw std::runtime_error("Too many custom songs for per-song BGM wave banks.");
+        }
         const auto midi = tpcm::parseMidi(loadSongMidi(song));
         const auto options = buildSongOptions(song);
         archive.replaceFile(slot->bmsName, tpcm::midiToBms(midi, options));
@@ -177,15 +234,20 @@ std::string applyRandomizer(const fs::path& isoPath, const CustomMusicProject& p
             throw std::runtime_error(
                 "Custom song has no supported playable instruments: " + song.title);
         }
-        allWaves.insert(waves.begin(), waves.end());
-        candidates.push_back({slot->bgmId, 90, slot->pinnedBank,
+        const auto bankIndex = static_cast<std::uint8_t>(bankNumber);
+        customBanks.push_back({bankIndex, slot->bgmId, slot->bmsName ? slot->bmsName : "", waves});
+        candidates.push_back({slot->bgmId, bankIndex, std::uint8_t{0},
                               song.noEnemyMusic || project.disableEnemyMusicGlobal});
         customNames[slot->bgmId] = song.title;
-        log("Prepared custom song: " + song.title);
+        log("Prepared custom song: " + song.title
+            + " -> BGM wave " + std::to_string(bankIndex)
+            + " (" + std::to_string(waves.size()) + " source waves)");
     }
     if (!candidates.empty()) {
         iso.replaceFile("Z2SoundSeqs.arc", tpcm::yaz0Compress(archive.toBytes()));
-        injectWaveBank(iso, {allWaves.begin(), allWaves.end()}, log);
+        for (const CustomBankPlan& bank : customBanks) {
+            injectWaveBank(iso, bank.waves, bank.bankIndex, log);
+        }
     }
 
     std::vector<tpcm::ForcedAssignment> validForced;
@@ -195,6 +257,29 @@ std::string applyRandomizer(const fs::path& isoPath, const CustomMusicProject& p
         } else {
             log("Warning: skipping self-referential forced assignment (same song and target); remove it in the Randomizer tab.");
         }
+    }
+
+    const auto compatibility = tpcm::buildMusicCompatibilityReport(project.poolMode);
+    std::size_t automaticCount = 0;
+    std::size_t targetOnlyCount = 0;
+    std::map<std::string, std::size_t> targetOnlyReasons;
+    for (const auto& entry : compatibility) {
+        if (entry.compatibility == tpcm::MusicSlotCompatibility::Automatic) {
+            ++automaticCount;
+        } else if (entry.compatibility == tpcm::MusicSlotCompatibility::TargetOnly) {
+            ++targetOnlyCount;
+            targetOnlyReasons[entry.reason]++;
+        }
+    }
+    log("Music pool: " + std::to_string(automaticCount)
+        + " automatic slots, " + std::to_string(targetOnlyCount)
+        + " target-only contextual slots available for forced assignments.");
+    if (!targetOnlyReasons.empty()) {
+        std::string reasonLine = "Target-only reasons:";
+        for (const auto& [reason, count] : targetOnlyReasons) {
+            reasonLine += " " + reason + "=" + std::to_string(count) + ";";
+        }
+        log(reasonLine);
     }
 
     const auto assignments = tpcm::buildMusicAssignments(
@@ -215,7 +300,8 @@ std::string applyRandomizer(const fs::path& isoPath, const CustomMusicProject& p
     } else {
         log("Music replacements hidden.");
     }
-    auto manifest = tpcm::buildManifest(assignments, {}, tpcm::BGM_TABLE, tpcm::BGM_TABLE_SIZE);
+    auto manifest = tpcm::buildManifest(
+        assignments, manifestBanksFor(customBanks), tpcm::BGM_TABLE, tpcm::BGM_TABLE_SIZE);
     manifest.disableAllEnemyMusic = project.disableEnemyMusicGlobal;
     return tpcm::toJson(manifest);
 }

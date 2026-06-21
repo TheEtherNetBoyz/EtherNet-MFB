@@ -16,7 +16,7 @@ constexpr std::array<std::pair<std::uint32_t, std::uint32_t>, 4> kIncompatibleRe
     {MakeBgmId(55), MakeBgmId(8)},    // Ook Battle over Snowpeak Ruins
 }};
 
-bool isPoolEntry(const BgmEntry& entry, MusicBgmPoolMode mode) noexcept {
+bool isModeEntry(const BgmEntry& entry, MusicBgmPoolMode mode) noexcept {
     switch (mode) {
         case MusicBgmPoolMode::Scene:
             return entry.sceneBgm;
@@ -26,9 +26,59 @@ bool isPoolEntry(const BgmEntry& entry, MusicBgmPoolMode mode) noexcept {
             return entry.sceneBgm || entry.bossBgm || entry.minibossBgm || entry.minigameBgm
                    || entry.eventBgm;
         case MusicBgmPoolMode::Boss:
-            return entry.bossBgm || entry.trigger == BgmTrigger::Main;
+            return entry.bossBgm || RuntimeInfoForBgm(entry).trigger == BgmTrigger::Main;
     }
     return false;
+}
+
+bool isPoolEntry(const BgmEntry& entry, MusicBgmPoolMode mode) noexcept {
+    return isModeEntry(entry, mode) && RuntimeInfoForBgm(entry).autoShuffle;
+}
+
+const char* targetOnlyReason(const BgmRuntimeInfo& runtime) noexcept {
+    switch (runtime.portability) {
+        case BgmPortability::Contextual:
+            return "contextual no-BMS playback";
+        case BgmPortability::Standalone:
+            break;
+    }
+    return "target-only playback";
+}
+
+const char* excludedReason(const BgmRuntimeInfo& runtime) noexcept {
+    if (runtime.trigger == BgmTrigger::Fanfare) {
+        return "fanfare/SFX route";
+    }
+    if (!runtime.targetAllowed) {
+        return "unsupported playback route";
+    }
+    if (!runtime.replacementAllowed) {
+        return targetOnlyReason(runtime);
+    }
+    return "excluded";
+}
+
+MusicCompatibilityEntry classifyEntry(const BgmEntry& entry, MusicBgmPoolMode mode) noexcept {
+    MusicCompatibilityEntry result;
+    result.entry = &entry;
+    result.runtime = RuntimeInfoForBgm(entry);
+    result.compatibility = MusicSlotCompatibility::Excluded;
+    result.reason = excludedReason(result.runtime);
+
+    if (!isModeEntry(entry, mode)) {
+        result.reason = "outside selected pool";
+        return result;
+    }
+
+    if (result.runtime.autoShuffle) {
+        result.compatibility = MusicSlotCompatibility::Automatic;
+        result.reason = "automatic shuffle";
+    } else if (result.runtime.targetAllowed) {
+        result.compatibility = MusicSlotCompatibility::TargetOnly;
+        result.reason = targetOnlyReason(result.runtime);
+    }
+
+    return result;
 }
 
 bool isValidPermutation(const std::vector<const BgmEntry*>& originals,
@@ -64,9 +114,9 @@ void rotateUntilValid(const std::vector<const BgmEntry*>& originals,
 
 std::vector<const BgmEntry*> selectMusicBgmPool(MusicBgmPoolMode mode) {
     std::vector<const BgmEntry*> pool;
-    for (std::size_t i = 0; i < BGM_TABLE_SIZE; ++i) {
-        if (isPoolEntry(BGM_TABLE[i], mode)) {
-            pool.push_back(&BGM_TABLE[i]);
+    for (const MusicCompatibilityEntry& entry : buildMusicCompatibilityReport(mode)) {
+        if (entry.compatibility == MusicSlotCompatibility::Automatic) {
+            pool.push_back(entry.entry);
         }
     }
     return pool;
@@ -84,15 +134,24 @@ std::vector<const BgmEntry*> selectCustomMusicSlots(MusicBgmPoolMode mode) {
 
 std::vector<const BgmEntry*> selectReliableMusicTargets(MusicBgmPoolMode mode) {
     std::vector<const BgmEntry*> slots;
-    for (const BgmEntry* entry : selectMusicBgmPool(mode)) {
-        // Entries without an archive BMS name are mostly sub-BGMs that the source
-        // database currently labels as scene music. Do not promise target-slot
-        // replacement until their runtime routes have been audited.
-        if (entry->bmsName != nullptr || entry->trigger == BgmTrigger::Main) {
-            slots.push_back(entry);
+    for (const MusicCompatibilityEntry& entry : buildMusicCompatibilityReport(mode)) {
+        if (entry.compatibility == MusicSlotCompatibility::Automatic
+            || entry.compatibility == MusicSlotCompatibility::TargetOnly) {
+            slots.push_back(entry.entry);
         }
     }
     return slots;
+}
+
+std::vector<MusicCompatibilityEntry> buildMusicCompatibilityReport(MusicBgmPoolMode mode) {
+    std::vector<MusicCompatibilityEntry> report;
+    report.reserve(BGM_TABLE_SIZE);
+    for (std::size_t i = 0; i < BGM_TABLE_SIZE; ++i) {
+        if (isModeEntry(BGM_TABLE[i], mode)) {
+            report.push_back(classifyEntry(BGM_TABLE[i], mode));
+        }
+    }
+    return report;
 }
 
 std::vector<MusicSlotAssignment> buildMusicAssignments(std::uint32_t seed, MusicBgmPoolMode mode) {
@@ -110,7 +169,8 @@ std::vector<MusicSlotAssignment> buildMusicAssignments(
     const std::vector<CustomMusicCandidate>& customCandidates,
     const std::vector<ForcedAssignment>& forcedAssignments) {
     const std::vector<const BgmEntry*> pool = selectMusicBgmPool(mode);
-    if (pool.size() < 2) {
+    const std::vector<const BgmEntry*> targetSlots = selectReliableMusicTargets(mode);
+    if (pool.size() < 2 && forcedAssignments.empty()) {
         return {};
     }
 
@@ -138,12 +198,40 @@ std::vector<MusicSlotAssignment> buildMusicAssignments(
     }
 
     // Pre-assign forced pairs.
-    // slotForced[i]      — pool[i]'s replacement is pinned
-    // forcedCandidate[i] — the pinned candidate for pool[i]
-    // candidateUsed[k]   — candidates[k] is consumed by a forced assignment
+    // slotForced[i]      - pool[i]'s replacement is pinned
+    // forcedCandidate[i] - the pinned candidate for pool[i]
+    // candidateUsed[k]   - candidates[k] is consumed by a forced assignment
     std::vector<bool>      slotForced(pool.size(), false);
+    std::vector<bool>      slotVanilla(pool.size(), false);
     std::vector<Candidate> forcedCandidate(pool.size());
     std::vector<bool>      candidateUsed(candidates.size(), false);
+    std::vector<MusicSlotAssignment> extraForcedAssignments;
+
+    const auto freeSlotCount = [&]() {
+        std::size_t count = 0;
+        for (std::size_t i = 0; i < pool.size(); ++i) {
+            if (!slotForced[i] && !slotVanilla[i]) {
+                ++count;
+            }
+        }
+        return count;
+    };
+    const auto freeCandidateCount = [&]() {
+        std::size_t count = 0;
+        for (bool used : candidateUsed) {
+            if (!used) {
+                ++count;
+            }
+        }
+        return count;
+    };
+    const auto markVanillaSlot = [&](std::size_t idx) {
+        if (idx < pool.size() && !slotForced[idx] && !slotVanilla[idx]) {
+            slotVanilla[idx] = true;
+            return true;
+        }
+        return false;
+    };
 
     std::set<std::uint32_t> forcedReplacementIds;
     std::set<std::uint32_t> forcedTargetIds;
@@ -164,12 +252,22 @@ std::vector<MusicSlotAssignment> buildMusicAssignments(
         // Find the target slot in pool.
         std::size_t targetIdx = pool.size();
         for (std::size_t i = 0; i < pool.size(); ++i) {
-            const bool reliableTarget = pool[i]->bmsName != nullptr || pool[i]->trigger == BgmTrigger::Main;
-            if (pool[i]->bgmId == fa.targetBgmId && reliableTarget && !slotForced[i]) {
+            if (pool[i]->bgmId == fa.targetBgmId
+                && RuntimeInfoForBgm(*pool[i]).targetAllowed && !slotForced[i]) {
                 targetIdx = i;
                 break;
             }
         }
+        const BgmEntry* extraTarget = nullptr;
+        if (targetIdx == pool.size()) {
+            for (const BgmEntry* target : targetSlots) {
+                if (target->bgmId == fa.targetBgmId) {
+                    extraTarget = target;
+                    break;
+                }
+            }
+        }
+
         // Find the replacement candidate (must not already be used).
         std::size_t replIdx = candidates.size();
         for (std::size_t k = 0; k < candidates.size(); ++k) {
@@ -178,20 +276,46 @@ std::vector<MusicSlotAssignment> buildMusicAssignments(
                 break;
             }
         }
-        if (targetIdx == pool.size() || replIdx == candidates.size()) {
+        if ((targetIdx == pool.size() && extraTarget == nullptr) || replIdx == candidates.size()) {
             throw std::invalid_argument("Forced music assignment is not in the selected pool");
         }
 
-        slotForced[targetIdx]   = true;
-        forcedCandidate[targetIdx] = candidates[replIdx];
-        candidateUsed[replIdx]  = true;
+        if (targetIdx == pool.size()) {
+            const Candidate& repl = candidates[replIdx];
+            extraForcedAssignments.push_back(
+                {extraTarget->bgmId, repl.bgmId, repl.wave1, repl.wave2, repl.kind, repl.noEnemyMusic});
+            candidateUsed[replIdx] = true;
+            (void)markVanillaSlot(replIdx);
+        } else {
+            slotForced[targetIdx]   = true;
+            forcedCandidate[targetIdx] = candidates[replIdx];
+            candidateUsed[replIdx]  = true;
+        }
+    }
+
+    while (freeSlotCount() > freeCandidateCount()) {
+        bool marked = false;
+        for (std::size_t i = 0; i < pool.size(); ++i) {
+            if (markVanillaSlot(i)) {
+                marked = true;
+                break;
+            }
+        }
+        if (!marked) {
+            throw std::invalid_argument(
+                "Forced music assignments leave no target slot to balance a target-only assignment");
+        }
+    }
+    if (freeCandidateCount() > freeSlotCount()) {
+        throw std::invalid_argument(
+            "Forced music assignments leave more replacement songs than target slots");
     }
 
     // Collect free slots and free candidates.
     std::vector<std::size_t> freeSlotIndices;
     std::vector<Candidate>   freeCandidates;
     for (std::size_t i = 0; i < pool.size(); ++i) {
-        if (!slotForced[i]) freeSlotIndices.push_back(i);
+        if (!slotForced[i] && !slotVanilla[i]) freeSlotIndices.push_back(i);
     }
     for (std::size_t k = 0; k < candidates.size(); ++k) {
         if (!candidateUsed[k]) freeCandidates.push_back(candidates[k]);
@@ -226,9 +350,14 @@ std::vector<MusicSlotAssignment> buildMusicAssignments(
 
     // Assemble final assignment list.
     std::vector<MusicSlotAssignment> assignments;
-    assignments.reserve(pool.size());
+    assignments.reserve(pool.size() + extraForcedAssignments.size());
+    assignments.insert(assignments.end(), extraForcedAssignments.begin(), extraForcedAssignments.end());
     std::size_t freeIdx = 0;
     for (std::size_t i = 0; i < pool.size(); ++i) {
+        if (slotVanilla[i]) {
+            continue;
+        }
+
         const BgmEntry& original = *pool[i];
         const Candidate& repl = slotForced[i] ? forcedCandidate[i] : freeCandidates[freeIdx++];
         assignments.push_back({original.bgmId, repl.bgmId, repl.wave1, repl.wave2, repl.kind, repl.noEnemyMusic});

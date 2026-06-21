@@ -20,7 +20,7 @@ if(NOT TARGET zlibstatic AND NOT TARGET zlibstaticd AND NOT TARGET ZLIB::ZLIB AN
     FetchContent_MakeAvailable(zlib)
 endif()
 
-add_library(tpcm_core
+add_library(tpcm_core STATIC
     src/BgmDatabase.cpp
     src/BmsConverter.cpp
     src/InstrumentMap.cpp

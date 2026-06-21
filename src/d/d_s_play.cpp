@@ -6,6 +6,7 @@
 #include "d/dolzel.h" // IWYU pragma: keep
 
 #include "d/d_s_play.h"
+#include "Z2AudioLib/DuskMusicResolver.h"
 #include "JSystem/JUtility/JUTConsole.h"
 #include "JSystem/JUtility/JUTGamePad.h"
 #include "SSystem/SComponent/c_counter.h"
@@ -812,7 +813,12 @@ static int dScnPly_Execute(dScnPly_c* i_this) {
     if (!fopOvlpM_IsPeek()) {
         if (mDoAud_zelAudio_c::isBgmSet()) {
 #if TARGET_PC
-            if (!dScnPly_isAcceleratedLoadAudio() || !mDoAud_check1stDynamicWave()) {
+            // SceneResolvedWavesStillLoading() is a compatibility hook for
+            // older custom-music experiments. The TP-rando-style resolver
+            // returns false here and lets the normal scene loader schedule BGM
+            // waves.
+            if ((!dScnPly_isAcceleratedLoadAudio() || !mDoAud_check1stDynamicWave())
+                && !dusk::music::SceneResolvedWavesStillLoading()) {
 #endif
                 mDoAud_sceneBgmStart();
                 mDoAud_load2ndDynamicWave();

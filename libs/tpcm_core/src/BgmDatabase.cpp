@@ -182,6 +182,38 @@ const BgmEntry BGM_TABLE[] = {
 
 const std::size_t BGM_TABLE_SIZE = sizeof(BGM_TABLE) / sizeof(BGM_TABLE[0]);
 
+namespace {
+
+void appendRuntimeBgmWave(BgmRuntimeInfo& info, std::uint8_t wave) noexcept {
+    if (wave == 0 || info.bgmWaveCount >= kMaxRuntimeBgmWaves) {
+        return;
+    }
+
+    for (std::uint8_t i = 0; i < info.bgmWaveCount; ++i) {
+        if (info.bgmWaves[i] == wave) {
+            return;
+        }
+    }
+
+    info.bgmWaves[info.bgmWaveCount++] = wave;
+}
+
+void appendRuntimeSeWave(BgmRuntimeInfo& info, std::uint8_t wave) noexcept {
+    if (wave == 0 || info.seWaveCount >= kMaxRuntimeSeWaves) {
+        return;
+    }
+
+    for (std::uint8_t i = 0; i < info.seWaveCount; ++i) {
+        if (info.seWaves[i] == wave) {
+            return;
+        }
+    }
+
+    info.seWaves[info.seWaveCount++] = wave;
+}
+
+}  // namespace
+
 const BgmEntry* FindBgmById(std::uint32_t bgmId) noexcept {
     for (std::size_t i = 0; i < BGM_TABLE_SIZE; ++i) {
         if (BGM_TABLE[i].bgmId == bgmId) {
@@ -189,6 +221,155 @@ const BgmEntry* FindBgmById(std::uint32_t bgmId) noexcept {
         }
     }
     return nullptr;
+}
+
+BgmRuntimeInfo RuntimeInfoForBgm(const BgmEntry& entry) noexcept {
+    BgmRuntimeInfo info;
+    info.trigger = RuntimeTriggerForBgm(entry);
+    info.portability = BgmPortability::Standalone;
+    info.targetAllowed = info.trigger != BgmTrigger::Fanfare;
+    info.replacementAllowed = info.trigger != BgmTrigger::Fanfare;
+    info.autoShuffle = info.targetAllowed && info.replacementAllowed;
+    info.dynamicTracks = false;
+
+    appendRuntimeBgmWave(info, entry.pinnedBank);
+    appendRuntimeBgmWave(info, entry.bgmWave1);
+    appendRuntimeBgmWave(info, entry.bgmWave2);
+
+    if (info.trigger == BgmTrigger::Fanfare) {
+        info.portability = BgmPortability::Contextual;
+    }
+
+    switch (entry.bgmId) {
+        case MakeBgmId(0x4B):  // Z2BGM_SNOW_BOARD
+        case MakeBgmId(0x98):  // Z2BGM_SNOWBOARD_WIN
+        case MakeBgmId(0x99):  // Z2BGM_SNOWBOARD_LOSE
+            appendRuntimeSeWave(info, 0x46);
+            appendRuntimeSeWave(info, 0x47);
+            break;
+    }
+
+    return info;
+}
+
+BgmRuntimeInfo RuntimeInfoForBgmId(std::uint32_t bgmId) noexcept {
+    const BgmEntry* entry = FindBgmById(bgmId);
+    return entry != nullptr ? RuntimeInfoForBgm(*entry) : BgmRuntimeInfo {};
+}
+
+BgmTrigger RuntimeTriggerForBgm(const BgmEntry& entry) noexcept {
+    switch (entry.bgmId) {
+        case MakeBgmId(0x0A):  // Z2BGM_ITEM_GET
+        case MakeBgmId(0x0B):  // Z2BGM_ITEM_GET_MINI
+        case MakeBgmId(0x12):  // Z2BGM_OPEN_BOX
+        case MakeBgmId(0x14):  // Z2BGM_ITEM_GET_ME
+        case MakeBgmId(0x1C):  // Z2BGM_HEART_GET
+        case MakeBgmId(0x43):  // Z2BGM_FISHING_BARE
+        case MakeBgmId(0x44):  // Z2BGM_FISHING_GET1
+        case MakeBgmId(0x45):  // Z2BGM_FISHING_GET2
+        case MakeBgmId(0x46):  // Z2BGM_FISHING_GET3
+        case MakeBgmId(0x52):  // Z2BGM_HOWL_TOBIKUSA
+        case MakeBgmId(0x53):  // Z2BGM_HOWL_UMAKUSA
+        case MakeBgmId(0x54):  // Z2BGM_HOWL_ZELDASONG
+        case MakeBgmId(0x55):  // Z2BGM_HOWL_LIGHT_PRLD
+        case MakeBgmId(0x66):  // Z2BGM_LIGHT_PRLD_DUO
+        case MakeBgmId(0x68):  // Z2BGM_SOUL_REQ_HOWL
+        case MakeBgmId(0x69):  // Z2BGM_SOUL_REQ_DUO
+        case MakeBgmId(0x72):  // Z2BGM_HEALING_HOWL
+        case MakeBgmId(0x73):  // Z2BGM_HEALING_DUO
+        case MakeBgmId(0x75):  // Z2BGM_NEW_01_HOWL
+        case MakeBgmId(0x76):  // Z2BGM_NEW_01_DUO
+        case MakeBgmId(0x7C):  // Z2BGM_NEW_02_HOWL
+        case MakeBgmId(0x7D):  // Z2BGM_NEW_02_DUO
+        case MakeBgmId(0x7F):  // Z2BGM_NEW_03_HOWL
+        case MakeBgmId(0x80):  // Z2BGM_NEW_03_DUO
+        case MakeBgmId(0x81):  // Z2BGM_ITEM_GET_INSECT
+        case MakeBgmId(0x82):  // Z2BGM_ITEM_GET_SMELL
+        case MakeBgmId(0x83):  // Z2BGM_ITEM_GET_POU
+        case MakeBgmId(0xA0):  // Z2BGM_ITEM_GET_ME_S
+        case MakeBgmId(0xA4):  // Z2BGM_KOMONJO_GET_INTRO
+            return BgmTrigger::Fanfare;
+
+        case MakeBgmId(0x0D):  // Z2BGM_BOSSBABA_1
+        case MakeBgmId(0x0E):  // Z2BGM_BOSSBABA_2
+        case MakeBgmId(0x25):  // Z2BGM_BOSSFIREMAN_0
+        case MakeBgmId(0x30):  // Z2BGM_BOSS_OCTAEEL_0
+        case MakeBgmId(0x31):  // Z2BGM_BOSS_OCTAEEL_1
+        case MakeBgmId(0x4C):  // Z2BGM_BOSS_SNOWWOMAN_0
+        case MakeBgmId(0x4D):  // Z2BGM_BOSS_SNOWWOMAN_1
+        case MakeBgmId(0x62):  // Z2BGM_BOSS_ZANT
+        case MakeBgmId(0x8B):  // Z2BGM_HARAGIGANT_BTL01
+        case MakeBgmId(0x8C):  // Z2BGM_HARAGIGANT_BTL02
+        case MakeBgmId(0x8F):  // Z2BGM_DRAGON_BTL01
+        case MakeBgmId(0x90):  // Z2BGM_DRAGON_BTL02
+        case MakeBgmId(0x94):  // Z2BGM_GOMA_BTL01
+            return BgmTrigger::Main;
+
+        case MakeBgmId(0x04):  // Z2BGM_HORSE_BATTLE
+        case MakeBgmId(0x06):  // Z2BGM_COWBOY_GAME
+        case MakeBgmId(0x07):  // Z2BGM_FACE_OFF_BATTLE
+        case MakeBgmId(0x08):  // Z2BGM_BOOMERAMG_MONKEY
+        case MakeBgmId(0x0C):  // Z2BGM_BOSSBABA_0
+        case MakeBgmId(0x0F):  // Z2BGM_BATTLE_NORMAL
+        case MakeBgmId(0x11):  // Z2BGM_WILD_GOAT
+        case MakeBgmId(0x17):  // Z2BGM_EVENT01
+        case MakeBgmId(0x1B):  // Z2BGM_BATTLE_TWILIGHT
+        case MakeBgmId(0x1D):  // Z2BGM_MAGNE_GORON
+        case MakeBgmId(0x21):  // Z2BGM_MAGNE_GORON_D01
+        case MakeBgmId(0x22):  // Z2BGM_MAGNE_GORON_D02
+        case MakeBgmId(0x24):  // Z2BGM_SUMO
+        case MakeBgmId(0x27):  // Z2BGM_DEKUTOAD
+        case MakeBgmId(0x28):  // Z2BGM_DEKUTOAD_D01
+        case MakeBgmId(0x29):  // Z2BGM_RODEO
+        case MakeBgmId(0x2A):  // Z2BGM_BOSSFIREMAN_1
+        case MakeBgmId(0x2B):  // Z2BGM_SUMO_D1
+        case MakeBgmId(0x2E):  // Z2BGM_STATUE_GAME
+        case MakeBgmId(0x32):  // Z2BGM_BOSS_OCTAEEL_D01
+        case MakeBgmId(0x33):  // Z2BGM_BOSS_OCTAEEL_D02
+        case MakeBgmId(0x39):  // Z2BGM_VARIANT
+        case MakeBgmId(0x40):  // Z2BGM_DEATH_MOUNTAIN02
+        case MakeBgmId(0x47):  // Z2BGM_LUTERA1
+        case MakeBgmId(0x49):  // Z2BGM_FISHING_HIT
+        case MakeBgmId(0x4B):  // Z2BGM_SNOW_BOARD
+        case MakeBgmId(0x56):  // Z2BGM_HIDDEN_VIL_D1
+        case MakeBgmId(0x5D):  // Z2BGM_BOSS_SNOWWOMAN_D1
+        case MakeBgmId(0x61):  // Z2BGM_IB_MBOSS
+        case MakeBgmId(0x63):  // Z2BGM_IB_MBOSS_D01
+        case MakeBgmId(0x64):  // Z2BGM_SUMOMO
+        case MakeBgmId(0x6C):  // Z2BGM_TN_MBOSS
+        case MakeBgmId(0x6D):  // Z2BGM_OBACHAN
+        case MakeBgmId(0x6E):  // Z2BGM_RIVER_GAME
+        case MakeBgmId(0x6F):  // Z2BGM_GG_MBOSS
+        case MakeBgmId(0x70):  // Z2BGM_OUGI_TRAINING
+        case MakeBgmId(0x78):  // Z2BGM_WCS_GAME
+        case MakeBgmId(0x84):  // Z2BGM_GG_MBOSS_D01
+        case MakeBgmId(0x85):  // Z2BGM_P_ZANT
+        case MakeBgmId(0x89):  // Z2BGM_HARAGIGANT_D01
+        case MakeBgmId(0x8A):  // Z2BGM_HARAGIGANT_D02
+        case MakeBgmId(0x8D):  // Z2BGM_DRAGON_D01
+        case MakeBgmId(0x8E):  // Z2BGM_DRAGON_D02
+        case MakeBgmId(0x91):  // Z2BGM_KOROKORO_GAME
+        case MakeBgmId(0x92):  // Z2BGM_YAMIMUSHI_B_D01
+        case MakeBgmId(0x93):  // Z2BGM_GOMA_D01
+        case MakeBgmId(0x96):  // Z2BGM_FACE_OFF_BATTLE2
+        case MakeBgmId(0x97):  // Z2BGM_FACE_OFF_BATTLE3
+        case MakeBgmId(0x98):  // Z2BGM_SNOWBOARD_WIN
+        case MakeBgmId(0x99):  // Z2BGM_SNOWBOARD_LOSE
+        case MakeBgmId(0x9C):  // Z2BGM_MINIGAME_WIN01
+        case MakeBgmId(0x9D):  // Z2BGM_MINIGAME_WIN02
+        case MakeBgmId(0x9E):  // Z2BGM_POSTMAN
+        case MakeBgmId(0xA3):  // Z2BGM_TARO_RESCUE
+        case MakeBgmId(0xA5):  // Z2BGM_RIVER_GAME_00
+        case MakeBgmId(0xA8):  // Z2BGM_TN_MBOSS_LV9
+            return BgmTrigger::Sub;
+    }
+
+    return entry.trigger;
+}
+
+BgmTrigger RuntimeTriggerForBgmId(std::uint32_t bgmId) noexcept {
+    const BgmEntry* entry = FindBgmById(bgmId);
+    return entry != nullptr ? RuntimeTriggerForBgm(*entry) : BgmTrigger::Scene;
 }
 
 }  // namespace tpcm

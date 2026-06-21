@@ -27,6 +27,27 @@ enum class BgmTrigger : std::uint8_t {
     Fanfare,
 };
 
+enum class BgmPortability : std::uint8_t {
+    Standalone,
+    Contextual,
+};
+
+constexpr std::size_t kMaxRuntimeBgmWaves = 4;
+constexpr std::size_t kMaxRuntimeSeWaves = 4;
+
+struct BgmRuntimeInfo {
+    BgmTrigger trigger = BgmTrigger::Scene;
+    BgmPortability portability = BgmPortability::Contextual;
+    std::uint8_t bgmWaves[kMaxRuntimeBgmWaves] = {};
+    std::uint8_t bgmWaveCount = 0;
+    std::uint8_t seWaves[kMaxRuntimeSeWaves] = {};
+    std::uint8_t seWaveCount = 0;
+    bool autoShuffle = false;
+    bool replacementAllowed = false;
+    bool targetAllowed = false;
+    bool dynamicTracks = false;
+};
+
 struct BgmEntry {
     const char* bmsName;
     const char* displayName;
@@ -57,5 +78,9 @@ extern const BgmEntry BGM_TABLE[];
 extern const std::size_t BGM_TABLE_SIZE;
 
 const BgmEntry* FindBgmById(std::uint32_t bgmId) noexcept;
+BgmRuntimeInfo RuntimeInfoForBgm(const BgmEntry& entry) noexcept;
+BgmRuntimeInfo RuntimeInfoForBgmId(std::uint32_t bgmId) noexcept;
+BgmTrigger RuntimeTriggerForBgm(const BgmEntry& entry) noexcept;
+BgmTrigger RuntimeTriggerForBgmId(std::uint32_t bgmId) noexcept;
 
 }  // namespace tpcm

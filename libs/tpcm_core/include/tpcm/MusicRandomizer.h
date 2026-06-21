@@ -20,6 +20,12 @@ enum class MusicAssignmentKind : std::uint8_t {
     CustomTprs,
 };
 
+enum class MusicSlotCompatibility : std::uint8_t {
+    Automatic,
+    TargetOnly,
+    Excluded,
+};
+
 struct MusicSlotAssignment {
     std::uint32_t originalBgmId;
     std::uint32_t replacementBgmId;
@@ -43,9 +49,17 @@ struct ForcedAssignment {
     std::uint32_t targetBgmId;       // the slot it plays in (right dropdown)
 };
 
+struct MusicCompatibilityEntry {
+    const BgmEntry* entry = nullptr;
+    BgmRuntimeInfo runtime;
+    MusicSlotCompatibility compatibility = MusicSlotCompatibility::Excluded;
+    const char* reason = "";
+};
+
 std::vector<const BgmEntry*> selectMusicBgmPool(MusicBgmPoolMode mode);
 std::vector<const BgmEntry*> selectCustomMusicSlots(MusicBgmPoolMode mode);
 std::vector<const BgmEntry*> selectReliableMusicTargets(MusicBgmPoolMode mode);
+std::vector<MusicCompatibilityEntry> buildMusicCompatibilityReport(MusicBgmPoolMode mode);
 
 std::vector<MusicSlotAssignment> buildMusicAssignments(std::uint32_t seed, MusicBgmPoolMode mode);
 std::vector<MusicSlotAssignment> buildMusicAssignments(
