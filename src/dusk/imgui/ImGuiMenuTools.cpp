@@ -530,6 +530,9 @@ namespace dusk {
         }
 
         if (ImGui::BeginMenu("Tools")) {
+            ImGui::MenuItem("Custom Music", nullptr, &m_showCustomMusic);
+            ImGui::Separator();
+
             if (!dusk::IsGameLaunched) {
                 ImGui::BeginDisabled();
             }

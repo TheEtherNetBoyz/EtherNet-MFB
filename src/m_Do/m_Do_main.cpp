@@ -54,6 +54,7 @@
 #include "dusk/app_info.hpp"
 #include "dusk/crash_handler.h"
 #include "dusk/crash_reporting.h"
+#include "dusk/custom_music/CustomMusicIsoTransaction.h"
 #include "dusk/data.hpp"
 #include "dusk/dusk.h"
 #include "dusk/frame_interpolation.h"
@@ -612,6 +613,17 @@ int game_main(int argc, char* argv[]) {
     log_build_info();
 
     dusk::config::LoadFromUserPreferences();
+    {
+        const std::filesystem::path configuredIso = dusk::getSettings().backend.isoPath.getValue();
+        if (!configuredIso.empty()) {
+            const auto restore = dusk::custom_music::CustomMusicIsoTransaction::applyPendingRestore(configuredIso);
+            if (restore.success) {
+                DuskLog.info("{}", restore.message);
+            } else if (!restore.message.empty()) {
+                DuskLog.error("Could not apply pending ISO restore: {}", restore.message);
+            }
+        }
+    }
     if (dusk::getSettings().game.speedrunMode) {
         dusk::resetForSpeedrunMode();
     }

@@ -33,6 +33,7 @@ namespace dusk {
         void ShowInputMacro();
         void ShowInputViewer();
         void ShowActorSpawner();
+        void ShowCustomMusic();
 
     private:
 		bool m_showDebugOverlay = false;
@@ -66,6 +67,7 @@ namespace dusk {
         bool m_showInputMacro = false;
 
         bool m_showActorSpawner = false;
+        bool m_showCustomMusic = false;
         int m_inputOverlayCorner = 3;
         std::string m_controllerName;
     };

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.25)
+﻿cmake_minimum_required(VERSION 3.25)
 
 if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING
@@ -170,6 +170,14 @@ target_compile_options(aurora_mtx PRIVATE
 )
 
 add_subdirectory(libs/freeverb)
+
+option(DUSK_BUILD_CUSTOM_MUSIC_TESTS "Build embedded custom-music core tests" OFF)
+set(TPCM_BUILD_TESTS ${DUSK_BUILD_CUSTOM_MUSIC_TESTS} CACHE BOOL "Build embedded custom-music core tests" FORCE)
+if(DUSK_BUILD_CUSTOM_MUSIC_TESTS)
+    enable_testing()
+endif()
+add_subdirectory(libs/tpcm_core)
+add_library(dusk_custom_music_core ALIAS tpcm_core)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(DUSK_GFX_DEBUG_GROUPS_DEFAULT ON)
@@ -386,6 +394,8 @@ find_package(Threads REQUIRED)
 set(GAME_LIBS aurora::core aurora::gx aurora::gd aurora::si aurora::vi aurora::pad aurora::mtx aurora::os aurora::dvd
     aurora::card freeverb cxxopts::cxxopts absl::flat_hash_map nlohmann_json::nlohmann_json TracyClient fmt::fmt
     Threads::Threads zstd::libzstd)
+
+list(APPEND GAME_LIBS dusk_custom_music_core)
 
 if (DUSK_ENABLE_SENTRY_NATIVE)
     list(APPEND GAME_LIBS sentry)

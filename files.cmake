@@ -255,6 +255,7 @@ set(Z2AUDIOLIB_FILES
         src/Z2AudioLib/Z2SoundStarter.cpp
         src/Z2AudioLib/Z2SoundHandles.cpp
         src/Z2AudioLib/Z2SeMgr.cpp
+        src/Z2AudioLib/DuskMusicResolver.cpp
         src/Z2AudioLib/Z2SeqMgr.cpp
         src/Z2AudioLib/Z2StatusMgr.cpp
         src/Z2AudioLib/Z2SceneMgr.cpp
@@ -1450,6 +1451,9 @@ set(DUSK_FILES
         src/dusk/latency_trace.cpp
         src/dusk/logging.cpp
         src/dusk/settings.cpp
+        src/dusk/custom_music/CustomMusicProject.cpp
+        src/dusk/custom_music/CustomMusicService.cpp
+        src/dusk/custom_music/CustomMusicIsoTransaction.cpp
         src/dusk/speedrun.cpp
         src/dusk/string.cpp
         src/dusk/stubs.cpp
@@ -1470,6 +1474,7 @@ set(DUSK_FILES
         src/dusk/imgui/ImGuiMenuTools.hpp
         src/dusk/imgui/ImGuiMenuRandomizer.cpp
         src/dusk/imgui/ImGuiMenuRandomizer.hpp
+        src/dusk/imgui/ImGuiCustomMusic.cpp
         src/dusk/imgui/ImGuiActorSpawner.cpp
         src/dusk/imgui/ImGuiProcessOverlay.cpp
         src/dusk/imgui/ImGuiCameraOverlay.cpp
