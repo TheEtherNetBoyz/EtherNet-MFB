@@ -92,6 +92,25 @@ int main() {
     assert(convertedSequence.tracks[1].program == 0);
     assert(convertedSequence.tracks[2].bank == 11);
     assert(convertedSequence.tracks[2].program == 32);
+    bool sawAutoLoopStart = false;
+    bool sawAutoLoopEnd = false;
+    for (const tpcm::BmsEvent& event : convertedSequence.tracks[2].events) {
+        sawAutoLoopStart = sawAutoLoopStart || (event.type == tpcm::BmsEventType::LoopStart && event.tick == 0);
+        sawAutoLoopEnd = sawAutoLoopEnd || (event.type == tpcm::BmsEventType::LoopEnd && event.tick == 10);
+    }
+    assert(sawAutoLoopStart);
+    assert(sawAutoLoopEnd);
+
+    tpcm::MidiToBmsOptions noLoopOptions;
+    noLoopOptions.enableLoops = false;
+    const tpcm::BmsSequence noLoopSequence =
+        tpcm::parseBms(tpcm::midiToBms(reparsedMidi, noLoopOptions));
+    bool sawDisabledLoop = false;
+    for (const tpcm::BmsEvent& event : noLoopSequence.tracks[2].events) {
+        sawDisabledLoop = sawDisabledLoop || event.type == tpcm::BmsEventType::LoopStart
+                        || event.type == tpcm::BmsEventType::LoopEnd;
+    }
+    assert(!sawDisabledLoop);
 
     tpcm::MidiFile loopMidi;
     loopMidi.ticksPerQuarter = 120;
@@ -130,6 +149,36 @@ int main() {
     assert(sawLoopEnd);
     assert(sawPan);
     assert(sawReverb);
+
+    bool sawAuthoredStartTick = false;
+    bool sawAuthoredEndTick = false;
+    for (const tpcm::BmsEvent& event : loopSequence.tracks[2].events) {
+        sawAuthoredStartTick = sawAuthoredStartTick
+                            || (event.type == tpcm::BmsEventType::LoopStart && event.tick == 120);
+        sawAuthoredEndTick = sawAuthoredEndTick
+                          || (event.type == tpcm::BmsEventType::LoopEnd && event.tick == 240);
+    }
+    assert(sawAuthoredStartTick);
+    assert(sawAuthoredEndTick);
+
+    tpcm::MidiFile sharedLoopMidi = loopMidi;
+    tpcm::MidiTrack unmarkedLoopTrack;
+    unmarkedLoopTrack.events.push_back({0, {0xC1, 0x21}});
+    unmarkedLoopTrack.events.push_back({120, {0x91, 65, 100}});
+    unmarkedLoopTrack.events.push_back({180, {0x81, 65, 0}});
+    sharedLoopMidi.tracks.push_back(unmarkedLoopTrack);
+    const tpcm::BmsSequence sharedLoopSequence =
+        tpcm::parseBms(tpcm::midiToBms(sharedLoopMidi));
+    bool sawSharedStartTick = false;
+    bool sawSharedEndTick = false;
+    for (const tpcm::BmsEvent& event : sharedLoopSequence.tracks[3].events) {
+        sawSharedStartTick = sawSharedStartTick
+                          || (event.type == tpcm::BmsEventType::LoopStart && event.tick == 120);
+        sawSharedEndTick = sawSharedEndTick
+                        || (event.type == tpcm::BmsEventType::LoopEnd && event.tick == 240);
+    }
+    assert(sawSharedStartTick);
+    assert(sawSharedEndTick);
 
     tpcm::MidiToBmsOptions drumOptions;
     drumOptions.drumChannels.insert(0);

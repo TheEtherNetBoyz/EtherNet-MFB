@@ -474,6 +474,14 @@ struct MidiChannelData {
     std::vector<MidiNote> notes;
 };
 
+std::uint32_t channelEndTick(const MidiChannelData& channel) {
+    std::uint32_t endTick = 0;
+    for (const MidiNote& note : channel.notes) {
+        endTick = std::max(endTick, note.end);
+    }
+    return endTick;
+}
+
 std::uint16_t bpmFromTempoMeta(const std::vector<std::uint8_t>& bytes) {
     const std::uint32_t micros = (bytes[3] << 16) | (bytes[4] << 8) | bytes[5];
     if (micros != 0) {
@@ -974,6 +982,34 @@ std::vector<std::uint8_t> midiToBms(const MidiFile& midi, MidiToBmsOptions optio
             channel.loopEnd = static_cast<std::uint32_t>(options.loopEnd);
             channel.hasLoopStart = true;
             channel.hasLoopEnd = true;
+        }
+    } else if (options.enableLoops) {
+        std::set<std::pair<std::uint32_t, std::uint32_t>> authoredLoopRanges;
+        std::uint32_t songEndTick = 0;
+        for (const MidiChannelData& channel : channels) {
+            songEndTick = std::max(songEndTick, channelEndTick(channel));
+            if (channel.hasLoopStart && channel.hasLoopEnd && channel.loopEnd > channel.loopStart) {
+                authoredLoopRanges.emplace(channel.loopStart, channel.loopEnd);
+            }
+        }
+
+        if (authoredLoopRanges.size() == 1) {
+            const auto [loopStart, loopEnd] = *authoredLoopRanges.begin();
+            for (MidiChannelData& channel : channels) {
+                if (channel.notes.empty()) continue;
+                channel.loopStart = loopStart;
+                channel.loopEnd = loopEnd;
+                channel.hasLoopStart = true;
+                channel.hasLoopEnd = true;
+            }
+        } else if (authoredLoopRanges.empty() && songEndTick > 0) {
+            for (MidiChannelData& channel : channels) {
+                if (channel.notes.empty()) continue;
+                channel.loopStart = 0;
+                channel.loopEnd = songEndTick;
+                channel.hasLoopStart = true;
+                channel.hasLoopEnd = true;
+            }
         }
     }
 
