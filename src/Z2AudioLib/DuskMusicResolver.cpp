@@ -683,6 +683,9 @@ ResolvedMusic Resolve(Route route, JAISoundID originalId) {
 }
 
 JAISoundID LogicalOriginalForPlayback(Route route, JAISoundID playbackId) {
+    if (!CustomAudioActive()) {
+        return playbackId;
+    }
     ensureLoaded();
 
     const u32 played = static_cast<u32>(playbackId);
@@ -696,6 +699,9 @@ JAISoundID LogicalOriginalForPlayback(Route route, JAISoundID playbackId) {
 }
 
 bool IsResolvedPlayback(Route route, JAISoundID playbackId) {
+    if (!CustomAudioActive()) {
+        return false;
+    }
     ensureLoaded();
 
     const u32 played = static_cast<u32>(playbackId);
@@ -709,14 +715,23 @@ bool IsResolvedPlayback(Route route, JAISoundID playbackId) {
 }
 
 bool IsCurrentSceneReplacementPlayback(JAISoundID playbackId) {
+    if (!CustomAudioActive()) {
+        return false;
+    }
     return s_sceneReplacementId == playbackId && s_sceneOriginalId != s_sceneReplacementId;
 }
 
 bool HasPlaybackMatch(Route route, JAISoundID requestedId) {
+    if (!CustomAudioActive()) {
+        return false;
+    }
     return findPlaybackMatch(route, static_cast<u32>(requestedId)).entry != nullptr;
 }
 
 void LoadResolvedBgmWaves(const ResolvedMusic& resolved, size_t startIndex) {
+    if (!CustomAudioActive()) {
+        return;
+    }
     if (!resolved.matched || startIndex >= resolved.bgmWaveCount) {
         return;
     }
@@ -732,6 +747,9 @@ void LoadResolvedBgmWaves(const ResolvedMusic& resolved, size_t startIndex) {
 }
 
 void ApplySceneResolution(JAISoundID& bgm, u8& bgmWave1, u8& bgmWave2) {
+    if (!CustomAudioActive()) {
+        return;
+    }
     const ResolvedMusic resolved = Resolve(Route::Scene, bgm);
     if (!resolved.matched) {
         stageSceneRequiredRelease();
@@ -788,6 +806,9 @@ void ApplySceneResolution(JAISoundID& bgm, u8& bgmWave1, u8& bgmWave2) {
 }
 
 bool SceneResolvedWavesStillLoading() {
+    if (!CustomAudioActive()) {
+        return false;
+    }
     for (size_t i = 0; i < s_sceneRequiredBgmWaveCount; ++i) {
         if (Z2GetSceneMgr()->getBgmLoadStatus(s_sceneRequiredBgmWaves[i]) == 1) {
             return true;
@@ -797,6 +818,9 @@ bool SceneResolvedWavesStillLoading() {
 }
 
 void ReleaseUnneededSceneBgmWaves() {
+    if (!CustomAudioActive()) {
+        return;
+    }
     if (s_sceneReleaseBgmWaveCount == 0) {
         return;
     }
@@ -835,6 +859,9 @@ void ReleaseUnneededSceneBgmWaves() {
 }
 
 void LoadSceneRequiredBgmWaves(size_t startIndex) {
+    if (!CustomAudioActive()) {
+        return;
+    }
     if (s_sceneRequiredBgmWaveCount == 0 || startIndex >= s_sceneRequiredBgmWaveCount) {
         return;
     }
@@ -851,6 +878,9 @@ void LoadSceneRequiredBgmWaves(size_t startIndex) {
 }
 
 JAISoundID ResolvePlaybackAndLoad(Route route, JAISoundID originalId) {
+    if (!CustomAudioActive()) {
+        return originalId;
+    }
     const PlaybackMatch match = findPlaybackMatch(route, static_cast<u32>(originalId));
     if (match.entry == nullptr) {
         LoadRuntimeBgmWavesForPassthrough(route, static_cast<u32>(originalId));
@@ -891,6 +921,9 @@ JAISoundID ResolvePlaybackAndLoad(Route route, JAISoundID originalId) {
 
 JAISoundID ResolvePlaybackAndLock(Route route, JAISoundID originalId, LockSlot slot) {
     (void)slot;
+    if (!CustomAudioActive()) {
+        return originalId;
+    }
     const JAISoundID playback = ResolvePlaybackAndLoad(route, originalId);
     MUSIC_LOG("tp-style no-lock route=%s requested=0x%08x(%s) playback=0x%08x(%s)\n",
               routeName(route), static_cast<u32>(originalId),
@@ -904,6 +937,9 @@ void ClearBgmWaveLock(LockSlot slot) {
 }
 
 bool IsBgmWaveLocked(u32 wave) {
+    if (!CustomAudioActive()) {
+        return false;
+    }
     if (s_allowSceneRequiredEviction) {
         return false;
     }
@@ -925,6 +961,10 @@ void ClearRuntimeSupportWavesForScene(u8 bgmWave1, u8 bgmWave2) {
     (void)bgmWave1;
     (void)bgmWave2;
 
+    if (!CustomAudioActive()) {
+        return;
+    }
+
     if (s_mainRouteBgmWaveCount != 0) {
         MUSIC_LOG("scene change clears main route BGM banks: [%s]\n",
                   waveListStr(s_mainRouteBgmWaves, s_mainRouteBgmWaveCount).c_str());
@@ -942,6 +982,9 @@ void ClearRuntimeSupportWavesForScene(u8 bgmWave1, u8 bgmWave2) {
 }
 
 void RestoreEvictedMainBgmWaves() {
+    if (!CustomAudioActive()) {
+        return;
+    }
     if (s_temporarilyEvictedSceneBgmWaveCount == 0 && s_temporaryRouteBgmWaveCount == 0) {
         return;
     }
@@ -969,6 +1012,9 @@ void RestoreEvictedMainBgmWaves() {
 }
 
 bool ReleaseBgmWavesForSeRetry(u32 seWave) {
+    if (!CustomAudioActive()) {
+        return false;
+    }
     bool freedAny = false;
 
     if (s_sceneReleaseBgmWaveCount != 0) {
@@ -986,11 +1032,17 @@ bool ReleaseBgmWavesForSeRetry(u32 seWave) {
 }
 
 bool IsAllEnemyMusicDisabled() {
+    if (!CustomAudioActive()) {
+        return false;
+    }
     ensureLoaded();
     return s_disableAllEnemyMusic;
 }
 
 bool IsEnemyMusicDisabledFor(JAISoundID bgmId) {
+    if (!CustomAudioActive()) {
+        return false;
+    }
     ensureLoaded();
     const u32 id = static_cast<u32>(bgmId);
     for (const ManifestEntry& entry : s_entries) {
@@ -999,6 +1051,14 @@ bool IsEnemyMusicDisabledFor(JAISoundID bgmId) {
         }
     }
     return false;
+}
+
+// True only when a music-randomized ROM's matching manifest with real entries
+// is loaded. No matching manifest -> false, so TP audio hooks fall through to
+// the original path.
+bool CustomAudioActive() {
+    ensureLoaded();
+    return s_loaded && !s_entries.empty();
 }
 
 } // namespace dusk::music

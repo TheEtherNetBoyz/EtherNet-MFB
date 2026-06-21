@@ -52,6 +52,10 @@ void LoadSceneRequiredBgmWaves(size_t startIndex = 0);
 bool IsEnemyMusicDisabledFor(JAISoundID bgmId);
 bool IsAllEnemyMusicDisabled();
 
+// Master gate for the music randomizer audio system. False on a non-music-rando
+// ROM (no matching manifest) -> TP audio hooks must run the original path.
+bool CustomAudioActive();
+
 // TP-rando-style music swaps do not gate sceneBgmStart. This remains as a
 // compatibility hook for callers added during earlier experiments.
 bool SceneResolvedWavesStillLoading();

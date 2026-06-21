@@ -62,6 +62,9 @@ static u32 z2FastLoadAudioFrames(u32 frames) {
 
 #if TARGET_PC
 static bool z2IsRandomizedScenePlayback(JAISoundID bgm) {
+    if (!dusk::music::CustomAudioActive()) {
+        return false;
+    }
     return dusk::music::IsCurrentSceneReplacementPlayback(bgm);
 }
 
@@ -157,6 +160,9 @@ static const int Z2_MAX_PENDING_SE_WAVES = 16;
 static Z2PendingSeWave s_pendingSeWaves[Z2_MAX_PENDING_SE_WAVES];
 
 static void z2TrackPendingSeWave(u32 wave, s32 statusAfterRequest) {
+    if (!dusk::music::CustomAudioActive()) {
+        return;
+    }
     // Only waves still loading need a completion watch; loaded/failed are terminal.
     if (statusAfterRequest != 1) {
         return;
@@ -181,6 +187,9 @@ static void z2TrackPendingSeWave(u32 wave, s32 statusAfterRequest) {
 }
 
 static void z2PollPendingSeWaves() {
+    if (!dusk::music::CustomAudioActive()) {
+        return;
+    }
     for (int i = 0; i < Z2_MAX_PENDING_SE_WAVES; ++i) {
         if (!s_pendingSeWaves[i].active) {
             continue;
@@ -1856,7 +1865,9 @@ void Z2SceneMgr::setSceneName(char* spot, s32 room, s32 layer) {
     Z2GetEnvSeMgr()->initSceneEnvSe(spotNo, room, fVar1);
 
 #if TARGET_PC
-    dusk::music::ApplySceneResolution(bgm_id, bgm_wave1, bgm_wave2);
+    if (dusk::music::CustomAudioActive()) {
+        dusk::music::ApplySceneResolution(bgm_id, bgm_wave1, bgm_wave2);
+    }
 #endif
 
     if (sceneNum != spotNo || bgm_id != BGM_ID || se_wave1 != loadedSeWave_1
@@ -1899,7 +1910,9 @@ void Z2SceneMgr::sceneChange(JAISoundID bgm, u8 seWave1, u8 seWave2, u8 bgmWave1
     requestBgmWave_2 = bgmWave2;
     requestDemoWave = demoWave;
 #if TARGET_PC
-    dusk::music::ClearRuntimeSupportWavesForScene(bgmWave1, bgmWave2);
+    if (dusk::music::CustomAudioActive()) {
+        dusk::music::ClearRuntimeSupportWavesForScene(bgmWave1, bgmWave2);
+    }
 #endif
     BGM_ID = bgm;
     Z2GetFxLineMgr()->setSceneFx(sceneNum);
@@ -1907,7 +1920,9 @@ void Z2SceneMgr::sceneChange(JAISoundID bgm, u8 seWave1, u8 seWave2, u8 bgmWave1
 
 void Z2SceneMgr::framework() {
 #if TARGET_PC
-    z2PollPendingSeWaves();
+    if (dusk::music::CustomAudioActive()) {
+        z2PollPendingSeWaves();
+    }
 #endif
     if (load1stWait > 0) {
         load1stWait--;
@@ -2002,7 +2017,9 @@ void Z2SceneMgr::_load1stWaveInner_2() {
     OS_REPORT("[Z2SceneMgr::_load1stWaveInner_2] requestBgm:%d loadedBgm:%d\n", requestBgmWave_1, loadedBgmWave_1);
 
 #if TARGET_PC
-    dusk::music::ReleaseUnneededSceneBgmWaves();
+    if (dusk::music::CustomAudioActive()) {
+        dusk::music::ReleaseUnneededSceneBgmWaves();
+    }
 #endif
 
     if (loadedBgmWave_2 != 0 && requestBgmWave_2 != loadedBgmWave_2) {
@@ -2025,14 +2042,16 @@ void Z2SceneMgr::_load1stWaveInner_2() {
     }
 
 #if TARGET_PC
-    dusk::music::LoadSceneRequiredBgmWaves(2);
+    if (dusk::music::CustomAudioActive()) {
+        dusk::music::LoadSceneRequiredBgmWaves(2);
+    }
 #endif
 }
 
 bool Z2SceneMgr::check1stDynamicWave() {
     return load1stWait != 0 || getSeLoadStatus(requestSeWave_1) == 1 || getBgmLoadStatus(requestBgmWave_1) == 1
 #if TARGET_PC
-           || dusk::music::SceneResolvedWavesStillLoading()
+           || (dusk::music::CustomAudioActive() && dusk::music::SceneResolvedWavesStillLoading())
 #endif
         ;
 }
@@ -2078,7 +2097,9 @@ void Z2SceneMgr::load2ndDynamicWave() {
     }
 
 #if TARGET_PC
-    dusk::music::LoadSceneRequiredBgmWaves(2);
+    if (dusk::music::CustomAudioActive()) {
+        dusk::music::LoadSceneRequiredBgmWaves(2);
+    }
 #endif
 }
 
@@ -2119,7 +2140,13 @@ void Z2SceneMgr::sceneBgmStart() {
             case Z2BGM_DUNGEON_LV9_02:
             case Z2BGM_SNOW_MOUNTAIN:
 #if TARGET_PC
-                Z2GetSeqMgr()->changeBgmStatus(z2SceneBgmDynamicStatus(BGM_ID, sceneNum, roomNum));
+                if (dusk::music::CustomAudioActive()) {
+                    Z2GetSeqMgr()->changeBgmStatus(z2SceneBgmDynamicStatus(BGM_ID, sceneNum, roomNum));
+                } else if (sceneNum == Z2SCENE_CASTLE_TOWN_SHOPS) {
+                    Z2GetSeqMgr()->changeBgmStatus(5);
+                } else {
+                    Z2GetSeqMgr()->changeBgmStatus(roomNum);
+                }
 #else
                 if (sceneNum == Z2SCENE_CASTLE_TOWN_SHOPS) {
                     Z2GetSeqMgr()->changeBgmStatus(5);
@@ -2203,6 +2230,9 @@ bool Z2SceneMgr::eraseSeWave(u32 wave) {
         JASWaveArc* wave_arc = wave_bank->getWaveArc(wave);
         if (wave_arc != NULL) {
 #if TARGET_PC
+            if (!dusk::music::CustomAudioActive()) {
+                return wave_arc->erase();
+            }
             const s32 before = wave_arc->getStatus();
             const bool erased = wave_arc->erase();
             Z2_MUSIC_LOG("eraseSeWave(%u): %d(%s) -> erase %s\n", wave, before,
@@ -2218,7 +2248,7 @@ bool Z2SceneMgr::eraseSeWave(u32 wave) {
 
 bool Z2SceneMgr::eraseBgmWave(u32 wave) {
 #if TARGET_PC
-    if (dusk::music::IsBgmWaveLocked(wave)) {
+    if (dusk::music::CustomAudioActive() && dusk::music::IsBgmWaveLocked(wave)) {
         Z2_MUSIC_LOG("keep scene-required BGM bank %u (eviction blocked)\n", wave);
         return false;
     }
@@ -2273,18 +2303,33 @@ bool Z2SceneMgr::loadSeWave(u32 wave) {
 
     JASWaveBank* wave_bank = sectionHeap->getWaveBankTable().getWaveBank(0);
     if (wave_bank == NULL) {
+#if TARGET_PC
+        if (!dusk::music::CustomAudioActive()) {
+            JUT_WARN_DEVICE(3038, 1, "Z2SceneMgr::cannot load SE wave:%d\n", wave);
+            return false;
+        }
+#endif
         Z2_MUSIC_LOG("loadSeWave(%u) FAILED: wave_bank=NULL\n", wave);
         return false;
     }
 
     JASWaveArc* wave_arc = wave_bank->getWaveArc(wave);
     if (wave_arc == NULL) {
+#if TARGET_PC
+        if (!dusk::music::CustomAudioActive()) {
+            JUT_WARN_DEVICE(3038, 1, "Z2SceneMgr::cannot load SE wave:%d\n", wave);
+            return false;
+        }
+#endif
         Z2_MUSIC_LOG("loadSeWave(%u) FAILED: wave_arc=NULL\n", wave);
         return false;
     }
 
     const s32 before = wave_arc->getStatus();
 #if TARGET_PC
+    if (!dusk::music::CustomAudioActive()) {
+        return wave_arc->load(NULL);
+    }
     if (z2WaveAvailableOrLoading(before)) {
         Z2_MUSIC_LOG("loadSeWave(%u): already %d(%s)\n", wave, before, z2WaveStatusName(before));
         return true;
@@ -2293,7 +2338,8 @@ bool Z2SceneMgr::loadSeWave(u32 wave) {
     bool ok = wave_arc->load(NULL);
     s32 after = wave_arc->getStatus();
 #if TARGET_PC
-    if (!ok && !z2WaveAvailableOrLoading(after)
+    if (dusk::music::CustomAudioActive()
+        && !ok && !z2WaveAvailableOrLoading(after)
         && dusk::music::ReleaseBgmWavesForSeRetry(wave))
     {
         ok = wave_arc->load(NULL);
@@ -2317,18 +2363,33 @@ bool Z2SceneMgr::loadBgmWave(u32 wave) {
 
     JASWaveBank* wave_bank = sectionHeap->getWaveBankTable().getWaveBank(1);
     if (wave_bank == NULL) {
+#if TARGET_PC
+        if (!dusk::music::CustomAudioActive()) {
+            JUT_WARN_DEVICE(3055, 1, "Z2SceneMgr::cannot load BGM wave:%d\n", wave);
+            return false;
+        }
+#endif
         Z2_MUSIC_LOG("loadBgmWave(%u) FAILED: wave_bank=NULL\n", wave);
         return false;
     }
 
     JASWaveArc* wave_arc = wave_bank->getWaveArc(wave);
     if (wave_arc == NULL) {
+#if TARGET_PC
+        if (!dusk::music::CustomAudioActive()) {
+            JUT_WARN_DEVICE(3055, 1, "Z2SceneMgr::cannot load BGM wave:%d\n", wave);
+            return false;
+        }
+#endif
         Z2_MUSIC_LOG("loadBgmWave(%u) FAILED: wave_arc=NULL\n", wave);
         return false;
     }
 
     const s32 before = wave_arc->getStatus();
 #if TARGET_PC
+    if (!dusk::music::CustomAudioActive()) {
+        return wave_arc->loadTail(NULL);
+    }
     if (z2WaveAvailableOrLoading(before)) {
         Z2_MUSIC_LOG("loadBgmWave(%u): already %d(%s)\n", wave, before, z2WaveStatusName(before));
         return true;

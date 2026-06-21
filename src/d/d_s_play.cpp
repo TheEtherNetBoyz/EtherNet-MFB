@@ -820,7 +820,8 @@ static int dScnPly_Execute(dScnPly_c* i_this) {
             // returns false here and lets the normal scene loader schedule BGM
             // waves.
             if ((!dScnPly_isAcceleratedLoadAudio() || !mDoAud_check1stDynamicWave())
-                && !dusk::music::SceneResolvedWavesStillLoading()) {
+                && !(dusk::music::CustomAudioActive()
+                     && dusk::music::SceneResolvedWavesStillLoading())) {
 #endif
                 mDoAud_sceneBgmStart();
                 mDoAud_load2ndDynamicWave();

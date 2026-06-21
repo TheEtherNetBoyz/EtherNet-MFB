@@ -115,8 +115,9 @@ void Z2SoundObjMgr::searchEnemy() {
         Z2GetSeqMgr()->changeSubBgmStatus(0);
         return;
     }
-    if (dusk::music::IsAllEnemyMusicDisabled() ||
-        dusk::music::IsEnemyMusicDisabledFor(JAISoundID(Z2GetSeqMgr()->getMainBgmID())))
+    if (dusk::music::CustomAudioActive()
+        && (dusk::music::IsAllEnemyMusicDisabled()
+            || dusk::music::IsEnemyMusicDisabledFor(JAISoundID(Z2GetSeqMgr()->getMainBgmID()))))
     {
         Z2GetSeqMgr()->changeSubBgmStatus(0);
         return;
