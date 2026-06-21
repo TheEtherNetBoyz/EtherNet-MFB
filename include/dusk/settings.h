@@ -1,9 +1,9 @@
-#ifndef DUSK_CONFIG_H
-#define DUSK_CONFIG_H
+#pragma once
 
 #include <array>
 
 #include "dusk/config_var.hpp"
+#include "dusk/ui/controls.hpp"
 
 namespace dusk {
 
@@ -50,6 +50,12 @@ enum class AspectRatioMode : int {
     Ratio16x9 = 1,
     Ratio21x9 = 2,
     Ratio3x2 = 3,
+};
+
+enum class FrameInterpMode : u8 {
+    Off = 0,
+    Capped = 1,
+    Unlimited = 2,
 };
 
 enum HotkeyModifier : int {
@@ -117,6 +123,12 @@ struct ConfigEnumRange<AspectRatioMode> {
 };
 
 template <>
+struct ConfigEnumRange<FrameInterpMode> {
+    static constexpr auto min = FrameInterpMode::Off;
+    static constexpr auto max = FrameInterpMode::Unlimited;
+};
+
+template <>
 struct ConfigEnumRange<MenuScaling> {
     static constexpr auto min = MenuScaling::GameCube;
     static constexpr auto max = MenuScaling::Dusklight;
@@ -126,6 +138,11 @@ template <>
 struct ConfigEnumRange<MagicArmorMode> {
     static constexpr auto min = MagicArmorMode::NORMAL;
     static constexpr auto max = MagicArmorMode::COSMETIC;
+};
+
+template <>
+struct ConfigValueTraits<ui::ControlLayout> {
+    static constexpr bool enabled = true;
 };
 }  // namespace config
 
@@ -213,7 +230,7 @@ struct UserSettings {
         ConfigVar<DepthOfFieldMode> depthOfFieldMode;
         ConfigVar<bool> disableWaterRefraction;
         ConfigVar<bool> enableTextureReplacements;
-        ConfigVar<bool> enableFrameInterpolation;
+        ConfigVar<FrameInterpMode> enableFrameInterpolation;
         ConfigVar<int> frameRateLimit;
         ConfigVar<bool> lowLatencyPresentation;
         ConfigVar<int> internalResolutionScale;
@@ -242,6 +259,9 @@ struct UserSettings {
         ConfigVar<float> mouseCameraSensitivity;
         ConfigVar<bool> invertMouseY;
         ConfigVar<bool> freeCamera;
+        ConfigVar<bool> enableTouchControls;
+        ConfigVar<bool> enableMenuPointer;
+        ConfigVar<ui::ControlLayout> touchControlsLayout;
         ConfigVar<bool> invertCameraXAxis;
         ConfigVar<bool> invertCameraYAxis;
         ConfigVar<bool> invertFirstPersonXAxis;
@@ -253,6 +273,10 @@ struct UserSettings {
         ConfigVar<float> aimingCameraSensitivityLevel;
         ConfigVar<float> freeCameraSensitivityLevel;
         ConfigVar<float> regularCameraSensitivityLevel;
+        ConfigVar<float> freeCameraXSensitivity;
+        ConfigVar<float> freeCameraYSensitivity;
+        ConfigVar<float> touchCameraXSensitivity;
+        ConfigVar<float> touchCameraYSensitivity;
         ConfigVar<bool> debugFlyCam;
         ConfigVar<bool> debugFlyCamLockEvents;
         ConfigVar<bool> allowBackgroundInput;
@@ -343,6 +367,8 @@ struct UserSettings {
     struct {
         std::array<ActionBindConfigVar, 4> firstPersonCamera;
         std::array<ActionBindConfigVar, 4> callMidna;
+        std::array<ActionBindConfigVar, 4> openMapScreen;
+        std::array<ActionBindConfigVar, 4> toggleMinimap;
         std::array<ActionBindConfigVar, 4> openDusklightMenu;
         std::array<ActionBindConfigVar, 4> turboSpeedButton;
     } actionBindings;
@@ -376,6 +402,4 @@ struct TransientSettings {
 
 TransientSettings& getTransientSettings();
 
-}
-
-#endif // DUSK_CONFIG_H
+}  // namespace dusk
