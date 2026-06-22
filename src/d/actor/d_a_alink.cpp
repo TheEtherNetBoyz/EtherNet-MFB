@@ -38,6 +38,7 @@
 #include "d/actor/d_a_tag_lantern.h"
 #include "d/actor/d_a_horse.h"
 #include "m_Do/m_Do_controller_pad.h"
+#include "m_Do/m_Do_Reset.h"
 #include "d/d_bomb.h"
 #include "d/d_meter2_info.h"
 #include "d/actor/d_a_kytag05.h"
@@ -74,6 +75,42 @@ static bool s_duskForceHumanFormWaitInit;
 #if TARGET_PC
 bool daAlink_c::sDuskHumanWarpRequest = false;
 #endif
+
+// Instant Movement (EXPERIMENTAL): when enabled, the player's load-start demo --
+// both the cosmetic walk-in animation AND the reserved start event/cutscene that
+// otherwise freezes Link -- is skipped, so the player has control the moment the
+// load finishes, regardless of load type. This is the aggressive behaviour that
+// suppresses post-load cutscenes (its main use is randomizer, where those scenes
+// are skipped anyway). It WILL break stages that depend on a start cutscene, so
+// a small whitelist of entrance start-modes (plus a couple of intro/special
+// stage exclusions) limits it to the cases that behave. playerInit() forces the
+// no-event path (mStartEventID == 0xFF, no orderStartDemo), and setStartProcInit
+// then skips the entrance animation, sending Link straight into movement.
+static bool duskShouldSkipLoadStartDemo(int startMode, u32 lastMode) {
+    if (!dusk::getSettings().game.instantMovement.getValue() || mDoRst::isReset()) {
+        return false;
+    }
+
+    // Intro / special-warp stages soft-lock if the start demo is skipped.
+    if ((strcmp(dComIfGp_getStartStageName(), "F_SP102") == 0 &&
+         dComIfGp_getStartStagePoint() >= 100) ||
+        strcmp(dComIfGp_getStartStageName(), "S_MV000") == 0)
+    {
+        return false;
+    }
+
+    switch (startMode) {
+    case 1:
+    case 2:
+    case 3:
+    case 5:
+    case 13:
+    case 14:
+        return true;
+    default:
+        return lastMode == 2 || lastMode == 3;
+    }
+}
 
 static bool isCastleBarrierApproachStage() {
     const char* stageName = dComIfGp_getStartStageName();
@@ -4702,8 +4739,11 @@ void daAlink_c::playerInit() {
 
     int startMode = getStartMode();
     int startEvent = getStartEvent();
+    bool skipLoadStartDemo = duskShouldSkipLoadStartDemo(startMode, getLastSceneMode());
 
-    if (dComIfGp_getStartStagePoint() == -2 || dComIfGp_getStartStagePoint() == -3) {
+    if (skipLoadStartDemo) {
+        mStartEventID = 0xFF;
+    } else if (dComIfGp_getStartStagePoint() == -2 || dComIfGp_getStartStagePoint() == -3) {
         mStartEventID = dComIfGp_evmng_startDemo(-1);
     } else if (dComIfGp_getStartStagePoint() == -4) {
         mStartEventID = dComIfGp_evmng_startDemo(0xD5);
@@ -4743,7 +4783,9 @@ void daAlink_c::playerInit() {
         }
     }
 
-    dComIfGp_getPEvtManager()->orderStartDemo();
+    if (!skipLoadStartDemo) {
+        dComIfGp_getPEvtManager()->orderStartDemo();
+    }
     field_0x2f94 = -1;
     field_0x2f95 = -1;
     field_0x2f96 = -1;
@@ -4900,15 +4942,22 @@ int daAlink_c::setStartProcInit() {
                 mNormalSpeed = dComIfGs_getLastSceneSpeedF();
             }
 
-            mDemo.setStartDemoType();
-            mDemo.setDemoMode(daPy_demo_c::DEMO_UNK_14_e);
-            mDemo.setMoveAngle(current.angle.y);
-            mDemo.setTimer(35);
+            bool skipStartDemo = duskShouldSkipLoadStartDemo(start_mode, last_mode);
+
+            if (!skipStartDemo) {
+                mDemo.setStartDemoType();
+                mDemo.setDemoMode(daPy_demo_c::DEMO_UNK_14_e);
+                mDemo.setMoveAngle(current.angle.y);
+                mDemo.setTimer(35);
+            }
 
             if (checkModeFlg(0x400)) {
                 daHorse_c* horse = dComIfGp_getHorseActor();
-                horse->changeOriginalDemo();
-                horse->changeDemoMode(6, 0);
+
+                if (!skipStartDemo) {
+                    horse->changeOriginalDemo();
+                    horse->changeDemoMode(6, 0);
+                }
 
                 if (start_mode == 2) {
                     if (checkStageName("F_SP109") && fopAcM_GetRoomNo(this) == 0 && dComIfGs_getStartPoint() == 35) {
@@ -4916,7 +4965,7 @@ int daAlink_c::setStartProcInit() {
                     } else {
                         horse->setSpeedF(0.0f);
                     }
-                } else if (start_mode == 1) {
+                } else if (start_mode == 1 && !skipStartDemo) {
                     horse->setWalkSpeedF();
                 } else {
                     horse->setSpeedF(dComIfGs_getLastSceneSpeedF());
@@ -4945,11 +4994,22 @@ int daAlink_c::setStartProcInit() {
                 field_0x2f99 = 0;
             } else if (start_mode == 1) {
                 if (checkWolf()) {
-                    mNormalSpeed = mpHIO->mWolf.mWlMove.m.mIdleToWalkRate * mpHIO->mWolf.mWlMove.m.mMaxSpeed;
+                    mNormalSpeed = skipStartDemo ?
+                                       dComIfGs_getLastSceneSpeedF() :
+                                       mpHIO->mWolf.mWlMove.m.mIdleToWalkRate *
+                                           mpHIO->mWolf.mWlMove.m.mMaxSpeed;
+                    if (mNormalSpeed > mpHIO->mWolf.mWlMove.m.mMaxSpeed) {
+                        mNormalSpeed = mpHIO->mWolf.mWlMove.m.mMaxSpeed;
+                    }
                     speedF = mNormalSpeed;
                     procWolfMoveInit();
                 } else {
-                    mNormalSpeed = mpHIO->mMove.m.mWalkChangeRate * mpHIO->mMove.m.mMaxSpeed;
+                    mNormalSpeed = skipStartDemo ?
+                                       dComIfGs_getLastSceneSpeedF() :
+                                       mpHIO->mMove.m.mWalkChangeRate * mpHIO->mMove.m.mMaxSpeed;
+                    if (mNormalSpeed > mpHIO->mMove.m.mMaxSpeed) {
+                        mNormalSpeed = mpHIO->mMove.m.mMaxSpeed;
+                    }
                     speedF = mNormalSpeed;
                     procMoveInit();
                 }

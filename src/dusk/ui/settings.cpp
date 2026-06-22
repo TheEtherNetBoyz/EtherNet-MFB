@@ -1864,6 +1864,12 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                     }
                 },
             });
+        addOption("Instant Movement", getSettings().game.instantMovement,
+            "Experimental: gives you control of Link the instant a load finishes, regardless "
+            "of load type, by skipping the start demo. Suppresses many post-load cutscenes -- "
+            "intended for randomizer. Will break stages that rely on a start cutscene."
+            "<br/><br/>Warning: This WILL break certain parts of the game, do not report bugs "
+            "regarding this feature");
         config_bool_select(leftPane, rightPane, getSettings().game.autoSave,
             {
                 .key = "Autosave",

@@ -207,6 +207,7 @@ struct UserSettings {
         ConfigVar<bool> no2ndFishForCat;
         ConfigVar<bool> enableFastLoads;
         ConfigVar<bool> enableInstaLoads;
+        ConfigVar<bool> instantMovement;
         ConfigVar<bool> buttonFishing;
         ConfigVar<bool> instantSaves;
         ConfigVar<bool> instantText;
