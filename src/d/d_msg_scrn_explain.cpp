@@ -18,6 +18,7 @@
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_player.h"
 #include "dusk/settings.h"
+#include "dusk/logging.h"
 #endif
 
 #if VERSION == VERSION_GCN_JPN
@@ -519,6 +520,10 @@ void dMsgScrnExplain_c::move_select_proc() {
                     if (dusk::getSettings().game.humanMidnaWarp && !daPy_py_c::checkNowWolf()) {
                         daAlink_c::sDuskHumanWarpRequest = true;
                     }
+                    DuskLog.warn("WARP|confirm warpStatus=3 humanMidnaWarp={} nowWolf={} humanWarpReq={}",
+                                 dusk::getSettings().game.humanMidnaWarp.getValue(),
+                                 (bool)daPy_py_c::checkNowWolf(),
+                                 daAlink_c::sDuskHumanWarpRequest);
 #endif
                     Z2GetAudioMgr()->seStart(Z2SE_WARP_MAP_DECIDE, NULL, 0, 0, 1.0f, 1.0f, -1.0f,
                                              -1.0f, 0);
