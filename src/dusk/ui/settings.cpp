@@ -779,7 +779,7 @@ const Rml::String kResamplerHelpText =
     "Configure the sampling method used when scaling the internal resolution for final presentation.";
 const Rml::String kBloomHelpText =
     "Configure the post-processing bloom effect. Classic uses the original bloom pass; Dusklight uses "
-    "a higher-quality bloom pass.";
+    "a higher-quality bloom pass; Shield uses the earlier PC bloom pass.";
 const Rml::String kBloomBrightnessHelpText =
     "Configure bloom intensity. Higher values make bright areas glow more strongly.";
 const Rml::String kDepthOfFieldHelpText =
@@ -1442,7 +1442,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .title = "Bloom",
                 .helpText = kBloomHelpText,
                 .valueMin = static_cast<int>(BloomMode::Off),
-                .valueMax = static_cast<int>(BloomMode::Dusk),
+                .valueMax = static_cast<int>(BloomMode::Shield),
                 .defaultValue = static_cast<int>(BloomMode::Classic),
             }, mPrelaunch);
         graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.bloomMultiplier,
