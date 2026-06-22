@@ -94,10 +94,6 @@ int daAlink_c::loadModelDVD() {
                     if (sDuskHumanWarpRequest && !checkWolf()) {
                         targetIsWolf = checkWolf();
                     }
-                    if (sDuskHumanWarpRequest) {
-                        DuskLog.warn("WARP|loadModelDVD timer==2 procID={} wolf={} targetIsWolf={} (selecting arc)",
-                                     (int)mProcID, (bool)checkWolf(), (bool)targetIsWolf);
-                    }
 #endif
                     setArcName(targetIsWolf);
                 } else {
@@ -120,13 +116,6 @@ int daAlink_c::loadModelDVD() {
                         const bool duskKeepHuman = sDuskHumanWarpRequest && !checkWolf();
 #else
                         const bool duskKeepHuman = false;
-#endif
-#if TARGET_PC
-                        if (sDuskHumanWarpRequest) {
-                            DuskLog.warn("WARP|loadModelDVD timer==1 procID={} wolf={} keepHuman={} -> {}",
-                                         (int)mProcID, (bool)checkWolf(), duskKeepHuman,
-                                         (checkWolf() || duskKeepHuman) ? "changeLink(0)" : "changeWolf()");
-                        }
 #endif
                         if (checkWolf() || duskKeepHuman) {
                             changeLink(0);
