@@ -273,7 +273,7 @@ namespace dusk {
         void BloomModeControl() {
             auto& value = getSettings().game.bloomMode;
             int copy = static_cast<int>(value.getValue());
-            const char* items[] = {"Off", "Classic", "Dusk"};
+            const char* items[] = {"Off", "Classic", "Dusk", "Shield"};
             ImGui::TextUnformatted("Bloom Mode");
             ImGui::SameLine(170.0f);
             ImGui::SetNextItemWidth(150.0f);
@@ -368,6 +368,7 @@ namespace dusk {
                 ImGui::Separator();
                 LoadModeCheckbox("Fast Loads", s.game.enableFastLoads, s.game.enableInstaLoads);
                 LoadModeCheckbox("Insta Loads", s.game.enableInstaLoads, s.game.enableFastLoads);
+                MenuCheckbox("Instant Movement", s.game.instantMovement);
                 MenuCheckbox("Autosave", s.game.autoSave, !s.game.speedrunMode);
                 MenuCheckbox("Instant Saves", s.game.instantSaves);
                 MenuCheckbox("Hold B for Instant Text", s.game.instantText);

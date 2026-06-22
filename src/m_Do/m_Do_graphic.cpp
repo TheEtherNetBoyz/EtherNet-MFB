@@ -1780,6 +1780,197 @@ void mDoGph_gInf_c::bloom_c::draw2() {
         divQuad(0);
     }
 }
+
+// Verbatim port of the April-9 (pre-"Widescreen rework") bloom_c::draw() PC path.
+// Goal: reproduce the exact "Native Bloom ON" look using the original full-resolution
+// (getWidth/getHeight) source and the original getZbufferTex/GXCopyTex/mDoGph_drawFilterQuad
+// plumbing, rather than the Classic path's fixed FB_WIDTH/FB_HEIGHT downscale.
+void mDoGph_gInf_c::bloom_c::drawShield() {
+    ZoneScoped;
+    bool enabled = mEnable && m_buffer != NULL;
+    if (mMonoColor.a != 0 || enabled) {
+        f32 width = mDoGph_gInf_c::getWidth();
+        f32 height = mDoGph_gInf_c::getHeight();
+        GXSetViewport(0.0f, 0.0f, width, height, 0.0f, 1.0f);
+        GXSetScissor(0, 0, width, height);
+
+        GXLoadTexObj(getFrameBufferTexObj(), GX_TEXMAP0);
+        GXSetNumChans(0);
+        GXSetNumTexGens(1);
+        GXSetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, 0x3c);
+        GXSetTevSwapModeTable(GX_TEV_SWAP1, GX_CH_RED, GX_CH_RED, GX_CH_RED, GX_CH_GREEN);
+        GXSetTevSwapModeTable(GX_TEV_SWAP3, GX_CH_BLUE, GX_CH_BLUE, GX_CH_BLUE, GX_CH_ALPHA);
+        GXSetZCompLoc(1);
+        GXSetZMode(0, GX_ALWAYS, 0);
+        GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_OR, GX_ALWAYS, 0);
+        GXSetFog(GX_FOG_NONE, 0.0f, 0.0f, 0.0f, 0.0f, g_clearColor);
+        GXSetFogRangeAdj(0, 0, 0);
+        GXSetCullMode(GX_CULL_NONE);
+        GXSetDither(1);
+        Mtx44 ortho;
+        C_MTXOrtho(ortho, 0.0f, 4.0f, 0.0f, 4.0f, 0.0f, 10.0f);
+        GXLoadPosMtxImm(cMtx_getIdentity(), 0);
+        GXSetProjection(ortho, GX_ORTHOGRAPHIC);
+        GXSetCurrentMtx(0);
+        GXClearVtxDesc();
+        GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
+        GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+        GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_S8, 0);
+        GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_S8, 0);
+        if (mMonoColor.a != 0) {
+            GXSetNumTevStages(1);
+            GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
+            GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_TEXC, GX_CC_C2, GX_CC_ZERO);
+            GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE,
+                            GX_TEVPREV);
+            GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_A2);
+            GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE,
+                            GX_TEVPREV);
+            GXSetTevSwapMode(GX_TEVSTAGE0, GX_TEV_SWAP1, GX_TEV_SWAP1);
+            GXSetTevColor(GX_TEVREG2, mMonoColor);
+            GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_OR);
+            mDoGph_drawFilterQuad(4, 4);
+        }
+        if (enabled) {
+            GXCreateFrameBuffer(width, height);
+
+            GXSetNumTevStages(3);
+            GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
+            GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_TEXC, GX_CC_TEXA, GX_CC_HALF, GX_CC_ZERO);
+            GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE,
+                            GX_TEVPREV);
+            GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO);
+            GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE,
+                            GX_TEVPREV);
+            GXSetTevSwapMode(GX_TEVSTAGE0, GX_TEV_SWAP1, GX_TEV_SWAP1);
+            GXSetTevOrder(GX_TEVSTAGE1, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
+            GXSetTevColorIn(GX_TEVSTAGE1, GX_CC_TEXC, GX_CC_CPREV, GX_CC_HALF, GX_CC_C0);
+            GXSetTevColorOp(GX_TEVSTAGE1, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE,
+                            GX_TEVPREV);
+            GXSetTevAlphaIn(GX_TEVSTAGE1, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO);
+            GXSetTevAlphaOp(GX_TEVSTAGE1, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE,
+                            GX_TEVPREV);
+            GXSetTevSwapMode(GX_TEVSTAGE1, GX_TEV_SWAP3, GX_TEV_SWAP3);
+            GXSetTevOrder(GX_TEVSTAGE2, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
+            GXSetTevColorIn(GX_TEVSTAGE2, GX_CC_ZERO, GX_CC_TEXC, GX_CC_CPREV, GX_CC_ZERO);
+            GXSetTevColorOp(GX_TEVSTAGE2, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE,
+                            GX_TEVPREV);
+            GXSetTevAlphaIn(GX_TEVSTAGE2, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO);
+            GXSetTevAlphaOp(GX_TEVSTAGE2, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE,
+                            GX_TEVPREV);
+            GXSetBlendMode(GX_BM_NONE, GX_BL_ZERO, GX_BL_ZERO, GX_LO_OR);
+            GXColorS10 tevColor0 = {(s16)-mPoint, (s16)-mPoint, (s16)-mPoint, 0x40};
+            GXSetTevColorS10(GX_TEVREG0, tevColor0);
+            GXColor tevColor1 = {mBlureRatio, mBlureRatio, mBlureRatio, mBlureRatio};
+            GXSetTevColor(GX_TEVREG1, tevColor1);
+            GXPixModeSync();
+            mDoGph_drawFilterQuad(2, 2);
+
+            GXSetTevSwapModeTable(GX_TEV_SWAP1, GX_CH_RED, GX_CH_RED, GX_CH_RED, GX_CH_ALPHA);
+            GXSetTevSwapMode(GX_TEVSTAGE0, GX_TEV_SWAP0, GX_TEV_SWAP0);
+            GXSetTevSwapMode(GX_TEVSTAGE1, GX_TEV_SWAP0, GX_TEV_SWAP0);
+
+            // Downsample and filter from 1/2 EFB into 1/4 zBufferTex (tmp_tex1).
+            void* zBufferTex = getZbufferTex();
+            GXSetTexCopySrc(0, 0, width / 2, height / 2);
+            GXSetTexCopyDst(width / 4, height / 4, GX_TF_RGBA8, GX_TRUE);
+            GXCopyTex(zBufferTex, 0);
+
+            TGXTexObj tmp_tex1;
+            GXInitTexObj(&tmp_tex1, zBufferTex, width / 4, height / 4, GX_TF_RGBA8, GX_CLAMP, GX_CLAMP,
+                         GX_FALSE);
+            GXInitTexObjLOD(&tmp_tex1, GX_LINEAR, GX_LINEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE,
+                            GX_ANISO_1);
+            GXLoadTexObj(&tmp_tex1, GX_TEXMAP0);
+
+            GXSetNumTexGens(8);
+            u32 iVar11 = 0x1e;
+            int sVar10 = 0;
+            GXSetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, 0x3c);
+            for (int texCoord = (int)GX_TEXCOORD1; texCoord < (int)GX_MAX_TEXCOORD; texCoord++) {
+                GXSetTexCoordGen((GXTexCoordID)texCoord, GX_TG_MTX2x4, GX_TG_TEX0, iVar11);
+
+                f32 dVar15 = mBlureSize * ((448.0f / getHeight()) / 6400.0f);
+
+                mDoMtx_stack_c::transS((dVar15 * cM_scos(sVar10)) * getInvScale(),
+                                       dVar15 * cM_ssin(sVar10), 0.0f);
+                GXLoadTexMtxImm(mDoMtx_stack_c::get(), iVar11, GX_MTX2x4);
+
+                iVar11 += 3;
+                sVar10 += 0x2492;
+            }
+            GXSetNumTevStages(8);
+            GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
+            GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_TEXC, GX_CC_A1, GX_CC_ZERO);
+            GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE,
+                            GX_TEVPREV);
+            GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO);
+            GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE,
+                            GX_TEVPREV);
+            for (int tevStage = (int)GX_TEVSTAGE1; tevStage < 8; tevStage++) {
+                GXSetTevOrder((GXTevStageID)tevStage, (GXTexCoordID)tevStage, GX_TEXMAP0,
+                              GX_COLOR_NULL);
+                GXSetTevColorIn((GXTevStageID)tevStage, GX_CC_ZERO, GX_CC_TEXC, GX_CC_A1,
+                                GX_CC_CPREV);
+                GXSetTevColorOp((GXTevStageID)tevStage, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1,
+                                GX_TRUE, GX_TEVPREV);
+                GXSetTevAlphaIn((GXTevStageID)tevStage, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO,
+                                GX_CA_A0);
+                GXSetTevAlphaOp((GXTevStageID)tevStage, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1,
+                                GX_TRUE, GX_TEVPREV);
+            }
+            GXPixModeSync();
+
+            // Blur filter from tmp_tex1 1/4 to EFB 1/4.
+            mDoGph_drawFilterQuad(1, 1);
+
+            GXSetTexCopySrc(0, 0, width / 4, height / 4);
+            GXSetTexCopyDst(width / 8, height / 8, GX_TF_RGBA8, GX_TRUE);
+
+            // Downsample EFB 1/4 to zBufferTex 1/8 (tmp_tex2).
+            GXCopyTex(zBufferTex, GX_FALSE);
+
+            TGXTexObj tmp_tex2;
+            GXInitTexObj(&tmp_tex2, zBufferTex, width / 8, height / 8, GX_TF_RGBA8, GX_CLAMP, GX_CLAMP,
+                         GX_FALSE);
+            GXInitTexObjLOD(&tmp_tex2, GX_LINEAR, GX_LINEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE,
+                            GX_ANISO_1);
+            GXLoadTexObj(&tmp_tex2, GX_TEXMAP0);
+
+            // Upsample 1/8 buffer back up to 1/4 buffer.
+            GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_OR);
+            GXPixModeSync();
+            GXInvalidateTexAll();
+            mDoGph_drawFilterQuad(1, 1);
+
+            tmp_tex2.reset();
+
+            // Now that we've upsampled and filtered our final bloom, copy 1/4 buffer back to zBufferTex.
+            GXSetTexCopySrc(0, 0, width / 4, height / 4);
+            GXSetTexCopyDst(width / 4, height / 4, GX_TF_RGBA8, GX_FALSE);
+            GXCopyTex(zBufferTex, GX_FALSE);
+
+            GXRestoreFrameBuffer();
+
+            // Now blend our bloom into the real FB.
+            GXLoadTexObj(&tmp_tex1, GX_TEXMAP0);
+            GXSetTevColor(GX_TEVREG0, mBlendColor);
+            GXSetNumTevStages(1);
+            GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
+            GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_TEXC, GX_CC_C0, GX_CC_ZERO);
+            GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE,
+                            GX_TEVPREV);
+            GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_A0);
+            GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE,
+                            GX_TEVPREV);
+            GXSetBlendMode(GX_BM_BLEND, mMode == 1 ? GX_BL_INVDSTCLR : GX_BL_ONE, GX_BL_SRCALPHA,
+                           GX_LO_OR);
+            GXPixModeSync();
+            GXInvalidateTexAll();
+            mDoGph_drawFilterQuad(4, 4);
+        }
+    }
+}
 #endif
 
 void mDoGph_gInf_c::bloom_c::draw() {
@@ -1788,7 +1979,15 @@ void mDoGph_gInf_c::bloom_c::draw() {
         draw2();
         return;
     }
-    if (dusk::getSettings().game.bloomMode.getValue() != dusk::BloomMode::Classic) {
+#if TARGET_PC
+    if (dusk::getSettings().game.bloomMode.getValue() == dusk::BloomMode::Shield) {
+        drawShield();
+        return;
+    }
+#endif
+    if (dusk::getSettings().game.bloomMode.getValue() != dusk::BloomMode::Classic &&
+        dusk::getSettings().game.bloomMode.getValue() != dusk::BloomMode::Shield)
+    {
         return;
     }
 

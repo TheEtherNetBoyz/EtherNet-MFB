@@ -13,6 +13,7 @@ enum class BloomMode : int {
     Off = 0,
     Classic = 1,
     Dusk = 2,
+    Shield = 3,
 };
 
 enum class DepthOfFieldMode : int {
@@ -83,7 +84,7 @@ namespace config {
 template <>
 struct ConfigEnumRange<BloomMode> {
     static constexpr auto min = BloomMode::Off;
-    static constexpr auto max = BloomMode::Dusk;
+    static constexpr auto max = BloomMode::Shield;
 };
 
 template <>
@@ -206,6 +207,7 @@ struct UserSettings {
         ConfigVar<bool> no2ndFishForCat;
         ConfigVar<bool> enableFastLoads;
         ConfigVar<bool> enableInstaLoads;
+        ConfigVar<bool> instantMovement;
         ConfigVar<bool> buttonFishing;
         ConfigVar<bool> instantSaves;
         ConfigVar<bool> instantText;
