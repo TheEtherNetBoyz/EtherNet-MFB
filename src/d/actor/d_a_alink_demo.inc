@@ -4396,11 +4396,6 @@ void daAlink_c::checkWarpStart() {
     static char cannonPortal[22] = "SKY_CANNON_WARP_START";
 
     if (dMeter2Info_getWarpStatus() != 0) {
-#if TARGET_PC
-        DuskLog.warn("WARP|checkWarpStart status={} targetPt={} midnaRide={} wolf={} humanWarpReq={} procID={}",
-                     (int)dMeter2Info_getWarpStatus(), (int)dComIfGp_TargetWarpPt_get(),
-                     (bool)checkMidnaRide(), (bool)checkWolf(), sDuskHumanWarpRequest, (int)mProcID);
-#endif
         if (dMeter2Info_getWarpStatus() == WARP_STATUS_DECIDED_e ||
             dComIfGp_event_compulsory(this, 0, 0xFFFF))
         {
@@ -4430,10 +4425,6 @@ void daAlink_c::checkWarpStart() {
                     dComIfGp_TargetWarpPt_set(0xFF);
                     portal = defaultPortal;
                 }
-#if TARGET_PC
-                DuskLog.warn("WARP|orderOtherEvent portal='{}' wolf={} humanWarpReq={}",
-                             portal, (bool)checkWolf(), sDuskHumanWarpRequest);
-#endif
                 fopAcM_orderOtherEvent(this, portal, 0xFFFF, 1, 1);
             } else {
                 mDemo.setSpecialDemoType();

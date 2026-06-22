@@ -60,7 +60,6 @@
 #include "dusk/action_bindings.h"
 #include "dusk/frame_interpolation.h"
 #include "dusk/settings.h"
-#include "dusk/logging.h"
 #include "res/Object/Alink.h"
 #include <algorithm>
 #include <cstring>
@@ -4836,10 +4835,6 @@ int daAlink_c::setStartProcInit() {
 #if TARGET_PC
     // The "Warp as Human" request (if any) has been honored by create() above; consume it
     // now that arrival is complete so it never affects a later transform.
-    if (sDuskHumanWarpRequest) {
-        DuskLog.warn("WARP|setStartProcInit consuming humanWarpReq (arrival complete) stage='{}' wolf={}",
-                     dComIfGp_getStartStageName(), (bool)checkWolf());
-    }
     sDuskHumanWarpRequest = false;
 #endif
 
@@ -5105,12 +5100,6 @@ int daAlink_c::create() {
             current.angle.y = shape_angle.y;
         }
 
-#if TARGET_PC
-        DuskLog.warn("WARP|create arrival startPt={} sceneMode={} startMode={} humanWarpReq={} wolfChangeChk={}",
-                     (int)startPoint, (int)sceneMode, (int)startMode, sDuskHumanWarpRequest,
-                     (bool)dComIfGs_Wolf_Change_Check());
-#endif
-
         if ((
                 (
                     !checkBossOctaIealRoom()
@@ -5139,9 +5128,6 @@ int daAlink_c::create() {
                                          current.pos.y + 80.0f,
                                          current.pos.z + cM_scos(shape_angle.y) * 70.0f);
             onNoResetFlg1(FLG1_IS_WOLF);
-#if TARGET_PC
-            DuskLog.warn("WARP|create arrival -> FORCED WOLF (FLG1_IS_WOLF set)");
-#endif
         } else if (isHorseStart) {
             attention_info.position.y = current.pos.y + 275.0f;
         } else {
@@ -12451,12 +12437,6 @@ BOOL daAlink_c::checkGroundSpecialMode() {
     if (mLinkAcch.ChkGroundHit() && !checkModeFlg(MODE_PLAYER_FLY) && !checkMagneBootsOn() &&
         checkEndResetFlg0(ERFLG0_FORCE_WOLF_CHANGE))
     {
-#if TARGET_PC
-        if (sDuskHumanWarpRequest) {
-            DuskLog.warn("WARP|checkGroundSpecialMode FORCE_WOLF_CHANGE -> procCoMetamorphoseInit (wolf={})",
-                         (bool)checkWolf());
-        }
-#endif
         return procCoMetamorphoseInit();
     }
 
@@ -17599,15 +17579,6 @@ int daAlink_c::procCrouch() {
 int daAlink_c::procCoMetamorphoseInit() {
     int var_r29 = 0;
 
-#if TARGET_PC
-    if (sDuskHumanWarpRequest) {
-        DuskLog.warn("WARP|metaInit ENTER wolf={} demoMode={} demoType={} p0={} p1={} startEvtID={} forceWolfFlg={} stage='{}'",
-                     (bool)checkWolf(), (int)mDemo.getDemoMode(), (int)mDemo.getDemoType(),
-                     (int)mDemo.getParam0(), (int)mDemo.getParam1(), (int)mStartEventID,
-                     (bool)checkEndResetFlg0(ERFLG0_FORCE_WOLF_CHANGE), dComIfGp_getStartStageName());
-    }
-#endif
-
     if (dComIfGp_getEvent()->isOrderOK()) {
         if (!dComIfGp_event_compulsory(this, NULL, 0xFFFF)) {
             return 0;
@@ -17648,11 +17619,6 @@ int daAlink_c::procCoMetamorphoseInit() {
 
         if (checkWolf()) {
             // Transform Wolf -> Human
-#if TARGET_PC
-            if (sDuskHumanWarpRequest) {
-                DuskLog.warn("WARP|metaInit branch=WOLF_TO_HUMAN");
-            }
-#endif
             setSingleAnimeWolfBase(WANM_TRANSFORM_TO_HUMAN);
             field_0x3588 = l_wolfBaseAnime;
             field_0x347c = 0.5f;
@@ -17667,11 +17633,6 @@ int daAlink_c::procCoMetamorphoseInit() {
             }
         } else {
             // Transform Human -> Wolf
-#if TARGET_PC
-            if (sDuskHumanWarpRequest) {
-                DuskLog.warn("WARP|metaInit branch=HUMAN_TO_WOLF (sets ANM_TRANSFORM_TO_WOLF + metamorphose model)");
-            }
-#endif
             if (mDemo.getDemoMode() == daPy_demo_c::DEMO_METAMORPHOSE_UNK1_e && mDemo.getParam1() == 1) {
                 voiceStart(Z2SE_AL_V_TRANSFORM);
             }
@@ -17751,15 +17712,6 @@ int daAlink_c::procCoMetamorphoseInit() {
 }
 
 int daAlink_c::procCoMetamorphose() {
-#if TARGET_PC
-    if (sDuskHumanWarpRequest) {
-        DuskLog.warn("WARP|metaExec frame={} wolf={} 300a={} 3008={} 3012={} clothesTimer={} eqItem={:#x} procID={}",
-                     (float)mUnderFrameCtrl[0].getFrame(), (bool)checkWolf(),
-                     (int)mProcVar1.field_0x300a, (int)mProcVar0.field_0x3008,
-                     (int)mProcVar5.field_0x3012, (int)mClothesChangeWaitTimer,
-                     (int)mEquipItem, (int)mProcID);
-    }
-#endif
     if (mProcVar1.field_0x300a != 0) {
         if (!checkEventRun()) {
             checkWaitAction();
