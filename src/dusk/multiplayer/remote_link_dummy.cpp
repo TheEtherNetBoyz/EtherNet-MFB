@@ -4,6 +4,7 @@
 #include "d/d_com_inf_game.h"
 #include "dusk/logging.h"
 #include "f_op/f_op_actor_mng.h"
+#include "f_pc/f_pc_name.h"
 #include "m_Do/m_Do_ext.h"
 #include "m_Do/m_Do_mtx.h"
 
@@ -21,6 +22,8 @@ struct RemoteLinkDummy {
     RemoteLinkModel hat;
     RemoteLinkModel face;
     RemoteLinkModel hand;
+    RemoteLinkModel sword;
+    RemoteLinkModel shield;
     std::string stage;
     int room = -128;
     uint32_t stableFrames = 0;
@@ -178,6 +181,8 @@ void destroy_remote_link_dummy() {
     destroy_model(sDummy.hat);
     destroy_model(sDummy.face);
     destroy_model(sDummy.hand);
+    destroy_model(sDummy.sword);
+    destroy_model(sDummy.shield);
     sDummy.stage.clear();
     sDummy.room = -128;
     sDummy.stableFrames = 0;
@@ -185,8 +190,23 @@ void destroy_remote_link_dummy() {
 }
 
 void draw_remote_link_dummy(const PeerPoseSnapshot& pose) {
-    daAlink_c* link = static_cast<daAlink_c*>(dComIfGp_getPlayer(0));
-    if (link == nullptr || link->mpLinkModel == nullptr) {
+    fopAc_ac_c* playerActor = dComIfGp_getPlayer(0);
+    if (playerActor == nullptr) {
+        return;
+    }
+
+    // is_peer_dummy_gameplay_ready() already checks this before this function
+    // is reached, but this is re-checked here defensively: this cast is only
+    // safe when player(0) is actually Link's actor, and that has not held
+    // true in every code path observed around cutscene/event transitions.
+    if (fopAcM_GetName(playerActor) != fpcNm_ALINK_e) {
+        DuskLog.warn("Multiplayer remote Link dummy: refusing daAlink_c cast, player(0) name={}",
+                     fopAcM_GetName(playerActor));
+        return;
+    }
+
+    daAlink_c* link = static_cast<daAlink_c*>(playerActor);
+    if (link->mpLinkModel == nullptr) {
         return;
     }
 
@@ -210,6 +230,8 @@ void draw_remote_link_dummy(const PeerPoseSnapshot& pose) {
     J3DModel* hat = get_or_create_model(sDummy.hat, link->mpLinkHatModel, 0x100000);
     J3DModel* face = get_or_create_model(sDummy.face, link->mpLinkFaceModel, 0x100000);
     J3DModel* hand = get_or_create_model(sDummy.hand, link->mpLinkHandModel, 0x100000);
+    J3DModel* sword = get_or_create_model(sDummy.sword, link->mSwordModel, 0x100000);
+    J3DModel* shield = get_or_create_model(sDummy.shield, link->mShieldModel, 0x100000);
     if (body == nullptr) {
         return;
     }
@@ -271,6 +293,38 @@ void draw_remote_link_dummy(const PeerPoseSnapshot& pose) {
         }
         if (drewHand) {
             entry_model_without_calc(hand);
+        }
+    }
+
+    if (sword != nullptr) {
+        bool drewSword = false;
+        if (usedRemoteMatrices && pose.linkMatrices.sword.valid) {
+            drewSword = copy_remote_model_matrices(sword, pose.linkMatrices.sword);
+        } else if (!usedRemoteMatrices) {
+            Mtx localToRemote;
+            if (build_local_to_remote_mtx(link, pose, localToRemote)) {
+                copy_model_matrices(sword, link->mSwordModel, localToRemote);
+                drewSword = true;
+            }
+        }
+        if (drewSword) {
+            entry_model_without_calc(sword);
+        }
+    }
+
+    if (shield != nullptr) {
+        bool drewShield = false;
+        if (usedRemoteMatrices && pose.linkMatrices.shield.valid) {
+            drewShield = copy_remote_model_matrices(shield, pose.linkMatrices.shield);
+        } else if (!usedRemoteMatrices) {
+            Mtx localToRemote;
+            if (build_local_to_remote_mtx(link, pose, localToRemote)) {
+                copy_model_matrices(shield, link->mShieldModel, localToRemote);
+                drewShield = true;
+            }
+        }
+        if (drewShield) {
+            entry_model_without_calc(shield);
         }
     }
 

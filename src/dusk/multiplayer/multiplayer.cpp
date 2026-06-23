@@ -1,8 +1,10 @@
 #include "dusk/multiplayer/multiplayer.hpp"
 
 #include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_tbox.h"
 #include "d/d_com_inf_game.h"
 #include "dusk/logging.h"
+#include "dusk/multiplayer/event_sync.hpp"
 #include "dusk/multiplayer/invite_code.hpp"
 #include "dusk/multiplayer/remote_link_dummy.hpp"
 #include "f_op/f_op_actor_mng.h"
@@ -99,6 +101,12 @@ bool sEnabled = false;
 Session sSession;
 
 bool sDummyModelEnabled = false;
+
+// Set while applying any remote save-state bit (event bit, chest bit, ...),
+// so the dComIfGs_* setter call that applies it doesn't loop back through
+// its notify_local_*_set() hook and re-send it to the peer that just sent it
+// to us.
+bool sApplyingRemoteSaveBit = false;
 
 #if 0
 J3DModel* get_or_create_peer_dummy_model() {
@@ -210,8 +218,29 @@ bool is_peer_dummy_gameplay_ready() {
         return false;
     }
 
+    static bool sWasEventRunning = false;
+    const bool eventRunning = dComIfGp_event_runCheck();
+    if (eventRunning != sWasEventRunning) {
+        DuskLog.info("Multiplayer remote Link dummy: event_runCheck transitioned {} -> {}",
+                     sWasEventRunning, eventRunning);
+        sWasEventRunning = eventRunning;
+    }
+    if (eventRunning) {
+        // Cutscenes/events swap and reparent Link's actor/model state in ways
+        // the dummy clone path has not been validated against; stay out of
+        // the way rather than risk casting/dereferencing a player actor that
+        // is mid-transition.
+        return false;
+    }
+
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
     if (player == nullptr) {
+        return false;
+    }
+
+    if (fopAcM_GetName(player) != fpcNm_ALINK_e) {
+        DuskLog.warn("Multiplayer remote Link dummy: player(0) is not ALINK (name={}), skipping",
+                     fopAcM_GetName(player));
         return false;
     }
 
@@ -454,8 +483,21 @@ void add_link_matrices(json& state) {
         return;
     }
 
-    daAlink_c* link = static_cast<daAlink_c*>(dComIfGp_getPlayer(0));
-    if (link == nullptr || link->mpLinkModel == nullptr) {
+    // Note: deliberately not gated on dComIfGp_event_runCheck() here, unlike
+    // the dummy draw path. This only reads already-built matrices off the
+    // real local Link actor; it doesn't allocate/destroy anything. Personal
+    // animations (chest-open, post-respawn get-up) run through the event
+    // system without recreating Link's actor, and skipping capture during
+    // them made the remote dummy go static for their duration. The actual
+    // crash risk was casting through a non-Link actor below, which the name
+    // check guards directly.
+    fopAc_ac_c* playerActor = dComIfGp_getPlayer(0);
+    if (playerActor == nullptr || fopAcM_GetName(playerActor) != fpcNm_ALINK_e) {
+        return;
+    }
+
+    daAlink_c* link = static_cast<daAlink_c*>(playerActor);
+    if (link->mpLinkModel == nullptr) {
         return;
     }
 
@@ -464,6 +506,8 @@ void add_link_matrices(json& state) {
         {"hat", model_matrices_to_json(link->mpLinkHatModel)},
         {"face", model_matrices_to_json(link->mpLinkFaceModel)},
         {"hand", model_matrices_to_json(link->mpLinkHandModel)},
+        {"sword", model_matrices_to_json(link->mSwordModel)},
+        {"shield", model_matrices_to_json(link->mShieldModel)},
     };
 }
 
@@ -542,6 +586,8 @@ RemoteLinkMatrixSnapshot parse_link_matrices(const json& state) {
     snapshot.hat = parse_model_matrices(it->value("hat", json::object()));
     snapshot.face = parse_model_matrices(it->value("face", json::object()));
     snapshot.hand = parse_model_matrices(it->value("hand", json::object()));
+    snapshot.sword = parse_model_matrices(it->value("sword", json::object()));
+    snapshot.shield = parse_model_matrices(it->value("shield", json::object()));
     snapshot.valid = snapshot.body.valid;
     return snapshot;
 }
@@ -587,6 +633,45 @@ void handle_message(const json& message) {
         if ((sSession.peerPoseLogTicks++ % 150) == 0) {
             DuskLog.info("Multiplayer peer pose stage={} room={} pos=({}, {}, {})",
                          pose.stage, pose.room, pose.x, pose.y, pose.z);
+        }
+    } else if (type == "event_bit") {
+        const uint16_t flag = message.value("flag", 0U);
+        sApplyingRemoteSaveBit = true;
+        dComIfGs_onEventBit(flag);
+        sApplyingRemoteSaveBit = false;
+        DuskLog.info("Multiplayer applied remote event bit flag={}", flag);
+    } else if (type == "tbox_bit") {
+        const int stage = message.value("stage", -1);
+        const int flag = message.value("flag", -1);
+        if (stage >= 0 && flag >= 0) {
+            sApplyingRemoteSaveBit = true;
+            dComIfGs_onStageTbox(stage, flag);
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote chest bit stage={} flag={}", stage, flag);
+
+            stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+            if (stagInfo != nullptr && stage == dStage_stagInfo_GetSaveTbl(stagInfo)) {
+                duskRepairTboxVisual(flag);
+            }
+        }
+    } else if (type == "dungeon_item_bit") {
+        const int stage = message.value("stage", -1);
+        const int kind = message.value("kind", -1);
+        if (stage >= 0 && kind >= 0) {
+            sApplyingRemoteSaveBit = true;
+            switch (kind) {
+            case 0: dComIfGs_onDungeonItemMap(stage); break;
+            case 1: dComIfGs_onDungeonItemCompass(stage); break;
+            case 2: dComIfGs_onDungeonItemBossKey(stage); break;
+            case 3: dComIfGs_onStageBossEnemy(stage); break;
+            case 4: dComIfGs_onStageLife(stage); break;
+            case 5: dComIfGs_onStageBossDemo(stage); break;
+            case 6: dComIfGs_onDungeonItemWarp(stage); break;
+            case 7: dComIfGs_onStageMiddleBoss(stage); break;
+            default: break;
+            }
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote dungeon item bit stage={} kind={}", stage, kind);
         }
     } else if (type == "pong") {
         DuskLog.debug("Multiplayer pong");
@@ -986,6 +1071,56 @@ void draw_debug_peer_marker() {
     }
 
     draw_remote_link_dummy(pose);
+}
+
+void notify_local_event_bit_set(uint16_t flag) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    send_json({
+        {"type", "event_bit"},
+        {"flag", flag},
+    });
+    DuskLog.info("Multiplayer sent local event bit flag={}", flag);
+}
+
+void notify_local_tbox_set(int flag) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+    if (stagInfo == nullptr) {
+        return;
+    }
+
+    const int stageNo = dStage_stagInfo_GetSaveTbl(stagInfo);
+    send_json({
+        {"type", "tbox_bit"},
+        {"stage", stageNo},
+        {"flag", flag},
+    });
+    DuskLog.info("Multiplayer sent local chest bit stage={} flag={}", stageNo, flag);
+}
+
+void notify_local_dungeon_item_set(int kind) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+    if (stagInfo == nullptr) {
+        return;
+    }
+
+    const int stageNo = dStage_stagInfo_GetSaveTbl(stagInfo);
+    send_json({
+        {"type", "dungeon_item_bit"},
+        {"stage", stageNo},
+        {"kind", kind},
+    });
+    DuskLog.info("Multiplayer sent local dungeon item bit stage={} kind={}", stageNo, kind);
 }
 
 }  // namespace dusk::multiplayer

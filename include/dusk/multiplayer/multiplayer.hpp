@@ -22,6 +22,8 @@ struct RemoteLinkMatrixSnapshot {
     RemoteModelMatrixSnapshot hat;
     RemoteModelMatrixSnapshot face;
     RemoteModelMatrixSnapshot hand;
+    RemoteModelMatrixSnapshot sword;
+    RemoteModelMatrixSnapshot shield;
 };
 
 struct PeerPoseSnapshot {

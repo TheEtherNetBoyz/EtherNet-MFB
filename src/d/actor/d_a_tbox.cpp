@@ -7,6 +7,7 @@
 #include "d/d_path.h"
 #include "d/d_bg_w.h"
 #include "f_op/f_op_camera_mng.h"
+#include "f_pc/f_pc_name.h"
 #include "SSystem/SComponent/c_math.h"
 #include "Z2AudioLib/Z2Instances.h"
 #include <cmath>
@@ -531,6 +532,43 @@ void daTbox_c::initAnm() {
             flagOn(3);
             break;
         }
+    }
+}
+
+void daTbox_c::forceOpenVisual() {
+    if (mpAnm != NULL) {
+        mpAnm->setFrame(mpAnm->getEndFrame());
+    }
+
+    setAction(&daTbox_c::actionWait);
+    setDzb();
+
+    int tbox_no = getTboxNo();
+    dTres_c::offStatus(0, tbox_no, 1);
+}
+
+namespace {
+
+void* judgeTboxByNo(void* i_actor, void* i_data) {
+    if (fopAcM_GetName(i_actor) != fpcNm_TBOX_e) {
+        return NULL;
+    }
+
+    daTbox_c* tbox = static_cast<daTbox_c*>(i_actor);
+    if (tbox->getTboxNo() != *static_cast<int*>(i_data)) {
+        return NULL;
+    }
+
+    return i_actor;
+}
+
+}  // namespace
+
+void duskRepairTboxVisual(int i_tboxNo) {
+    int tboxNo = i_tboxNo;
+    daTbox_c* tbox = static_cast<daTbox_c*>(fopAcIt_Judge(judgeTboxByNo, &tboxNo));
+    if (tbox != NULL) {
+        tbox->forceOpenVisual();
     }
 }
 

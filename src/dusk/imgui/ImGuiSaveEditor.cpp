@@ -1754,9 +1754,9 @@ namespace dusk {
                     bool flag = event.getEventReg(e.flagID);
                     if (ImGui::Checkbox(("##" + e.flagName).c_str(), &flag)) {
                         if (flag) {
-                            event.onEventBit(e.flagID);
+                            dComIfGs_onEventBit(e.flagID);
                         } else {
-                            event.offEventBit(e.flagID);
+                            dComIfGs_offEventBit(e.flagID);
                         }
                     }
 

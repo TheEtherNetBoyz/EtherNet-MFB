@@ -19,6 +19,10 @@
 
 #include "tracy/Tracy.hpp"
 
+#if TARGET_PC
+#include "dusk/multiplayer/event_sync.hpp"
+#endif
+
 enum dComIfG_ButtonStatus {
     /* 0x00 */ BUTTON_STATUS_NONE,
     /* 0x01 */ BUTTON_STATUS_LET_GO,
@@ -1121,6 +1125,7 @@ void dComIfGs_setWarpItemData(char const* stage, cXyz pos, s16 angle, s8 roomNo,
                               u8 param_5);
 BOOL dComIfGs_isStageSwitch(int i_stageNo, int i_no);
 BOOL dComIfGs_isStageTbox(int i_stageNo, int i_no);
+void dComIfGs_onStageTbox(int i_stageNo, int i_no);
 void dComIfGs_onStageSwitch(int i_stageNo, int i_no);
 void dComIfGs_offStageSwitch(int i_stageNo, int i_no);
 BOOL dComIfGs_isStageSwitch(int i_stageNo, int i_no);
@@ -1970,6 +1975,9 @@ inline void* dComIfGs_getPEventBit() {
 
 inline void dComIfGs_onEventBit(const u16 i_flag) {
     g_dComIfG_gameInfo.info.getEvent().onEventBit(i_flag);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_event_bit_set(i_flag);
+#endif
 }
 
 inline void dComIfGs_offEventBit(const u16 i_flag) {
@@ -2022,6 +2030,9 @@ inline void dComIfGs_setKeyNum(u8 i_keyNum) {
 
 inline void dComIfGs_onDungeonItemMap() {
     g_dComIfG_gameInfo.info.getMemory().getBit().onDungeonItemMap();
+#if TARGET_PC
+    dusk::multiplayer::notify_local_dungeon_item_set(0);
+#endif
 }
 
 inline void dComIfGs_offDungeonItemMap() {
@@ -2034,6 +2045,9 @@ inline s32 dComIfGs_isDungeonItemMap() {
 
 inline void dComIfGs_onDungeonItemCompass() {
     g_dComIfG_gameInfo.info.getMemory().getBit().onDungeonItemCompass();
+#if TARGET_PC
+    dusk::multiplayer::notify_local_dungeon_item_set(1);
+#endif
 }
 
 inline void dComIfGs_offDungeonItemCompass() {
@@ -2046,6 +2060,9 @@ inline s32 dComIfGs_isDungeonItemCompass() {
 
 inline void dComIfGs_onDungeonItemBossKey() {
     g_dComIfG_gameInfo.info.getMemory().getBit().onDungeonItemBossKey();
+#if TARGET_PC
+    dusk::multiplayer::notify_local_dungeon_item_set(2);
+#endif
 }
 
 inline void dComIfGs_offDungeonItemBossKey() {
@@ -2058,6 +2075,9 @@ inline s32 dComIfGs_isDungeonItemBossKey() {
 
 inline void dComIfGs_onStageBossEnemy() {
     g_dComIfG_gameInfo.info.getMemory().getBit().onStageBossEnemy();
+#if TARGET_PC
+    dusk::multiplayer::notify_local_dungeon_item_set(3);
+#endif
 }
 
 inline void dComIfGs_offStageBossEnemy() {
@@ -2070,6 +2090,9 @@ inline s32 dComIfGs_isStageBossEnemy() {
 
 inline void dComIfGs_onStageLife() {
     g_dComIfG_gameInfo.info.getMemory().getBit().onStageLife();
+#if TARGET_PC
+    dusk::multiplayer::notify_local_dungeon_item_set(4);
+#endif
 }
 
 inline void dComIfGs_offStageLife() {
@@ -2082,6 +2105,9 @@ inline s32 dComIfGs_isStageLife() {
 
 inline void dComIfGs_onStageBossDemo() {
     g_dComIfG_gameInfo.info.getMemory().getBit().onStageBossDemo();
+#if TARGET_PC
+    dusk::multiplayer::notify_local_dungeon_item_set(5);
+#endif
 }
 
 inline void dComIfGs_offStageBossDemo() {
@@ -2094,6 +2120,9 @@ inline s32 dComIfGs_isStageBossDemo() {
 
 inline void dComIfGs_onDungeonItemWarp() {
     g_dComIfG_gameInfo.info.getMemory().getBit().onDungeonItemWarp();
+#if TARGET_PC
+    dusk::multiplayer::notify_local_dungeon_item_set(6);
+#endif
 }
 
 inline void dComIfGs_offDungeonItemWarp() {
@@ -2106,6 +2135,9 @@ inline s32 dComIfGs_isDungeonItemWarp() {
 
 inline void dComIfGs_onStageMiddleBoss() {
     g_dComIfG_gameInfo.info.getMemory().getBit().onStageBossEnemy2();
+#if TARGET_PC
+    dusk::multiplayer::notify_local_dungeon_item_set(7);
+#endif
 }
 
 inline void dComIfGs_offStageMiddleBoss() {
@@ -2118,6 +2150,9 @@ inline BOOL dComIfGs_isStageMiddleBoss() {
 
 inline void dComIfGs_onTbox(int i_no) {
     g_dComIfG_gameInfo.info.getMemory().getBit().onTbox(i_no);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_tbox_set(i_no);
+#endif
 }
 
 inline void dComIfGs_offTbox(int i_no) {

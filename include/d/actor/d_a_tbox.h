@@ -143,6 +143,13 @@ public:
     u16 flagCheck(u16 i_flag) { return mFlags & i_flag; }
     void setAction(daTbox_actionFn i_actionFn) { mpActionFn = i_actionFn; }
     void action() { (this->*mpActionFn)(); }
+    // Snaps an already-spawned chest to the same "already open" visual/
+    // collision state initAnm() sets up when checkOpen() is true at create
+    // time (open lid pose, idle action, open collision, no item granted).
+    // Safe to call even if already open. For multiplayer: makes a chest
+    // opened by a peer look open locally without re-running the actual
+    // open-and-grant-item interaction sequence.
+    void forceOpenVisual();
     void setDrawMtx(Mtx i_mtx) {
         MTXCopy(i_mtx, mDrawMtx);
         field_0x9fc = 1;
@@ -197,5 +204,11 @@ private:
 };
 
 STATIC_ASSERT(sizeof(daTbox_c) == 0xA30);
+
+// Searches the active actor list for a currently-spawned chest with the
+// given tbox number and, if found, forces it into the open visual state.
+// No-op if that chest isn't currently spawned (e.g. a different room/stage
+// from the caller) -- used by the multiplayer chest-bit repair hook.
+void duskRepairTboxVisual(int i_tboxNo);
 
 #endif /* D_A_TBOX_H */

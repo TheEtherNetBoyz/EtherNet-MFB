@@ -1516,6 +1516,15 @@ BOOL dComIfGs_isStageTbox(int i_stageNo, int i_no) {
     }
 }
 
+void dComIfGs_onStageTbox(int i_stageNo, int i_no) {
+    if (i_stageNo == dStage_stagInfo_GetSaveTbl(dComIfGp_getStageStagInfo())) {
+        dComIfGs_onTbox(i_no);
+        return;
+    }
+
+    g_dComIfG_gameInfo.info.getSavedata().getSave(i_stageNo).getBit().onTbox(i_no);
+}
+
 void dComIfGs_onStageSwitch(int i_stageNo, int i_no) {
     if (i_stageNo == dStage_stagInfo_GetSaveTbl(dComIfGp_getStageStagInfo())) {
         dComIfGs_onSwitch(i_no, -1);
