@@ -9,6 +9,7 @@
 #include "d/actor/d_a_player.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_item_data.h"
+#include "f_pc/f_pc_name.h"
 
 static DUSK_CONSTEXPR cull_box l_cull_box = {{-200.0f, 0.0f, -200.0f}, {200.0f, 100.0f, 200.0f}};
 
@@ -88,6 +89,34 @@ int daObjSword_c::actionOrderGetDemo() {
         eventInfo.onCondition(8);
     }
     return 1;
+}
+
+namespace {
+
+void* judgeObjSwordBySaveBit(void* i_actor, void* i_data) {
+    if (fopAcM_GetName(i_actor) != fpcNm_Obj_Sword_e) {
+        return NULL;
+    }
+
+    daObjSword_c* obj = static_cast<daObjSword_c*>(i_actor);
+    if (obj->getItemBit() != *static_cast<int*>(i_data)) {
+        return NULL;
+    }
+
+    return i_actor;
+}
+
+}  // namespace
+
+bool duskRepairObjSwordVisual(int i_globalSaveBitNo) {
+    int saveBit = i_globalSaveBitNo;
+    daObjSword_c* obj = static_cast<daObjSword_c*>(fopAcIt_Judge(judgeObjSwordBySaveBit, &saveBit));
+    if (obj == NULL) {
+        return false;
+    }
+
+    fopAcM_delete(obj);
+    return true;
 }
 
 int daObjSword_c::actionGetDemo() {

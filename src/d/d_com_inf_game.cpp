@@ -1525,6 +1525,23 @@ void dComIfGs_onStageTbox(int i_stageNo, int i_no) {
     g_dComIfG_gameInfo.info.getSavedata().getSave(i_stageNo).getBit().onTbox(i_no);
 }
 
+void dComIfGs_onStageMemoryItem(int i_stageNo, int i_no) {
+    if (i_stageNo == dStage_stagInfo_GetSaveTbl(dComIfGp_getStageStagInfo())) {
+        g_dComIfG_gameInfo.info.getMemory().getBit().onItem(i_no);
+        return;
+    }
+
+    g_dComIfG_gameInfo.info.getSavedata().getSave(i_stageNo).getBit().onItem(i_no);
+}
+
+BOOL dComIfGs_isStageMemoryItem(int i_stageNo, int i_no) {
+    if (i_stageNo == dStage_stagInfo_GetSaveTbl(dComIfGp_getStageStagInfo())) {
+        return g_dComIfG_gameInfo.info.getMemory().getBit().isItem(i_no);
+    }
+
+    return g_dComIfG_gameInfo.info.getSavedata().getSave(i_stageNo).getBit().isItem(i_no);
+}
+
 void dComIfGs_onStageSwitch(int i_stageNo, int i_no) {
     if (i_stageNo == dStage_stagInfo_GetSaveTbl(dComIfGp_getStageStagInfo())) {
         dComIfGs_onSwitch(i_no, -1);

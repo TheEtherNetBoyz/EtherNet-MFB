@@ -39,4 +39,12 @@ private:
 
 STATIC_ASSERT(sizeof(daObjSword_c) == 0x938);
 
+// Same shape as duskRepairObjLifeVisual (d_a_obj_life_container.h): finds a
+// currently-spawned Ordon Sword pickup by its global Item-bit ID
+// (daObjSword_c::getItemBit() space, same as fopAcM_onItem's bitNo, not the
+// dSv_memBit_c-local offset index) and deletes it, mirroring what
+// daObjSword_c::actionGetDemo() does on a real pickup minus the grant.
+// Returns true if a live actor was found and deleted.
+bool duskRepairObjSwordVisual(int i_globalSaveBitNo);
+
 #endif /* D_A_OBJ_SWORD_H */

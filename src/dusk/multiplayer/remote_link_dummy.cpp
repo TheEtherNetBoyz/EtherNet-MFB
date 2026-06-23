@@ -1,5 +1,7 @@
 #include "dusk/multiplayer/remote_link_dummy.hpp"
 
+#include <map>
+
 #include "d/actor/d_a_alink.h"
 #include "d/d_com_inf_game.h"
 #include "dusk/logging.h"
@@ -30,7 +32,10 @@ struct RemoteLinkDummy {
     uint32_t drawLogCount = 0;
 };
 
-RemoteLinkDummy sDummy;
+// Keyed by PeerPoseSnapshot::peerId. Only one peer exists in practice today
+// (see remote_link_dummy.hpp), but storage is peer-keyed so adding real
+// multi-peer rendering later is a drawing-loop change, not a data-model one.
+std::map<std::string, RemoteLinkDummy> sDummies;
 
 void destroy_model(RemoteLinkModel& model) {
     if (model.heap != nullptr) {
@@ -176,20 +181,40 @@ bool build_local_to_remote_mtx(daAlink_c* link, const PeerPoseSnapshot& pose, Mt
 
 }  // namespace
 
-void destroy_remote_link_dummy() {
-    destroy_model(sDummy.body);
-    destroy_model(sDummy.hat);
-    destroy_model(sDummy.face);
-    destroy_model(sDummy.hand);
-    destroy_model(sDummy.sword);
-    destroy_model(sDummy.shield);
-    sDummy.stage.clear();
-    sDummy.room = -128;
-    sDummy.stableFrames = 0;
-    sDummy.drawLogCount = 0;
+void destroy_remote_link_dummy(const std::string& peerId) {
+    auto it = sDummies.find(peerId);
+    if (it == sDummies.end()) {
+        return;
+    }
+
+    RemoteLinkDummy& dummy = it->second;
+    destroy_model(dummy.body);
+    destroy_model(dummy.hat);
+    destroy_model(dummy.face);
+    destroy_model(dummy.hand);
+    destroy_model(dummy.sword);
+    destroy_model(dummy.shield);
+    dummy.stage.clear();
+    dummy.room = -128;
+    dummy.stableFrames = 0;
+    dummy.drawLogCount = 0;
+    sDummies.erase(it);
 }
 
-void draw_remote_link_dummy(const PeerPoseSnapshot& pose) {
+void destroy_all_remote_link_dummies() {
+    for (auto& entry : sDummies) {
+        RemoteLinkDummy& dummy = entry.second;
+        destroy_model(dummy.body);
+        destroy_model(dummy.hat);
+        destroy_model(dummy.face);
+        destroy_model(dummy.hand);
+        destroy_model(dummy.sword);
+        destroy_model(dummy.shield);
+    }
+    sDummies.clear();
+}
+
+void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& pose) {
     fopAc_ac_c* playerActor = dComIfGp_getPlayer(0);
     if (playerActor == nullptr) {
         return;
@@ -206,7 +231,39 @@ void draw_remote_link_dummy(const PeerPoseSnapshot& pose) {
     }
 
     daAlink_c* link = static_cast<daAlink_c*>(playerActor);
+    if (link->mProcID == daAlink_c::PROC_METAMORPHOSE || link->mProcID == daAlink_c::PROC_METAMORPHOSE_ONLY) {
+        // Same use-after-free risk as in add_link_matrices (multiplayer.cpp):
+        // daAlink_c::changeWolf()/changeLink() free and reassign
+        // mpLinkModel/mSwordModel/mShieldModel partway through this state.
+        // link here is the receiving client's own local player -- the clone
+        // source for the dummy's body/hat/face/hand/sword/shield models --
+        // so this guards against touching it mid-transform regardless of
+        // what the remote peer is doing.
+        return;
+    }
+
     if (link->mpLinkModel == nullptr) {
+        return;
+    }
+
+    // checkWolf() returns the raw masked flag (mNoResetFlg1 & FLG1_IS_WOLF),
+    // i.e. 0 or 0x2000000, not a normalized 0/1 -- must explicitly convert
+    // to bool before comparing against pose.isWolf, or this would treat
+    // every wolf-form match as a mismatch.
+    if (static_cast<bool>(link->checkWolf()) != pose.isWolf) {
+        // The dummy clones whatever model/skeleton the LOCAL player currently
+        // has (mpLinkModel etc.), then either copies the peer's matrices onto
+        // it or drives it from the local player's own matrices as a fallback.
+        // Wolf and human bodies have different joint counts/hierarchies
+        // (see architecture.md), so if the peer's reported form doesn't match
+        // the local player's current form, neither path can produce a
+        // correct pose: remote matrices get rejected by the joint-count guard
+        // in copy_remote_model_matrices, and the local fallback would render
+        // the peer in the WRONG form using the local skeleton. Skip drawing
+        // entirely rather than show a guaranteed-wrong clone -- and tear down
+        // any existing clone so it doesn't linger as a frozen ghost for
+        // however long the mismatch lasts.
+        destroy_remote_link_dummy(peerId);
         return;
     }
 
@@ -214,24 +271,34 @@ void draw_remote_link_dummy(const PeerPoseSnapshot& pose) {
         return;
     }
 
-    if (sDummy.stage != pose.stage || sDummy.room != pose.room) {
-        destroy_remote_link_dummy();
-        sDummy.stage = pose.stage;
-        sDummy.room = pose.room;
+    auto dummyIt = sDummies.find(peerId);
+    if (dummyIt != sDummies.end() &&
+        (dummyIt->second.stage != pose.stage || dummyIt->second.room != pose.room))
+    {
+        destroy_remote_link_dummy(peerId);
+        dummyIt = sDummies.end();
+    }
+
+    if (dummyIt == sDummies.end()) {
+        RemoteLinkDummy& newDummy = sDummies[peerId];
+        newDummy.stage = pose.stage;
+        newDummy.room = pose.room;
         return;
     }
 
-    if (sDummy.stableFrames < 30) {
-        ++sDummy.stableFrames;
+    RemoteLinkDummy& dummy = dummyIt->second;
+
+    if (dummy.stableFrames < 30) {
+        ++dummy.stableFrames;
         return;
     }
 
-    J3DModel* body = get_or_create_model(sDummy.body, link->mpLinkModel, 0x200000);
-    J3DModel* hat = get_or_create_model(sDummy.hat, link->mpLinkHatModel, 0x100000);
-    J3DModel* face = get_or_create_model(sDummy.face, link->mpLinkFaceModel, 0x100000);
-    J3DModel* hand = get_or_create_model(sDummy.hand, link->mpLinkHandModel, 0x100000);
-    J3DModel* sword = get_or_create_model(sDummy.sword, link->mSwordModel, 0x100000);
-    J3DModel* shield = get_or_create_model(sDummy.shield, link->mShieldModel, 0x100000);
+    J3DModel* body = get_or_create_model(dummy.body, link->mpLinkModel, 0x200000);
+    J3DModel* hat = get_or_create_model(dummy.hat, link->mpLinkHatModel, 0x100000);
+    J3DModel* face = get_or_create_model(dummy.face, link->mpLinkFaceModel, 0x100000);
+    J3DModel* hand = get_or_create_model(dummy.hand, link->mpLinkHandModel, 0x100000);
+    J3DModel* sword = get_or_create_model(dummy.sword, link->mSwordModel, 0x100000);
+    J3DModel* shield = get_or_create_model(dummy.shield, link->mShieldModel, 0x100000);
     if (body == nullptr) {
         return;
     }
@@ -328,11 +395,12 @@ void draw_remote_link_dummy(const PeerPoseSnapshot& pose) {
         }
     }
 
-    if (sDummy.drawLogCount < 5) {
-        ++sDummy.drawLogCount;
-        DuskLog.info("Multiplayer remote Link dummy: drew copy #{} matrices={} pos=({}, {}, {}) angleY={}",
-                     sDummy.drawLogCount, usedRemoteMatrices ? "remote" : "local-fallback", pose.x,
-                     pose.y, pose.z, pose.angleY);
+    if (dummy.drawLogCount < 5) {
+        ++dummy.drawLogCount;
+        DuskLog.info(
+            "Multiplayer remote Link dummy: drew copy #{} peer={} matrices={} pos=({}, {}, {}) angleY={}",
+            dummy.drawLogCount, peerId, usedRemoteMatrices ? "remote" : "local-fallback",
+            pose.x, pose.y, pose.z, pose.angleY);
     }
 }
 

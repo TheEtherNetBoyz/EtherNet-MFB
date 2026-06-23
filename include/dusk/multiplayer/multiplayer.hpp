@@ -28,6 +28,12 @@ struct RemoteLinkMatrixSnapshot {
 
 struct PeerPoseSnapshot {
     bool valid = false;
+    // Identifies which peer this pose belongs to: the relay-assigned
+    // client_id when connected via the relay (tools/multiplayer_relay),
+    // or a fixed placeholder in direct mode (which only ever has one
+    // peer today). Stored per-pose, not just as a map key, so callers
+    // that copy a snapshot out of the map don't lose the association.
+    std::string peerId;
     uint32_t sequence = 0;
     uint32_t ageTicks = 0;
     std::string stage;
@@ -37,6 +43,7 @@ struct PeerPoseSnapshot {
     float y = 0.0f;
     float z = 0.0f;
     int angleY = 0;
+    bool isWolf = false;
     RemoteLinkMatrixSnapshot linkMatrices;
 };
 

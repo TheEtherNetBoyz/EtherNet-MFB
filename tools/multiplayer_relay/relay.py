@@ -14,6 +14,14 @@ from typing import Any
 
 PROTOCOL_VERSION = 1
 MAX_LINE_BYTES = 64 * 1024
+STATE_BROADCAST_TYPES = {
+    "event_bit",
+    "tbox_bit",
+    "switch_bit",
+    "item_bit",
+    "dungeon_item_bit",
+    "save_snapshot",
+}
 
 
 @dataclass
@@ -128,6 +136,12 @@ class Relay:
                 "type": "ack",
                 "sequence": sequence,
             })
+            return
+
+        if msg_type in STATE_BROADCAST_TYPES:
+            routed = dict(message)
+            routed["client_id"] = client.client_id
+            await self._broadcast(client, routed)
             return
 
         await self._send(client.writer, {"type": "error", "error": "unknown_message"})

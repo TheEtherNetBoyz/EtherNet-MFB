@@ -92,5 +92,18 @@ private:
 
 STATIC_ASSERT(sizeof(daObjLife_c) == 0x9d4);
 
+// Searches the active actor list for a currently-spawned heart piece/heart
+// container with the given save bit number (the global "Item" bit ID, same
+// space as daObjLife_c::getSaveBitNo() / fopAcM_onItem's bitNo, not the
+// dSv_memBit_c-local offset index) and, if found, deletes it -- mirroring
+// what daObjLife_c::actionGetDemo() does on a real pickup, just without the
+// item-grant logic (the reward already happened on whichever side actually
+// collected it). No-op if it isn't currently spawned (e.g. a different
+// room/stage from the caller) -- used by the multiplayer item-bit repair
+// hook.
+// Returns true if a live actor was found and deleted, false if none was
+// currently spawned (the no-op case described above).
+bool duskRepairObjLifeVisual(int i_globalSaveBitNo);
+
 
 #endif /* D_A_OBJ_LIFE_CONTAINER_H */

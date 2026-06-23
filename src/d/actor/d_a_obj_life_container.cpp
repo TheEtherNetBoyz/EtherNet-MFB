@@ -9,6 +9,7 @@
 #include "d/d_com_inf_game.h"
 #include "d/actor/d_a_player.h"
 #include "d/d_item_data.h"
+#include "f_pc/f_pc_name.h"
 #include "SSystem/SComponent/c_math.h"
 #include <cstring>
 
@@ -316,6 +317,34 @@ int daObjLife_c::actionOrderGetDemo() {
     }
 
     return 1;
+}
+
+namespace {
+
+void* judgeObjLifeBySaveBit(void* i_actor, void* i_data) {
+    if (fopAcM_GetName(i_actor) != fpcNm_Obj_LifeContainer_e) {
+        return NULL;
+    }
+
+    daObjLife_c* obj = static_cast<daObjLife_c*>(i_actor);
+    if (obj->getSaveBitNo() != *static_cast<int*>(i_data)) {
+        return NULL;
+    }
+
+    return i_actor;
+}
+
+}  // namespace
+
+bool duskRepairObjLifeVisual(int i_globalSaveBitNo) {
+    int saveBit = i_globalSaveBitNo;
+    daObjLife_c* obj = static_cast<daObjLife_c*>(fopAcIt_Judge(judgeObjLifeBySaveBit, &saveBit));
+    if (obj == NULL) {
+        return false;
+    }
+
+    fopAcM_delete(obj);
+    return true;
 }
 
 int daObjLife_c::actionGetDemo() {

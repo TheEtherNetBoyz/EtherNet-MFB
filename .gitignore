@@ -37,6 +37,7 @@ compile_commands.json
 # Miscellaneous
 *.exe
 *.zip
+tools/multiplayer_dev/
 
 # MacOS
 .DS_Store

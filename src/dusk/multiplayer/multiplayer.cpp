@@ -1,8 +1,12 @@
 #include "dusk/multiplayer/multiplayer.hpp"
 
 #include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_obj_life_container.h"
+#include "d/actor/d_a_obj_sword.h"
 #include "d/actor/d_a_tbox.h"
 #include "d/d_com_inf_game.h"
+#include "d/d_item.h"
+#include "d/d_item_data.h"
 #include "dusk/logging.h"
 #include "dusk/multiplayer/event_sync.hpp"
 #include "dusk/multiplayer/invite_code.hpp"
@@ -47,14 +51,28 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <map>
+#include <set>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 
 namespace dusk::multiplayer {
 namespace {
 
 using json = nlohmann::json;
+
+// Direct mode (DirectHost/DirectJoin) is a raw 1:1 TCP pipe -- the peer
+// never tags its own messages with a client_id, unlike the relay
+// (tools/multiplayer_relay), which assigns one and stamps every routed
+// message with the sender's. This placeholder key stands in for "the one
+// peer" when there's no real client_id to key peer-specific state by.
+const char* const kDirectPeerId = "direct";
+
+std::string resolve_peer_id(const json& message) {
+    return message.value("client_id", kDirectPeerId);
+}
 
 enum class NetworkMode {
     Disabled,
@@ -90,10 +108,16 @@ struct Session {
     uint32_t pingTicks = 0;
     uint32_t poseSequence = 0;
     uint32_t peerPoseLogTicks = 0;
-    PeerPoseSnapshot peerPose;
+    // Keyed by peer ID (relay client_id, or kDirectPeerId in direct mode).
+    // Only one peer exists in practice today (direct mode is 1:1), but this
+    // is peer-keyed so multi-peer support is a drawing/networking-layer
+    // change later, not a data-model one -- see remote_link_dummy.hpp.
+    std::map<std::string, PeerPoseSnapshot> peerPoses;
     bool helloSent = false;
     bool welcomeSent = false;
     bool welcomed = false;
+    bool snapshotPending = false;
+    uint32_t repairSweepTicks = 0;
 };
 
 bool sInitialized = false;
@@ -107,6 +131,54 @@ bool sDummyModelEnabled = false;
 // its notify_local_*_set() hook and re-send it to the peer that just sent it
 // to us.
 bool sApplyingRemoteSaveBit = false;
+
+// Local memory-tier item bits observed through the live setter hook. This
+// intentionally records before the network "welcomed" check, so a player can
+// collect a heart piece, then have a peer join later and still include that
+// pickup in the catch-up snapshot even if vanilla has not committed the
+// current stage memory back into the savedata table yet.
+std::map<int, std::set<int>> sObservedMemoryItems;
+
+// Incoming messages that touch per-stage save state (everything except
+// event bits) need dComIfGp_getStageStagInfo() to be non-null -- every
+// dComIfGs_onStageX accessor dereferences it via dStage_stagInfo_GetSaveTbl
+// with no null check, because nothing had ever called them before a stage
+// was loaded. The TCP handshake completes within milliseconds, well before
+// the game finishes booting to a loaded stage, so a peer's save_snapshot (or
+// even a live tbox_bit/switch_bit/etc.) can arrive while we're still on the
+// boot logo. Messages of these types are queued here and replayed once a
+// stage is actually loaded, rather than processed (and crashing) or dropped
+// (and silently losing catch-up data).
+std::vector<json> sPendingStageMessages;
+
+bool is_stage_dependent_message_type(const std::string& type) {
+    return type == "save_snapshot" || type == "tbox_bit" || type == "switch_bit" ||
+           type == "item_bit" || type == "dungeon_item_bit";
+}
+
+void remember_memory_item_bit(int stageNo, int flag) {
+    if (stageNo >= 0 && flag >= 0 && flag < dSv_info_c::DAN_ITEM) {
+        sObservedMemoryItems[stageNo].insert(flag);
+    }
+}
+
+void reapply_observed_memory_items_for_stage(int stageNo) {
+    const auto observedItems = sObservedMemoryItems.find(stageNo);
+    if (observedItems == sObservedMemoryItems.end()) {
+        return;
+    }
+
+    for (const int flag : observedItems->second) {
+        if (dComIfGs_isStageMemoryItem(stageNo, flag)) {
+            continue;
+        }
+
+        sApplyingRemoteSaveBit = true;
+        dComIfGs_onStageMemoryItem(stageNo, flag);
+        sApplyingRemoteSaveBit = false;
+        DuskLog.info("Multiplayer restored cached item bit stage={} flag={}", stageNo, flag);
+    }
+}
 
 #if 0
 J3DModel* get_or_create_peer_dummy_model() {
@@ -244,8 +316,22 @@ bool is_peer_dummy_gameplay_ready() {
         return false;
     }
 
-    return sSession.peerPose.stage == dComIfGp_getStartStageName() &&
-           sSession.peerPose.room == static_cast<int>(fopAcM_GetRoomNo(player));
+    const daAlink_c* link = static_cast<const daAlink_c*>(player);
+    if (link->mProcID == daAlink_c::PROC_METAMORPHOSE || link->mProcID == daAlink_c::PROC_METAMORPHOSE_ONLY) {
+        // Wolf<->human transformation frees and reassigns mpLinkModel/
+        // mSwordModel/mShieldModel partway through this state -- see
+        // add_link_matrices() for the full explanation. Not gated through
+        // event_runCheck() above since metamorphosis is its own mProcID
+        // state, not the cutscene/event system.
+        return false;
+    }
+
+    // This only covers gameplay-readiness that's the same regardless of
+    // which peer's pose is being considered. The per-peer stage/room match
+    // (was here previously, when there was only ever one pose to check) now
+    // happens per-peer in draw_debug_peer_marker(), since sSession.peerPoses
+    // can hold more than one entry.
+    return true;
 }
 
 #if 0
@@ -360,12 +446,15 @@ void reset_connection_state() {
     sSession.helloSent = false;
     sSession.welcomeSent = false;
     sSession.welcomed = false;
+    sSession.snapshotPending = false;
+    sPendingStageMessages.clear();
     sSession.rxBuffer.clear();
     sSession.reconnectTicks = 0;
     sSession.pingTicks = 0;
     sSession.poseSequence = 0;
     sSession.peerPoseLogTicks = 0;
-    sSession.peerPose = {};
+    sSession.peerPoses.clear();
+    destroy_all_remote_link_dummies();
 }
 
 void disconnect(const char* reason) {
@@ -419,6 +508,102 @@ void send_hello() {
     });
 }
 
+// Sent once, immediately after this side becomes "welcomed", so a peer that
+// joined or reconnected mid-session catches up on durable state it missed
+// instead of only receiving bits set after it connected. Lists only
+// currently-set bits (not the full bit space) to keep the payload small;
+// applying each one through the same setters the live hooks use (below)
+// means a late-set local bit during the brief gap before this snapshot
+// arrives is naturally preserved -- these are all monotonic OR-merges, so
+// receiving a bit twice or in any order is harmless.
+void send_save_snapshot() {
+    json eventFlags = json::array();
+    for (int i = 0; i < 256 * 8; ++i) {
+        if (dComIfGs_isEventBit(static_cast<u16>(i))) {
+            eventFlags.push_back(i);
+        }
+    }
+
+    json chestStages = json::array();
+    json switchStages = json::array();
+    json itemStages = json::array();
+    json dungeonStages = json::array();
+
+    for (int s = 0; s < dSv_save_c::STAGE_MAX; ++s) {
+        json chests = json::array();
+        for (int i = 0; i < 64; ++i) {
+            if (dComIfGs_isStageTbox(s, i)) {
+                chests.push_back(i);
+            }
+        }
+        if (!chests.empty()) {
+            chestStages.push_back({{"stage", s}, {"flags", chests}});
+        }
+
+        json switches = json::array();
+        for (int i = 0; i < dSv_info_c::MEMORY_SWITCH; ++i) {
+            if (dComIfGs_isStageSwitch(s, i)) {
+                switches.push_back(i);
+            }
+        }
+        if (!switches.empty()) {
+            switchStages.push_back({{"stage", s}, {"flags", switches}});
+        }
+
+        json items = json::array();
+        for (int i = 0; i < dSv_info_c::DAN_ITEM; ++i) {
+            if (dComIfGs_isStageMemoryItem(s, i)) {
+                items.push_back(i);
+            }
+        }
+        const auto observedItems = sObservedMemoryItems.find(s);
+        if (observedItems != sObservedMemoryItems.end()) {
+            for (const int flag : observedItems->second) {
+                bool alreadyListed = false;
+                for (const json& item : items) {
+                    if (item.get<int>() == flag) {
+                        alreadyListed = true;
+                        break;
+                    }
+                }
+                if (!alreadyListed) {
+                    items.push_back(flag);
+                }
+            }
+        }
+        if (!items.empty()) {
+            itemStages.push_back({{"stage", s}, {"flags", items}});
+        }
+
+        json kinds = json::array();
+        if (dComIfGs_isDungeonItemMap(s)) kinds.push_back(0);
+        if (dComIfGs_isDungeonItemCompass(s)) kinds.push_back(1);
+        if (dComIfGs_isDungeonItemBossKey(s)) kinds.push_back(2);
+        if (dComIfGs_isStageBossEnemy(s)) kinds.push_back(3);
+        if (dComIfGs_isStageLife(s)) kinds.push_back(4);
+        if (dComIfGs_isStageBossDemo(s)) kinds.push_back(5);
+        if (dComIfGs_isDungeonItemWarp(s)) kinds.push_back(6);
+        if (dComIfGs_isStageMiddleBoss(s)) kinds.push_back(7);
+        if (!kinds.empty()) {
+            dungeonStages.push_back({{"stage", s}, {"kinds", kinds}});
+        }
+    }
+
+    send_json({
+        {"type", "save_snapshot"},
+        {"event_flags", eventFlags},
+        {"chests", chestStages},
+        {"switches", switchStages},
+        {"items", itemStages},
+        {"dungeon_items", dungeonStages},
+        {"max_life", dComIfGs_getMaxLife()},
+    });
+    DuskLog.info(
+        "Multiplayer sent save snapshot event_flags={} chest_stages={} switch_stages={} item_stages={} dungeon_stages={}",
+        eventFlags.size(), chestStages.size(), switchStages.size(), itemStages.size(),
+        dungeonStages.size());
+}
+
 void send_welcome() {
     if (sSession.welcomeSent) {
         return;
@@ -432,6 +617,9 @@ void send_welcome() {
         {"peers", json::array()},
     });
     sSession.welcomed = sSession.welcomeSent;
+    if (sSession.welcomed) {
+        sSession.snapshotPending = true;
+    }
 }
 
 json matrix_to_json(CMtxP matrix) {
@@ -497,6 +685,16 @@ void add_link_matrices(json& state) {
     }
 
     daAlink_c* link = static_cast<daAlink_c*>(playerActor);
+    if (link->mProcID == daAlink_c::PROC_METAMORPHOSE || link->mProcID == daAlink_c::PROC_METAMORPHOSE_ONLY) {
+        // Wolf<->human transformation. daAlink_c::changeWolf()/changeLink()
+        // free the old model/arc resources (mpArcHeap->freeAll()) and then
+        // reassign mpLinkModel/mSwordModel/mShieldModel to freshly-allocated
+        // objects partway through this state, not atomically with the state
+        // transition itself -- reading those fields during the window is a
+        // use-after-free risk, not just a stale-data one.
+        return;
+    }
+
     if (link->mpLinkModel == nullptr) {
         return;
     }
@@ -594,6 +792,11 @@ RemoteLinkMatrixSnapshot parse_link_matrices(const json& state) {
 
 void handle_message(const json& message) {
     const std::string type = message.value("type", "");
+    if (is_stage_dependent_message_type(type) && dComIfGp_getStageStagInfo() == nullptr) {
+        sPendingStageMessages.push_back(message);
+        return;
+    }
+
     if (type == "hello" && sSession.mode == NetworkMode::DirectHost) {
         DuskLog.info("Multiplayer direct peer joined name={} room={}", message.value("name", ""),
                      message.value("room_id", ""));
@@ -603,21 +806,99 @@ void handle_message(const json& message) {
         DuskLog.info("Multiplayer joined room={} client_id={} peers={}",
                      message.value("room_id", ""), message.value("client_id", ""),
                      message.value("peers", json::array()).size());
+        sSession.snapshotPending = true;
     } else if (type == "peer_joined") {
         DuskLog.info("Multiplayer peer joined id={} name={}", message.value("client_id", ""),
                      message.value("name", ""));
     } else if (type == "peer_left") {
-        DuskLog.info("Multiplayer peer left id={}", message.value("client_id", ""));
-        sSession.peerPose = {};
+        const std::string leftPeerId = resolve_peer_id(message);
+        DuskLog.info("Multiplayer peer left id={}", leftPeerId);
+        sSession.peerPoses.erase(leftPeerId);
+        destroy_remote_link_dummy(leftPeerId);
+    } else if (type == "save_snapshot") {
+        sApplyingRemoteSaveBit = true;
+        for (const json& flag : message.value("event_flags", json::array())) {
+            dComIfGs_onEventBit(static_cast<uint16_t>(flag.get<int>()));
+        }
+        for (const json& entry : message.value("chests", json::array())) {
+            const int stage = entry.value("stage", -1);
+            for (const json& flag : entry.value("flags", json::array())) {
+                dComIfGs_onStageTbox(stage, flag.get<int>());
+                DuskLog.info("Multiplayer snapshot chest bit stage={} flag={}", stage,
+                             flag.get<int>());
+            }
+        }
+        for (const json& entry : message.value("switches", json::array())) {
+            const int stage = entry.value("stage", -1);
+            for (const json& flag : entry.value("flags", json::array())) {
+                dComIfGs_onStageSwitch(stage, flag.get<int>());
+            }
+        }
+        for (const json& entry : message.value("items", json::array())) {
+            const int stage = entry.value("stage", -1);
+            for (const json& flag : entry.value("flags", json::array())) {
+                const int flagValue = flag.get<int>();
+                dComIfGs_onStageMemoryItem(stage, flagValue);
+                remember_memory_item_bit(stage, flagValue);
+                DuskLog.info("Multiplayer snapshot item bit stage={} flag={}", stage,
+                             flagValue);
+            }
+        }
+        {
+            stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+            const int currentStage = stagInfo != nullptr ? dStage_stagInfo_GetSaveTbl(stagInfo) : -1;
+            DuskLog.info("Multiplayer snapshot item repair pass current_stage={}", currentStage);
+            for (const json& entry : message.value("items", json::array())) {
+                if (entry.value("stage", -1) != currentStage) {
+                    continue;
+                }
+                for (const json& flag : entry.value("flags", json::array())) {
+                    const int globalBit = flag.get<int>() + dSv_info_c::MEMORY_ITEM;
+                    const bool repairedLife = duskRepairObjLifeVisual(globalBit);
+                    const bool repairedSword = !repairedLife && duskRepairObjSwordVisual(globalBit);
+                    DuskLog.info(
+                        "Multiplayer snapshot item bit repair stage={} flag={} found_life={} found_sword={}",
+                        currentStage, flag.get<int>(), repairedLife, repairedSword);
+                }
+            }
+        }
+        for (const json& entry : message.value("dungeon_items", json::array())) {
+            const int stage = entry.value("stage", -1);
+            for (const json& kind : entry.value("kinds", json::array())) {
+                switch (kind.get<int>()) {
+                case 0: dComIfGs_onDungeonItemMap(stage); break;
+                case 1: dComIfGs_onDungeonItemCompass(stage); break;
+                case 2: dComIfGs_onDungeonItemBossKey(stage); break;
+                case 3: dComIfGs_onStageBossEnemy(stage); break;
+                case 4: dComIfGs_onStageLife(stage); break;
+                case 5: dComIfGs_onStageBossDemo(stage); break;
+                case 6: dComIfGs_onDungeonItemWarp(stage); break;
+                case 7: dComIfGs_onStageMiddleBoss(stage); break;
+                default: break;
+                }
+            }
+        }
+        sApplyingRemoteSaveBit = false;
+        const int remoteMaxLife = message.value("max_life", 0);
+        if (remoteMaxLife > dComIfGs_getMaxLife() && remoteMaxLife <= 100) {
+            dComIfGs_setMaxLife(static_cast<u8>(remoteMaxLife));
+            DuskLog.info("Multiplayer snapshot max life set to {}", remoteMaxLife);
+        }
+        DuskLog.info("Multiplayer applied save snapshot from peer");
     } else if (type == "pose") {
+        const std::string peerId = resolve_peer_id(message);
         const uint32_t sequence = message.value("sequence", 0U);
-        if (sSession.peerPose.valid && sequence <= sSession.peerPose.sequence) {
+        auto existing = sSession.peerPoses.find(peerId);
+        if (existing != sSession.peerPoses.end() && existing->second.valid &&
+            sequence <= existing->second.sequence)
+        {
             return;
         }
 
         const json state = message.value("state", json::object());
         PeerPoseSnapshot pose;
         pose.valid = true;
+        pose.peerId = peerId;
         pose.sequence = sequence;
         pose.ageTicks = 0;
         pose.stage = state.value("stage", "");
@@ -627,11 +908,12 @@ void handle_message(const json& message) {
         pose.y = state.value("y", 0.0f);
         pose.z = state.value("z", 0.0f);
         pose.angleY = state.value("angle_y", 0);
+        pose.isWolf = state.value("is_wolf", false);
         pose.linkMatrices = parse_link_matrices(state);
-        sSession.peerPose = pose;
+        sSession.peerPoses[peerId] = pose;
 
         if ((sSession.peerPoseLogTicks++ % 150) == 0) {
-            DuskLog.info("Multiplayer peer pose stage={} room={} pos=({}, {}, {})",
+            DuskLog.info("Multiplayer peer pose peer={} stage={} room={} pos=({}, {}, {})", peerId,
                          pose.stage, pose.room, pose.x, pose.y, pose.z);
         }
     } else if (type == "event_bit") {
@@ -672,6 +954,43 @@ void handle_message(const json& message) {
             }
             sApplyingRemoteSaveBit = false;
             DuskLog.info("Multiplayer applied remote dungeon item bit stage={} kind={}", stage, kind);
+        }
+    } else if (type == "switch_bit") {
+        const int stage = message.value("stage", -1);
+        const int flag = message.value("flag", -1);
+        if (stage >= 0 && flag >= 0) {
+            sApplyingRemoteSaveBit = true;
+            dComIfGs_onStageSwitch(stage, flag);
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote switch bit stage={} flag={}", stage, flag);
+        }
+    } else if (type == "item_bit") {
+        const int stage = message.value("stage", -1);
+        const int flag = message.value("flag", -1);
+        if (stage >= 0 && flag >= 0) {
+            sApplyingRemoteSaveBit = true;
+            dComIfGs_onStageMemoryItem(stage, flag);
+            remember_memory_item_bit(stage, flag);
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote item bit stage={} flag={}", stage, flag);
+
+            stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+            if (stagInfo != nullptr && stage == dStage_stagInfo_GetSaveTbl(stagInfo)) {
+                const int globalBit = flag + dSv_info_c::MEMORY_ITEM;
+                const bool repairedLife = duskRepairObjLifeVisual(globalBit);
+                const bool repairedSword = !repairedLife && duskRepairObjSwordVisual(globalBit);
+                DuskLog.info(
+                    "Multiplayer item bit repair stage={} flag={} found_life={} found_sword={}",
+                    stage, flag, repairedLife, repairedSword);
+            }
+        }
+    } else if (type == "item_get") {
+        const int itemId = message.value("item_id", -1);
+        if (itemId == dItemNo_KAKERA_HEART_e || itemId == dItemNo_UTAWA_HEART_e) {
+            sApplyingRemoteSaveBit = true;
+            execItemGet(static_cast<u8>(itemId));
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote item get item_id={}", itemId);
         }
     } else if (type == "pong") {
         DuskLog.debug("Multiplayer pong");
@@ -858,6 +1177,13 @@ void send_pose() {
         return;
     }
 
+    // checkWolf() lives on daPy_py_c (daAlink_c's base), but reads a plain
+    // flag rather than touching model pointers, so unlike add_link_matrices()
+    // this doesn't need the metamorphosis-state guard -- just the same
+    // actor-type check before the cast.
+    const bool isWolf = fopAcM_GetName(player) == fpcNm_ALINK_e &&
+                         static_cast<daAlink_c*>(player)->checkWolf();
+
     json state = {
         {"stage", dComIfGp_getStartStageName()},
         {"room", static_cast<int>(fopAcM_GetRoomNo(player))},
@@ -866,6 +1192,7 @@ void send_pose() {
         {"y", player->current.pos.y},
         {"z", player->current.pos.z},
         {"angle_y", static_cast<int>(player->shape_angle.y)},
+        {"is_wolf", isWolf},
     };
     add_link_matrices(state);
 
@@ -874,6 +1201,41 @@ void send_pose() {
         {"sequence", ++sSession.poseSequence},
         {"state", state},
     });
+}
+
+// Safety net independent of exactly how/when a chest/item bit got applied
+// (live single-bit message, late-join snapshot, or replayed from
+// sPendingStageMessages): periodically re-checks every already-collected
+// memory-tier chest/item bit in the CURRENT stage against whatever's
+// actually spawned right now, and repairs any mismatch. This does not
+// depend on catching the exact moment a bit arrives, so it should mask any
+// ordering/timing bug in the targeted repair calls elsewhere -- if a
+// collected pickup is still visible, it will self-correct within one sweep
+// interval of the player being in that room, even if we can't identify why
+// the targeted repair didn't fire.
+void repair_current_stage_collectibles() {
+    stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+    if (stagInfo == nullptr) {
+        return;
+    }
+
+    const int stage = dStage_stagInfo_GetSaveTbl(stagInfo);
+    reapply_observed_memory_items_for_stage(stage);
+
+    for (int i = 0; i < 64; ++i) {
+        if (dComIfGs_isStageTbox(stage, i)) {
+            duskRepairTboxVisual(i);
+        }
+    }
+
+    for (int i = 0; i < dSv_info_c::DAN_ITEM; ++i) {
+        if (dComIfGs_isStageMemoryItem(stage, i)) {
+            const int globalBit = i + dSv_info_c::MEMORY_ITEM;
+            if (!duskRepairObjLifeVisual(globalBit)) {
+                duskRepairObjSwordVisual(globalBit);
+            }
+        }
+    }
 }
 
 void update_connected() {
@@ -885,6 +1247,35 @@ void update_connected() {
 
     if (sSession.state != ConnectionState::Connected) {
         return;
+    }
+
+    if (dComIfGp_getStageStagInfo() != nullptr) {
+        if (sSession.snapshotPending) {
+            // The network handshake can complete within milliseconds, well
+            // before the game has finished booting to a loaded stage (still
+            // on the boot logo/title). Every per-stage save accessor used by
+            // send_save_snapshot() dereferences dComIfGp_getStageStagInfo()
+            // without a null check, so wait for a real stage before sending.
+            send_save_snapshot();
+            sSession.snapshotPending = false;
+        }
+
+        if (!sPendingStageMessages.empty()) {
+            // Same problem on the receive side: a peer's save_snapshot (or
+            // even a live tbox_bit/etc.) can arrive before we have a stage
+            // loaded ourselves. handle_message() queued those; replay them
+            // now that dComIfGp_getStageStagInfo() is safe to use.
+            std::vector<json> pending = std::move(sPendingStageMessages);
+            sPendingStageMessages.clear();
+            for (const json& queued : pending) {
+                handle_message(queued);
+            }
+        }
+
+        if (++sSession.repairSweepTicks >= 60) {
+            sSession.repairSweepTicks = 0;
+            repair_current_stage_collectibles();
+        }
     }
 
     send_pose();
@@ -1000,8 +1391,10 @@ void update() {
         return;
     }
 
-    if (sSession.peerPose.valid) {
-        ++sSession.peerPose.ageTicks;
+    for (auto& entry : sSession.peerPoses) {
+        if (entry.second.valid) {
+            ++entry.second.ageTicks;
+        }
     }
 
     if (sSession.state == ConnectionState::Disconnected) {
@@ -1030,7 +1423,7 @@ void shutdown() {
     }
 
     disconnect("shutdown");
-    destroy_remote_link_dummy();
+    destroy_all_remote_link_dummies();
 #if _WIN32
     if (sEnabled) {
         WSACleanup();
@@ -1046,11 +1439,24 @@ bool is_enabled() {
 }
 
 bool has_recent_peer_pose(uint32_t maxAgeTicks) {
-    return sSession.peerPose.valid && sSession.peerPose.ageTicks <= maxAgeTicks;
+    for (const auto& entry : sSession.peerPoses) {
+        if (entry.second.valid && entry.second.ageTicks <= maxAgeTicks) {
+            return true;
+        }
+    }
+    return false;
 }
 
 PeerPoseSnapshot get_latest_peer_pose() {
-    return sSession.peerPose;
+    // No current callers (kept for API compatibility / future debug
+    // overlays) -- with more than one peer, "latest" is ambiguous; this
+    // just returns an arbitrary one. Use sSession.peerPoses directly (via
+    // draw_debug_peer_marker()'s loop pattern) for anything that needs to
+    // see every peer.
+    if (sSession.peerPoses.empty()) {
+        return PeerPoseSnapshot{};
+    }
+    return sSession.peerPoses.begin()->second;
 }
 
 void draw_debug_peer_marker() {
@@ -1060,17 +1466,28 @@ void draw_debug_peer_marker() {
         return;
     }
 
-    const PeerPoseSnapshot pose = sSession.peerPose;
-    if (pose.stage != dComIfGp_getStartStageName()) {
-        return;
-    }
-
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
-    if (player == nullptr || pose.room != static_cast<int>(fopAcM_GetRoomNo(player))) {
+    if (player == nullptr) {
         return;
     }
 
-    draw_remote_link_dummy(pose);
+    const int localRoom = static_cast<int>(fopAcM_GetRoomNo(player));
+    const char* localStage = dComIfGp_getStartStageName();
+
+    // Only one entry exists in practice today (direct mode is 1:1), but
+    // this iterates the full map so multi-peer rendering later is just a
+    // matter of more peers showing up here -- no further changes needed
+    // to this loop.
+    for (const auto& entry : sSession.peerPoses) {
+        const PeerPoseSnapshot& pose = entry.second;
+        if (!pose.valid || pose.ageTicks > 30) {
+            continue;
+        }
+        if (pose.stage != localStage || pose.room != localRoom) {
+            continue;
+        }
+        draw_remote_link_dummy(entry.first, pose);
+    }
 }
 
 void notify_local_event_bit_set(uint16_t flag) {
@@ -1121,6 +1538,68 @@ void notify_local_dungeon_item_set(int kind) {
         {"kind", kind},
     });
     DuskLog.info("Multiplayer sent local dungeon item bit stage={} kind={}", stageNo, kind);
+}
+
+void notify_local_item_get(int itemId) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    if (itemId != dItemNo_KAKERA_HEART_e && itemId != dItemNo_UTAWA_HEART_e) {
+        return;
+    }
+
+    send_json({
+        {"type", "item_get"},
+        {"item_id", itemId},
+    });
+    DuskLog.info("Multiplayer sent local item get item_id={}", itemId);
+}
+
+void notify_local_memory_switch_set(int flag) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+    if (stagInfo == nullptr) {
+        return;
+    }
+
+    const int stageNo = dStage_stagInfo_GetSaveTbl(stagInfo);
+    send_json({
+        {"type", "switch_bit"},
+        {"stage", stageNo},
+        {"flag", flag},
+    });
+    DuskLog.info("Multiplayer sent local switch bit stage={} flag={}", stageNo, flag);
+}
+
+void notify_local_memory_item_set(int flag) {
+    if (!sEnabled || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+    if (stagInfo == nullptr) {
+        return;
+    }
+
+    const int stageNo = dStage_stagInfo_GetSaveTbl(stagInfo);
+    remember_memory_item_bit(stageNo, flag);
+
+    if (!sSession.welcomed) {
+        DuskLog.info("Multiplayer remembered local item bit stage={} flag={} before peer welcome",
+                     stageNo, flag);
+        return;
+    }
+
+    send_json({
+        {"type", "item_bit"},
+        {"stage", stageNo},
+        {"flag", flag},
+    });
+    DuskLog.info("Multiplayer sent local item bit stage={} flag={}", stageNo, flag);
 }
 
 }  // namespace dusk::multiplayer

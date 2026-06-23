@@ -28,7 +28,9 @@ Protocol:
 - one message per line
 - clients send `hello` first
 - relay replies with `welcome`
-- relay broadcasts `peer_joined`, `peer_left`, `pose`, and `reliable`
+- relay broadcasts `peer_joined`, `peer_left`, `pose`, `reliable`, and the
+  current durable-state messages (`event_bit`, `tbox_bit`, `switch_bit`,
+  `item_bit`, `dungeon_item_bit`, `save_snapshot`)
 
 Relay clients only receive opaque `client_id` values. Direct invite-code mode is
 different: the code hides connection details from the game UI, while the joiner

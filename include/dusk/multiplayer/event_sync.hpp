@@ -19,4 +19,20 @@ void notify_local_tbox_set(int flag);
 // 6=OOCCOO_NOTE (warp), 7=STAGE_BOSS_ENEMY_2 (mid-boss).
 void notify_local_dungeon_item_set(int kind);
 
+// Item acquisition lane for durable inventory/progression effects that are
+// not represented by actor/chest flags alone. Keep this narrowly filtered in
+// the implementation; TP's item table also includes consumables.
+void notify_local_item_get(int itemId);
+
+// Memory-tier switch bits only (dSv_memBit_c, per-stage, persistent). The
+// caller (d_com_inf_game.h) already filtered out dungeon-tier and zone-tier
+// switch IDs, which are deliberately ephemeral/room-resetting by design and
+// not synced.
+void notify_local_memory_switch_set(int flag);
+
+// Memory-tier "Item" bits only (dSv_memBit_c, per-stage, persistent). `flag`
+// is the already-offset local index (global ID minus MEMORY_ITEM), matching
+// dSv_memBit_c::onItem's own indexing.
+void notify_local_memory_item_set(int flag);
+
 }  // namespace dusk::multiplayer

@@ -1126,6 +1126,10 @@ void dComIfGs_setWarpItemData(char const* stage, cXyz pos, s16 angle, s8 roomNo,
 BOOL dComIfGs_isStageSwitch(int i_stageNo, int i_no);
 BOOL dComIfGs_isStageTbox(int i_stageNo, int i_no);
 void dComIfGs_onStageTbox(int i_stageNo, int i_no);
+// i_no here is the already-offset local dSv_memBit_c::mItem index (global
+// "Item" bit number minus dSv_info_c::MEMORY_ITEM), not the global ID.
+void dComIfGs_onStageMemoryItem(int i_stageNo, int i_no);
+BOOL dComIfGs_isStageMemoryItem(int i_stageNo, int i_no);
 void dComIfGs_onStageSwitch(int i_stageNo, int i_no);
 void dComIfGs_offStageSwitch(int i_stageNo, int i_no);
 BOOL dComIfGs_isStageSwitch(int i_stageNo, int i_no);
@@ -2413,6 +2417,11 @@ inline int dComIfGs_createZone(int roomNo) {
 
 inline void dComIfGs_onSwitch(int i_no, int i_roomNo) {
     g_dComIfG_gameInfo.info.onSwitch(i_no, i_roomNo);
+#if TARGET_PC
+    if (i_no >= 0 && i_no < dSv_info_c::MEMORY_SWITCH) {
+        dusk::multiplayer::notify_local_memory_switch_set(i_no);
+    }
+#endif
 }
 
 inline void dComIfGs_offSwitch(int i_no, int i_roomNo) {
@@ -2429,6 +2438,13 @@ inline void dComIfGs_revSwitch(int i_no, int i_roomNo) {
 
 inline void dComIfGs_onItem(int i_bitNo, int i_roomNo) {
     g_dComIfG_gameInfo.info.onItem(i_bitNo, i_roomNo);
+#if TARGET_PC
+    if (i_bitNo >= dSv_info_c::MEMORY_ITEM &&
+        i_bitNo < dSv_info_c::MEMORY_ITEM + dSv_info_c::DAN_ITEM)
+    {
+        dusk::multiplayer::notify_local_memory_item_set(i_bitNo - dSv_info_c::MEMORY_ITEM);
+    }
+#endif
 }
 
 inline bool dComIfGs_isItem(int i_bitNo, int i_roomNo) {
