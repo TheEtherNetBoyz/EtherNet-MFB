@@ -1449,6 +1449,12 @@ set(DUSK_FILES
         src/dusk/layout.cpp
         src/dusk/latency_trace.cpp
         src/dusk/logging.cpp
+        include/dusk/multiplayer/invite_code.hpp
+        src/dusk/multiplayer/invite_code.cpp
+        include/dusk/multiplayer/multiplayer.hpp
+        src/dusk/multiplayer/multiplayer.cpp
+        include/dusk/multiplayer/remote_link_dummy.hpp
+        src/dusk/multiplayer/remote_link_dummy.cpp
         src/dusk/settings.cpp
         src/dusk/speedrun.cpp
         src/dusk/string.cpp

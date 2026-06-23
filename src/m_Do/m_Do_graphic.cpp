@@ -56,6 +56,7 @@
 #include "dusk/gx_helper.h"
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/logging.h"
+#include "dusk/multiplayer/multiplayer.hpp"
 #include "dusk/settings.h"
 #endif
 

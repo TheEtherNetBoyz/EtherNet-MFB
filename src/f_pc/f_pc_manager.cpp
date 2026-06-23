@@ -22,6 +22,9 @@
 #include "m_Do/m_Do_controller_pad.h"
 #include "dusk/latency.h"
 #include "dusk/latency_trace.h"
+#if TARGET_PC
+#include "dusk/multiplayer/multiplayer.hpp"
+#endif
 
 #include "tracy/Tracy.hpp"
 
@@ -105,6 +108,9 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
                 i_postExecuteFn();
             }
 
+#if TARGET_PC
+            dusk::multiplayer::draw_debug_peer_marker();
+#endif
             dComIfGp_drawSimpleModel();
 
 #ifdef TARGET_PC

@@ -60,6 +60,7 @@
 #include "dusk/game_clock.h"
 #include "dusk/gyro.h"
 #include "dusk/mouse.h"
+#include "dusk/multiplayer/multiplayer.hpp"
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/imgui/ImGuiEngine.hpp"
 #include "dusk/iso_validate.hpp"
@@ -251,6 +252,7 @@ void main01(void) {
     OSReport("Entering Main Loop (main01)...\n");
 
     dusk::game_clock::ensure_initialized();
+    dusk::multiplayer::initialize();
 
     do {
         // 1. Update Window Events
@@ -333,6 +335,7 @@ void main01(void) {
                     dusk::latency_trace::mark("fapGm_Execute_before");
                     fapGm_Execute();
                     dusk::latency_trace::mark("fapGm_Execute_after");
+                    dusk::multiplayer::update();
                     mDoAud_Execute();
                     dusk::game_clock::commit_sim_tick();
                 }
@@ -384,6 +387,7 @@ void main01(void) {
             dusk::latency_trace::mark("fapGm_Execute_before");
             fapGm_Execute();
             dusk::latency_trace::mark("fapGm_Execute_after");
+            dusk::multiplayer::update();
 
             mDoAud_Execute();
         }
@@ -405,6 +409,7 @@ void main01(void) {
     } while (dusk::IsRunning);
 
     exit:;
+    dusk::multiplayer::shutdown();
     dusk::ui::shutdown();
 }
 

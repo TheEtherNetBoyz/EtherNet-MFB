@@ -19,6 +19,7 @@
 #include "dusk/frame_interpolation.h"
 #include "dusk/livesplit.h"
 #include "dusk/logging.h"
+#include "dusk/multiplayer/multiplayer.hpp"
 #include "f_op/f_op_camera_mng.h"
 #include "f_op/f_op_draw_tag.h"
 #include "f_op/f_op_overlap_mng.h"
@@ -806,6 +807,7 @@ void fapGm_After() {
                 dusk::frame_interp::request_presentation_skip();
             } else if (drawReady) {
                 fpcDw_Handler((fpcDw_HandlerFuncFunc)fpcM_DrawIterater, (fpcDw_HandlerFunc)fpcM_Draw);
+                dusk::multiplayer::draw_debug_peer_marker();
                 dComIfGp_drawSimpleModel();
                 cAPIGph_Painter();
             }
