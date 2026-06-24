@@ -728,13 +728,19 @@ int daHorse_c::create() {
     // forever case is visible as a flood of identical lines instead of one
     // silent gap.
     if (phase_state != cPhs_COMPLEATE_e) {
-        // pid/pos identify WHICH placement this is, since the log text is
-        // otherwise identical whether one actor is stuck for many frames or
-        // several different actors are each only stuck briefly.
+        // pid/pos identify WHICH placement this is. phase_id distinguishes
+        // "never even started" (id=0, phase_1 in d_com_inf_game.cpp hasn't
+        // succeeded yet) from "permanently waiting on the async archive
+        // read to finish" (id=1, phase_2's dComIfG_syncObjectRes() keeps
+        // reporting still-pending forever) -- phase_state alone can't tell
+        // these apart, since phase_2 returning cPhs_INIT_e while NOT
+        // advancing id looks identical to a fresh id=0 request at this
+        // logging point.
         DuskLog.warn(
-            "daHorse_c::create resLoad phase={} arcName={} pid={} pos=({}, {}, {}) "
+            "daHorse_c::create resLoad phase={} phase_id={} arcName={} pid={} pos=({}, {}, {}) "
             "(0=INIT 1=LOADING 4=COMPLEATE 5=ERROR)",
-            phase_state, l_arcName, fopAcM_GetID(this), home.pos.x, home.pos.y, home.pos.z);
+            phase_state, m_phase.id, l_arcName, fopAcM_GetID(this), home.pos.x, home.pos.y,
+            home.pos.z);
     }
 #endif
     if (phase_state == cPhs_COMPLEATE_e) {
