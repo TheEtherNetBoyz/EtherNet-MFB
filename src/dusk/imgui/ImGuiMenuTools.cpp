@@ -541,6 +541,7 @@ namespace dusk {
             ImGui::MenuItem("Practice Saves", nullptr, &m_showPracticeSaves);
             ImGui::MenuItem("Input Macro", nullptr, &m_showInputMacro);
             ImGui::MenuItem("State Share", hotkeys::SHOW_STATE_SHARE, &m_showStateShare);
+            ImGui::MenuItem("Online", nullptr, &m_showOnline);
             MenuCheckbox("Move Link", getSettings().game.moveLink);
 
             ImGui::EndDisabled();
@@ -631,6 +632,10 @@ namespace dusk {
 
             ImGui::EndMenu();
         }
+    }
+
+    void ImGuiMenuTools::ShowOnline() {
+        m_online.draw(m_showOnline);
     }
 
     void ImGuiMenuTools::ShowDebugOverlay() {

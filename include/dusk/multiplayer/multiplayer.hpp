@@ -54,10 +54,47 @@ struct PeerPoseSnapshot {
     RemoteLinkMatrixSnapshot linkMatrices;
 };
 
+struct DirectHostOptions {
+    std::string name = "Host";
+    std::string room = "dev";
+    std::string bindHost = "0.0.0.0";
+    std::string publicHost = "127.0.0.1";
+    int port = 34197;
+    bool debugMarker = true;
+    bool dummyModel = true;
+};
+
+struct DirectJoinOptions {
+    std::string name = "Joiner";
+    std::string inviteCode;
+    bool debugMarker = true;
+    bool dummyModel = true;
+};
+
+struct SessionStatus {
+    bool enabled = false;
+    std::string mode = "disabled";
+    std::string state = "disabled";
+    std::string name;
+    std::string room;
+    std::string host;
+    std::string bindHost;
+    std::string publicHost;
+    std::string inviteCode;
+    int port = 0;
+    bool debugMarker = false;
+    bool dummyModel = false;
+    bool hasRecentPeerPose = false;
+};
+
 void initialize();
 void update();
 void shutdown();
 bool is_enabled();
+bool host_direct(const DirectHostOptions& options, std::string* errorOut = nullptr);
+bool join_direct(const DirectJoinOptions& options, std::string* errorOut = nullptr);
+void disconnect_session();
+SessionStatus get_session_status();
 bool has_recent_peer_pose(uint32_t maxAgeTicks);
 PeerPoseSnapshot get_latest_peer_pose();
 void draw_debug_peer_marker();

@@ -1487,6 +1487,8 @@ set(DUSK_FILES
         src/dusk/imgui/ImGuiPracticeSaves.cpp
         src/dusk/imgui/ImGuiStateShare.hpp
         src/dusk/imgui/ImGuiStateShare.cpp
+        src/dusk/imgui/ImGuiOnline.hpp
+        src/dusk/imgui/ImGuiOnline.cpp
         src/dusk/ui/achievements.cpp
         src/dusk/ui/achievements.hpp
         src/dusk/ui/bool_button.cpp

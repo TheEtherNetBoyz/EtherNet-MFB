@@ -502,6 +502,7 @@ namespace dusk {
             m_menuTools.ShowPracticeSaves();
             m_menuTools.ShowInputMacro();
             m_menuTools.ShowStateShare();
+            m_menuTools.ShowOnline();
             m_menuTools.ShowActorSpawner();
         }
 

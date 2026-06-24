@@ -9,6 +9,7 @@
 #include "ImGuiSaveEditor.hpp"
 #include "ImGuiPracticeSaves.hpp"
 #include "ImGuiStateShare.hpp"
+#include "ImGuiOnline.hpp"
 
 namespace dusk {
     class ImGuiMenuTools {
@@ -30,6 +31,7 @@ namespace dusk {
         void ShowSaveEditor();
         void ShowPracticeSaves();
         void ShowStateShare();
+        void ShowOnline();
         void ShowInputMacro();
         void ShowInputViewer();
         void ShowActorSpawner();
@@ -62,6 +64,9 @@ namespace dusk {
 
         bool m_showStateShare = false;
         ImGuiStateShare m_stateShare;
+
+        bool m_showOnline = false;
+        ImGuiOnline m_online;
 
         bool m_showInputMacro = false;
 

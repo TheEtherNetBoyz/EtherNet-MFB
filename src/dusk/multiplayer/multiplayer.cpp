@@ -173,6 +173,7 @@ bool sDummyModelEnabled = false;
 // Off by default; opt in with DUSK_MP_LAYER_SYNC=1 once that audit is done,
 // or for testing with both peers in the same room at the same time.
 bool sLayerRiskSyncEnabled = false;
+bool sNetworkStackStarted = false;
 
 // Set while applying any remote save-state bit (event bit, chest bit, ...),
 // so the dComIfGs_* setter call that applies it doesn't loop back through
@@ -632,6 +633,25 @@ void disconnect(const char* reason) {
     }
 
     reset_connection_state();
+}
+
+bool ensure_network_stack(std::string* errorOut = nullptr) {
+#if _WIN32
+    if (sNetworkStackStarted) {
+        return true;
+    }
+
+    WSADATA data{};
+    if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
+        if (errorOut != nullptr) {
+            *errorOut = "WSAStartup failed";
+        }
+        DuskLog.warn("Multiplayer module disabled: WSAStartup failed");
+        return false;
+    }
+    sNetworkStackStarted = true;
+#endif
+    return true;
 }
 
 bool send_json(const json& message) {
@@ -1873,6 +1893,15 @@ const char* mode_name(NetworkMode mode) {
     }
 }
 
+const char* state_name(ConnectionState state) {
+    switch (state) {
+    case ConnectionState::Listening: return "listening";
+    case ConnectionState::Connecting: return "connecting";
+    case ConnectionState::Connected: return "connected";
+    default: return "disconnected";
+    }
+}
+
 }  // namespace
 
 void initialize() {
@@ -1892,14 +1921,10 @@ void initialize() {
         return;
     }
 
-#if _WIN32
-    WSADATA data{};
-    if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
+    if (!ensure_network_stack()) {
         sEnabled = false;
-        DuskLog.warn("Multiplayer module disabled: WSAStartup failed");
         return;
     }
-#endif
 
     DuskLog.info("Multiplayer module enabled mode={} room={}", mode_name(sSession.mode),
                  sSession.room);
@@ -1964,8 +1989,9 @@ void shutdown() {
     disconnect("shutdown");
     destroy_all_remote_link_dummies();
 #if _WIN32
-    if (sEnabled) {
+    if (sNetworkStackStarted) {
         WSACleanup();
+        sNetworkStackStarted = false;
     }
 #endif
     sInitialized = false;
@@ -1975,6 +2001,136 @@ void shutdown() {
 
 bool is_enabled() {
     return sEnabled;
+}
+
+bool host_direct(const DirectHostOptions& options, std::string* errorOut) {
+    if (options.port <= 0 || options.port > 65535) {
+        if (errorOut != nullptr) {
+            *errorOut = "Port must be between 1 and 65535";
+        }
+        return false;
+    }
+    if (options.bindHost.empty() || options.publicHost.empty()) {
+        if (errorOut != nullptr) {
+            *errorOut = "Bind and public host cannot be empty";
+        }
+        return false;
+    }
+
+    sInitialized = true;
+    if (!ensure_network_stack(errorOut)) {
+        sEnabled = false;
+        return false;
+    }
+
+    reset_connection_state();
+    sEnabled = true;
+    sSession.mode = NetworkMode::DirectHost;
+    sSession.name = options.name.empty() ? "Host" : options.name;
+    sSession.room = options.room.empty() ? "dev" : options.room;
+    sSession.bindHost = options.bindHost;
+    sSession.publicHost = options.publicHost;
+    sSession.port = options.port;
+    sSession.debugMarker = options.debugMarker;
+    sDummyModelEnabled = options.dummyModel;
+    sSession.sessionId = make_session_token(9);
+    sSession.sessionKey = make_session_token(16);
+
+    InviteCodePayload payload;
+    payload.transport = "direct";
+    payload.host = sSession.publicHost;
+    payload.port = sSession.port;
+    payload.room = sSession.room;
+    payload.sessionId = sSession.sessionId;
+    payload.sessionKey = sSession.sessionKey;
+    sSession.inviteCode = create_invite_code(payload);
+
+    DuskLog.info("Multiplayer module enabled mode={} room={}", mode_name(sSession.mode),
+                 sSession.room);
+    begin_host();
+    if (sSession.state != ConnectionState::Listening) {
+        sEnabled = false;
+        sSession.mode = NetworkMode::Disabled;
+        if (errorOut != nullptr) {
+            *errorOut = "Failed to start listening";
+        }
+        return false;
+    }
+    return true;
+}
+
+bool join_direct(const DirectJoinOptions& options, std::string* errorOut) {
+    if (options.inviteCode.empty()) {
+        if (errorOut != nullptr) {
+            *errorOut = "Invite code cannot be empty";
+        }
+        return false;
+    }
+
+    std::string decodeError;
+    const std::optional<InviteCodePayload> payload = decode_invite_code(options.inviteCode, &decodeError);
+    if (!payload) {
+        if (errorOut != nullptr) {
+            *errorOut = "Invalid invite code: " + decodeError;
+        }
+        return false;
+    }
+
+    sInitialized = true;
+    if (!ensure_network_stack(errorOut)) {
+        sEnabled = false;
+        return false;
+    }
+
+    reset_connection_state();
+    sEnabled = true;
+    sSession.mode = NetworkMode::DirectJoin;
+    sSession.name = options.name.empty() ? "Joiner" : options.name;
+    sSession.host = payload->host;
+    sSession.port = payload->port;
+    sSession.room = payload->room;
+    sSession.sessionId = payload->sessionId;
+    sSession.sessionKey = payload->sessionKey;
+    sSession.inviteCode = options.inviteCode;
+    sSession.debugMarker = options.debugMarker;
+    sDummyModelEnabled = options.dummyModel;
+
+    DuskLog.info("Multiplayer module enabled mode={} room={}", mode_name(sSession.mode),
+                 sSession.room);
+    begin_connect();
+    if (sSession.state == ConnectionState::Disconnected) {
+        sEnabled = false;
+        sSession.mode = NetworkMode::Disabled;
+        if (errorOut != nullptr) {
+            *errorOut = "Failed to begin connection";
+        }
+        return false;
+    }
+    return true;
+}
+
+void disconnect_session() {
+    disconnect("user requested");
+    sEnabled = false;
+    sSession.mode = NetworkMode::Disabled;
+}
+
+SessionStatus get_session_status() {
+    SessionStatus status;
+    status.enabled = sEnabled;
+    status.mode = sEnabled ? mode_name(sSession.mode) : "disabled";
+    status.state = sEnabled ? state_name(sSession.state) : "disabled";
+    status.name = sSession.name;
+    status.room = sSession.room;
+    status.host = sSession.host;
+    status.bindHost = sSession.bindHost;
+    status.publicHost = sSession.publicHost;
+    status.inviteCode = sSession.inviteCode;
+    status.port = sSession.port;
+    status.debugMarker = sSession.debugMarker;
+    status.dummyModel = sDummyModelEnabled;
+    status.hasRecentPeerPose = has_recent_peer_pose(90);
+    return status;
 }
 
 bool has_recent_peer_pose(uint32_t maxAgeTicks) {
