@@ -96,6 +96,23 @@ public:
 
 STATIC_ASSERT(sizeof(daObjDrop_c) == 0xa7c);
 
+// Searches the active actor list for a currently-spawned Light Drop tear
+// with the given save bit number (daObjDrop_c::getSave(), the same
+// per-instance slot space dComIfGs_isTbox/onTbox already syncs via
+// tbox_bit). If found, deletes it so it doesn't linger visibly a moment
+// longer than necessary -- the same visual-only purpose as
+// duskRepairTboxVisual for chests. Deliberately does NOT touch the
+// light-drop count or the 15-tear threshold event bit: those are kept in
+// sync independently via the light_drop_num message
+// (notify_local_light_drop_num_set/dComIfGs_setLightDropNum), which
+// broadcasts the absolute current count read from save state rather than
+// deriving it from a live actor -- mirroring OoT Anchor's
+// UPDATE_DUNGEON_ITEMS packet. Calling both would double-count. No-op if no
+// instance is currently spawned (e.g. a different room/stage than the
+// caller, or already collected/deleted).
+// Returns true if a live actor was found and deleted, false otherwise.
+bool duskRepairLightDropVisual(int i_saveBitNo);
+
 class daObjDrop_HIO_c {
 public:
     u8 pad[0x17];

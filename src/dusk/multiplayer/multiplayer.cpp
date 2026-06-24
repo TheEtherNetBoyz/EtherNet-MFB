@@ -1,7 +1,9 @@
 #include "dusk/multiplayer/multiplayer.hpp"
 
 #include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_obj_drop.h"
 #include "d/actor/d_a_obj_life_container.h"
+#include "d/actor/d_a_obj_smallkey.h"
 #include "d/actor/d_a_obj_sword.h"
 #include "d/actor/d_a_tbox.h"
 #include "d/d_com_inf_game.h"
@@ -88,6 +90,40 @@ enum class ConnectionState {
     Connected,
 };
 
+enum RemoteSwordVariant {
+    REMOTE_SWORD_UNKNOWN = 0,
+    REMOTE_SWORD_ORDON = 1,
+    REMOTE_SWORD_WOOD = 2,
+    REMOTE_SWORD_MASTER = 3,
+};
+
+// Mirrors daAlink_c::changeLink()'s clothing-tier branches
+// (d_a_alink_wolf.inc:312-369) -- each tier uses a different body archive
+// (joint/weight-envelope counts differ even when the skeleton's joint count
+// matches), so the remote dummy needs to know which one to clone instead of
+// always assuming Hero's Clothes ("Kmdl"). Sumo wrestling outfit
+// (FLG2_UNK_200000) is deliberately not covered -- a rare minigame-only
+// state.
+enum RemoteClothesVariant {
+    REMOTE_CLOTHES_HERO = 0,    // "Kmdl" -- changeLink()'s default/else branch
+    REMOTE_CLOTHES_CASUAL = 1,  // "Bmdl" -- checkCasualWearFlg()
+    REMOTE_CLOTHES_ZORA = 2,    // "Zmdl" -- checkZoraWearFlg()
+    REMOTE_CLOTHES_ARMOR = 3,   // "Mmdl" -- checkMagicArmorWearFlg()
+};
+
+int detect_clothes_variant() {
+    if (daPy_py_c::checkCasualWearFlg()) {
+        return REMOTE_CLOTHES_CASUAL;
+    }
+    if (daPy_py_c::checkZoraWearFlg()) {
+        return REMOTE_CLOTHES_ZORA;
+    }
+    if (daPy_py_c::checkMagicArmorWearFlg()) {
+        return REMOTE_CLOTHES_ARMOR;
+    }
+    return REMOTE_CLOTHES_HERO;
+}
+
 struct Session {
     NetworkMode mode = NetworkMode::Disabled;
     ConnectionState state = ConnectionState::Disconnected;
@@ -126,6 +162,18 @@ Session sSession;
 
 bool sDummyModelEnabled = false;
 
+// DarkClearLV/TransformLV (Twilight-clear / wolf-transform region levels)
+// double as room-layer/actor-set selectors in at least Ordon Village and
+// related rooms (confirmed by direct read of d_com_inf_game.cpp:454-607,
+// interleaved with already-synced event bits in the same if/else chain).
+// This is the same hazard class OoT Anchor explicitly excludes from its
+// blanket switch-sync (Water Temple water level, Forest Temple elevator,
+// Ganon's Tower collapse timer) -- the full extent of which TP stage/room
+// functions also select layers from these values was never enumerated.
+// Off by default; opt in with DUSK_MP_LAYER_SYNC=1 once that audit is done,
+// or for testing with both peers in the same room at the same time.
+bool sLayerRiskSyncEnabled = false;
+
 // Set while applying any remote save-state bit (event bit, chest bit, ...),
 // so the dComIfGs_* setter call that applies it doesn't loop back through
 // its notify_local_*_set() hook and re-send it to the peer that just sent it
@@ -151,9 +199,123 @@ std::map<int, std::set<int>> sObservedMemoryItems;
 // (and silently losing catch-up data).
 std::vector<json> sPendingStageMessages;
 
+int detect_sword_variant(const daAlink_c* link) {
+    if (link == nullptr || link->mSwordModel == nullptr) {
+        // Without this guard, a momentarily-null mSwordModel (equip/sheath
+        // transition, or before the wood-sword resource is loaded/after it's
+        // freed) would compare equal to an ALSO-null mWoodSwordModel below
+        // (nullptr == nullptr), misreporting REMOTE_SWORD_WOOD even though no
+        // sword is meaningfully equipped -- sending the wood/training-sword
+        // model (al_SWB.bmd) to the dummy instead of leaving it unrecognized.
+        return REMOTE_SWORD_UNKNOWN;
+    }
+    if (link->mSwordModel == link->mWoodSwordModel) {
+        return REMOTE_SWORD_WOOD;
+    }
+    if (link->mSwordModel == link->mpSwMModel) {
+        return REMOTE_SWORD_MASTER;
+    }
+    if (link->mSwordModel == link->mpSwAModel) {
+        return REMOTE_SWORD_ORDON;
+    }
+    return REMOTE_SWORD_UNKNOWN;
+}
+
 bool is_stage_dependent_message_type(const std::string& type) {
+    // key_num touches the same per-stage savedata accessor as tbox_bit/
+    // switch_bit/item_bit, so it carries the same risk if applied before a
+    // stage is loaded. light_drop_num does not -- it writes directly to
+    // player-level save data with no per-stage lookup, same exemption as
+    // event_bit.
     return type == "save_snapshot" || type == "tbox_bit" || type == "switch_bit" ||
-           type == "item_bit" || type == "dungeon_item_bit";
+           type == "item_bit" || type == "dungeon_item_bit" || type == "key_num";
+}
+
+// Key items / progression unlocks that are safe to apply on a remote peer by
+// simply re-running execItemGet(). Deliberately excludes: rupees/bombs/
+// arrows/magic-refill counts and bug catches (volatile consumables, matches
+// TP's existing merge rules); small keys, key pieces, and boss keys (small
+// keys are explicitly flagged as needing dungeon-scoped conflict handling in
+// state-audit.md; boss keys are already synced via dungeon_item_bit kind=2,
+// re-applying here would double the hook); mirror pieces (handled by the
+// dedicated dSv_player_collect_c::mMirror sync instead, not this item-table
+// path, to avoid two mechanisms fighting over the same progression).
+bool is_synced_key_item(int itemId) {
+    switch (itemId) {
+    // Heart pieces / heart containers (already-shipped baseline).
+    case dItemNo_KAKERA_HEART_e:
+    case dItemNo_UTAWA_HEART_e:
+    // Tools.
+    case dItemNo_HOOKSHOT_e:
+    case dItemNo_W_HOOKSHOT_e:
+    case dItemNo_BOOMERANG_e:
+    case dItemNo_SPINNER_e:
+    case dItemNo_COPY_ROD_e:
+    case dItemNo_COPY_ROD_2_e:
+    case dItemNo_BOW_e:
+    case dItemNo_IRONBALL_e:
+    case dItemNo_HAWK_EYE_e:
+    case dItemNo_HVY_BOOTS_e:
+    case dItemNo_ARMOR_e:
+    case dItemNo_PACHINKO_e:
+    case dItemNo_KANTERA_e:
+    case dItemNo_KANTERA2_e:
+    case dItemNo_FISHING_ROD_1_e:
+    case dItemNo_LURE_ROD_e:
+    case dItemNo_WOOD_STICK_e:
+    // Sword / shield / clothing tiers.
+    case dItemNo_SWORD_e:
+    case dItemNo_MASTER_SWORD_e:
+    case dItemNo_LIGHT_SWORD_e:
+    case dItemNo_WOOD_SHIELD_e:
+    case dItemNo_SHIELD_e:
+    case dItemNo_HYLIA_SHIELD_e:
+    case dItemNo_WEAR_CASUAL_e:
+    case dItemNo_WEAR_KOKIRI_e:
+    case dItemNo_WEAR_ZORA_e:
+    // Bottle slot unlocks.
+    case dItemNo_EMPTY_BOTTLE_e:
+    case dItemNo_RED_BOTTLE_e:
+    case dItemNo_GREEN_BOTTLE_e:
+    case dItemNo_BLUE_BOTTLE_e:
+    case dItemNo_MILK_BOTTLE_e:
+    case dItemNo_HALF_MILK_BOTTLE_e:
+    case dItemNo_OIL_BOTTLE_e:
+    case dItemNo_WATER_BOTTLE_e:
+    case dItemNo_OIL_BOTTLE_2_e:
+    case dItemNo_RED_BOTTLE_2_e:
+    case dItemNo_OIL_BOTTLE3_e:
+    // Capacity upgrades (quiver/bomb bag/wallet/magic).
+    case dItemNo_WALLET_LV1_e:
+    case dItemNo_WALLET_LV2_e:
+    case dItemNo_WALLET_LV3_e:
+    case dItemNo_BOMB_BAG_LV1_e:
+    case dItemNo_BOMB_BAG_LV2_e:
+    case dItemNo_MAGIC_LV1_e:
+    case dItemNo_ARROW_LV1_e:
+    case dItemNo_ARROW_LV2_e:
+    case dItemNo_ARROW_LV3_e:
+    // Quest / letter items.
+    case dItemNo_TKS_LETTER_e:
+    case dItemNo_RAFRELS_MEMO_e:
+    case dItemNo_ASHS_SCRIBBLING_e:
+    case dItemNo_LETTER_e:
+    case dItemNo_BILL_e:
+    case dItemNo_WOOD_STATUE_e:
+    case dItemNo_IRIAS_PENDANT_e:
+    case dItemNo_HORSE_FLUTE_e:
+    case dItemNo_ZORAS_JEWEL_e:
+    case dItemNo_ANCIENT_DOCUMENT_e:
+    case dItemNo_ANCIENT_DOCUMENT2_e:
+    case dItemNo_AIR_LETTER_e:
+    case dItemNo_LINKS_SAVINGS_e:
+    case dItemNo_TOMATO_PUREE_e:
+    case dItemNo_TASTE_e:
+    case dItemNo_SURFBOARD_e:
+        return true;
+    default:
+        return false;
+    }
 }
 
 void remember_memory_item_bit(int stageNo, int flag) {
@@ -317,6 +479,13 @@ bool is_peer_dummy_gameplay_ready() {
     }
 
     const daAlink_c* link = static_cast<const daAlink_c*>(player);
+    if (link->mClothesChangeWaitTimer != 0) {
+        // Confirmed crash (JKRArchive::findNameResource) while the local
+        // player was mid clothes/armor change (Magic Armor toggle) -- see
+        // the matching guard in remote_link_dummy.cpp's draw_remote_link_
+        // dummy() for the full explanation.
+        return false;
+    }
     if (link->mProcID == daAlink_c::PROC_METAMORPHOSE || link->mProcID == daAlink_c::PROC_METAMORPHOSE_ONLY) {
         // Wolf<->human transformation frees and reassigns mpLinkModel/
         // mSwordModel/mShieldModel partway through this state -- see
@@ -528,6 +697,7 @@ void send_save_snapshot() {
     json switchStages = json::array();
     json itemStages = json::array();
     json dungeonStages = json::array();
+    json keyCounts = json::array();
 
     for (int s = 0; s < dSv_save_c::STAGE_MAX; ++s) {
         json chests = json::array();
@@ -587,6 +757,56 @@ void send_save_snapshot() {
         if (!kinds.empty()) {
             dungeonStages.push_back({{"stage", s}, {"kinds", kinds}});
         }
+
+        const u8 keyNum = dComIfGs_getKeyNum(s);
+        if (keyNum > 0) {
+            keyCounts.push_back({{"stage", s}, {"count", keyNum}});
+        }
+    }
+
+    json lightDropCounts = json::array();
+    for (int area = 0; area < 4; ++area) {
+        const u8 num = dComIfGs_getLightDropNum(static_cast<u8>(area));
+        if (num > 0) {
+            lightDropCounts.push_back({{"area", area}, {"count", num}});
+        }
+    }
+
+    json keyItems = json::array();
+    for (int i = 0; i < 256; ++i) {
+        if (is_synced_key_item(i) && dComIfGs_isItemFirstBit(static_cast<u8>(i))) {
+            keyItems.push_back(i);
+        }
+    }
+
+    json crystals = json::array();
+    json mirrors = json::array();
+    json darkClearLevels = json::array();
+    json transformLevels = json::array();
+    json regionBits = json::array();
+    for (int i = 0; i < 8; ++i) {
+        if (dComIfGs_isCollectCrystal(static_cast<u8>(i))) crystals.push_back(i);
+        if (dComIfGs_isCollectMirror(static_cast<u8>(i))) mirrors.push_back(i);
+        // Gated by DUSK_MP_LAYER_SYNC -- see sLayerRiskSyncEnabled.
+        if (sLayerRiskSyncEnabled && dComIfGs_isDarkClearLV(i)) darkClearLevels.push_back(i);
+        if (sLayerRiskSyncEnabled && dComIfGs_isTransformLV(i)) transformLevels.push_back(i);
+        if (dComIfGs_isRegionBit(i)) regionBits.push_back(i);
+    }
+
+    json collectClothing = json::array();
+    json collectSword = json::array();
+    json collectShield = json::array();
+    for (int i = 0; i < 8; ++i) {
+        if (dComIfGs_isCollectClothing(static_cast<u8>(i))) collectClothing.push_back(i);
+        if (dComIfGs_isCollectSword(static_cast<u8>(i))) collectSword.push_back(i);
+        if (dComIfGs_isCollectShield(static_cast<u8>(i))) collectShield.push_back(i);
+    }
+
+    json letterGetFlags = json::array();
+    for (int i = 0; i < 64; ++i) {
+        if (dComIfGs_isLetterGetFlag(i)) {
+            letterGetFlags.push_back(i);
+        }
     }
 
     send_json({
@@ -596,12 +816,25 @@ void send_save_snapshot() {
         {"switches", switchStages},
         {"items", itemStages},
         {"dungeon_items", dungeonStages},
+        {"key_counts", keyCounts},
+        {"light_drop_counts", lightDropCounts},
+        {"key_items", keyItems},
+        {"crystals", crystals},
+        {"mirrors", mirrors},
+        {"dark_clear_levels", darkClearLevels},
+        {"transform_levels", transformLevels},
+        {"region_bits", regionBits},
+        {"collect_clothing", collectClothing},
+        {"collect_sword", collectSword},
+        {"collect_shield", collectShield},
+        {"letter_get_flags", letterGetFlags},
         {"max_life", dComIfGs_getMaxLife()},
+        {"bottle_slots", dComIfGs_getBottleSlotCount()},
     });
     DuskLog.info(
-        "Multiplayer sent save snapshot event_flags={} chest_stages={} switch_stages={} item_stages={} dungeon_stages={}",
+        "Multiplayer sent save snapshot event_flags={} chest_stages={} switch_stages={} item_stages={} dungeon_stages={} key_items={}",
         eventFlags.size(), chestStages.size(), switchStages.size(), itemStages.size(),
-        dungeonStages.size());
+        dungeonStages.size(), keyItems.size());
 }
 
 void send_welcome() {
@@ -666,6 +899,10 @@ json model_matrices_to_json(J3DModel* model) {
     };
 }
 
+json model_matrices_to_json_if(bool enabled, J3DModel* model) {
+    return enabled ? model_matrices_to_json(model) : json(nullptr);
+}
+
 void add_link_matrices(json& state) {
     if (!sDummyModelEnabled) {
         return;
@@ -685,6 +922,14 @@ void add_link_matrices(json& state) {
     }
 
     daAlink_c* link = static_cast<daAlink_c*>(playerActor);
+    if (link->mClothesChangeWaitTimer != 0) {
+        // Confirmed crash (JKRArchive::findNameResource) on the receiving
+        // side while the local player there was mid clothes/armor change.
+        // Skipping capture here too means we don't send a pose mid-change
+        // in the first place, same defense-in-depth as the metamorphosis
+        // guard below.
+        return;
+    }
     if (link->mProcID == daAlink_c::PROC_METAMORPHOSE || link->mProcID == daAlink_c::PROC_METAMORPHOSE_ONLY) {
         // Wolf<->human transformation. daAlink_c::changeWolf()/changeLink()
         // free the old model/arc resources (mpArcHeap->freeAll()) and then
@@ -699,14 +944,25 @@ void add_link_matrices(json& state) {
         return;
     }
 
+    const bool isWolf = static_cast<bool>(link->checkWolf());
+    const bool includeHumanParts = !isWolf;
     state["link_matrices"] = {
         {"body", model_matrices_to_json(link->mpLinkModel)},
-        {"hat", model_matrices_to_json(link->mpLinkHatModel)},
-        {"face", model_matrices_to_json(link->mpLinkFaceModel)},
-        {"hand", model_matrices_to_json(link->mpLinkHandModel)},
-        {"sword", model_matrices_to_json(link->mSwordModel)},
-        {"shield", model_matrices_to_json(link->mShieldModel)},
+        {"hat", model_matrices_to_json_if(includeHumanParts, link->mpLinkHatModel)},
+        {"face", model_matrices_to_json_if(includeHumanParts, link->mpLinkFaceModel)},
+        {"hand", model_matrices_to_json_if(includeHumanParts, link->mpLinkHandModel)},
+        {"sword", model_matrices_to_json_if(includeHumanParts, link->mSwordModel)},
+        {"sheath", model_matrices_to_json_if(includeHumanParts, link->mSheathModel)},
+        {"shield", model_matrices_to_json_if(includeHumanParts, link->mShieldModel)},
     };
+
+    state["equip_item"] = static_cast<int>(link->mEquipItem);
+    state["sword_variant"] = detect_sword_variant(link);
+    state["clothes_variant"] = detect_clothes_variant();
+    state["sword_draw"] = !isWolf && static_cast<bool>(link->checkSwordDraw());
+    state["shield_draw"] = !isWolf && static_cast<bool>(link->checkShieldDraw());
+    state["sword_out"] = !isWolf && link->mEquipItem == 0x103;
+    state["form"] = isWolf ? "wolf" : "human";
 }
 
 bool read_matrix_array(const json& source, std::array<float, 12>& out) {
@@ -785,10 +1041,13 @@ RemoteLinkMatrixSnapshot parse_link_matrices(const json& state) {
     snapshot.face = parse_model_matrices(it->value("face", json::object()));
     snapshot.hand = parse_model_matrices(it->value("hand", json::object()));
     snapshot.sword = parse_model_matrices(it->value("sword", json::object()));
+    snapshot.sheath = parse_model_matrices(it->value("sheath", json::object()));
     snapshot.shield = parse_model_matrices(it->value("shield", json::object()));
     snapshot.valid = snapshot.body.valid;
     return snapshot;
 }
+
+void apply_remote_tbox_bit(int stage, int flag);
 
 void handle_message(const json& message) {
     const std::string type = message.value("type", "");
@@ -823,7 +1082,7 @@ void handle_message(const json& message) {
         for (const json& entry : message.value("chests", json::array())) {
             const int stage = entry.value("stage", -1);
             for (const json& flag : entry.value("flags", json::array())) {
-                dComIfGs_onStageTbox(stage, flag.get<int>());
+                apply_remote_tbox_bit(stage, flag.get<int>());
                 DuskLog.info("Multiplayer snapshot chest bit stage={} flag={}", stage,
                              flag.get<int>());
             }
@@ -878,11 +1137,85 @@ void handle_message(const json& message) {
                 }
             }
         }
+        for (const json& entry : message.value("key_counts", json::array())) {
+            const int stage = entry.value("stage", -1);
+            const int count = entry.value("count", -1);
+            if (stage >= 0 && stage < dSv_save_c::STAGE_MAX && count >= 0 && count <= 99) {
+                dComIfGs_setKeyNum(stage, static_cast<u8>(count));
+            }
+        }
+        for (const json& entry : message.value("light_drop_counts", json::array())) {
+            const int area = entry.value("area", -1);
+            const int count = entry.value("count", -1);
+            if (area >= 0 && area <= 0xFF && count >= 0 && count <= 0xFF) {
+                dComIfGs_setLightDropNum(static_cast<u8>(area), static_cast<u8>(count));
+                if (area == 2 && count == 15) {
+                    /* dSv_event_flag_c::F_0005 - Misc. - Gathered 14 Tears of Light in area 4 */
+                    dComIfGs_onEventBit(dSv_event_flag_c::saveBitLabels[9]);
+                }
+            }
+        }
+        for (const json& idEntry : message.value("key_items", json::array())) {
+            const int itemId = idEntry.get<int>();
+            if (is_synced_key_item(itemId) && !dComIfGs_isItemFirstBit(static_cast<u8>(itemId))) {
+                execItemGet(static_cast<u8>(itemId));
+                DuskLog.info("Multiplayer snapshot key item item_id={}", itemId);
+            }
+        }
+        for (const json& entry : message.value("crystals", json::array())) {
+            dComIfGs_onCollectCrystal(static_cast<u8>(entry.get<int>()));
+        }
+        for (const json& entry : message.value("mirrors", json::array())) {
+            dComIfGs_onCollectMirror(static_cast<u8>(entry.get<int>()));
+        }
+        // Gated by DUSK_MP_LAYER_SYNC -- see sLayerRiskSyncEnabled. A peer
+        // with the flag off must not apply these even if a flag-on sender
+        // included them in its snapshot.
+        if (sLayerRiskSyncEnabled) {
+            for (const json& entry : message.value("dark_clear_levels", json::array())) {
+                const int no = entry.get<int>();
+                if (no >= 0 && no < 8) {
+                    dComIfGs_onDarkClearLV(no);
+                }
+            }
+            for (const json& entry : message.value("transform_levels", json::array())) {
+                const int no = entry.get<int>();
+                if (no >= 0 && no < 8) {
+                    dComIfGs_onTransformLV(no);
+                }
+            }
+        }
+        for (const json& entry : message.value("region_bits", json::array())) {
+            dComIfGs_onRegionBit(entry.get<int>());
+        }
+        for (const json& entry : message.value("collect_clothing", json::array())) {
+            g_dComIfG_gameInfo.info.getPlayer().getCollect().setCollect(
+                COLLECT_CLOTHING, static_cast<u8>(entry.get<int>()));
+        }
+        for (const json& entry : message.value("collect_sword", json::array())) {
+            g_dComIfG_gameInfo.info.getPlayer().getCollect().setCollect(
+                COLLECT_SWORD, static_cast<u8>(entry.get<int>()));
+        }
+        for (const json& entry : message.value("collect_shield", json::array())) {
+            g_dComIfG_gameInfo.info.getPlayer().getCollect().setCollect(
+                COLLECT_SHIELD, static_cast<u8>(entry.get<int>()));
+        }
+        for (const json& entry : message.value("letter_get_flags", json::array())) {
+            dComIfGs_onLetterGetFlag(entry.get<int>());
+        }
         sApplyingRemoteSaveBit = false;
         const int remoteMaxLife = message.value("max_life", 0);
         if (remoteMaxLife > dComIfGs_getMaxLife() && remoteMaxLife <= 100) {
             dComIfGs_setMaxLife(static_cast<u8>(remoteMaxLife));
             DuskLog.info("Multiplayer snapshot max life set to {}", remoteMaxLife);
+        }
+        const int remoteBottleSlots = message.value("bottle_slots", 0);
+        const int localBottleSlots = dComIfGs_getBottleSlotCount();
+        if (remoteBottleSlots > localBottleSlots && remoteBottleSlots <= 4) {
+            for (int i = localBottleSlots; i < remoteBottleSlots; ++i) {
+                dComIfGs_setEmptyBottle();
+            }
+            DuskLog.info("Multiplayer snapshot bottle slots set to {}", remoteBottleSlots);
         }
         DuskLog.info("Multiplayer applied save snapshot from peer");
     } else if (type == "pose") {
@@ -909,12 +1242,19 @@ void handle_message(const json& message) {
         pose.z = state.value("z", 0.0f);
         pose.angleY = state.value("angle_y", 0);
         pose.isWolf = state.value("is_wolf", false);
+        pose.equipItem = static_cast<uint16_t>(state.value("equip_item", 0xFFFF));
+        pose.swordVariant = state.value("sword_variant", REMOTE_SWORD_UNKNOWN);
+        pose.clothesVariant = state.value("clothes_variant", REMOTE_CLOTHES_HERO);
+        pose.swordDraw = state.value("sword_draw", false);
+        pose.shieldDraw = state.value("shield_draw", false);
+        pose.swordOut = state.value("sword_out", false);
         pose.linkMatrices = parse_link_matrices(state);
         sSession.peerPoses[peerId] = pose;
 
         if ((sSession.peerPoseLogTicks++ % 150) == 0) {
-            DuskLog.info("Multiplayer peer pose peer={} stage={} room={} pos=({}, {}, {})", peerId,
-                         pose.stage, pose.room, pose.x, pose.y, pose.z);
+            DuskLog.info("Multiplayer peer pose peer={} form={} stage={} room={} pos=({}, {}, {})",
+                         peerId, pose.isWolf ? "wolf" : "human", pose.stage, pose.room, pose.x,
+                         pose.y, pose.z);
         }
     } else if (type == "event_bit") {
         const uint16_t flag = message.value("flag", 0U);
@@ -927,14 +1267,9 @@ void handle_message(const json& message) {
         const int flag = message.value("flag", -1);
         if (stage >= 0 && flag >= 0) {
             sApplyingRemoteSaveBit = true;
-            dComIfGs_onStageTbox(stage, flag);
+            apply_remote_tbox_bit(stage, flag);
             sApplyingRemoteSaveBit = false;
             DuskLog.info("Multiplayer applied remote chest bit stage={} flag={}", stage, flag);
-
-            stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
-            if (stagInfo != nullptr && stage == dStage_stagInfo_GetSaveTbl(stagInfo)) {
-                duskRepairTboxVisual(flag);
-            }
         }
     } else if (type == "dungeon_item_bit") {
         const int stage = message.value("stage", -1);
@@ -954,6 +1289,61 @@ void handle_message(const json& message) {
             }
             sApplyingRemoteSaveBit = false;
             DuskLog.info("Multiplayer applied remote dungeon item bit stage={} kind={}", stage, kind);
+        }
+    } else if (type == "key_num") {
+        // OoT Anchor model: absolute overwrite (last-write-wins) of the
+        // whole-dungeon key count, not a per-key bit/identity. No actor
+        // lookup needed -- works even if the player is nowhere near the
+        // dungeon this count belongs to.
+        const int stage = message.value("stage", -1);
+        const int count = message.value("count", -1);
+        if (stage >= 0 && stage < dSv_save_c::STAGE_MAX && count >= 0 && count <= 99) {
+            sApplyingRemoteSaveBit = true;
+            dComIfGs_setKeyNum(stage, static_cast<u8>(count));
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote key num stage={} count={}", stage, count);
+        }
+    } else if (type == "light_drop_num") {
+        // Same absolute-overwrite model as key_num. Light Drop counts are
+        // stored per dark-twilight area, not per-stage, so no stage lookup
+        // is needed at all.
+        const int area = message.value("area", -1);
+        const int count = message.value("count", -1);
+        if (area >= 0 && area <= 0xFF && count >= 0 && count <= 0xFF) {
+            sApplyingRemoteSaveBit = true;
+            dComIfGs_setLightDropNum(static_cast<u8>(area), static_cast<u8>(count));
+            if (area == 2 && count == 15) {
+                /* dSv_event_flag_c::F_0005 - Misc. - Gathered 14 Tears of Light in area 4 */
+                dComIfGs_onEventBit(dSv_event_flag_c::saveBitLabels[9]);
+            }
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote light drop num area={} count={}", area, count);
+        }
+    } else if (type == "max_life_update") {
+        // Monotonic max-merge, not last-write-wins: max life should never
+        // decrease from a remote update, so only raise it, never lower it.
+        const int value = message.value("value", -1);
+        if (value >= 0 && value <= 100 && value > dComIfGs_getMaxLife()) {
+            sApplyingRemoteSaveBit = true;
+            dComIfGs_setMaxLife(static_cast<u8>(value));
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote max life value={}", value);
+        }
+    } else if (type == "bottle_slots") {
+        // Same monotonic max-merge as max_life. Fills additional empty
+        // slots locally (always as a generic empty bottle) to match the
+        // remote count -- never touches existing slot contents.
+        const int count = message.value("count", -1);
+        if (count >= 0 && count <= 4) {
+            const int localCount = dComIfGs_getBottleSlotCount();
+            if (count > localCount) {
+                sApplyingRemoteSaveBit = true;
+                for (int i = localCount; i < count; ++i) {
+                    dComIfGs_setEmptyBottle();
+                }
+                sApplyingRemoteSaveBit = false;
+                DuskLog.info("Multiplayer applied remote bottle slots count={}", count);
+            }
         }
     } else if (type == "switch_bit") {
         const int stage = message.value("stage", -1);
@@ -986,11 +1376,102 @@ void handle_message(const json& message) {
         }
     } else if (type == "item_get") {
         const int itemId = message.value("item_id", -1);
-        if (itemId == dItemNo_KAKERA_HEART_e || itemId == dItemNo_UTAWA_HEART_e) {
+        // Guard against double-apply. Verified directly in d_item.cpp: every
+        // capacity item_func (WALLET_LV1-3, BOMB_BAG_LV1, MAGIC_LV1,
+        // ARROW_LV1-3) calls an absolute setter (setWalletSize/setArrowMax/
+        // etc.), not a cumulative addX(), so replaying one does not double
+        // the capacity value. The guard matters for a different reason: many
+        // item_funcs (BOW, HOOKSHOT, BOOMERANG, etc.) also call
+        // dComIfGs_setItem(SLOT_n, itemId) to occupy a C-button slot.
+        // Without this guard, replaying an already-owned item's item_get
+        // (e.g. from a resent snapshot) would silently reassign that slot
+        // back to the original item, reverting any slot swap the local
+        // player made since first picking it up.
+        if (is_synced_key_item(itemId) && !dComIfGs_isItemFirstBit(static_cast<u8>(itemId))) {
             sApplyingRemoteSaveBit = true;
             execItemGet(static_cast<u8>(itemId));
             sApplyingRemoteSaveBit = false;
             DuskLog.info("Multiplayer applied remote item get item_id={}", itemId);
+        }
+    } else if (type == "collect_crystal") {
+        const int item = message.value("item", -1);
+        if (item >= 0 && item < 8) {
+            sApplyingRemoteSaveBit = true;
+            dComIfGs_onCollectCrystal(static_cast<u8>(item));
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote crystal collect item={}", item);
+        }
+    } else if (type == "collect_mirror") {
+        const int item = message.value("item", -1);
+        if (item >= 0 && item < 8) {
+            sApplyingRemoteSaveBit = true;
+            dComIfGs_onCollectMirror(static_cast<u8>(item));
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote mirror collect item={}", item);
+        }
+    } else if (type == "dark_clear_lv") {
+        const int no = message.value("no", -1);
+        // Gated by DUSK_MP_LAYER_SYNC: this value also selects room layers
+        // in some stages (see sLayerRiskSyncEnabled's declaration comment).
+        // A peer with the flag off must not apply it even if a flag-on peer
+        // sends it.
+        if (sLayerRiskSyncEnabled && no >= 0 && no < 8) {
+            sApplyingRemoteSaveBit = true;
+            dComIfGs_onDarkClearLV(no);
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote dark clear lv no={}", no);
+        }
+    } else if (type == "transform_lv") {
+        const int no = message.value("no", -1);
+        if (sLayerRiskSyncEnabled && no >= 0 && no < 8) {
+            sApplyingRemoteSaveBit = true;
+            dComIfGs_onTransformLV(no);
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote transform lv no={}", no);
+        }
+    } else if (type == "region_bit") {
+        const int region = message.value("region", -1);
+        if (region >= 0 && region < 8) {
+            sApplyingRemoteSaveBit = true;
+            dComIfGs_onRegionBit(region);
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote region bit region={}", region);
+        }
+    } else if (type == "collect") {
+        const int collectType = message.value("collect_type", -1);
+        const int item = message.value("item", -1);
+        if (collectType >= 0 && collectType <= B_BUTTON_ITEM && item >= 0 && item < 8) {
+            sApplyingRemoteSaveBit = true;
+            g_dComIfG_gameInfo.info.getPlayer().getCollect().setCollect(collectType,
+                                                                         static_cast<u8>(item));
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote collect type={} item={}", collectType, item);
+        }
+    } else if (type == "visited_room") {
+        const int stage = message.value("stage", -1);
+        const int room = message.value("room", -1);
+        // Bounds must match dSv_save_c::STAGE2_MAX and dSv_memory2_c's 64-bit
+        // mVisitedRoom field exactly: getSave2()/onVisitedRoom() only guard
+        // with JUT_ASSERT, which compiles to a no-op in release builds, so an
+        // out-of-range value from the wire would otherwise index mSave2[]/
+        // mVisitedRoom[] out of bounds unchecked.
+        if (stage >= 0 && stage < dSv_save_c::STAGE2_MAX && room >= 0 && room < 64) {
+            sApplyingRemoteSaveBit = true;
+            dComIfGs_onSaveVisitedRoom(stage, room);
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote visited room stage={} room={}", stage, room);
+        }
+    } else if (type == "letter_get") {
+        const int no = message.value("no", -1);
+        // Bounds must match dSv_letter_info_c::LETTER_INFO_BIT exactly --
+        // onLetterGetFlag only guards with JUT_ASSERT (no-op in release), so
+        // an out-of-range value from the wire would otherwise index
+        // mLetterGetFlags[] out of bounds unchecked.
+        if (no >= 0 && no < LETTER_INFO_BIT) {
+            sApplyingRemoteSaveBit = true;
+            dComIfGs_onLetterGetFlag(no);
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote letter get no={}", no);
         }
     } else if (type == "pong") {
         DuskLog.debug("Multiplayer pong");
@@ -1203,6 +1684,43 @@ void send_pose() {
     });
 }
 
+// Applies a remote chest-bit-space transition (stage/flag, the same slot
+// space chests/keys/Light Drop tears all share via dComIfGs_isTbox/onTbox)
+// and, if this is a genuine unset->set transition for the CURRENT stage,
+// also repairs whichever local state is stale: a visible chest's open
+// visual, or -- for small keys/Light Drop tears -- the derived counter
+// (mKeyNum / light-drop count) that a remote pickup's bit alone does not
+// update. The bit itself was already correctly OR-merging before this
+// function existed; only the derived side effects were missing. Checking
+// "was it already set" first makes this naturally safe to call repeatedly
+// (live message, snapshot catch-up, or a resend of either) without double-
+// counting: a bit that's already true locally (including one this same
+// client set moments ago via its own pickup) is treated as a no-op.
+void apply_remote_tbox_bit(int stage, int flag) {
+    const bool wasUnset = !dComIfGs_isStageTbox(stage, flag);
+    dComIfGs_onStageTbox(stage, flag);
+
+    if (!wasUnset) {
+        return;
+    }
+
+    stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+    if (stagInfo == nullptr || stage != dStage_stagInfo_GetSaveTbl(stagInfo)) {
+        return;
+    }
+
+    duskRepairTboxVisual(flag);
+    // Visual-only: deletes a currently-spawned key/tear so it doesn't sit
+    // there a moment longer than necessary. Does NOT touch mKeyNum/
+    // LightDropNum -- that's handled independently by the key_num/
+    // light_drop_num absolute-broadcast messages (see notify_local_key_num_
+    // set/notify_local_light_drop_num_set), which work without needing a
+    // live actor at all. Calling both would double-count.
+    if (!duskRepairKeyVisual(flag)) {
+        duskRepairLightDropVisual(flag);
+    }
+}
+
 // Safety net independent of exactly how/when a chest/item bit got applied
 // (live single-bit message, late-join snapshot, or replayed from
 // sPendingStageMessages): periodically re-checks every already-collected
@@ -1301,6 +1819,7 @@ bool configure_session() {
     sSession.port = env_int("DUSK_MP_PORT", 34197);
     sSession.debugMarker = env_enabled("DUSK_MP_DEBUG_MARKER");
     sDummyModelEnabled = env_enabled("DUSK_MP_DUMMY_MODEL");
+    sLayerRiskSyncEnabled = env_enabled("DUSK_MP_LAYER_SYNC");
     sSession.sessionId = make_session_token(9);
     sSession.sessionKey = make_session_token(16);
 
@@ -1389,6 +1908,26 @@ void initialize() {
 void update() {
     if (!sInitialized || !sEnabled) {
         return;
+    }
+
+    if (sDummyModelEnabled && is_peer_dummy_gameplay_ready()) {
+        // Must happen here (the simulation tick), not from the draw phase --
+        // see the comment on preload_remote_link_dummy_resources()'s
+        // declaration for why issuing these archive loads from the draw
+        // phase was a suspected cause of a real crash during a peer's
+        // transform.
+        //
+        // is_peer_dummy_gameplay_ready() is required here too: without it,
+        // this fired from the very first update() tick after enabling the
+        // module -- including at the boot logo, before any stage/player
+        // exists -- and crashed inside the engine's own resource/texture
+        // loader (dRes_info_c::loadResource -> addWarpMaterial ->
+        // J3DTexture::addResTIMG, null deref) because the object-archive
+        // loading path isn't safe to use that early. The old lazy-load (from
+        // inside draw_remote_link_dummy(), only reachable once this same
+        // readiness check already passed) never hit this because it could
+        // only ever run once real gameplay had started.
+        preload_remote_link_dummy_resources();
     }
 
     for (auto& entry : sSession.peerPoses) {
@@ -1545,7 +2084,7 @@ void notify_local_item_get(int itemId) {
         return;
     }
 
-    if (itemId != dItemNo_KAKERA_HEART_e && itemId != dItemNo_UTAWA_HEART_e) {
+    if (!is_synced_key_item(itemId)) {
         return;
     }
 
@@ -1600,6 +2139,174 @@ void notify_local_memory_item_set(int flag) {
         {"flag", flag},
     });
     DuskLog.info("Multiplayer sent local item bit stage={} flag={}", stageNo, flag);
+}
+
+void notify_local_collect_crystal_set(int item) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    send_json({
+        {"type", "collect_crystal"},
+        {"item", item},
+    });
+    DuskLog.info("Multiplayer sent local crystal collect item={}", item);
+}
+
+void notify_local_collect_mirror_set(int item) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    send_json({
+        {"type", "collect_mirror"},
+        {"item", item},
+    });
+    DuskLog.info("Multiplayer sent local mirror collect item={}", item);
+}
+
+void notify_local_dark_clear_lv_set(int no) {
+    if (!sEnabled || !sLayerRiskSyncEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    send_json({
+        {"type", "dark_clear_lv"},
+        {"no", no},
+    });
+    DuskLog.info("Multiplayer sent local dark clear lv no={}", no);
+}
+
+void notify_local_transform_lv_set(int no) {
+    if (!sEnabled || !sLayerRiskSyncEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    send_json({
+        {"type", "transform_lv"},
+        {"no", no},
+    });
+    DuskLog.info("Multiplayer sent local transform lv no={}", no);
+}
+
+void notify_local_region_bit_set(int region) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    send_json({
+        {"type", "region_bit"},
+        {"region", region},
+    });
+    DuskLog.info("Multiplayer sent local region bit region={}", region);
+}
+
+void notify_local_collect_set(int type, int item) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    send_json({
+        {"type", "collect"},
+        {"collect_type", type},
+        {"item", item},
+    });
+    DuskLog.info("Multiplayer sent local collect type={} item={}", type, item);
+}
+
+void notify_local_visited_room_set(int stage, int roomNo) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    send_json({
+        {"type", "visited_room"},
+        {"stage", stage},
+        {"room", roomNo},
+    });
+    DuskLog.info("Multiplayer sent local visited room stage={} room={}", stage, roomNo);
+}
+
+void notify_local_letter_get_set(int no) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    send_json({
+        {"type", "letter_get"},
+        {"no", no},
+    });
+    DuskLog.info("Multiplayer sent local letter get no={}", no);
+}
+
+// OoT Anchor model (verified against oot_pc/soh/soh/Network/Anchor/Packets/
+// UpdateDungeonItems.cpp): broadcast the absolute current count read
+// straight from save state, not a per-instance bit. Works regardless of
+// where the receiving player physically is, unlike a fix that depends on
+// finding a live actor in the world.
+void notify_local_key_num_set(uint8_t keyNum) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+    if (stagInfo == nullptr) {
+        return;
+    }
+
+    const int stageNo = dStage_stagInfo_GetSaveTbl(stagInfo);
+    send_json({
+        {"type", "key_num"},
+        {"stage", stageNo},
+        {"count", keyNum},
+    });
+    DuskLog.info("Multiplayer sent local key num stage={} count={}", stageNo, keyNum);
+}
+
+void notify_local_light_drop_num_set(uint8_t area, uint8_t num) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    send_json({
+        {"type", "light_drop_num"},
+        {"area", area},
+        {"count", num},
+    });
+    DuskLog.info("Multiplayer sent local light drop num area={} count={}", area, num);
+}
+
+// Heart pieces/containers share one item ID each across many pickups, so
+// the item_get lane's first-bit guard only lets the first one of each type
+// replay remotely. Broadcast the absolute value instead, same as key_num/
+// light_drop_num, but merged as monotonic-max on receive since max life
+// should never decrease.
+void notify_local_max_life_set(uint8_t maxLife) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    send_json({
+        {"type", "max_life_update"},
+        {"value", maxLife},
+    });
+    DuskLog.info("Multiplayer sent local max life value={}", maxLife);
+}
+
+// Same shape as max_life: empty-bottle grants share one item ID across up
+// to 4 NPCs/quests, so the item_get lane swallows every one after the
+// first. Broadcasts the slot count only, not contents (see
+// notify_local_bottle_slot_count_set's declaration for why).
+void notify_local_bottle_slot_count_set(uint8_t count) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    send_json({
+        {"type", "bottle_slots"},
+        {"count", count},
+    });
+    DuskLog.info("Multiplayer sent local bottle slot count={}", count);
 }
 
 }  // namespace dusk::multiplayer

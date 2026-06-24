@@ -118,6 +118,34 @@ void daObjDrop_c::dropGet() {
     }
 }
 
+namespace {
+
+void* judgeDropBySaveBit(void* i_actor, void* i_data) {
+    if (fopAcM_GetName(i_actor) != fpcNm_Obj_Drop_e) {
+        return NULL;
+    }
+
+    daObjDrop_c* drop = static_cast<daObjDrop_c*>(i_actor);
+    if (drop->getSave() != *static_cast<int*>(i_data)) {
+        return NULL;
+    }
+
+    return i_actor;
+}
+
+}  // namespace
+
+bool duskRepairLightDropVisual(int i_saveBitNo) {
+    int saveBit = i_saveBitNo;
+    daObjDrop_c* drop = static_cast<daObjDrop_c*>(fopAcIt_Judge(judgeDropBySaveBit, &saveBit));
+    if (drop == NULL) {
+        return false;
+    }
+
+    fopAcM_delete(drop);
+    return true;
+}
+
 static f32 dummy() {
     f32 temp = -4.0f;
     return temp;

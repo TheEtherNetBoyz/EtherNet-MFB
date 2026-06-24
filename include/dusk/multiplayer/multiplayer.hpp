@@ -23,6 +23,7 @@ struct RemoteLinkMatrixSnapshot {
     RemoteModelMatrixSnapshot face;
     RemoteModelMatrixSnapshot hand;
     RemoteModelMatrixSnapshot sword;
+    RemoteModelMatrixSnapshot sheath;
     RemoteModelMatrixSnapshot shield;
 };
 
@@ -44,6 +45,12 @@ struct PeerPoseSnapshot {
     float z = 0.0f;
     int angleY = 0;
     bool isWolf = false;
+    uint16_t equipItem = 0xFFFF;
+    int swordVariant = 0;
+    int clothesVariant = 0;
+    bool swordDraw = false;
+    bool shieldDraw = false;
+    bool swordOut = false;
     RemoteLinkMatrixSnapshot linkMatrices;
 };
 

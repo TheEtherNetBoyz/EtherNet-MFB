@@ -22,6 +22,7 @@
 
 #if TARGET_PC
 #include "dusk/dusk.h"
+#include "dusk/logging.h"
 
 namespace {
 // FRAME INTERP NOTE: Sim tick control point snapshots for interpolation
@@ -694,16 +695,66 @@ int daHorse_c::create() {
            /* General use - When on (while changing scenes) stage name is not shown */
         || dComIfGs_isTmpBit(dSv_event_tmp_flag_c::NO_TELOP)))
     {
+#if TARGET_PC
+        // Diagnostic for the "Epona doesn't spawn for one multiplayer peer"
+        // report: this rejection is permanent (cPhs_ERROR_e, not retried)
+        // for this placement, so if NO_TELOP is the one that's true, a
+        // per-frame timing difference around stage load (e.g. insta-loads
+        // collapsing the normally multi-frame fadeout into one frame) is
+        // the likely cause, not a save-state/progression difference.
+        DuskLog.warn(
+            "daHorse_c::create rejected: ending={} kidnapped_m008={} rescued_m023={} "
+            "stage_sp109={} goron_f0066={} no_telop={}",
+            static_cast<bool>(checkStateFlg0(FLG0_UNK_8000)),
+            static_cast<bool>(dComIfGs_isEventBit(dSv_event_flag_c::M_008)),
+            static_cast<bool>(dComIfGs_isEventBit(dSv_event_flag_c::M_023)),
+            daAlink_c::checkStageName("F_SP109"),
+            static_cast<bool>(dComIfGs_isEventBit(dSv_event_flag_c::F_0066)),
+            static_cast<bool>(dComIfGs_isTmpBit(dSv_event_tmp_flag_c::NO_TELOP)));
+#endif
         return cPhs_ERROR_e;
     }
 
     int phase_state = dComIfG_resLoad(&m_phase, l_arcName);
+#if TARGET_PC
+    // Diagnostic for "Epona missing entirely, no collision, random which of
+    // two concurrently-running client processes it happens to" -- confirmed
+    // NOT specific to insta-loads or host/joiner role, so the lead is
+    // resource-load contention between the two processes reading the same
+    // game files concurrently. cPhs_COMPLEATE_e (4) is the only value that
+    // lets this placement continue past this point; INIT_e(0)/LOADING_e(1)
+    // retry next frame, ERROR_e(5) does not (the actor silently never
+    // becomes anything). Logged every call while not complete so a stuck-
+    // forever case is visible as a flood of identical lines instead of one
+    // silent gap.
+    if (phase_state != cPhs_COMPLEATE_e) {
+        // pid/pos identify WHICH placement this is, since the log text is
+        // otherwise identical whether one actor is stuck for many frames or
+        // several different actors are each only stuck briefly.
+        DuskLog.warn(
+            "daHorse_c::create resLoad phase={} arcName={} pid={} pos=({}, {}, {}) "
+            "(0=INIT 1=LOADING 4=COMPLEATE 5=ERROR)",
+            phase_state, l_arcName, fopAcM_GetID(this), home.pos.x, home.pos.y, home.pos.z);
+    }
+#endif
     if (phase_state == cPhs_COMPLEATE_e) {
         if (daAlink_getAlinkActorClass() == NULL) {
+#if TARGET_PC
+            // Retried every frame (not a permanent rejection), so this is
+            // only a problem if it never stops firing for this placement.
+            DuskLog.warn("daHorse_c::create stalled: daAlink_getAlinkActorClass() is null");
+#endif
             return cPhs_INIT_e;
         }
 
         if (dComIfGp_getHorseActor() != NULL) {
+#if TARGET_PC
+            // Same diagnostic purpose as the rejection log above: this is
+            // also a permanent (non-retried) rejection, triggered if a
+            // horse actor singleton is already registered -- worth knowing
+            // if this fires instead of/alongside the other rejection.
+            DuskLog.warn("daHorse_c::create rejected: horse actor singleton already set");
+#endif
             return cPhs_ERROR_e;
         }
 
@@ -744,11 +795,30 @@ int daHorse_c::create() {
                 current.angle.y = shape_angle.y;
                 fopAcM_SetRoomNo(this, dComIfGs_getHorseRestartRoomNo());
             } else {
+#if TARGET_PC
+                // Created but invisible: this fires whenever the saved
+                // "horse restart position" (per-player position
+                // bookkeeping, not synced over the network -- see the
+                // gameplay-state-sync-audit.md merge rules) doesn't match
+                // this placement's stage/room. On a brand-new save this
+                // should never be reached (the empty-string check above
+                // should already short-circuit it) -- if it fires anyway,
+                // that string/room/pos data isn't actually at its fresh-
+                // save default for this client.
+                DuskLog.warn(
+                    "daHorse_c::create hides actor (FLG0_NO_DRAW_WAIT): "
+                    "restart_stage='{}' restart_room={} current_room={} room_no_param={}",
+                    dComIfGs_getHorseRestartStageName(), dComIfGs_getHorseRestartRoomNo(),
+                    fopAcM_GetRoomNo(this), room_no);
+#endif
                 onStateFlg0(FLG0_NO_DRAW_WAIT);
             }
         }
 
         if (!fopAcM_entrySolidHeap(this, daHorse_createHeap, 0x6E60)) {
+#if TARGET_PC
+            DuskLog.warn("daHorse_c::create rejected: fopAcM_entrySolidHeap failed");
+#endif
             return cPhs_ERROR_e;
         }
 

@@ -1088,6 +1088,7 @@ u8 dComIfGs_getBottleMax();
 u8 dComIfGs_checkGetItem(u8 i_itemNo);
 void dComIfGs_setSelectEquipClothes(u8 i_itemNo);
 void dComIfGs_setKeyNum(int i_stageNo, u8 i_keyNum);
+u8 dComIfGs_getKeyNum(int i_stageNo);
 s32 dComIfGs_isDungeonItemWarp(int i_stageNo);
 void dComIfGs_BossLife_public_Set(s8);
 s8 dComIfGs_sense_type_change_Get();
@@ -1187,6 +1188,7 @@ void dComIfGs_setSelectEquipClothes(u8 i_itemNo);
 void dComIfGs_setSelectEquipSword(u8 i_itemNo);
 void dComIfGs_setSelectEquipShield(u8 i_itemNo);
 void dComIfGs_setKeyNum(int i_stageNo, u8 i_keyNum);
+u8 dComIfGs_getKeyNum(int i_stageNo);
 void dComIfGs_setWarpItemData(char const* stage, cXyz pos, s16 angle, s8 roomNo, u8 param_4,
                               u8 param_5);
 void dComIfGs_setLastWarpMarkItemData(const char* stage, cXyz pos, s16 angle, s8 roomNo, u8, u8);
@@ -1291,6 +1293,9 @@ inline u16 dComIfGs_getMaxLife() {
 
 inline void dComIfGs_setMaxLife(u8 i_maxLife) {
     g_dComIfG_gameInfo.info.getPlayer().getPlayerStatusA().setMaxLife(i_maxLife);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_max_life_set(i_maxLife);
+#endif
 }
 
 inline u16 dComIfGs_getLife() {
@@ -1419,6 +1424,7 @@ inline void dComIfGs_setDate(u16 i_date) {
 
 inline void dComIfGs_onDarkClearLV(int i_no) {
     g_dComIfG_gameInfo.info.getPlayer().getPlayerStatusB().onDarkClearLV(i_no);
+    dusk::multiplayer::notify_local_dark_clear_lv_set(i_no);
 }
 
 inline void dComIfGs_offDarkClearLV(int i_no) {
@@ -1431,6 +1437,7 @@ inline BOOL dComIfGs_isDarkClearLV(int i_no) {
 
 inline void dComIfGs_onTransformLV(int i_no) {
     g_dComIfG_gameInfo.info.getPlayer().getPlayerStatusB().onTransformLV(i_no);
+    dusk::multiplayer::notify_local_transform_lv_set(i_no);
 }
 
 inline void dComIfGs_offTransformLV(int i_no) {
@@ -1504,6 +1511,7 @@ inline BOOL dComIfGs_isRegionBit(int i_region) {
 
 inline void dComIfGs_onRegionBit(int i_region) {
     g_dComIfG_gameInfo.info.getPlayer().getPlayerFieldLastStayInfo().onRegionBit(i_region);
+    dusk::multiplayer::notify_local_region_bit_set(i_region);
 }
 
 inline void dComIfGs_setPlayerFieldLastStayInfo(const char* i_stage, cXyz& i_pos, s16 i_angle,
@@ -1568,12 +1576,32 @@ inline void dComIfGs_setEmptyBottleItemIn(u8 i_itemNo) {
     g_dComIfG_gameInfo.info.getPlayer().getItem().setEmptyBottleItemIn(i_itemNo);
 }
 
+// Number of the 4 bottle slots (SLOT_11-SLOT_14) currently occupied by any
+// bottle item, regardless of what liquid each currently holds. Used to
+// broadcast the slot count, not the contents -- see
+// notify_local_bottle_slot_count_set.
+inline u8 dComIfGs_getBottleSlotCount() {
+    u8 count = 0;
+    for (int i = SLOT_11; i <= SLOT_14; ++i) {
+        if (dComIfGs_getItem(static_cast<u8>(i), true) != dItemNo_NONE_e) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 inline void dComIfGs_setEmptyBottle() {
     g_dComIfG_gameInfo.info.getPlayer().getItem().setEmptyBottle();
+#if TARGET_PC
+    dusk::multiplayer::notify_local_bottle_slot_count_set(dComIfGs_getBottleSlotCount());
+#endif
 }
 
 inline void dComIfGs_setEmptyBottle(u8 i_itemNo) {
     g_dComIfG_gameInfo.info.getPlayer().getItem().setEmptyBottle(i_itemNo);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_bottle_slot_count_set(dComIfGs_getBottleSlotCount());
+#endif
 }
 
 inline void dComIfGs_setEquipBottleItemIn(u8 i_curItem, u8 i_newItem) {
@@ -1727,14 +1755,17 @@ inline BOOL dComIfGs_isCollectClothes(u8 i_clothesNo) {
 
 inline void dComIfGs_setCollectClothes(u8 i_clothesNo) {
     g_dComIfG_gameInfo.info.getPlayer().getCollect().setCollect(COLLECT_CLOTHING, i_clothesNo);
+    dusk::multiplayer::notify_local_collect_set(COLLECT_CLOTHING, i_clothesNo);
 }
 
 inline void dComIfGs_setCollectSword(u8 i_swordNo) {
     g_dComIfG_gameInfo.info.getPlayer().getCollect().setCollect(COLLECT_SWORD, i_swordNo);
+    dusk::multiplayer::notify_local_collect_set(COLLECT_SWORD, i_swordNo);
 }
 
 inline void dComIfGs_setCollectShield(u8 i_shieldNo) {
     g_dComIfG_gameInfo.info.getPlayer().getCollect().setCollect(COLLECT_SHIELD, i_shieldNo);
+    dusk::multiplayer::notify_local_collect_set(COLLECT_SHIELD, i_shieldNo);
 }
 
 inline BOOL dComIfGs_isCollectClothing(u8 i_clothesNo) {
@@ -1764,6 +1795,7 @@ inline void dComIfGs_offCollectShield(u8 i_shieldNo) {
 
 inline void dComIfGs_onCollectCrystal(u8 i_item) {
     g_dComIfG_gameInfo.info.getPlayer().getCollect().onCollectCrystal(i_item);
+    dusk::multiplayer::notify_local_collect_crystal_set(i_item);
 }
 
 inline void dComIfGs_offCollectCrystal(u8 i_item) {
@@ -1776,6 +1808,7 @@ inline bool dComIfGs_isCollectCrystal(u8 i_item) {
 
 inline void dComIfGs_onCollectMirror(u8 i_item) {
     g_dComIfG_gameInfo.info.getPlayer().getCollect().onCollectMirror(i_item);
+    dusk::multiplayer::notify_local_collect_mirror_set(i_item);
 }
 
 inline void dComIfGs_offCollectMirror(u8 i_item) {
@@ -1788,6 +1821,9 @@ inline bool dComIfGs_isCollectMirror(u8 i_item) {
 
 inline void dComIfGs_setLightDropNum(u8 i_level, u8 i_num) {
     g_dComIfG_gameInfo.info.getPlayer().getLightDrop().setLightDropNum(i_level, i_num);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_light_drop_num_set(i_level, i_num);
+#endif
 }
 
 inline u8 dComIfGs_getLightDropNum(u8 i_nowLevel) {
@@ -1808,6 +1844,7 @@ inline BOOL dComIfGs_isLightDropGetFlag(u8 i_nowLevel) {
 
 inline void dComIfGs_onLetterGetFlag(int i_no) {
     g_dComIfG_gameInfo.info.getPlayer().getLetterInfo().onLetterGetFlag(i_no);
+    dusk::multiplayer::notify_local_letter_get_set(i_no);
 }
 
 inline BOOL dComIfGs_isLetterGetFlag(int i_no) {
@@ -2030,6 +2067,9 @@ inline u8 dComIfGs_getKeyNum() {
 
 inline void dComIfGs_setKeyNum(u8 i_keyNum) {
     g_dComIfG_gameInfo.info.getMemory().getBit().setKeyNum(i_keyNum);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_key_num_set(i_keyNum);
+#endif
 }
 
 inline void dComIfGs_onDungeonItemMap() {

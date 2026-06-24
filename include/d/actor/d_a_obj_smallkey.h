@@ -99,5 +99,20 @@ public:
 
 STATIC_ASSERT(sizeof(daKey_c) == 0x988);
 
+// Searches the active actor list for a currently-spawned small key with the
+// given dungeon-local save bit number (daKey_c::getSaveBitNo(), the same
+// per-instance slot space dComIfGs_isTbox/onTbox already syncs via
+// tbox_bit). If found, deletes it so it doesn't linger visibly a moment
+// longer than necessary -- the same visual-only purpose as
+// duskRepairTboxVisual for chests. Deliberately does NOT touch
+// dSv_memBit_c::mKeyNum: that counter is kept in sync independently via the
+// key_num message (notify_local_key_num_set/dComIfGs_setKeyNum), which
+// broadcasts the absolute current count read from save state rather than
+// deriving it from a live actor -- mirroring OoT Anchor's
+// UPDATE_DUNGEON_ITEMS packet. Calling both would double-count. No-op if no
+// instance is currently spawned (e.g. a different room/stage than the
+// caller, or already collected/deleted).
+// Returns true if a live actor was found and deleted, false otherwise.
+bool duskRepairKeyVisual(int i_saveBitNo);
 
 #endif /* D_A_OBJ_SMALLKEY_H */

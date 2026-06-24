@@ -352,6 +352,35 @@ int daKey_c::actionGetDemo() {
     return 1;
 }
 
+namespace {
+
+void* judgeKeyBySaveBit(void* i_actor, void* i_data) {
+    if (fopAcM_GetName(i_actor) != fpcNm_Obj_SmallKey_e) {
+        return NULL;
+    }
+
+    daKey_c* key = static_cast<daKey_c*>(i_actor);
+    if (key->getSaveBitNo() != *static_cast<int*>(i_data)) {
+        return NULL;
+    }
+
+    return i_actor;
+}
+
+}  // namespace
+
+bool duskRepairKeyVisual(int i_saveBitNo) {
+    int saveBit = i_saveBitNo;
+    daKey_c* key = static_cast<daKey_c*>(fopAcIt_Judge(judgeKeyBySaveBit, &saveBit));
+    if (key == NULL) {
+        return false;
+    }
+
+    dTres_c::offStatus(saveBit, 1);
+    fopAcM_delete(key);
+    return true;
+}
+
 int daKey_c::actionInitSwOnWait() {
     cLib_offBit<u32>(attention_info.flags, fopAc_AttnFlag_CARRY_e);
     mCcCyl.OffTgSPrmBit(1);

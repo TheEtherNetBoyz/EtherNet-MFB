@@ -38,6 +38,7 @@ compile_commands.json
 *.exe
 *.zip
 tools/multiplayer_dev/
+docs/multiplayer/
 
 # MacOS
 .DS_Store

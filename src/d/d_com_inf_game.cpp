@@ -2679,6 +2679,16 @@ void dComIfGs_setKeyNum(int i_stageNo, u8 i_keyNum) {
     g_dComIfG_gameInfo.info.getSavedata().getSave(i_stageNo).getBit().setKeyNum(i_keyNum);
 }
 
+u8 dComIfGs_getKeyNum(int i_stageNo) {
+    if (dComIfGp_getStageStagInfo() &&
+        i_stageNo == dStage_stagInfo_GetSaveTbl(dComIfGp_getStageStagInfo()))
+    {
+        return dComIfGs_getKeyNum();
+    }
+
+    return g_dComIfG_gameInfo.info.getSavedata().getSave(i_stageNo).getBit().getKeyNum();
+}
+
 static void dComIfGs_setWarpItemData(int param_0, char const* i_stage, cXyz i_pos, s16 i_angle, s8 i_roomNo,
                                      u8 param_5, u8 param_6) {
     UNUSED(param_0);
@@ -3001,7 +3011,9 @@ void dComIfGs_onVisitedRoom(int i_roomNo) {
         }
 
         JUT_ASSERT(6169, 0 <= dComIfGp_roomControl_getStayNo() && dComIfGp_roomControl_getStayNo() < 64);
-        dComIfGs_onSaveVisitedRoom(dStage_roomControl_c::getFileList2(dComIfGp_roomControl_getStayNo())->field_0x13, i_roomNo);
+        const int stage = dStage_roomControl_c::getFileList2(dComIfGp_roomControl_getStayNo())->field_0x13;
+        dComIfGs_onSaveVisitedRoom(stage, i_roomNo);
+        dusk::multiplayer::notify_local_visited_room_set(stage, i_roomNo);
     }
 }
 
