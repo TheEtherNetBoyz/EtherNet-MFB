@@ -363,6 +363,7 @@ struct UserSettings {
         HotkeyBinding gyroAim;
         HotkeyBinding showInputViewer;
         HotkeyBinding moveLink;
+        HotkeyBinding showOnlinePlayerList;
     } hotkeys;
 
     // Arrays of size 4 for 4 ports

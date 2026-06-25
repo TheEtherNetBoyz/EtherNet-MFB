@@ -139,6 +139,93 @@ void toggle_texture_pack() {
     toggle_config_bool(dusk::getSettings().game.enableTextureReplacements);
     dusk::texture_replacements::set_enabled(dusk::getSettings().game.enableTextureReplacements.getValue());
 }
+
+ImVec4 player_status_color(const dusk::multiplayer::PlayerListEntry& player) {
+    if (player.local || player.recentPose || player.status == "connected") {
+        return ImVec4(0.34f, 0.92f, 0.44f, 1.0f);
+    }
+    if (player.status == "connecting" || player.status == "joined" || player.status == "waiting") {
+        return ImVec4(0.96f, 0.78f, 0.28f, 1.0f);
+    }
+    return ImVec4(0.95f, 0.35f, 0.32f, 1.0f);
+}
+
+void draw_player_status_dot(const ImVec4& color) {
+    const float radius = ImGui::GetTextLineHeight() * 0.28f;
+    const ImVec2 pos = ImGui::GetCursorScreenPos();
+    const ImVec2 center{pos.x + radius, pos.y + ImGui::GetTextLineHeight() * 0.5f};
+    ImGui::GetWindowDrawList()->AddCircleFilled(center, radius, ImGui::GetColorU32(color), 16);
+    ImGui::Dummy(ImVec2(radius * 2.0f, ImGui::GetTextLineHeight()));
+}
+
+void draw_online_player_list_overlay() {
+    const auto status = dusk::multiplayer::get_session_status();
+    if (!status.enabled || !hotkey_down(dusk::getSettings().hotkeys.showOnlinePlayerList)) {
+        return;
+    }
+
+    const auto players = dusk::multiplayer::get_player_list();
+    if (players.empty()) {
+        return;
+    }
+
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImVec2 windowPos{viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
+                           viewport->WorkPos.y + 42.0f};
+    const float width = std::clamp(viewport->WorkSize.x * 0.54f, 420.0f, 760.0f);
+
+    ImGui::SetNextWindowPos(windowPos, ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+    ImGui::SetNextWindowSize(ImVec2(width, 0.0f), ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.72f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 2.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 10.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 5.0f));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.02f, 0.02f, 0.02f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.55f, 0.55f, 0.55f, 0.65f));
+    if (ImGui::Begin("Online Player List", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
+                         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                         ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav))
+    {
+        const std::string title = fmt::format("{} - {} player{}", status.room.empty() ? "Online" : status.room,
+                                             players.size(), players.size() == 1 ? "" : "s");
+        const ImVec2 titleSize = ImGui::CalcTextSize(title.c_str());
+        ImGui::SetCursorPosX((ImGui::GetWindowWidth() - titleSize.x) * 0.5f);
+        ImGui::TextUnformatted(title.c_str());
+        ImGui::Separator();
+
+        if (ImGui::BeginTable("OnlinePlayers", 3,
+                              ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings,
+                              ImVec2(-1.0f, 0.0f)))
+        {
+            ImGui::TableSetupColumn("Player", ImGuiTableColumnFlags_WidthStretch, 0.38f);
+            ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthStretch, 0.22f);
+            ImGui::TableSetupColumn("Area", ImGuiTableColumnFlags_WidthStretch, 0.40f);
+            ImGui::TableHeadersRow();
+            for (const auto& player : players) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                draw_player_status_dot(player_status_color(player));
+                ImGui::SameLine();
+                ImGui::TextUnformatted(player.name.c_str());
+                if (player.local) {
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(you)");
+                }
+
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(player.status.c_str());
+
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(player.area.c_str());
+            }
+            ImGui::EndTable();
+        }
+    }
+    ImGui::End();
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(3);
+}
 }  // namespace
 
 namespace dusk {
@@ -507,6 +594,7 @@ namespace dusk {
             m_menuTools.ShowActorSpawner();
         }
         dusk::multiplayer::draw_notifications_overlay();
+        draw_online_player_list_overlay();
 
     }
 

@@ -18,6 +18,7 @@
 #include "d/d_msg_object.h"
 #include "d/d_s_play.h"
 #include "dusk/logging.h"
+#include "dusk/map_loader_definitions.h"
 #include "dusk/multiplayer/event_sync.hpp"
 #include "dusk/multiplayer/invite_code.hpp"
 #include "dusk/multiplayer/remote_link_dummy.hpp"
@@ -1033,6 +1034,36 @@ std::string display_name_for_peer(const std::string& peerId) {
         return name->second;
     }
     return peerId.empty() ? "Peer" : peerId;
+}
+
+std::string display_area_for_stage(std::string_view stage, int room) {
+    if (stage.empty()) {
+        return "Unknown";
+    }
+
+    const MapEntry* firstStageMatch = nullptr;
+    for (const auto& region : gameRegions) {
+        for (const auto& map : region.maps) {
+            if (map.mapFile == nullptr || stage != map.mapFile) {
+                continue;
+            }
+
+            if (firstStageMatch == nullptr) {
+                firstStageMatch = &map;
+            }
+
+            for (const auto& mapRoom : map.mapRooms) {
+                if (room >= 0 && mapRoom.roomNo == room) {
+                    return map.mapName != nullptr ? map.mapName : std::string(stage);
+                }
+            }
+        }
+    }
+
+    if (firstStageMatch != nullptr && firstStageMatch->mapName != nullptr) {
+        return firstStageMatch->mapName;
+    }
+    return std::string(stage);
 }
 
 bool is_player_color_slot_used(uint8_t slot) {
@@ -3192,6 +3223,86 @@ SessionStatus get_session_status() {
     status.nameLabelsHostControlled = sSession.mode == NetworkMode::DirectJoin;
     status.hasRecentPeerPose = has_recent_peer_pose(90);
     return status;
+}
+
+std::vector<PlayerListEntry> get_player_list() {
+    std::vector<PlayerListEntry> players;
+    if (!sEnabled) {
+        return players;
+    }
+
+    PlayerListEntry local;
+    local.id = "local";
+    local.name = sSession.name.empty() ? "You" : sSession.name;
+    local.area = display_area_for_stage(current_stage_name(), dComIfGp_roomControl_getStayNo());
+    local.local = true;
+    local.recentPose = sSession.state == ConnectionState::Connected ||
+                       sSession.state == ConnectionState::Listening;
+    local.status = sSession.mode == NetworkMode::DirectHost &&
+                       sSession.state == ConnectionState::Listening ?
+                       "hosting" : state_name(sSession.state);
+    players.push_back(std::move(local));
+
+    auto add_or_update_peer = [&](const std::string& peerId, std::string name, std::string status,
+                                  std::string area, uint32_t ageTicks, bool recentPose) {
+        if (peerId.empty()) {
+            return;
+        }
+        auto existing = std::find_if(players.begin(), players.end(), [&](const PlayerListEntry& entry) {
+            return entry.id == peerId;
+        });
+        if (existing == players.end()) {
+            players.push_back(PlayerListEntry{
+                .id = peerId,
+                .name = name.empty() ? display_name_for_peer(peerId) : std::move(name),
+                .status = std::move(status),
+                .area = area.empty() ? "Unknown" : std::move(area),
+                .ageTicks = ageTicks,
+                .local = false,
+                .recentPose = recentPose,
+            });
+            return;
+        }
+
+        if (!name.empty()) {
+            existing->name = std::move(name);
+        }
+        existing->status = std::move(status);
+        if (!area.empty()) {
+            existing->area = std::move(area);
+        }
+        existing->ageTicks = ageTicks;
+        existing->recentPose = recentPose;
+    };
+
+    for (const auto& entry : sPeerNames) {
+        add_or_update_peer(entry.first, entry.second, "joined", "Unknown", 0, false);
+    }
+
+    if (sSession.mode == NetworkMode::DirectHost) {
+        for (const auto& entry : sSession.directPeers) {
+            const DirectPeer& peer = entry.second;
+            add_or_update_peer(peer.id, display_name_for_peer(peer.id),
+                               peer.welcomed ? "connected" : "connecting", "Unknown", 0,
+                               peer.welcomed);
+        }
+    }
+
+    for (const auto& entry : sSession.peerPoses) {
+        const PeerPoseSnapshot& pose = entry.second;
+        if (!pose.valid) {
+            add_or_update_peer(entry.first, display_name_for_peer(entry.first), "waiting", "Unknown",
+                               0, false);
+            continue;
+        }
+
+        const bool recent = pose.ageTicks <= 90;
+        add_or_update_peer(entry.first, display_name_for_peer(entry.first),
+                           recent ? "online" : "stale",
+                           display_area_for_stage(pose.stage, pose.room), pose.ageTicks, recent);
+    }
+
+    return players;
 }
 
 void set_name_labels_enabled(bool enabled) {

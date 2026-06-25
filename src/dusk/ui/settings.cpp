@@ -185,6 +185,7 @@ enum class HotkeyAction {
     GyroAim,
     ShowInputViewer,
     MoveLink,
+    ShowOnlinePlayerList,
 };
 
 struct HotkeyEntry {
@@ -211,6 +212,7 @@ constexpr std::array kHotkeyEntries = {
     HotkeyEntry{HotkeyAction::GyroAim, "Gyro Aim", "Enable or disable gyro aiming for supported actions."},
     HotkeyEntry{HotkeyAction::ShowInputViewer, "Show Input Viewer", "Show or hide the controller input overlay."},
     HotkeyEntry{HotkeyAction::MoveLink, "Move Link", "Allow or block the Move Link activation combo."},
+    HotkeyEntry{HotkeyAction::ShowOnlinePlayerList, "Online Player List", "Hold to show the online player list."},
 };
 
 UserSettings::HotkeyBinding& hotkey_binding(HotkeyAction action) {
@@ -250,6 +252,8 @@ UserSettings::HotkeyBinding& hotkey_binding(HotkeyAction action) {
         return hotkeys.showInputViewer;
     case HotkeyAction::MoveLink:
         return hotkeys.moveLink;
+    case HotkeyAction::ShowOnlinePlayerList:
+        return hotkeys.showOnlinePlayerList;
     }
     return hotkeys.toggleImGuiMenu;
 }

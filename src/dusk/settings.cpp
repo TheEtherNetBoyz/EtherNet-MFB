@@ -277,6 +277,11 @@ UserSettings g_userSettings = {
             ConfigVar<int>{"hotkeys.moveLink.modifiers", HOTKEY_MOD_NONE},
             ConfigVar<int>{"hotkeys.moveLink.controllerButton", PAD_NATIVE_BUTTON_INVALID},
         },
+        .showOnlinePlayerList = {
+            ConfigVar<int>{"hotkeys.showOnlinePlayerList.key", SDL_SCANCODE_UNKNOWN},
+            ConfigVar<int>{"hotkeys.showOnlinePlayerList.modifiers", HOTKEY_MOD_NONE},
+            ConfigVar<int>{"hotkeys.showOnlinePlayerList.controllerButton", PAD_NATIVE_BUTTON_INVALID},
+        },
     },
 
     // Not sure if there's a better way to declare this
@@ -536,6 +541,9 @@ void registerSettings() {
     Register(g_userSettings.hotkeys.moveLink.key);
     Register(g_userSettings.hotkeys.moveLink.modifiers);
     Register(g_userSettings.hotkeys.moveLink.controllerButton);
+    Register(g_userSettings.hotkeys.showOnlinePlayerList.key);
+    Register(g_userSettings.hotkeys.showOnlinePlayerList.modifiers);
+    Register(g_userSettings.hotkeys.showOnlinePlayerList.controllerButton);
 
     Register(g_userSettings.actionBindings.firstPersonCamera[0]);
     Register(g_userSettings.actionBindings.firstPersonCamera[1]);

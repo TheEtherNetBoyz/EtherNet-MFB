@@ -113,6 +113,16 @@ struct SessionStatus {
     bool hasRecentPeerPose = false;
 };
 
+struct PlayerListEntry {
+    std::string id;
+    std::string name;
+    std::string status;
+    std::string area;
+    uint32_t ageTicks = 0;
+    bool local = false;
+    bool recentPose = false;
+};
+
 void initialize();
 void update();
 void shutdown();
@@ -122,6 +132,7 @@ bool join_direct(const DirectJoinOptions& options, std::string* errorOut = nullp
 bool join_relay(const RelayJoinOptions& options, std::string* errorOut = nullptr);
 void disconnect_session();
 SessionStatus get_session_status();
+std::vector<PlayerListEntry> get_player_list();
 void set_name_labels_enabled(bool enabled);
 bool has_recent_peer_pose(uint32_t maxAgeTicks);
 PeerPoseSnapshot get_latest_peer_pose();
