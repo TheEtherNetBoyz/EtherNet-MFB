@@ -597,19 +597,37 @@ void prepare_remote_human_body_materials(const PeerPoseSnapshot& pose, daAlink_c
         set_material_tev_color1(hatData, 0, &neutralColor);
         return;
     }
-    if (pose.clothesVariant != 0) {
+
+    if (pose.clothesVariant == 2) {
+        set_material_tev_color1(bodyData, 13, &neutralColor);
+        set_material_tev_color1(bodyData, 0, &neutralColor);
+        set_material_tev_color1(bodyData, 1, &neutralColor);
+        set_material_tev_color1(hatData, 1, &neutralColor);
         return;
     }
 
-    set_material_tev_color1(bodyData, 17, &neutralColor);
-    set_material_tev_color1(bodyData, 9, &neutralColor);
-    set_material_tev_color1(bodyData, 0, &neutralColor);
-    set_material_tev_color1(bodyData, 1, &neutralColor);
-    set_material_tev_color1(bodyData, 2, &neutralColor);
-    set_material_tev_color1(bodyData, 16, &neutralColor);
-    set_material_tev_color1(bodyData, 15, &neutralColor);
-    set_material_tev_color1(bodyData, 14, &neutralColor);
-    set_material_tev_color1(hatData, 0, &neutralColor);
+    if (pose.clothesVariant == 3) {
+        set_material_tev_color1(bodyData, 11, &neutralColor);
+        set_material_tev_color1(bodyData, 10, &neutralColor);
+        set_material_tev_color1(bodyData, 9, &neutralColor);
+        set_material_tev_color1(bodyData, 8, &neutralColor);
+        set_material_tev_color1(bodyData, 6, &neutralColor);
+        set_material_tev_color1(hatData, 2, &neutralColor);
+        set_material_tev_color1(hatData, 1, &neutralColor);
+        return;
+    }
+
+    if (pose.clothesVariant == 0) {
+        set_material_tev_color1(bodyData, 17, &neutralColor);
+        set_material_tev_color1(bodyData, 9, &neutralColor);
+        set_material_tev_color1(bodyData, 0, &neutralColor);
+        set_material_tev_color1(bodyData, 1, &neutralColor);
+        set_material_tev_color1(bodyData, 2, &neutralColor);
+        set_material_tev_color1(bodyData, 16, &neutralColor);
+        set_material_tev_color1(bodyData, 15, &neutralColor);
+        set_material_tev_color1(bodyData, 14, &neutralColor);
+        set_material_tev_color1(hatData, 0, &neutralColor);
+    }
 }
 
 void prepare_remote_eye_materials(RemoteLinkDummy& dummy, const PeerPoseSnapshot& pose,
