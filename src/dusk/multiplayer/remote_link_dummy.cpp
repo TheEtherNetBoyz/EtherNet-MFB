@@ -1,5 +1,6 @@
 #include "dusk/multiplayer/remote_link_dummy.hpp"
 
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -8,6 +9,7 @@
 
 #include "SSystem/SComponent/c_phase.h"
 #include "d/actor/d_a_alink.h"
+#include "d/d_cc_d.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_kankyo.h"
 #include "dusk/frame_interpolation.h"
@@ -83,6 +85,9 @@ struct RemoteLinkDummy {
     RemoteEquipmentInterp swordInterp;
     RemoteEquipmentInterp sheathInterp;
     RemoteEquipmentInterp shieldInterp;
+    dCcD_Stts bodyCcStts;
+    dCcD_Cyl bodyCyl;
+    bool bodyCollisionInitialized = false;
 };
 
 struct RemoteArcRequest {
@@ -124,6 +129,29 @@ RemoteArcRequest sCarvingWoodShieldArc{"CWShd"};
 RemoteArcRequest sOrdonShieldArc{"SWShd"};
 RemoteArcRequest sHylianShieldArc{"HyShd"};
 uint32_t sRoomSkipLogCount = 0;
+
+constexpr f32 kRemoteHumanBodyRadius = 35.0f;
+constexpr f32 kRemoteHumanBodyHeight = 180.0f;
+constexpr f32 kRemoteWolfBodyRadius = 35.0f;
+constexpr f32 kRemoteWolfBodyHeight = 95.0f;
+constexpr f32 kRemoteWolfBodyHalfLength = 45.0f;
+constexpr f32 kLocalLinkBodyRadius = 35.0f;
+
+static dCcD_SrcCyl l_remoteLinkBodyCylSrc = {
+    {
+        {0, {{(u32)AT_TYPE_WOLF_ATTACK, 3, 0x1A}, {0xD8FFFDFF, 5}, 0x73}},
+        {dCcD_SE_WOLF_BITE, 3, 1, 0, {1}},
+        {dCcD_SE_NONE, 6, 0, 0, {0}},
+        {0},
+    },
+    {
+        {
+            {0.0f, 0.0f, 0.0f},
+            kRemoteHumanBodyRadius,
+            kRemoteHumanBodyHeight,
+        },
+    }
+};
 
 // Temporary experiment for the "yellow sword affects the real local
 // character too" report: g_env_light.setLightTevColorType_MAJI() (called
@@ -906,6 +934,88 @@ dKy_tevstr_c build_dummy_tev_str(const PeerPoseSnapshot& pose) {
     return tevStr;
 }
 
+void init_remote_body_collision(RemoteLinkDummy& dummy) {
+    if (dummy.bodyCollisionInitialized) {
+        return;
+    }
+
+    dummy.bodyCyl.Set(l_remoteLinkBodyCylSrc);
+    dummy.bodyCyl.OnTgNoConHit();
+    dummy.bodyCyl.OffAtSetBit();
+    dummy.bodyCyl.OffTgSetBit();
+    dummy.bodyCollisionInitialized = true;
+}
+
+void apply_remote_body_push(const PeerPoseSnapshot& pose, fopAc_ac_c* playerActor) {
+    if (playerActor == nullptr) {
+        return;
+    }
+
+    const f32 bodyHeight = pose.isWolf ? kRemoteWolfBodyHeight : kRemoteHumanBodyHeight;
+    const f32 minY = pose.y - 20.0f;
+    const f32 maxY = pose.y + bodyHeight;
+    if (playerActor->current.pos.y < minY || playerActor->current.pos.y > maxY) {
+        return;
+    }
+
+    const f32 remoteRadius = pose.isWolf ? kRemoteWolfBodyRadius : kRemoteHumanBodyRadius;
+    const f32 combinedRadius = remoteRadius + kLocalLinkBodyRadius;
+    f32 closestX = pose.x;
+    f32 closestZ = pose.z;
+    if (pose.isWolf) {
+        const s16 angleY = static_cast<s16>(pose.angleY);
+        const f32 forwardX = cM_ssin(angleY);
+        const f32 forwardZ = cM_scos(angleY);
+        const f32 toPlayerX = playerActor->current.pos.x - pose.x;
+        const f32 toPlayerZ = playerActor->current.pos.z - pose.z;
+        f32 along = (toPlayerX * forwardX) + (toPlayerZ * forwardZ);
+        if (along < -kRemoteWolfBodyHalfLength) {
+            along = -kRemoteWolfBodyHalfLength;
+        } else if (along > kRemoteWolfBodyHalfLength) {
+            along = kRemoteWolfBodyHalfLength;
+        }
+        closestX += forwardX * along;
+        closestZ += forwardZ * along;
+    }
+
+    f32 dx = playerActor->current.pos.x - closestX;
+    f32 dz = playerActor->current.pos.z - closestZ;
+    f32 distSq = dx * dx + dz * dz;
+    if (distSq >= combinedRadius * combinedRadius) {
+        return;
+    }
+
+    if (distSq < 0.0001f) {
+        dx = cM_ssin(playerActor->shape_angle.y);
+        dz = cM_scos(playerActor->shape_angle.y);
+        distSq = dx * dx + dz * dz;
+    }
+
+    const f32 dist = std::sqrt(distSq);
+    if (dist < 0.0001f) {
+        return;
+    }
+
+    const f32 push = combinedRadius - dist;
+    playerActor->current.pos.x += (dx / dist) * push;
+    playerActor->current.pos.z += (dz / dist) * push;
+}
+
+void update_remote_body_collision(RemoteLinkDummy& dummy, const PeerPoseSnapshot& pose,
+                                  fopAc_ac_c* owner) {
+    init_remote_body_collision(dummy);
+
+    cXyz position(pose.x, pose.y, pose.z);
+    dummy.bodyCyl.SetC(position);
+    dummy.bodyCyl.SetR(pose.isWolf ? kRemoteWolfBodyRadius : kRemoteHumanBodyRadius);
+    dummy.bodyCyl.SetH(pose.isWolf ? kRemoteWolfBodyHeight : kRemoteHumanBodyHeight);
+    dummy.bodyCyl.OffAtSetBit();
+    dummy.bodyCyl.OffTgSetBit();
+    dummy.bodyCyl.OffCoSetBit();
+
+    apply_remote_body_push(pose, owner);
+}
+
 bool shares_active_local_link_model_data(J3DModel* model, const daAlink_c* link) {
     if (model == nullptr || model->getModelData() == nullptr || link == nullptr) {
         return false;
@@ -1202,6 +1312,7 @@ void destroy_remote_link_dummy(const std::string& peerId) {
     free_remote_face_anim(dummy.wolfFaceAnim);
     free_remote_eye_anims(dummy.humanEyeAnm, dummy.humanEyeAnmData);
     free_remote_eye_anims(dummy.wolfEyeAnm, dummy.wolfEyeAnmData);
+    dummy.bodyCollisionInitialized = false;
     dummy.stage.clear();
     dummy.room = -128;
     dummy.stableFrames = 0;
@@ -1234,6 +1345,7 @@ void destroy_all_remote_link_dummies() {
         free_remote_face_anim(dummy.wolfFaceAnim);
         free_remote_eye_anims(dummy.humanEyeAnm, dummy.humanEyeAnmData);
         free_remote_eye_anims(dummy.wolfEyeAnm, dummy.wolfEyeAnmData);
+        dummy.bodyCollisionInitialized = false;
     }
     sDummies.clear();
 }
@@ -1324,10 +1436,12 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
         RemoteLinkDummy& newDummy = sDummies[peerId];
         newDummy.stage = pose.stage;
         newDummy.room = pose.room;
+        update_remote_body_collision(newDummy, pose, playerActor);
         return;
     }
 
     RemoteLinkDummy& dummy = dummyIt->second;
+    update_remote_body_collision(dummy, pose, playerActor);
 
     if (dummy.lastObservedIsWolf != pose.isWolf) {
         dummy.lastObservedIsWolf = pose.isWolf;
