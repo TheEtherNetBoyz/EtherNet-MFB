@@ -45,6 +45,16 @@ struct PeerPoseSnapshot {
     float z = 0.0f;
     int angleY = 0;
     bool isWolf = false;
+    bool isTransforming = false;
+    bool transformFromWolf = false;
+    bool transformToWolf = false;
+    int transformProcVar0 = 0;
+    int transformProcVar5 = 0;
+    int transformClothesWait = 0;
+    float transformFrame = 0.0f;
+    int transformProcVar2 = 0;
+    int transformProcVar3 = 0;
+    int transformShapeX = 0;
     uint16_t equipItem = 0xFFFF;
     int swordVariant = 0;
     int shieldVariant = 0;

@@ -890,6 +890,17 @@ bool is_peer_dummy_gameplay_ready() {
     return true;
 }
 
+bool has_transforming_peer_pose() {
+    for (const auto& entry : sSession.peerPoses) {
+        const PeerPoseSnapshot& pose = entry.second;
+        if (pose.valid && pose.ageTicks <= 30 && pose.isTransforming) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 #if 0
 void destroy_peer_dummy_model_if_stage_changed() {
     if (sPeerDummyModel != nullptr && sPeerDummyStage[0] != '\0' &&
@@ -1841,6 +1852,16 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         pose.z = state.value("z", 0.0f);
         pose.angleY = state.value("angle_y", 0);
         pose.isWolf = state.value("is_wolf", false);
+        pose.isTransforming = state.value("is_transforming", false);
+        pose.transformFromWolf = state.value("transform_from_wolf", pose.isWolf);
+        pose.transformToWolf = state.value("transform_to_wolf", !pose.transformFromWolf);
+        pose.transformProcVar0 = state.value("transform_proc_v0", 0);
+        pose.transformProcVar5 = state.value("transform_proc_v5", 0);
+        pose.transformClothesWait = state.value("transform_clothes_wait", 0);
+        pose.transformFrame = state.value("transform_frame", 0.0f);
+        pose.transformProcVar2 = state.value("transform_proc_v2", 0);
+        pose.transformProcVar3 = state.value("transform_proc_v3", 0);
+        pose.transformShapeX = state.value("transform_shape_x", 0);
         pose.equipItem = static_cast<uint16_t>(state.value("equip_item", 0xFFFF));
         pose.swordVariant = state.value("sword_variant", REMOTE_SWORD_UNKNOWN);
         pose.shieldVariant = state.value("shield_variant", REMOTE_SHIELD_UNKNOWN);
@@ -1849,7 +1870,26 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         pose.shieldDraw = state.value("shield_draw", false);
         pose.swordOut = state.value("sword_out", false);
         pose.linkMatrices = parse_link_matrices(state);
+        const bool wasTransforming =
+            existing != sSession.peerPoses.end() && existing->second.valid &&
+            existing->second.isTransforming;
         sSession.peerPoses[peerId] = pose;
+
+        static uint32_t sTransformPoseRxLogCount = 0;
+        if ((pose.isTransforming || wasTransforming) && sTransformPoseRxLogCount < 80)
+        {
+            ++sTransformPoseRxLogCount;
+            DuskLog.info(
+                "Multiplayer transform debug rx_pose peer={} seq={} transforming={} from_wolf={} "
+                "to_wolf={} is_wolf={} proc_v0={} proc_v2={} proc_v3={} proc_v5={} "
+                "shape_x={} clothes_wait={} frame={} "
+                "matrices_valid={} age={} stage={} room={}",
+                peerId, pose.sequence, pose.isTransforming, pose.transformFromWolf,
+                pose.transformToWolf, pose.isWolf, pose.transformProcVar0,
+                pose.transformProcVar2, pose.transformProcVar3, pose.transformProcVar5,
+                pose.transformShapeX, pose.transformClothesWait, pose.transformFrame,
+                pose.linkMatrices.valid, pose.ageTicks, pose.stage, pose.room);
+        }
 
         if ((sSession.peerPoseLogTicks++ % 150) == 0) {
             DuskLog.info("Multiplayer peer pose peer={} form={} stage={} room={} pos=({}, {}, {})",
@@ -2305,7 +2345,42 @@ void send_pose() {
     // this doesn't need the metamorphosis-state guard -- just the same
     // actor-type check before the cast.
     const bool isLink = fopAcM_GetName(player) == fpcNm_ALINK_e;
-    const bool isWolf = isLink && static_cast<daAlink_c*>(player)->checkWolf();
+    daAlink_c* link = isLink ? static_cast<daAlink_c*>(player) : nullptr;
+    const bool isWolf = link != nullptr && link->checkWolf();
+    const bool isTransforming =
+        link != nullptr && (link->mProcID == daAlink_c::PROC_METAMORPHOSE ||
+                            link->mProcID == daAlink_c::PROC_METAMORPHOSE_ONLY);
+    static bool sLocalTransformObserved = false;
+    static bool sLocalTransformFromWolf = false;
+    static bool sLocalTransformToWolf = false;
+    if (isTransforming && !sLocalTransformObserved) {
+        sLocalTransformObserved = true;
+        sLocalTransformFromWolf = isWolf;
+        sLocalTransformToWolf = !isWolf;
+    } else if (!isTransforming) {
+        sLocalTransformObserved = false;
+    }
+    const bool transformFromWolf = isTransforming && sLocalTransformFromWolf;
+    const bool transformToWolf = isTransforming && sLocalTransformToWolf;
+    static bool sWasSendingTransform = false;
+    static uint32_t sTransformPoseTxLogCount = 0;
+    if ((isTransforming || sWasSendingTransform) && sTransformPoseTxLogCount < 80) {
+        ++sTransformPoseTxLogCount;
+        DuskLog.info(
+            "Multiplayer transform debug tx_pose seq_next={} transforming={} from_wolf={} "
+            "to_wolf={} is_wolf={} proc={} proc_v0={} proc_v1={} proc_v2={} proc_v3={} "
+            "proc_v5={} shape_x={} pos=({}, {}, {})",
+            sSession.poseSequence + 1, isTransforming, transformFromWolf, transformToWolf,
+            isWolf, link != nullptr ? link->mProcID : 0,
+            link != nullptr ? link->mProcVar0.field_0x3008 : 0,
+            link != nullptr ? link->mProcVar1.field_0x300a : 0,
+            link != nullptr ? link->mProcVar2.field_0x300c : 0,
+            link != nullptr ? link->mProcVar3.field_0x300e : 0,
+            link != nullptr ? link->mProcVar5.field_0x3012 : 0,
+            link != nullptr ? static_cast<int>(link->shape_angle.x) : 0,
+            player->current.pos.x, player->current.pos.y, player->current.pos.z);
+    }
+    sWasSendingTransform = isTransforming;
 
     json state = {
         {"stage", dComIfGp_getStartStageName()},
@@ -2316,9 +2391,33 @@ void send_pose() {
         {"z", player->current.pos.z},
         {"angle_y", static_cast<int>(player->shape_angle.y)},
         {"is_wolf", isWolf},
+        {"is_transforming", isTransforming},
+        {"transform_from_wolf", transformFromWolf},
+        {"transform_to_wolf", transformToWolf},
+        {"transform_proc_v0", link != nullptr ? link->mProcVar0.field_0x3008 : 0},
+        {"transform_proc_v5", link != nullptr ? link->mProcVar5.field_0x3012 : 0},
+        {"transform_clothes_wait", link != nullptr ? static_cast<int>(link->mClothesChangeWaitTimer) : 0},
+        {"transform_frame", link != nullptr ? link->mUnderFrameCtrl[0].getFrame() : 0.0f},
+        {"transform_proc_v2", link != nullptr ? link->mProcVar2.field_0x300c : 0},
+        {"transform_proc_v3", link != nullptr ? link->mProcVar3.field_0x300e : 0},
+        {"transform_shape_x", link != nullptr ? static_cast<int>(link->shape_angle.x) : 0},
+        {"equip_item", link != nullptr ? static_cast<int>(link->mEquipItem) : 0xFFFF},
+        {"sword_variant", detect_sword_variant(link)},
+        {"shield_variant", detect_shield_variant()},
+        {"clothes_variant", detect_clothes_variant()},
+        {"sword_draw", link != nullptr && !isWolf && static_cast<bool>(link->checkSwordDraw())},
+        {"shield_draw", link != nullptr && !isWolf && static_cast<bool>(link->checkShieldDraw())},
+        {"sword_out", link != nullptr && !isWolf && link->mEquipItem == 0x103},
     };
-    if (isLink && (sDummyModelEnabled || isWolf) && !add_link_matrices(state))
-    {
+    if (!isTransforming && isLink && (sDummyModelEnabled || isWolf) && !add_link_matrices(state)) {
+        static uint32_t sMatrixPoseDropLogCount = 0;
+        if (sMatrixPoseDropLogCount < 20) {
+            ++sMatrixPoseDropLogCount;
+            DuskLog.info(
+                "Multiplayer transform debug tx_pose_dropped matrix_capture_failed seq_next={} "
+                "is_wolf={} proc={}",
+                sSession.poseSequence + 1, isWolf, link != nullptr ? link->mProcID : 0);
+        }
         return;
     }
 
@@ -2861,9 +2960,33 @@ PeerPoseSnapshot get_latest_peer_pose() {
 }
 
 void draw_debug_peer_marker() {
-    if (!sEnabled || !sDummyModelEnabled || !sSession.debugMarker || !has_recent_peer_pose(30) ||
-        !is_peer_dummy_gameplay_ready())
-    {
+    static uint32_t sTransformDrawGateLogCount = 0;
+    const bool hasTransformPose = has_transforming_peer_pose();
+    auto log_transform_draw_gate = [&](const char* reason) {
+        if (hasTransformPose && sTransformDrawGateLogCount < 40) {
+            ++sTransformDrawGateLogCount;
+            DuskLog.info("Multiplayer transform debug draw_gate_skip reason={}", reason);
+        }
+    };
+
+    if (!sEnabled) {
+        log_transform_draw_gate("disabled");
+        return;
+    }
+    if (!sDummyModelEnabled) {
+        log_transform_draw_gate("dummy_model_disabled");
+        return;
+    }
+    if (!sSession.debugMarker) {
+        log_transform_draw_gate("debug_marker_disabled");
+        return;
+    }
+    if (!has_recent_peer_pose(30)) {
+        log_transform_draw_gate("no_recent_peer_pose");
+        return;
+    }
+    if (!is_peer_dummy_gameplay_ready()) {
+        log_transform_draw_gate("gameplay_not_ready");
         return;
     }
 
@@ -2881,10 +3004,32 @@ void draw_debug_peer_marker() {
     for (const auto& entry : sSession.peerPoses) {
         const PeerPoseSnapshot& pose = entry.second;
         if (!pose.valid || pose.ageTicks > 30) {
+            if (pose.isTransforming && sTransformDrawGateLogCount < 40) {
+                ++sTransformDrawGateLogCount;
+                DuskLog.info(
+                    "Multiplayer transform debug draw_pose_skip peer={} reason=stale_or_invalid "
+                    "valid={} age={} seq={}",
+                    entry.first, pose.valid, pose.ageTicks, pose.sequence);
+            }
             continue;
         }
         if (pose.stage != localStage) {
+            if (pose.isTransforming && sTransformDrawGateLogCount < 40) {
+                ++sTransformDrawGateLogCount;
+                DuskLog.info(
+                    "Multiplayer transform debug draw_pose_skip peer={} reason=stage_mismatch "
+                    "peer_stage={} local_stage={} seq={}",
+                    entry.first, pose.stage, localStage, pose.sequence);
+            }
             continue;
+        }
+        if (pose.isTransforming && sTransformDrawGateLogCount < 40) {
+            ++sTransformDrawGateLogCount;
+            DuskLog.info(
+                "Multiplayer transform debug draw_call peer={} seq={} from_wolf={} to_wolf={} "
+                "is_wolf={} matrices_valid={} age={}",
+                entry.first, pose.sequence, pose.transformFromWolf, pose.transformToWolf,
+                pose.isWolf, pose.linkMatrices.valid, pose.ageTicks);
         }
         draw_remote_link_dummy(entry.first, pose);
     }

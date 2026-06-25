@@ -12,17 +12,20 @@
 #include "d/d_cc_d.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_kankyo.h"
+#include "d/d_resorce.h"
 #include "dusk/frame_interpolation.h"
 #include "dusk/logging.h"
 #include "f_op/f_op_actor_mng.h"
 #include "f_pc/f_pc_name.h"
 #include "JSystem/J3DGraphLoader/J3DAnmLoader.h"
+#include "JSystem/J3DGraphAnimator/J3DJoint.h"
 #include "JSystem/J3DGraphBase/J3DMaterial.h"
 #include "JSystem/J3DGraphBase/J3DShape.h"
 #include "JSystem/J3DGraphBase/J3DTexture.h"
 #include "JSystem/JUtility/JUTNameTab.h"
 #include "m_Do/m_Do_ext.h"
 #include "m_Do/m_Do_mtx.h"
+#include "res/Object/AlAnm.h"
 #include "res/Object/Alink.h"
 
 namespace dusk::multiplayer {
@@ -46,6 +49,29 @@ struct RemoteEquipmentInterp {
     bool suppressMaterialAnm = true;
 };
 
+struct RemoteTransformAnim {
+    bool active = false;
+    bool fromWolf = false;
+    bool toWolf = false;
+    bool secondPhase = false;
+    bool initialized = false;
+    bool holdFinal = false;
+    f32 frame = 0.0f;
+    f32 endFrame = 0.0f;
+    uint32_t holdTicks = 0;
+    daPy_anmHeap_c* anmHeap = nullptr;
+    mDoExt_bckAnm bck;
+    JKRSolidHeap* heap = nullptr;
+    RemoteLinkModel wfModel;
+    void* wfModelBuffer = nullptr;
+    void* wfBckBuffer = nullptr;
+    J3DAnmTransform* wfBckData = nullptr;
+    bool wfBckToWolf = false;
+    mDoExt_bckAnm wfBck;
+    JKRSolidHeap* wfHeap = nullptr;
+    RemoteLinkModel changeModel;
+};
+
 struct RemoteLinkDummy {
     RemoteLinkModel body;
     RemoteLinkModel hat;
@@ -60,7 +86,10 @@ struct RemoteLinkDummy {
     uint32_t matrixRejectLogCount = 0;
     uint32_t swordLogCount = 0;
     uint32_t wolfDrawLogCount = 0;
+    uint32_t transformLogCount = 0;
     bool lastObservedIsWolf = false;
+    bool hasObservedForm = false;
+    bool remoteTransformingObserved = false;
     int lastObservedClothesVariant = -1;
     int lastObservedShieldVariant = -1;
     bool lastObservedShieldDraw = false;
@@ -84,6 +113,7 @@ struct RemoteLinkDummy {
     RemoteEquipmentInterp swordInterp;
     RemoteEquipmentInterp sheathInterp;
     RemoteEquipmentInterp shieldInterp;
+    RemoteTransformAnim transform;
     dCcD_Stts bodyCcStts;
     dCcD_Cyl bodyCyl;
     bool bodyCollisionInitialized = false;
@@ -135,6 +165,8 @@ constexpr f32 kRemoteWolfBodyRadius = 35.0f;
 constexpr f32 kRemoteWolfBodyHeight = 95.0f;
 constexpr f32 kRemoteWolfBodyHalfLength = 45.0f;
 constexpr f32 kLocalLinkBodyRadius = 35.0f;
+constexpr f32 kRemoteTransformAnimSpeed = 1.0f;
+constexpr uint32_t kRemoteTransformFinalHoldTicks = 180;
 
 static dCcD_SrcCyl l_remoteLinkBodyCylSrc = {
     {
@@ -151,6 +183,20 @@ static dCcD_SrcCyl l_remoteLinkBodyCylSrc = {
         },
     }
 };
+
+RemoteLinkSources resolve_remote_sources(const PeerPoseSnapshot& pose);
+void prepare_remote_form_resources(RemoteLinkDummy& dummy, const PeerPoseSnapshot& pose,
+                                   daAlink_c* link, J3DModel* body, J3DModel* hat,
+                                   J3DModel* face, J3DModel* sword);
+dKy_tevstr_c build_dummy_tev_str(const PeerPoseSnapshot& pose);
+void entry_model_without_calc(J3DModel* model, dKy_tevstr_c* tevStr, bool rebindLight,
+                              bool useDarkList, bool suppressMaterialAnm,
+                              bool entryOnNonSimFrame);
+void log_draw_skip(RemoteLinkDummy& dummy, const char* reason, const std::string& peerId,
+                   const PeerPoseSnapshot& pose, const RemoteLinkSources& sources,
+                   J3DModel* body, bool localIsWolf, const RemoteLinkMatrixSnapshot* matrices,
+                   bool usingCachedMatrices);
+void* load_link_anm(u16 resId, u32 bufferSize, void** outBuffer);
 
 // Temporary experiment for the "yellow sword affects the real local
 // character too" report: g_env_light.setLightTevColorType_MAJI() (called
@@ -226,6 +272,31 @@ void destroy_model(RemoteLinkModel& model) {
     model.heap = nullptr;
 }
 
+void destroy_transform_anim(RemoteTransformAnim& anim) {
+    destroy_model(anim.changeModel);
+    destroy_model(anim.wfModel);
+    if (anim.wfBckBuffer != nullptr) {
+        JKRFree(anim.wfBckBuffer);
+    }
+    if (anim.wfModelBuffer != nullptr) {
+        JKRFree(anim.wfModelBuffer);
+    }
+    if (anim.wfHeap != nullptr) {
+        mDoExt_destroySolidHeap(anim.wfHeap);
+    }
+    if (anim.anmHeap != nullptr) {
+        if (anim.anmHeap->getBuffer() != nullptr) {
+            JKR_DELETE_ARRAY(anim.anmHeap->getBuffer());
+        }
+        JKR_DELETE(anim.anmHeap);
+    }
+    if (anim.heap != nullptr) {
+        mDoExt_destroySolidHeap(anim.heap);
+    }
+
+    anim = {};
+}
+
 J3DModel* get_or_create_model_from_data(RemoteLinkModel& dst, J3DModelData* sourceData,
                                         u32 heapSize, u32 differedDlistFlag = 0x11000084) {
     if (sourceData == nullptr) {
@@ -299,6 +370,516 @@ bool copy_remote_model_matrices(J3DModel* dst, const RemoteModelMatrixSnapshot& 
         flat_matrix_to_mtx(&source.weights[static_cast<size_t>(i) * 12], mtx);
         mDoMtx_copy(mtx, dst->getWeightAnmMtx(i));
     }
+
+    return true;
+}
+
+u16 remote_transform_bck_res_id(const RemoteTransformAnim& anim) {
+    if (anim.toWolf) {
+        return anim.secondPhase ? dRes_ID_ALANM_BCK_WL_CHANGEATOW_e :
+                                  dRes_ID_ALANM_BCK_CHANGEATOW_e;
+    }
+
+    return anim.secondPhase ? dRes_ID_ALANM_BCK_CHANGEWTOA_e :
+                              dRes_ID_ALANM_BCK_WL_CHANGEWTOA_e;
+}
+
+bool remote_transform_display_is_wolf(const RemoteTransformAnim& anim) {
+    return anim.secondPhase ? anim.toWolf : anim.fromWolf;
+}
+
+void start_remote_transform(RemoteLinkDummy& dummy, bool fromWolf, bool toWolf) {
+    dummy.transformLogCount = 0;
+    RemoteTransformAnim& anim = dummy.transform;
+    anim.active = true;
+    anim.fromWolf = fromWolf;
+    anim.toWolf = toWolf;
+    anim.secondPhase = false;
+    anim.frame = 0.0f;
+    anim.endFrame = 0.0f;
+    anim.initialized = false;
+    anim.holdFinal = false;
+    anim.holdTicks = 0;
+}
+
+bool init_remote_transform_phase(RemoteTransformAnim& anim) {
+    const u16 resId = remote_transform_bck_res_id(anim);
+    if (anim.anmHeap == nullptr) {
+        anim.anmHeap = JKR_NEW daPy_anmHeap_c(0x10800);
+        if (anim.anmHeap == nullptr) {
+            DuskLog.warn("Multiplayer remote Link dummy: transform animation data heap allocation failed");
+            return false;
+        }
+        if (anim.anmHeap->mallocBuffer() == nullptr) {
+            DuskLog.warn("Multiplayer remote Link dummy: transform animation data buffer allocation failed");
+            JKR_DELETE(anim.anmHeap);
+            anim.anmHeap = nullptr;
+            return false;
+        }
+        anim.anmHeap->createHeap(daPy_anmHeap_c::HEAP_TYPE_3, "remote_transform_anm");
+    }
+
+    anim.anmHeap->setBufferSize(0x10800);
+    anim.anmHeap->resetIdx();
+    anim.anmHeap->resetArcNo();
+    J3DAnmTransform* bck = static_cast<J3DAnmTransform*>(anim.anmHeap->loadDataIdx(resId));
+    if (bck == nullptr) {
+        DuskLog.info(
+            "Multiplayer transform debug anim_phase_init_failed reason=bck_null res_id={} "
+            "from_wolf={} to_wolf={} second_phase={}",
+            resId, anim.fromWolf, anim.toWolf, anim.secondPhase);
+        return false;
+    }
+
+    if (anim.heap == nullptr) {
+        anim.heap = mDoExt_createSolidHeapFromGameToCurrent(0x3000, 0x20);
+        if (anim.heap == nullptr) {
+            DuskLog.warn("Multiplayer remote Link dummy: transform animation heap allocation failed");
+            return false;
+        }
+
+        if (!anim.bck.init(bck, TRUE, J3DFrameCtrl::EMode_NONE, kRemoteTransformAnimSpeed, 0, -1, false)) {
+            DuskLog.warn("Multiplayer remote Link dummy: transform animation init failed");
+            mDoExt_destroySolidHeap(anim.heap);
+            anim.heap = nullptr;
+            mDoExt_restoreCurrentHeap();
+            return false;
+        }
+
+        mDoExt_adjustSolidHeapToSystem(anim.heap);
+    } else {
+        anim.bck.changeBckOnly(bck);
+        anim.bck.setPlayMode(J3DFrameCtrl::EMode_NONE);
+        anim.bck.setPlaySpeed(kRemoteTransformAnimSpeed);
+        anim.bck.setFrame(0.0f);
+    }
+
+    anim.frame = 0.0f;
+    anim.endFrame = bck->getFrameMax();
+    anim.initialized = true;
+    return true;
+}
+
+void set_remote_transform_base_matrix(J3DModel* model, const PeerPoseSnapshot& pose) {
+    mDoMtx_stack_c::transS(pose.x, pose.y, pose.z);
+    mDoMtx_stack_c::ZXYrotM(static_cast<s16>(pose.transformShapeX),
+                            static_cast<s16>(pose.angleY), 0);
+    model->setBaseTRMtx(mDoMtx_stack_c::get());
+}
+
+struct JointCallbackSnapshot {
+    std::vector<std::pair<J3DJoint*, J3DJointCallBack>> entries;
+};
+
+struct ShapeVisibilitySnapshot {
+    std::vector<std::pair<J3DShape*, bool>> shapes;
+};
+
+struct SwordShapeVisibility {
+    J3DShape* shape = nullptr;
+    bool wasHidden = false;
+};
+
+ShapeVisibilitySnapshot show_model_shapes(J3DModel* model);
+void restore_model_shapes(const ShapeVisibilitySnapshot& snapshot);
+bool is_wood_sword_variant(int swordVariant);
+SwordShapeVisibility apply_sword_shape_visibility(J3DModel* sword, bool swordOut, bool woodSword);
+void restore_sword_shape_visibility(const SwordShapeVisibility& snapshot);
+
+JointCallbackSnapshot suppress_joint_callbacks(J3DModelData* data) {
+    JointCallbackSnapshot snapshot;
+    if (data == nullptr) {
+        return snapshot;
+    }
+
+    const u16 jointCount = data->getJointNum();
+    snapshot.entries.reserve(jointCount);
+    for (u16 i = 0; i < jointCount; ++i) {
+        J3DJoint* joint = data->getJointNodePointer(i);
+        if (joint == nullptr) {
+            continue;
+        }
+
+        J3DJointCallBack callback = joint->getCallBack();
+        if (callback != nullptr) {
+            snapshot.entries.emplace_back(joint, callback);
+            joint->setCallBack(nullptr);
+        }
+    }
+
+    return snapshot;
+}
+
+void restore_joint_callbacks(const JointCallbackSnapshot& snapshot) {
+    for (const auto& entry : snapshot.entries) {
+        if (entry.first != nullptr) {
+            entry.first->setCallBack(entry.second);
+        }
+    }
+}
+
+void calc_model_suppressing_joint_callbacks(J3DModel* model) {
+    if (model == nullptr || model->getModelData() == nullptr) {
+        return;
+    }
+
+    JointCallbackSnapshot jointCallbacks = suppress_joint_callbacks(model->getModelData());
+    model->calc();
+    restore_joint_callbacks(jointCallbacks);
+}
+
+void entry_remote_transform_model(J3DModel* model, dKy_tevstr_c* tevStr, bool useDarkList) {
+    ShapeVisibilitySnapshot visibility = show_model_shapes(model);
+    entry_model_without_calc(model, tevStr, /*rebindLight=*/true, useDarkList,
+                             /*suppressMaterialAnm=*/true, /*entryOnNonSimFrame=*/true);
+    restore_model_shapes(visibility);
+}
+
+void entry_remote_transform_equipment(J3DModel* model, dKy_tevstr_c* tevStr) {
+    ShapeVisibilitySnapshot visibility = show_model_shapes(model);
+    entry_model_without_calc(model, tevStr, /*rebindLight=*/true, /*useDarkList=*/false,
+                             /*suppressMaterialAnm=*/true, /*entryOnNonSimFrame=*/false);
+    restore_model_shapes(visibility);
+}
+
+J3DModelData* load_remote_transform_bmd(u16 resId, u32 bufferSize, void** outBuffer) {
+    if (outBuffer == nullptr) {
+        return nullptr;
+    }
+    if (*outBuffer == nullptr) {
+        *outBuffer = JKRAlloc(bufferSize, 0x20);
+        if (*outBuffer == nullptr) {
+            return nullptr;
+        }
+        JKRReadIdxResource(*outBuffer, bufferSize, resId, dComIfGp_getAnmArchive());
+    }
+    return dRes_info_c::loaderBasicBmd('BMWR', *outBuffer);
+}
+
+bool ensure_remote_transform_wf(RemoteTransformAnim& anim, bool toWolf) {
+    if (anim.wfModel.data == nullptr) {
+        J3DModelData* data =
+            load_remote_transform_bmd(dRes_ID_ALANM_BMD_AL_WF_e, 0x6000, &anim.wfModelBuffer);
+        if (data == nullptr) {
+            return false;
+        }
+        J3DModel* model = get_or_create_model_from_data(anim.wfModel, data, 0x100000);
+        if (model == nullptr) {
+            return false;
+        }
+    }
+
+    const u16 bckResId = toWolf ? dRes_ID_ALANM_BCK_WFCHANGEATOW_e :
+                                  dRes_ID_ALANM_BCK_WFCHANGEWTOA_e;
+    if (anim.wfBckData == nullptr || anim.wfBck.getBckAnm() == nullptr ||
+        anim.wfBckToWolf != toWolf)
+    {
+        if (anim.wfBckBuffer != nullptr && anim.wfBckToWolf != toWolf) {
+            JKRFree(anim.wfBckBuffer);
+            anim.wfBckBuffer = nullptr;
+            anim.wfBckData = nullptr;
+        }
+        anim.wfBckData = static_cast<J3DAnmTransform*>(load_link_anm(bckResId, 0x1400,
+                                                                      &anim.wfBckBuffer));
+        if (anim.wfBckData == nullptr) {
+            return false;
+        }
+        if (anim.wfHeap == nullptr) {
+            anim.wfHeap = mDoExt_createSolidHeapFromGameToCurrent(0x1000, 0x20);
+            if (anim.wfHeap == nullptr) {
+                return false;
+            }
+            if (!anim.wfBck.init(anim.wfBckData, FALSE, J3DFrameCtrl::EMode_NONE,
+                                 kRemoteTransformAnimSpeed, 0, -1, false))
+            {
+                mDoExt_destroySolidHeap(anim.wfHeap);
+                anim.wfHeap = nullptr;
+                return false;
+            }
+            mDoExt_adjustSolidHeapToSystem(anim.wfHeap);
+        } else {
+            anim.wfBck.changeBckOnly(anim.wfBckData);
+            anim.wfBck.setPlayMode(J3DFrameCtrl::EMode_NONE);
+            anim.wfBck.setPlaySpeed(kRemoteTransformAnimSpeed);
+            anim.wfBck.setFrame(0.0f);
+        }
+        anim.wfBckToWolf = toWolf;
+    }
+
+    return true;
+}
+
+void draw_remote_transform_wf(RemoteTransformAnim& anim, J3DModel* body,
+                              dKy_tevstr_c* tevStr) {
+    if (body == nullptr || anim.wfModel.model == nullptr ||
+        anim.wfModel.model->getModelData() == nullptr)
+    {
+        return;
+    }
+
+    J3DModel* model = anim.wfModel.model;
+    model->setBaseTRMtx(body->getAnmMtx(4));
+    anim.wfBck.entry(model->getModelData(), anim.frame);
+    calc_model_suppressing_joint_callbacks(model);
+    anim.wfBck.remove(model->getModelData());
+    entry_remote_transform_model(model, tevStr, false);
+}
+
+J3DModel* ensure_remote_transform_change_model(RemoteTransformAnim& anim) {
+    J3DModelData* data = static_cast<J3DModelData*>(
+        dComIfG_getObjectRes("Alink", dRes_ID_ALINK_BMD_WL_CHANGE_e));
+    if (data == nullptr) {
+        return nullptr;
+    }
+    return get_or_create_model_from_data(anim.changeModel, data, 0x100000);
+}
+
+void advance_remote_transform_anim(RemoteTransformAnim& anim, RemoteLinkDummy& dummy,
+                                   const std::string& peerId,
+                                   const PeerPoseSnapshot& pose) {
+    if (anim.holdFinal) {
+        ++anim.holdTicks;
+    } else {
+        anim.frame += kRemoteTransformAnimSpeed;
+    }
+    if (!anim.holdFinal && anim.frame >= anim.endFrame) {
+        if (!anim.secondPhase) {
+            anim.secondPhase = true;
+            anim.initialized = false;
+            if (dummy.transformLogCount < 20) {
+                ++dummy.transformLogCount;
+                DuskLog.info("Multiplayer transform debug draw_transform_phase2 peer={}", peerId);
+            }
+        } else {
+            anim.holdFinal = true;
+            anim.holdTicks = 0;
+            if (anim.endFrame > 1.0f) {
+                anim.frame = anim.endFrame - 1.0f;
+            } else {
+                anim.frame = 0.0f;
+            }
+            if (dummy.transformLogCount < 20) {
+                ++dummy.transformLogCount;
+                DuskLog.info(
+                    "Multiplayer transform debug draw_transform_hold peer={} target_wolf={} "
+                    "pose_mtx_valid={} peer_wolf={}",
+                    peerId, anim.toWolf, pose.linkMatrices.valid, pose.isWolf);
+            }
+        }
+    }
+}
+
+bool draw_remote_transform_body(RemoteLinkDummy& dummy, const std::string& peerId,
+                                const PeerPoseSnapshot& pose, daAlink_c* link,
+                                bool localIsWolf) {
+    RemoteTransformAnim& anim = dummy.transform;
+    if (!anim.active) {
+        return false;
+    }
+
+    const bool targetMatricesReady = pose.linkMatrices.valid && pose.isWolf == anim.toWolf;
+    if ((!pose.isTransforming || anim.holdFinal) && targetMatricesReady) {
+        anim.active = false;
+        if (dummy.transformLogCount < 24) {
+            ++dummy.transformLogCount;
+            DuskLog.info(
+                "Multiplayer transform debug draw_transform_handoff peer={} target_wolf={} "
+                "pose_mtx_valid={} peer_wolf={}",
+                peerId, anim.toWolf, pose.linkMatrices.valid, pose.isWolf);
+        }
+        return false;
+    }
+
+    if (anim.holdFinal && anim.holdTicks >= kRemoteTransformFinalHoldTicks) {
+        anim.active = false;
+        if (dummy.transformLogCount < 24) {
+            ++dummy.transformLogCount;
+            DuskLog.info(
+                "Multiplayer transform debug draw_transform_hold_timeout peer={} target_wolf={} "
+                "pose_mtx_valid={} peer_wolf={}",
+                peerId, anim.toWolf, pose.linkMatrices.valid, pose.isWolf);
+        }
+        return false;
+    }
+
+    if (!anim.initialized && !init_remote_transform_phase(anim)) {
+        if (dummy.transformLogCount < 20) {
+            ++dummy.transformLogCount;
+            DuskLog.info(
+                "Multiplayer transform debug draw_transform_failed peer={} reason=phase_init "
+                "from_wolf={} to_wolf={} second_phase={}",
+                peerId, anim.fromWolf, anim.toWolf, anim.secondPhase);
+        }
+        anim.active = false;
+        return false;
+    }
+
+    PeerPoseSnapshot displayPose = pose;
+    displayPose.isWolf = remote_transform_display_is_wolf(anim);
+    if (anim.holdFinal) {
+        displayPose.isWolf = anim.toWolf;
+        if (anim.endFrame > 1.0f) {
+            anim.frame = anim.endFrame - 1.0f;
+        } else {
+            anim.frame = 0.0f;
+        }
+    }
+    displayPose.swordDraw = !displayPose.isWolf && pose.swordDraw;
+    displayPose.shieldDraw = !displayPose.isWolf && pose.shieldDraw;
+    displayPose.swordOut = !displayPose.isWolf && pose.swordOut;
+
+    dKy_tevstr_c dummyTevStr = build_dummy_tev_str(displayPose);
+    if (pose.isTransforming) {
+        dummyTevStr.TevColor.r = pose.transformProcVar3;
+        dummyTevStr.TevColor.g = pose.transformProcVar3;
+        dummyTevStr.TevColor.b = pose.transformProcVar3;
+    }
+    const bool unsafeHumanTransformFallback =
+        pose.isTransforming && !displayPose.isWolf && !targetMatricesReady;
+    if (unsafeHumanTransformFallback && !anim.fromWolf && !anim.secondPhase &&
+        dummy.lastLinkMatrices.valid && !dummy.lastLinkMatricesIsWolf)
+    {
+        if (dummy.transformLogCount < 24) {
+            ++dummy.transformLogCount;
+            DuskLog.info(
+                "Multiplayer transform debug hold_cached_human peer={} frame={} "
+                "sender_wolf={} proc_v5={} cache_wolf={}",
+                peerId, anim.frame, pose.isWolf, pose.transformProcVar5,
+                dummy.lastLinkMatricesIsWolf);
+        }
+        advance_remote_transform_anim(anim, dummy, peerId, pose);
+        return false;
+    }
+
+    const bool drawChangeBridge =
+        !anim.holdFinal &&
+        ((anim.secondPhase && anim.frame < 4.0f) || unsafeHumanTransformFallback);
+    if (drawChangeBridge) {
+        J3DModel* changeModel = ensure_remote_transform_change_model(anim);
+        if (changeModel != nullptr) {
+            set_remote_transform_base_matrix(changeModel, pose);
+            if (!anim.toWolf) {
+                mDoMtx_stack_c::copy(changeModel->getBaseTRMtx());
+                mDoMtx_stack_c::transM(0.0f, 0.0f, 30.0f);
+                changeModel->setBaseTRMtx(mDoMtx_stack_c::get());
+            }
+            calc_model_suppressing_joint_callbacks(changeModel);
+            entry_remote_transform_model(changeModel, &dummyTevStr, displayPose.isWolf);
+            if (dummy.transformLogCount < 24) {
+                ++dummy.transformLogCount;
+                DuskLog.info(
+                    "Multiplayer transform debug draw_transform_change_bridge peer={} "
+                    "frame={} to_wolf={} proc_v0={} proc_v5={} clothes_wait={} model={}",
+                    peerId, anim.frame, anim.toWolf, pose.transformProcVar0,
+                    pose.transformProcVar5, pose.transformClothesWait,
+                    static_cast<void*>(changeModel));
+            }
+            advance_remote_transform_anim(anim, dummy, peerId, pose);
+            return true;
+        }
+    }
+
+    const RemoteLinkSources sources = resolve_remote_sources(displayPose);
+    const u32 bodyDiffFlags = displayPose.isWolf ? 0x11020284 : 0x11000084;
+    J3DModel* body = get_or_create_model_from_data(dummy.body, sources.body, 0x200000, bodyDiffFlags);
+    const bool drawHumanParts = !displayPose.isWolf && sources.humanParts;
+    J3DModel* hat = drawHumanParts ? get_or_create_model_from_data(dummy.hat, sources.hat, 0x100000) : nullptr;
+    J3DModel* face = drawHumanParts ? get_or_create_model_from_data(dummy.face, sources.face, 0x100000) : nullptr;
+    J3DModel* hand = drawHumanParts ? get_or_create_model_from_data(dummy.hand, sources.hand, 0x100000) : nullptr;
+    J3DModel* sword =
+        drawHumanParts && displayPose.swordDraw ?
+            get_or_create_model_from_data(dummy.sword, sources.sword, 0x100000) :
+            nullptr;
+    J3DModel* sheath =
+        drawHumanParts && displayPose.swordDraw ?
+            get_or_create_model_from_data(dummy.sheath, sources.sheath, 0x100000) :
+            nullptr;
+    J3DModel* shield =
+        drawHumanParts && displayPose.shieldDraw ?
+            get_or_create_model_from_data(dummy.shield, sources.shield, 0x100000) :
+            nullptr;
+    if (dummy.transformLogCount < 20) {
+        ++dummy.transformLogCount;
+            DuskLog.info(
+                "Multiplayer transform debug draw_transform peer={} frame={} end={} from_wolf={} "
+            "to_wolf={} second_phase={} display_wolf={} shape_x={} proc_v2={} proc_v3={} "
+            "source_body={} body={} hat={} face={} hand={}",
+            peerId, anim.frame, anim.endFrame, anim.fromWolf, anim.toWolf, anim.secondPhase,
+            displayPose.isWolf, pose.transformShapeX, pose.transformProcVar2,
+            pose.transformProcVar3, static_cast<void*>(sources.body),
+            static_cast<void*>(body), static_cast<void*>(hat), static_cast<void*>(face),
+            static_cast<void*>(hand));
+    }
+    prepare_remote_form_resources(dummy, displayPose, link, body, hat, face, sword);
+    if (!drawHumanParts) {
+        destroy_model(dummy.hat);
+        destroy_model(dummy.face);
+        destroy_model(dummy.hand);
+    }
+    if (!drawHumanParts || !displayPose.swordDraw) {
+        destroy_model(dummy.sword);
+        destroy_model(dummy.sheath);
+    }
+    if (!drawHumanParts || !displayPose.shieldDraw) {
+        destroy_model(dummy.shield);
+    }
+
+    if (body == nullptr || body->getModelData() == nullptr) {
+        log_draw_skip(dummy, "transform_body_null", peerId, displayPose, sources, body, localIsWolf,
+                      nullptr, false);
+        anim.active = false;
+        return false;
+    }
+
+    const bool hasCachedHumanMatrices =
+        dummy.lastLinkMatrices.valid && !dummy.lastLinkMatricesIsWolf;
+    set_remote_transform_base_matrix(body, pose);
+    anim.bck.entry(body->getModelData(), anim.frame);
+    calc_model_suppressing_joint_callbacks(body);
+    anim.bck.remove(body->getModelData());
+    entry_remote_transform_model(body, &dummyTevStr, displayPose.isWolf);
+    if (!anim.holdFinal && ensure_remote_transform_wf(anim, anim.toWolf)) {
+        draw_remote_transform_wf(anim, body, &dummyTevStr);
+    }
+    if (drawHumanParts) {
+        if (face != nullptr) {
+            face->setBaseTRMtx(body->getAnmMtx(4));
+            calc_model_suppressing_joint_callbacks(face);
+            entry_remote_transform_model(face, &dummyTevStr, false);
+        }
+        if (hat != nullptr) {
+            hat->setBaseTRMtx(body->getAnmMtx(4));
+            calc_model_suppressing_joint_callbacks(hat);
+            entry_remote_transform_model(hat, &dummyTevStr, false);
+        }
+        if (hand != nullptr) {
+            hand->setBaseTRMtx(body->getBaseTRMtx());
+            calc_model_suppressing_joint_callbacks(hand);
+            hand->setAnmMtx(1, body->getAnmMtx(9));
+            hand->setAnmMtx(2, body->getAnmMtx(0xE));
+            entry_remote_transform_model(hand, &dummyTevStr, false);
+        }
+        if (sword != nullptr && hasCachedHumanMatrices && dummy.lastLinkMatrices.sword.valid &&
+            !skip_remote_sword_draw())
+        {
+            copy_remote_model_matrices(sword, dummy.lastLinkMatrices.sword);
+            const bool woodSword = is_wood_sword_variant(displayPose.swordVariant);
+            SwordShapeVisibility visibility =
+                apply_sword_shape_visibility(sword, displayPose.swordOut, woodSword);
+            entry_remote_transform_equipment(sword, &dummyTevStr);
+            restore_sword_shape_visibility(visibility);
+        }
+        if (sheath != nullptr && hasCachedHumanMatrices && dummy.lastLinkMatrices.sheath.valid) {
+            copy_remote_model_matrices(sheath, dummy.lastLinkMatrices.sheath);
+            entry_remote_transform_equipment(sheath, &dummyTevStr);
+        }
+        if (shield != nullptr && hasCachedHumanMatrices && dummy.lastLinkMatrices.shield.valid) {
+            copy_remote_model_matrices(shield, dummy.lastLinkMatrices.shield);
+            entry_remote_transform_equipment(shield, &dummyTevStr);
+        }
+    }
+
+    advance_remote_transform_anim(anim, dummy, peerId, pose);
 
     return true;
 }
@@ -1211,15 +1792,6 @@ J3DModelData* choose_shield_source_data(int shieldVariant) {
 // restore_sword_shape_visibility() immediately after this dummy's own sword
 // draw call completes, scoping the mutation to only this dummy's own
 // drawcall instead of leaking into whatever happens afterward.
-struct SwordShapeVisibility {
-    J3DShape* shape = nullptr;
-    bool wasHidden = false;
-};
-
-struct ShapeVisibilitySnapshot {
-    std::vector<std::pair<J3DShape*, bool>> shapes;
-};
-
 ShapeVisibilitySnapshot show_model_shapes(J3DModel* model) {
     ShapeVisibilitySnapshot snapshot;
     if (model == nullptr || model->getModelData() == nullptr) {
@@ -1387,13 +1959,17 @@ void destroy_remote_link_dummy(const std::string& peerId) {
     free_remote_face_anim(dummy.wolfFaceAnim);
     free_remote_eye_anims(dummy.humanEyeAnm, dummy.humanEyeAnmData);
     free_remote_eye_anims(dummy.wolfEyeAnm, dummy.wolfEyeAnmData);
+    destroy_transform_anim(dummy.transform);
     dummy.bodyCollisionInitialized = false;
     dummy.stage.clear();
     dummy.room = -128;
     dummy.drawLogCount = 0;
     dummy.matrixRejectLogCount = 0;
     dummy.wolfDrawLogCount = 0;
+    dummy.transformLogCount = 0;
     dummy.lastObservedIsWolf = false;
+    dummy.hasObservedForm = false;
+    dummy.remoteTransformingObserved = false;
     dummy.lastObservedClothesVariant = -1;
     dummy.lastObservedShieldVariant = -1;
     dummy.lastObservedShieldDraw = false;
@@ -1419,6 +1995,7 @@ void destroy_all_remote_link_dummies() {
         free_remote_face_anim(dummy.wolfFaceAnim);
         free_remote_eye_anims(dummy.humanEyeAnm, dummy.humanEyeAnmData);
         free_remote_eye_anims(dummy.wolfEyeAnm, dummy.wolfEyeAnmData);
+        destroy_transform_anim(dummy.transform);
         dummy.bodyCollisionInitialized = false;
     }
     sDummies.clear();
@@ -1427,6 +2004,9 @@ void destroy_all_remote_link_dummies() {
 void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& pose) {
     fopAc_ac_c* playerActor = dComIfGp_getPlayer(0);
     if (playerActor == nullptr) {
+        if (pose.isTransforming) {
+            DuskLog.info("Multiplayer transform debug dummy_skip peer={} reason=no_player", peerId);
+        }
         return;
     }
 
@@ -1449,6 +2029,12 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
         // source for the dummy's body/hat/face/hand/sword/shield models --
         // so this guards against touching it mid-transform regardless of
         // what the remote peer is doing.
+        if (pose.isTransforming) {
+            DuskLog.info(
+                "Multiplayer transform debug dummy_skip peer={} reason=local_transforming "
+                "local_proc={}",
+                peerId, link->mProcID);
+        }
         return;
     }
     if (link->mClothesChangeWaitTimer != 0) {
@@ -1464,6 +2050,11 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
         // during which the "Kmdl" archive's resources can apparently be
         // briefly invalid/reloading. Skip entirely while it's nonzero,
         // same tradeoff already accepted for transforms and cutscenes.
+        if (pose.isTransforming) {
+            DuskLog.info(
+                "Multiplayer transform debug dummy_skip peer={} reason=local_clothes_change timer={}",
+                peerId, link->mClothesChangeWaitTimer);
+        }
         return;
     }
     const bool localIsWolf = static_cast<bool>(link->checkWolf());
@@ -1491,6 +2082,12 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
                 "displayed (local room={}, stage={})",
                 pose.room, fopAcM_GetRoomNo(link), pose.stage);
         }
+        if (pose.isTransforming) {
+            DuskLog.info(
+                "Multiplayer transform debug dummy_skip peer={} reason=room_not_displayed "
+                "peer_room={} local_room={} stage={}",
+                peerId, pose.room, fopAcM_GetRoomNo(link), pose.stage);
+        }
         return;
     }
 
@@ -1510,13 +2107,55 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
         newDummy.stage = pose.stage;
         newDummy.room = pose.room;
         update_remote_body_collision(newDummy, pose, playerActor);
+        if (pose.isTransforming) {
+            DuskLog.info(
+                "Multiplayer transform debug dummy_created peer={} seq={} from_wolf={} to_wolf={} "
+                "is_wolf={} returning_until_next_draw=1",
+                peerId, pose.sequence, pose.transformFromWolf, pose.transformToWolf, pose.isWolf);
+        }
         return;
     }
 
     RemoteLinkDummy& dummy = dummyIt->second;
     update_remote_body_collision(dummy, pose, playerActor);
 
-    if (dummy.lastObservedIsWolf != pose.isWolf) {
+    if (pose.isTransforming && (!dummy.remoteTransformingObserved || !dummy.transform.active)) {
+        const bool firstTransformPacket = !dummy.remoteTransformingObserved;
+        dummy.remoteTransformingObserved = true;
+        dummy.hasObservedForm = true;
+        dummy.lastObservedIsWolf = pose.transformFromWolf;
+        start_remote_transform(dummy, pose.transformFromWolf, pose.transformToWolf);
+        if (pose.transformProcVar5 != 0 || pose.isWolf == pose.transformToWolf) {
+            dummy.transform.secondPhase = true;
+            dummy.transform.initialized = false;
+            DuskLog.info(
+                "Multiplayer transform debug start_at_sender_phase2 peer={} sender_wolf={} "
+                "target_wolf={} proc_v5={} frame={}",
+                peerId, pose.isWolf, pose.transformToWolf, pose.transformProcVar5,
+                pose.transformFrame);
+        }
+        dummy.drawLogCount = 0;
+        dummy.matrixRejectLogCount = 0;
+        dummy.swordLogCount = 0;
+        if (pose.transformToWolf) {
+            dummy.wolfDrawLogCount = 0;
+        }
+        if (firstTransformPacket) {
+            DuskLog.info(
+                "Multiplayer remote Link dummy: peer transform started peer={} from_wolf={} "
+                "to_wolf={} peer_wolf={} pose_mtx_valid={} cache_valid={} cache_wolf={}",
+                peerId, pose.transformFromWolf, pose.transformToWolf, pose.isWolf,
+                pose.linkMatrices.valid, dummy.lastLinkMatrices.valid, dummy.lastLinkMatricesIsWolf);
+        }
+    } else if (!pose.isTransforming) {
+        dummy.remoteTransformingObserved = false;
+    }
+
+    if (!dummy.hasObservedForm) {
+        dummy.lastObservedIsWolf = pose.isWolf;
+        dummy.hasObservedForm = true;
+    } else if (!pose.isTransforming && dummy.lastObservedIsWolf != pose.isWolf) {
+        const bool fromWolf = dummy.lastObservedIsWolf;
         dummy.lastObservedIsWolf = pose.isWolf;
         dummy.drawLogCount = 0;
         dummy.matrixRejectLogCount = 0;
@@ -1524,11 +2163,18 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
         if (pose.isWolf) {
             dummy.wolfDrawLogCount = 0;
         }
+        if (!pose.linkMatrices.valid) {
+            start_remote_transform(dummy, fromWolf, pose.isWolf);
+        }
         DuskLog.info(
             "Multiplayer remote Link dummy: peer form changed peer={} peer_wolf={} "
-            "pose_mtx_valid={} cache_valid={} cache_wolf={}",
+            "pose_mtx_valid={} cache_valid={} cache_wolf={} replay_transform={}",
             peerId, pose.isWolf, pose.linkMatrices.valid, dummy.lastLinkMatrices.valid,
-            dummy.lastLinkMatricesIsWolf);
+            dummy.lastLinkMatricesIsWolf, !pose.linkMatrices.valid);
+    }
+
+    if (draw_remote_transform_body(dummy, peerId, pose, link, localIsWolf)) {
+        return;
     }
 
     if (dummy.lastObservedClothesVariant != pose.clothesVariant ||
