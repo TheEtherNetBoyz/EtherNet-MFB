@@ -150,6 +150,7 @@ public:
     // opened by a peer look open locally without re-running the actual
     // open-and-grant-item interaction sequence.
     void forceOpenVisual();
+    bool repairJumpSwitchPosition(int i_swNo);
     void setDrawMtx(Mtx i_mtx) {
         MTXCopy(i_mtx, mDrawMtx);
         field_0x9fc = 1;
@@ -210,5 +211,6 @@ STATIC_ASSERT(sizeof(daTbox_c) == 0xA30);
 // No-op if that chest isn't currently spawned (e.g. a different room/stage
 // from the caller) -- used by the multiplayer chest-bit repair hook.
 void duskRepairTboxVisual(int i_tboxNo);
+bool duskRepairTboxJumpSwitchPosition(int i_swNo);
 
 #endif /* D_A_TBOX_H */

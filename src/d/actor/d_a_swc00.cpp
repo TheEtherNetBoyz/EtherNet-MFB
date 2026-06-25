@@ -12,6 +12,9 @@
 #include "d/d_s_play.h"
 #include "d/d_com_inf_game.h"
 #include "f_op/f_op_actor_mng.h"
+#if TARGET_PC
+#include "dusk/multiplayer/event_sync.hpp"
+#endif
 
 static BOOL hitCheck(daSwc00_c* i_swc) {
     fopAc_ac_c* a_this = i_swc;
@@ -97,6 +100,17 @@ inline static int daSwc00_getSw2No(daSwc00_c* i_this) {
     return (fopAcM_GetParam(i_this) >> 8) & 0xff; 
 }
 
+static void daSwc00_onSwitch(daSwc00_c* i_this, int sw) {
+#if TARGET_PC
+    dusk::multiplayer::begin_local_switch_actor_context(fopAcM_GetName(i_this),
+                                                        fopAcM_GetRoomNo(i_this), sw);
+#endif
+    dComIfGs_onSwitch(sw, fopAcM_GetRoomNo(i_this));
+#if TARGET_PC
+    dusk::multiplayer::end_local_switch_actor_context();
+#endif
+}
+
 int daSwc00_c::execute() {
     daPy_py_c* player = daPy_getPlayerActorClass();
     u8 condition = daSwc00_getCondition(this);
@@ -151,7 +165,7 @@ int daSwc00_c::execute() {
     case 3:
     case 15:
         if (hitCheck(this)) {
-            dComIfGs_onSwitch(sw1, fopAcM_GetRoomNo(this));
+            daSwc00_onSwitch(this, sw1);
             field_0x583 = 1;
             field_0x584 = 1;
         }
@@ -159,7 +173,7 @@ int daSwc00_c::execute() {
     case 0:
     case 4:
         if (hitCheck(this)) {
-            dComIfGs_onSwitch(sw1, fopAcM_GetRoomNo(this));
+            daSwc00_onSwitch(this, sw1);
             field_0x584 = 1;
         } else {
             dComIfGs_offSwitch(sw1, fopAcM_GetRoomNo(this));
@@ -168,7 +182,7 @@ int daSwc00_c::execute() {
     case 1:
     case 5:
         if (hitCheck(this)) {
-            dComIfGs_onSwitch(sw1, fopAcM_GetRoomNo(this));
+            daSwc00_onSwitch(this, sw1);
             field_0x584 = 1;
         }
         break;

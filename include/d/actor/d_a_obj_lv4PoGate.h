@@ -44,6 +44,7 @@ public:
     void modeMoveClose3();
     void setSe();
     void setEffect(int);
+    bool duskForceOpenFromRemoteSwitch();
 
     virtual int CreateHeap();
     virtual int Execute(Mtx**);
@@ -64,6 +65,8 @@ private:
 };
 
 STATIC_ASSERT(sizeof(daLv4PoGate_c) == 0x5BC);
+
+bool duskRepairLv4PoGateOpen();
 
 class daLv4PoGate_HIO_c : public mDoHIO_entry_c {
 public:

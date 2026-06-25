@@ -2094,6 +2094,28 @@ int daNpcChin_c::_Evt_SpotLight_Off_CutMain(const int& param_0) {
     return result;
 }
 
+namespace {
+
+void* judgeNpcChinBySwitch(void* i_actor, void* i_data) {
+    if (fopAcM_GetName(i_actor) != fpcNm_NPC_CHIN_e) {
+        return NULL;
+    }
+
+    daNpcChin_c* chin = static_cast<daNpcChin_c*>(i_actor);
+    if (chin->getSWBit() != *static_cast<int*>(i_data)) {
+        return NULL;
+    }
+
+    return i_actor;
+}
+
+}  // namespace
+
+bool duskMonitorNpcChinSwitch(int i_swNo) {
+    int swNo = i_swNo;
+    return fopAcIt_Judge(judgeNpcChinBySwitch, &swNo) != NULL;
+}
+
 static int daNpcChin_Create(void* i_this) {
     return ((daNpcChin_c*)i_this)->Create();
 }

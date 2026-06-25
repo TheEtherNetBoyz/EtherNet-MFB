@@ -44,6 +44,7 @@ public:
     BOOL checkWall();
     int Draw();
     int Delete();
+    bool repairSwitchPosition(int i_swNo);
 
     u8 getArg0() { return fopAcM_GetParamBit(this, 0, 4); }
     u8 getSwNo() { return fopAcM_GetParamBit(this, 16, 8); }
@@ -79,5 +80,6 @@ private:
 
 STATIC_ASSERT(sizeof(daObjCBlk_c) == 0xca8);
 
+bool duskRepairCBlockSwitchPosition(int i_swNo);
 
 #endif /* D_A_OBJ_CBLOCK_H */

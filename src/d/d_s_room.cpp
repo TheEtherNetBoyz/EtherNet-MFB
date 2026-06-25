@@ -12,6 +12,9 @@
 #include "d/d_bg_parts.h"
 #include "m_Do/m_Do_Reset.h"
 #include "f_ap/f_ap_game.h"
+#if TARGET_PC
+#include "dusk/multiplayer/event_sync.hpp"
+#endif
 
 #include <cstdio>
 #include <cstring>
@@ -280,7 +283,19 @@ static int dScnRoom_Execute(room_of_scene_class* i_this) {
                     dScnPly_c::setPauseTimer(2);
                 } else {
                     i_this->field_0x1d5 = 0;
+#if TARGET_PC
+                    dusk::multiplayer::notify_local_room_scene_initialized(param);
+#endif
                 }
+            }
+        } else if (i_this->field_0x1d4 < 0 && i_this->field_0x1d5 == 0 &&
+                   !dComIfGp_event_runCheck())
+        {
+            int param = fopScnM_GetParam(i_this);
+            if (param == dComIfGp_roomControl_getStayNo()) {
+#if TARGET_PC
+                dusk::multiplayer::notify_local_room_scene_initialized(param);
+#endif
             }
         }
     }

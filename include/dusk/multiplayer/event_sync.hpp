@@ -29,6 +29,9 @@ void notify_local_item_get(int itemId);
 // switch IDs, which are deliberately ephemeral/room-resetting by design and
 // not synced.
 void notify_local_memory_switch_set(int flag);
+void begin_local_switch_actor_context(int actorName, int room, int flag);
+void end_local_switch_actor_context();
+void notify_local_room_scene_initialized(int room);
 
 // Memory-tier "Item" bits only (dSv_memBit_c, per-stage, persistent). `flag`
 // is the already-offset local index (global ID minus MEMORY_ITEM), matching

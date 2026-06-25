@@ -54,6 +54,7 @@ public:
     int _delete();
     int CreateHeap();
     int create();
+    bool duskRepairRemoteDefeat();
     daE_PZ_c();
 
     /* 0x5AC */ request_of_phase_process_class mPhase;
@@ -124,5 +125,7 @@ public:
 };
 
 STATIC_ASSERT(sizeof(daE_PZ_c) == 0xEF8);
+
+bool duskRepairE_PZRemoteDefeat(int i_swNo);
 
 #endif /* D_A_E_PZ_H */

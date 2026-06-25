@@ -216,4 +216,6 @@ public:
 
 STATIC_ASSERT(sizeof(daNpcChin_c) == 0xe78);
 
+bool duskMonitorNpcChinSwitch(int i_swNo);
+
 #endif /* D_A_NPC_CHIN_H */

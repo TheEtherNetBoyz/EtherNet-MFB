@@ -1,8 +1,14 @@
 #include "dusk/multiplayer/multiplayer.hpp"
 
 #include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_e_pz.h"
+#include "d/actor/d_a_npc_chin.h"
 #include "d/actor/d_a_obj_drop.h"
+#include "d/actor/d_a_obj_cblock.h"
 #include "d/actor/d_a_obj_life_container.h"
+#include "d/actor/d_a_obj_lv4PoGate.h"
+#include "d/actor/d_a_obj_picture.h"
+#include "d/actor/d_a_obj_scannon.h"
 #include "d/actor/d_a_obj_smallkey.h"
 #include "d/actor/d_a_obj_sword.h"
 #include "d/actor/d_a_tbox.h"
@@ -234,6 +240,14 @@ struct RecentRemoteSwitch {
     bool deferred = false;
 };
 
+struct LocalSwitchActorContext {
+    bool active = false;
+    int actorName = -1;
+    int room = -128;
+    int flag = -1;
+    int depth = 0;
+};
+
 constexpr uint32_t kRemoteSwitchRoomInitTicks = 3;
 constexpr uint32_t kRecentRemoteSwitchTicks = 600;
 
@@ -244,6 +258,12 @@ const RemoteSwitchPolicy kRemoteSwitchPolicies[] = {
      "Tag_Hinit local trigger switch"},
     {0, 12, RemoteSwitchPolicyMode::DeferUntilRoomInit, "F_SP104", 1,
      "Tag_Hinit secondary horse initializer output switch"},
+    {19, 0x26, RemoteSwitchPolicyMode::DeferUntilRoomInit, "D_MN10", -1,
+     "E_PO Arbiter's Grounds Poe gate completion switch"},
+    {19, 0x43, RemoteSwitchPolicyMode::DeferUntilRoomInit, "D_MN10", -1,
+     "E_PO Arbiter's Grounds Poe sequence switch"},
+    {23, 63, RemoteSwitchPolicyMode::SuppressRemote, "D_MN08", 0,
+     "Palace light ball local carry/recovery guard switch"},
 };
 
 std::vector<DeferredRemoteSwitch> sDeferredRemoteSwitches;
@@ -251,6 +271,11 @@ std::vector<RecentRemoteSwitch> sRecentRemoteSwitches;
 std::string sPolicyStageName;
 int sPolicyRoom = -128;
 uint32_t sPolicyRoomStableTicks = 0;
+std::string sPolicyInitializedStageName;
+int sPolicyInitializedRoom = -128;
+uint32_t sPolicyRoomInitializedTicks = 0;
+bool sPolicyRoomInitialized = false;
+LocalSwitchActorContext sLocalSwitchActorContext;
 
 int detect_sword_variant(const daAlink_c* link) {
     if (link == nullptr || link->mSwordModel == nullptr) {
@@ -419,6 +444,23 @@ const char* remote_switch_policy_mode_name(RemoteSwitchPolicyMode mode) {
     }
 }
 
+const char* group2_lifecycle_actor_reason(int actorName) {
+    switch (actorName) {
+    case fpcNm_Tag_Mhint_e: return "Tag_Mhint local hint lifecycle switch";
+    case fpcNm_Tag_Mmsg_e: return "Tag_Mmsg local message lifecycle switch";
+    case fpcNm_Tag_Mstop_e: return "Tag_Mstop local Midna stop lifecycle switch";
+    case fpcNm_Tag_TheBHint_e: return "Tag_TheBHint local hint lifecycle switch";
+    case fpcNm_Obj_Timer_e: return "Obj_Timer local timer lifecycle switch";
+    case fpcNm_NPC_BLUENS_e: return "NpcBlueNS local NPC interaction lifecycle switch";
+    case fpcNm_SWC00_e: return "SWC00 local area trigger output switch";
+    default: return nullptr;
+    }
+}
+
+bool is_group2_lifecycle_actor(int actorName) {
+    return group2_lifecycle_actor_reason(actorName) != nullptr;
+}
+
 void remember_remote_switch(int stage, int flag, bool deferred) {
     for (RecentRemoteSwitch& recent : sRecentRemoteSwitches) {
         if (recent.stage == stage && recent.flag == flag) {
@@ -432,13 +474,36 @@ void remember_remote_switch(int stage, int flag, bool deferred) {
 }
 
 void dispatch_remote_switch_repair_hook(int stage, int flag, const char* reason) {
-    // Category-3 switches from the audit belong here: the switch is valid
-    // shared world state, but an already-created actor may need to refresh
-    // cached state after a remote bit arrives. Keep this empty until a
-    // switch's semantics and repair behavior are proven.
-    (void)stage;
-    (void)flag;
-    (void)reason;
+    stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+    if (stagInfo == nullptr || stage != dStage_stagInfo_GetSaveTbl(stagInfo)) {
+        return;
+    }
+
+    const bool repairedCBlock = duskRepairCBlockSwitchPosition(flag);
+    const bool repairedJumpTbox = duskRepairTboxJumpSwitchPosition(flag);
+    const bool monitoredPicture = duskMonitorObjPictureSwitch(flag);
+    const bool monitoredNpcChin = duskMonitorNpcChinSwitch(flag);
+    const bool repairedLv4PoGate = stage == 19 && flag == 0x26 && duskRepairLv4PoGateOpen();
+    const bool repairedPZ = duskRepairE_PZRemoteDefeat(flag);
+    const bool repairedSCannon = duskRepairSCannonRemotePortalClosed(flag);
+
+    if (repairedCBlock || repairedJumpTbox || repairedLv4PoGate || repairedPZ || repairedSCannon) {
+        DuskLog.info("Multiplayer remote switch repair stage={} flag={} reason={} "
+                     "cblock={} jump_tbox={} lv4_poe_gate={} e_pz={} scannon={} "
+                     "picture_monitor={} npc_chin_monitor={}",
+                     stage, flag, reason, repairedCBlock, repairedJumpTbox, repairedLv4PoGate,
+                     repairedPZ, repairedSCannon, monitoredPicture, monitoredNpcChin);
+    } else if (monitoredPicture || monitoredNpcChin) {
+        DuskLog.info("Multiplayer remote switch monitor stage={} flag={} reason={} "
+                     "picture_monitor={} npc_chin_monitor={} repair=reload_or_cosmetic",
+                     stage, flag, reason, monitoredPicture, monitoredNpcChin);
+    } else {
+        DuskLog.info("Multiplayer remote switch repair checked stage={} flag={} reason={} "
+                     "cblock={} jump_tbox={} lv4_poe_gate={} e_pz={} scannon={} "
+                     "picture_monitor={} npc_chin_monitor={}",
+                     stage, flag, reason, repairedCBlock, repairedJumpTbox, repairedLv4PoGate,
+                     repairedPZ, repairedSCannon, monitoredPicture, monitoredNpcChin);
+    }
 }
 
 void update_remote_switch_policy_room_state() {
@@ -449,17 +514,31 @@ void update_remote_switch_policy_room_state() {
         if (sPolicyRoomStableTicks < kRemoteSwitchRoomInitTicks) {
             ++sPolicyRoomStableTicks;
         }
+        if (sPolicyRoomInitialized && sPolicyInitializedStageName == stage &&
+            sPolicyInitializedRoom == room &&
+            sPolicyRoomInitializedTicks < kRemoteSwitchRoomInitTicks)
+        {
+            ++sPolicyRoomInitializedTicks;
+        }
         return;
     }
 
     sPolicyStageName = stage;
     sPolicyRoom = room;
     sPolicyRoomStableTicks = 0;
+    sPolicyRoomInitialized = false;
+    sPolicyInitializedStageName.clear();
+    sPolicyInitializedRoom = -128;
+    sPolicyRoomInitializedTicks = 0;
 }
 
 bool is_remote_switch_policy_ready(const RemoteSwitchPolicy& policy) {
-    return sPolicyStageName == policy.stageName && sPolicyRoom == policy.room &&
-           sPolicyRoomStableTicks >= kRemoteSwitchRoomInitTicks;
+    const bool roomMatches = policy.room < 0 || sPolicyRoom == policy.room;
+    const bool initializedRoomMatches = policy.room < 0 || sPolicyInitializedRoom == policy.room;
+    return sPolicyStageName == policy.stageName && roomMatches &&
+           sPolicyRoomStableTicks >= kRemoteSwitchRoomInitTicks && sPolicyRoomInitialized &&
+           sPolicyInitializedStageName == policy.stageName && initializedRoomMatches &&
+           sPolicyRoomInitializedTicks >= kRemoteSwitchRoomInitTicks;
 }
 
 bool is_remote_switch_deferred(int stage, int flag) {
@@ -478,12 +557,14 @@ void apply_remote_switch_bit_now(int stage, int flag, const char* reason,
         DuskLog.info("Multiplayer remote switch already set stage={} flag={} reason={} mode={}",
                      stage, flag, reason,
                      applyReason == RemoteSwitchApplyReason::Flush ? "flush" : "immediate");
+        dispatch_remote_switch_repair_hook(stage, flag, reason);
         return;
     }
 
+    const bool wasApplyingRemoteSaveBit = sApplyingRemoteSaveBit;
     sApplyingRemoteSaveBit = true;
     dComIfGs_onStageSwitch(stage, flag);
-    sApplyingRemoteSaveBit = false;
+    sApplyingRemoteSaveBit = wasApplyingRemoteSaveBit;
     remember_remote_switch(stage, flag, applyReason == RemoteSwitchApplyReason::Flush);
 
     DuskLog.info("Multiplayer applied remote switch bit stage={} flag={} reason={} mode={}",
@@ -496,20 +577,24 @@ void defer_remote_switch_bit(int stage, int flag, const RemoteSwitchPolicy& poli
     if (is_remote_switch_deferred(stage, flag)) {
         DuskLog.info("Multiplayer remote switch defer duplicate stage={} flag={} policyMode={} "
                      "targetStage={} targetRoom={} currentStage={} currentRoom={} stableTicks={} "
+                     "roomInitialized={} initializedStage={} initializedRoom={} initializedTicks={} "
                      "reason={}",
                      stage, flag, remote_switch_policy_mode_name(policy.mode), policy.stageName,
                      policy.room, current_stage_name(), dComIfGp_roomControl_getStayNo(),
-                     sPolicyRoomStableTicks, policy.reason);
+                     sPolicyRoomStableTicks, sPolicyRoomInitialized, sPolicyInitializedStageName,
+                     sPolicyInitializedRoom, sPolicyRoomInitializedTicks, policy.reason);
         return;
     }
 
     sDeferredRemoteSwitches.push_back({stage, flag, &policy, 0});
     DuskLog.info("Multiplayer deferred remote switch bit stage={} flag={} policyMode={} "
                  "targetStage={} targetRoom={} currentStage={} currentRoom={} stableTicks={} "
+                 "roomInitialized={} initializedStage={} initializedRoom={} initializedTicks={} "
                  "reason={}",
                  stage, flag, remote_switch_policy_mode_name(policy.mode), policy.stageName,
                  policy.room, current_stage_name(), dComIfGp_roomControl_getStayNo(),
-                 sPolicyRoomStableTicks, policy.reason);
+                 sPolicyRoomStableTicks, sPolicyRoomInitialized, sPolicyInitializedStageName,
+                 sPolicyInitializedRoom, sPolicyRoomInitializedTicks, policy.reason);
 }
 
 void suppress_remote_switch_bit(int stage, int flag, const RemoteSwitchPolicy& policy) {
@@ -518,6 +603,18 @@ void suppress_remote_switch_bit(int stage, int flag, const RemoteSwitchPolicy& p
                  stage, flag, remote_switch_policy_mode_name(policy.mode), policy.stageName,
                  policy.room, current_stage_name(), dComIfGp_roomControl_getStayNo(),
                  policy.reason);
+}
+
+bool suppress_remote_switch_from_source_actor(int stage, int flag, int sourceActor) {
+    const char* reason = group2_lifecycle_actor_reason(sourceActor);
+    if (reason == nullptr) {
+        return false;
+    }
+
+    DuskLog.info("Multiplayer suppressed remote switch bit stage={} flag={} sourceActor={} "
+                 "reason={}",
+                 stage, flag, sourceActor, reason);
+    return true;
 }
 
 void apply_remote_switch_bit(int stage, int flag) {
@@ -561,11 +658,14 @@ void flush_deferred_remote_switches() {
         if (deferred.policy != nullptr && is_remote_switch_policy_ready(*deferred.policy)) {
             DuskLog.info("Multiplayer flushing deferred remote switch bit stage={} flag={} "
                          "policyMode={} currentStage={} currentRoom={} stableTicks={} "
-                         "ageTicks={} reason={}",
+                         "roomInitialized={} initializedStage={} initializedRoom={} "
+                         "initializedTicks={} ageTicks={} reason={}",
                          deferred.stage, deferred.flag,
                          remote_switch_policy_mode_name(deferred.policy->mode),
                          current_stage_name(), dComIfGp_roomControl_getStayNo(),
-                         sPolicyRoomStableTicks, deferred.ageTicks, deferred.policy->reason);
+                         sPolicyRoomStableTicks, sPolicyRoomInitialized,
+                         sPolicyInitializedStageName, sPolicyInitializedRoom,
+                         sPolicyRoomInitializedTicks, deferred.ageTicks, deferred.policy->reason);
             apply_remote_switch_bit_now(deferred.stage, deferred.flag, deferred.policy->reason,
                                         RemoteSwitchApplyReason::Flush);
         } else {
@@ -869,6 +969,11 @@ void reset_connection_state() {
     sPolicyStageName.clear();
     sPolicyRoom = -128;
     sPolicyRoomStableTicks = 0;
+    sPolicyInitializedStageName.clear();
+    sPolicyInitializedRoom = -128;
+    sPolicyRoomInitializedTicks = 0;
+    sPolicyRoomInitialized = false;
+    sLocalSwitchActorContext = {};
     sSession.rxBuffer.clear();
     sSession.reconnectTicks = 0;
     sSession.pingTicks = 0;
@@ -1361,7 +1466,7 @@ void handle_message(const json& message) {
         for (const json& entry : message.value("switches", json::array())) {
             const int stage = entry.value("stage", -1);
             for (const json& flag : entry.value("flags", json::array())) {
-                dComIfGs_onStageSwitch(stage, flag.get<int>());
+                apply_remote_switch_bit(stage, flag.get<int>());
             }
         }
         for (const json& entry : message.value("items", json::array())) {
@@ -1619,8 +1724,11 @@ void handle_message(const json& message) {
     } else if (type == "switch_bit") {
         const int stage = message.value("stage", -1);
         const int flag = message.value("flag", -1);
+        const int sourceActor = message.value("source_actor", -1);
         if (stage >= 0 && flag >= 0) {
-            apply_remote_switch_bit(stage, flag);
+            if (!suppress_remote_switch_from_source_actor(stage, flag, sourceActor)) {
+                apply_remote_switch_bit(stage, flag);
+            }
         }
     } else if (type == "item_bit") {
         const int stage = message.value("stage", -1);
@@ -2529,12 +2637,83 @@ void notify_local_memory_switch_set(int flag) {
     }
 
     const int stageNo = dStage_stagInfo_GetSaveTbl(stagInfo);
-    send_json({
+    const bool hasActorContext = sLocalSwitchActorContext.active &&
+        sLocalSwitchActorContext.flag == flag;
+
+    if (hasActorContext && is_group2_lifecycle_actor(sLocalSwitchActorContext.actorName)) {
+        DuskLog.info("Multiplayer suppressed local switch bit stage={} flag={} sourceActor={} "
+                     "sourceRoom={} reason={}",
+                     stageNo, flag, sLocalSwitchActorContext.actorName,
+                     sLocalSwitchActorContext.room,
+                     group2_lifecycle_actor_reason(sLocalSwitchActorContext.actorName));
+        return;
+    }
+
+    json message = {
         {"type", "switch_bit"},
         {"stage", stageNo},
         {"flag", flag},
-    });
-    DuskLog.info("Multiplayer sent local switch bit stage={} flag={}", stageNo, flag);
+    };
+
+    if (hasActorContext) {
+        message["source_actor"] = sLocalSwitchActorContext.actorName;
+        message["source_room"] = sLocalSwitchActorContext.room;
+    }
+
+    send_json(message);
+    if (hasActorContext) {
+        DuskLog.info("Multiplayer sent local switch bit stage={} flag={} sourceActor={} sourceRoom={}",
+                     stageNo, flag, sLocalSwitchActorContext.actorName,
+                     sLocalSwitchActorContext.room);
+    } else {
+        DuskLog.info("Multiplayer sent local switch bit stage={} flag={}", stageNo, flag);
+    }
+}
+
+void begin_local_switch_actor_context(int actorName, int room, int flag) {
+    if (sLocalSwitchActorContext.depth++ == 0) {
+        sLocalSwitchActorContext.active = true;
+        sLocalSwitchActorContext.actorName = actorName;
+        sLocalSwitchActorContext.room = room;
+        sLocalSwitchActorContext.flag = flag;
+    }
+}
+
+void end_local_switch_actor_context() {
+    if (sLocalSwitchActorContext.depth <= 0) {
+        sLocalSwitchActorContext.depth = 0;
+        sLocalSwitchActorContext.active = false;
+        return;
+    }
+
+    if (--sLocalSwitchActorContext.depth == 0) {
+        sLocalSwitchActorContext.active = false;
+        sLocalSwitchActorContext.actorName = -1;
+        sLocalSwitchActorContext.room = -128;
+        sLocalSwitchActorContext.flag = -1;
+    }
+}
+
+void notify_local_room_scene_initialized(int room) {
+    const char* stage = current_stage_name();
+    if (stage == nullptr || stage[0] == '\0') {
+        return;
+    }
+
+    if (sPolicyRoomInitialized && sPolicyInitializedStageName == stage &&
+        sPolicyInitializedRoom == room)
+    {
+        return;
+    }
+
+    sPolicyRoomInitialized = true;
+    sPolicyInitializedStageName = stage;
+    sPolicyInitializedRoom = room;
+    sPolicyRoomInitializedTicks = 0;
+
+    DuskLog.info("Multiplayer room scene initialized currentStage={} currentRoom={} "
+                 "initializedRoom={}",
+                 stage, dComIfGp_roomControl_getStayNo(), room);
 }
 
 void notify_local_memory_item_set(int flag) {

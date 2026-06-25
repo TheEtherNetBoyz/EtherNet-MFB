@@ -9,6 +9,7 @@
 #include "d/actor/d_a_obj_scannon.h"
 #include "d/actor/d_a_player.h"
 #include "d/d_s_play.h"
+#include "dusk/logging.h"
 #include <cstring>
 
 DUSK_CONSTEXPR char DUSK_CONST* l_arcName_Comp = "SkyCannon";
@@ -823,6 +824,49 @@ void daSCannon_c::setCannonRepair() {
         dComIfGs_offSaveSwitch(6, 0x35);
         dComIfGs_onSaveSwitch(6, 0x36);
     }
+}
+
+bool daSCannon_c::duskRepairRemotePortalClosed(int i_swNo) {
+    if (mLayerNo != 1 || getSw1() != i_swNo || !fopAcM_isSwitch(this, getSw1())) {
+        return false;
+    }
+
+    if (mIsPortal == FALSE && mMode == MODE_END && mDrawShadow == TRUE) {
+        return false;
+    }
+
+    const bool wasPortal = mIsPortal != FALSE;
+    mIsPortal = FALSE;
+    mDrawShadow = TRUE;
+    mMode = MODE_END;
+    setModelMtx();
+    fopAcM_SetMtx(this, mpModels[mIsRepaired]->getBaseTRMtx());
+
+    DuskLog.info("SCannon remote portal repair room={} sw={} wasPortal={}",
+                 fopAcM_GetRoomNo(this), i_swNo, wasPortal);
+    return true;
+}
+
+namespace {
+
+void* judgeSCannonRemotePortalClosed(void* i_actor, void* i_data) {
+    if (fopAcM_GetName(i_actor) != fpcNm_Obj_SCannon_e) {
+        return NULL;
+    }
+
+    daSCannon_c* cannon = static_cast<daSCannon_c*>(i_actor);
+    if (!cannon->duskRepairRemotePortalClosed(*static_cast<int*>(i_data))) {
+        return NULL;
+    }
+
+    return i_actor;
+}
+
+}  // namespace
+
+bool duskRepairSCannonRemotePortalClosed(int i_swNo) {
+    int swNo = i_swNo;
+    return fopAcIt_Judge(judgeSCannonRemotePortalClosed, &swNo) != NULL;
 }
 
 static int daSCannon_create(daSCannon_c* i_this) {

@@ -365,6 +365,54 @@ int daObjCBlk_c::Delete() {
     return 1;
 }
 
+bool daObjCBlk_c::repairSwitchPosition(int i_swNo) {
+    if (getSwNo() != i_swNo || getPathID() == 0xff || !fopAcM_isSwitch(this, getSwNo())) {
+        return false;
+    }
+
+    dPath* path = dPath_GetRoomPath(getPathID(), fopAcM_GetHomeRoomNo(this));
+    if (path == NULL || path->m_num < 2) {
+        return false;
+    }
+
+    dPnt* pnt = dPath_GetPnt(path, 1);
+    if (pnt == NULL) {
+        return false;
+    }
+
+    if (current.pos.abs(pnt->m_position) <= 1.0f) {
+        return false;
+    }
+
+    current.pos = pnt->m_position;
+    old.pos = current.pos;
+    setBaseMtx();
+    fopAcM_SetMtx(this, model1->getBaseTRMtx());
+    return true;
+}
+
+namespace {
+
+void* judgeCBlockBySwitch(void* i_actor, void* i_data) {
+    if (fopAcM_GetName(i_actor) != fpcNm_Obj_ChainBlock_e) {
+        return NULL;
+    }
+
+    daObjCBlk_c* cblock = static_cast<daObjCBlk_c*>(i_actor);
+    if (!cblock->repairSwitchPosition(*static_cast<int*>(i_data))) {
+        return NULL;
+    }
+
+    return i_actor;
+}
+
+}  // namespace
+
+bool duskRepairCBlockSwitchPosition(int i_swNo) {
+    int swNo = i_swNo;
+    return fopAcIt_Judge(judgeCBlockBySwitch, &swNo) != NULL;
+}
+
 static int daObjCBlk_Draw(daObjCBlk_c* i_this) {
     return i_this->MoveBGDraw();
 }

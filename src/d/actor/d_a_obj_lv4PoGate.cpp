@@ -7,6 +7,7 @@
 
 #include "d/actor/d_a_obj_lv4PoGate.h"
 #include "d/d_com_inf_game.h"
+#include "dusk/logging.h"
 #include "f_pc/f_pc_name.h"
 
 daLv4PoGate_HIO_c::daLv4PoGate_HIO_c() {
@@ -61,6 +62,10 @@ int daLv4PoGate_c::create() {
         mMoveTarget = 1000.0f;
         mMoveValue = 0.0f;
 
+        if (fopAcM_isSwitch(this, 0x26)) {
+            mInitMove = 0;
+        }
+
         if (!mInitMove) {
             mMoveValue = mMoveTarget;
         }
@@ -73,6 +78,9 @@ int daLv4PoGate_c::create() {
 }
 
 int daLv4PoGate_c::Execute(Mtx** param_0) {
+    if (fopAcM_isSwitch(this, 0x26)) {
+        duskForceOpenFromRemoteSwitch();
+    }
     moveGate();
     *param_0 = &mpModel->getBaseTRMtx();
     setBaseMtx();
@@ -235,6 +243,51 @@ int daLv4PoGate_c::Draw() {
 int daLv4PoGate_c::Delete() {
     dComIfG_resDelete(&mPhase, "L4R02Gate");
     return 1;
+}
+
+bool daLv4PoGate_c::duskForceOpenFromRemoteSwitch() {
+    const bool wasClosed = mInitMove != 0 || mMoveValue != mMoveTarget || mMode != MODE_WAIT_e;
+
+    if (mSw != 0xFF) {
+        fopAcM_offSwitch(this, mSw);
+    }
+
+    mInitMove = 0;
+    mMoveValue = mMoveTarget;
+    speedF = 0.0f;
+    init_modeWait();
+    setBaseMtx();
+    fopAcM_SetMtx(this, mpModel->getBaseTRMtx());
+
+    if (wasClosed) {
+        DuskLog.info("Obj_Lv4PoGate remote completion repair room={} sw={} moveValue={} target={}",
+                     fopAcM_GetRoomNo(this), mSw, mMoveValue, mMoveTarget);
+    }
+
+    return wasClosed;
+}
+
+namespace {
+
+void* judgeLv4PoGate(void* i_actor, void* i_data) {
+    (void)i_data;
+
+    if (fopAcM_GetName(i_actor) != fpcNm_Obj_Lv4PoGate_e) {
+        return NULL;
+    }
+
+    daLv4PoGate_c* gate = static_cast<daLv4PoGate_c*>(i_actor);
+    if (!gate->duskForceOpenFromRemoteSwitch()) {
+        return NULL;
+    }
+
+    return i_actor;
+}
+
+}  // namespace
+
+bool duskRepairLv4PoGateOpen() {
+    return fopAcIt_Judge(judgeLv4PoGate, NULL) != NULL;
 }
 
 static int daLv4PoGate_Draw(daLv4PoGate_c* i_this) {

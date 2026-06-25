@@ -13,6 +13,9 @@
 #include "m_Do/m_Do_hostIO.h"
 #include "SSystem/SComponent/c_phase.h"
 #include "dusk/endian_ssystem.h"
+#if TARGET_PC
+#include "dusk/multiplayer/event_sync.hpp"
+#endif
 
 #if !__MWERKS__
 // mwerks compiler makes value initialization act like default initialization so we need
@@ -444,7 +447,15 @@ BOOL dComIfGs_isSwitch(int i_no, int i_roomNo);
 void dComIfGs_offActor(int i_no, int i_roomNo);
 
 inline void fopAcM_onSwitch(const fopAc_ac_c* i_actor, int sw) {
-    return dComIfGs_onSwitch(sw, fopAcM_GetHomeRoomNo(i_actor));
+#if TARGET_PC
+    dusk::multiplayer::begin_local_switch_actor_context(
+                                                        ((const base_process_class*)i_actor)->profname,
+                                                        fopAcM_GetHomeRoomNo(i_actor), sw);
+#endif
+    dComIfGs_onSwitch(sw, fopAcM_GetHomeRoomNo(i_actor));
+#if TARGET_PC
+    dusk::multiplayer::end_local_switch_actor_context();
+#endif
 }
 
 inline void fopAcM_offSwitch(const fopAc_ac_c* i_actor, int sw) {

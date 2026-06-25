@@ -71,5 +71,6 @@ private:
 
 STATIC_ASSERT(sizeof(daObjPicture_c) == 0xda0);
 
+bool duskMonitorObjPictureSwitch(int i_swNo);
 
 #endif /* D_A_OBJ_PICTURE_H */

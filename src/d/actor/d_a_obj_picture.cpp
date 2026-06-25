@@ -497,6 +497,28 @@ void daObjPicture_c::setPicAtCol() {
     dComIfG_Ccsp()->Set(&mAtCyl);
 }
 
+namespace {
+
+void* judgeObjPictureBySwitch(void* i_actor, void* i_data) {
+    if (fopAcM_GetName(i_actor) != fpcNm_Obj_Picture_e) {
+        return NULL;
+    }
+
+    daObjPicture_c* picture = static_cast<daObjPicture_c*>(i_actor);
+    if (picture->getSW_0() != *static_cast<int*>(i_data)) {
+        return NULL;
+    }
+
+    return i_actor;
+}
+
+}  // namespace
+
+bool duskMonitorObjPictureSwitch(int i_swNo) {
+    int swNo = i_swNo;
+    return fopAcIt_Judge(judgeObjPictureBySwitch, &swNo) != NULL;
+}
+
 static int daObjPicture_create(daObjPicture_c* i_this) {
     fopAcM_ct(i_this, daObjPicture_c);
     return i_this->create();

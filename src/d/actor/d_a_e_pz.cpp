@@ -10,6 +10,7 @@
 #include "d/actor/d_a_player.h"
 #include "d/d_debug_viewer.h"
 #include "d/d_s_play.h"
+#include "dusk/logging.h"
 #include "c/c_damagereaction.h"
 #include "Z2AudioLib/Z2Instances.h"
 #include "f_op/f_op_actor_enemy.h"
@@ -2316,6 +2317,10 @@ int daE_PZ_c::execute() {
         return 1;
     }
 
+    if (duskRepairRemoteDefeat()) {
+        return 1;
+    }
+
     if (field_0x7d0 != 0) {
         field_0x7d0--;
     }
@@ -2466,6 +2471,67 @@ static int useHeapInit(fopAc_ac_c* i_this) {
     return ((daE_PZ_c*)i_this)->CreateHeap();
 }
 
+namespace {
+
+void* judgeKytag12InRoom(void* i_actor, void* i_data) {
+    if (fopAcM_GetName(i_actor) != fpcNm_KYTAG12_e) {
+        return NULL;
+    }
+
+    if (fopAcM_GetRoomNo(static_cast<fopAc_ac_c*>(i_actor)) != *static_cast<int*>(i_data)) {
+        return NULL;
+    }
+
+    return i_actor;
+}
+
+bool duskEnsurePZDefeatMist(int i_roomNo) {
+    if (fopAcIt_Judge(judgeKytag12InRoom, &i_roomNo) != NULL) {
+        return false;
+    }
+
+    cXyz pos(0.0f, 0.0f, -1300.0f);
+    fopAcM_create(fpcNm_KYTAG12_e, 1, &pos, i_roomNo, NULL, NULL, -1);
+    return true;
+}
+
+void* judgeE_PZBySwitch(void* i_actor, void* i_data) {
+    if (fopAcM_GetName(i_actor) != fpcNm_E_PZ_e) {
+        return NULL;
+    }
+
+    daE_PZ_c* pz = static_cast<daE_PZ_c*>(i_actor);
+    if (pz->bitSw != *static_cast<int*>(i_data)) {
+        return NULL;
+    }
+
+    if (!pz->duskRepairRemoteDefeat()) {
+        return NULL;
+    }
+
+    return i_actor;
+}
+
+}  // namespace
+
+bool daE_PZ_c::duskRepairRemoteDefeat() {
+    if ((arg0 != 0 && arg0 != 1) || bitSw == 0xFF || !fopAcM_isSwitch(this, bitSw)) {
+        return false;
+    }
+
+    const int roomNo = fopAcM_GetRoomNo(this);
+    const bool spawnedMist = duskEnsurePZDefeatMist(roomNo);
+    DuskLog.info("E_PZ remote defeat repair room={} arg0={} bitSw={} spawned_mist={}", roomNo,
+                 arg0, bitSw, spawnedMist);
+    fopAcM_delete(this);
+    return true;
+}
+
+bool duskRepairE_PZRemoteDefeat(int i_swNo) {
+    int swNo = i_swNo;
+    return fopAcIt_Judge(judgeE_PZBySwitch, &swNo) != NULL;
+}
+
 int daE_PZ_c::create() {
     fopAcM_ct(this, daE_PZ_c);
 
@@ -2506,8 +2572,7 @@ int daE_PZ_c::create() {
             fopAcM_SetMax(this, 4000.0f, 4000.0f, 4000.0f);
         } else {
             if ((arg0 == 0 || arg0 == 1) && bitSw != 0xFF && fopAcM_isSwitch( this, bitSw)) {
-                cXyz pos(0.0f, 0.0f, -1300.0f);
-                fopAcM_create(fpcNm_KYTAG12_e, 1, &pos, fopAcM_GetRoomNo(this), NULL, NULL, -1);
+                duskEnsurePZDefeatMist(fopAcM_GetRoomNo(this));
                 return cPhs_ERROR_e;
             }
     

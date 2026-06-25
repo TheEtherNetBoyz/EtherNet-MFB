@@ -547,6 +547,37 @@ void daTbox_c::forceOpenVisual() {
     dTres_c::offStatus(0, tbox_no, 1);
 }
 
+bool daTbox_c::repairJumpSwitchPosition(int i_swNo) {
+    if (getSwNo() != i_swNo || !dComIfGs_isSwitch(getSwNo(), fopAcM_GetRoomNo(this))) {
+        return false;
+    }
+
+    const int funcType = getFuncType();
+    if (!((funcType == 6 && getSwType() == 15) || funcType == 7)) {
+        return false;
+    }
+
+    dPath* path = dPath_GetRoomPath(getPathId(), -1);
+    if (path == NULL || path->m_num <= 0) {
+        return false;
+    }
+
+    dPnt* pnt = &path->m_points[path->m_num - 1];
+    if (current.pos.abs(pnt->m_position) <= 1.0f) {
+        return false;
+    }
+
+    current.pos = pnt->m_position;
+    home.pos = pnt->m_position;
+    old.pos = current.pos;
+    attention_info.position = current.pos;
+    eyePos = current.pos;
+    initBaseMtx();
+    fopAcM_SetMtx(this, mpModel->getBaseTRMtx());
+    dTres_c::setPosition(getTboxNo(), &current.pos);
+    return true;
+}
+
 namespace {
 
 void* judgeTboxByNo(void* i_actor, void* i_data) {
@@ -562,6 +593,19 @@ void* judgeTboxByNo(void* i_actor, void* i_data) {
     return i_actor;
 }
 
+void* judgeTboxJumpBySwitch(void* i_actor, void* i_data) {
+    if (fopAcM_GetName(i_actor) != fpcNm_TBOX_e) {
+        return NULL;
+    }
+
+    daTbox_c* tbox = static_cast<daTbox_c*>(i_actor);
+    if (!tbox->repairJumpSwitchPosition(*static_cast<int*>(i_data))) {
+        return NULL;
+    }
+
+    return i_actor;
+}
+
 }  // namespace
 
 void duskRepairTboxVisual(int i_tboxNo) {
@@ -570,6 +614,11 @@ void duskRepairTboxVisual(int i_tboxNo) {
     if (tbox != NULL) {
         tbox->forceOpenVisual();
     }
+}
+
+bool duskRepairTboxJumpSwitchPosition(int i_swNo) {
+    int swNo = i_swNo;
+    return fopAcIt_Judge(judgeTboxJumpBySwitch, &swNo) != NULL;
 }
 
 int daTbox_c::boxCheck() {

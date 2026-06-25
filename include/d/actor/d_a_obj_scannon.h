@@ -72,6 +72,7 @@ public:
     void exeEmtLine();
     void delEmtAll();
     void setCannonRepair();
+    bool duskRepairRemotePortalClosed(int i_swNo);
 
     int getSw1() { return fopAcM_GetParamBit(this, 0, 8); }
     int getSw2() { return fopAcM_GetParamBit(this, 8, 8); }
@@ -116,5 +117,6 @@ private:
 
 STATIC_ASSERT(sizeof(daSCannon_c) == 0x638);
 
+bool duskRepairSCannonRemotePortalClosed(int i_swNo);
 
 #endif /* D_A_OBJ_SCANNON_H */
