@@ -73,6 +73,7 @@ struct DirectHostOptions {
     int port = 34197;
     bool debugMarker = true;
     bool dummyModel = true;
+    bool nameLabels = true;
 };
 
 struct DirectJoinOptions {
@@ -80,6 +81,7 @@ struct DirectJoinOptions {
     std::string inviteCode;
     bool debugMarker = true;
     bool dummyModel = true;
+    bool nameLabels = true;
 };
 
 struct RelayJoinOptions {
@@ -90,6 +92,7 @@ struct RelayJoinOptions {
     int port = 34197;
     bool debugMarker = true;
     bool dummyModel = true;
+    bool nameLabels = true;
 };
 
 struct SessionStatus {
@@ -105,6 +108,8 @@ struct SessionStatus {
     int port = 0;
     bool debugMarker = false;
     bool dummyModel = false;
+    bool nameLabels = false;
+    bool nameLabelsHostControlled = false;
     bool hasRecentPeerPose = false;
 };
 
@@ -117,6 +122,7 @@ bool join_direct(const DirectJoinOptions& options, std::string* errorOut = nullp
 bool join_relay(const RelayJoinOptions& options, std::string* errorOut = nullptr);
 void disconnect_session();
 SessionStatus get_session_status();
+void set_name_labels_enabled(bool enabled);
 bool has_recent_peer_pose(uint32_t maxAgeTicks);
 PeerPoseSnapshot get_latest_peer_pose();
 void draw_debug_peer_marker();

@@ -51,6 +51,20 @@ void ImGuiOnline::draw(bool& open) {
         ImGui::Text("Peer pose");
         ImGui::SameLine(115.0f);
         ImGui::TextUnformatted(status.hasRecentPeerPose ? "recent" : "waiting");
+
+        bool nameLabels = status.nameLabels;
+        if (status.nameLabelsHostControlled) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Checkbox("Name labels", &nameLabels) && !status.nameLabelsHostControlled) {
+            multiplayer::set_name_labels_enabled(nameLabels);
+            m_nameLabels = nameLabels;
+        }
+        if (status.nameLabelsHostControlled) {
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::TextDisabled("(host controlled)");
+        }
     }
 
     if (!m_statusMessage.empty()) {
@@ -87,6 +101,8 @@ void ImGuiOnline::draw(bool& open) {
                 ImGui::Checkbox("Debug marker", &m_debugMarker);
                 ImGui::SameLine();
                 ImGui::Checkbox("Remote Link model", &m_dummyModel);
+                ImGui::SameLine();
+                ImGui::Checkbox("Name labels", &m_nameLabels);
 
                 if (ImGui::Button("Host Lobby")) {
                     multiplayer::DirectHostOptions options;
@@ -97,6 +113,7 @@ void ImGuiOnline::draw(bool& open) {
                     options.port = m_port;
                     options.debugMarker = m_debugMarker;
                     options.dummyModel = m_dummyModel;
+                    options.nameLabels = m_nameLabels;
 
                     std::string error;
                     if (multiplayer::host_direct(options, &error)) {
@@ -116,6 +133,8 @@ void ImGuiOnline::draw(bool& open) {
                 ImGui::Checkbox("Debug marker##join", &m_debugMarker);
                 ImGui::SameLine();
                 ImGui::Checkbox("Remote Link model##join", &m_dummyModel);
+                ImGui::SameLine();
+                ImGui::Checkbox("Name labels##join", &m_nameLabels);
 
                 if (ImGui::Button("Join Lobby")) {
                     multiplayer::DirectJoinOptions options;
@@ -123,6 +142,7 @@ void ImGuiOnline::draw(bool& open) {
                     options.inviteCode = m_inviteCode;
                     options.debugMarker = m_debugMarker;
                     options.dummyModel = m_dummyModel;
+                    options.nameLabels = m_nameLabels;
 
                     std::string error;
                     if (multiplayer::join_direct(options, &error)) {
@@ -149,6 +169,8 @@ void ImGuiOnline::draw(bool& open) {
             ImGui::Checkbox("Debug marker##relay", &m_debugMarker);
             ImGui::SameLine();
             ImGui::Checkbox("Remote Link model##relay", &m_dummyModel);
+            ImGui::SameLine();
+            ImGui::Checkbox("Name labels##relay", &m_nameLabels);
 
             if (ImGui::Button("Join Relay Lobby")) {
                 multiplayer::RelayJoinOptions options;
@@ -159,6 +181,7 @@ void ImGuiOnline::draw(bool& open) {
                 options.port = m_relayPort;
                 options.debugMarker = m_debugMarker;
                 options.dummyModel = m_dummyModel;
+                options.nameLabels = m_nameLabels;
 
                 std::string error;
                 if (multiplayer::join_relay(options, &error)) {

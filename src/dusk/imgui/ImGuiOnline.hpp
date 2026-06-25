@@ -24,6 +24,7 @@ private:
     int m_relayPort = 34197;
     bool m_debugMarker = true;
     bool m_dummyModel = true;
+    bool m_nameLabels = true;
     std::string m_statusMessage;
 };
 

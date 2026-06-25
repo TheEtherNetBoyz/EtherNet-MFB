@@ -15,6 +15,8 @@
 #include "d/d_com_inf_game.h"
 #include "d/d_item.h"
 #include "d/d_item_data.h"
+#include "d/d_msg_object.h"
+#include "d/d_s_play.h"
 #include "dusk/logging.h"
 #include "dusk/multiplayer/event_sync.hpp"
 #include "dusk/multiplayer/invite_code.hpp"
@@ -192,6 +194,7 @@ bool sEnabled = false;
 Session sSession;
 
 bool sDummyModelEnabled = false;
+bool sNameLabelsEnabled = true;
 
 // DarkClearLV/TransformLV (Twilight-clear / wolf-transform region levels)
 // double as room-layer/actor-set selectors in at least Ordon Village and
@@ -214,6 +217,9 @@ struct Notification {
 
 std::vector<Notification> sNotifications;
 std::map<std::string, std::string> sPeerNames;
+std::map<std::string, uint8_t> sPeerColorSlots;
+uint8_t sLocalPlayerColorSlot = 0;
+bool sLocalPlayerColorSlotReserved = true;
 
 // Set while applying any remote save-state bit (event bit, chest bit, ...),
 // so the dComIfGs_* setter call that applies it doesn't loop back through
@@ -1029,6 +1035,68 @@ std::string display_name_for_peer(const std::string& peerId) {
     return peerId.empty() ? "Peer" : peerId;
 }
 
+bool is_player_color_slot_used(uint8_t slot) {
+    if (sLocalPlayerColorSlotReserved && sLocalPlayerColorSlot == slot) {
+        return true;
+    }
+
+    for (const auto& entry : sPeerColorSlots) {
+        if (entry.second == slot) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void reserve_local_player_color_slot(uint8_t slot) {
+    sLocalPlayerColorSlot = std::min<uint8_t>(slot, static_cast<uint8_t>(7));
+    sLocalPlayerColorSlotReserved = true;
+}
+
+void assign_peer_color_slot(const std::string& peerId) {
+    if (peerId.empty() || sPeerColorSlots.find(peerId) != sPeerColorSlots.end()) {
+        return;
+    }
+
+    for (uint8_t slot = 0; slot < 8; ++slot) {
+        if (!is_player_color_slot_used(slot)) {
+            sPeerColorSlots[peerId] = slot;
+            return;
+        }
+    }
+
+    sPeerColorSlots[peerId] = 7;
+}
+
+void assign_peer_color_slot(const std::string& peerId, uint8_t slot) {
+    if (!peerId.empty()) {
+        sPeerColorSlots[peerId] = std::min<uint8_t>(slot, static_cast<uint8_t>(7));
+    }
+}
+
+ImU32 color_for_peer(const std::string& peerId) {
+    assign_peer_color_slot(peerId);
+    const auto slotIt = sPeerColorSlots.find(peerId);
+    const uint8_t slot = slotIt != sPeerColorSlots.end() ? slotIt->second : 7;
+
+    static const ImU32 kPlayerNameColors[8] = {
+        IM_COL32(255, 255, 255, 255),  // Player 1
+        IM_COL32(94, 211, 255, 255),
+        IM_COL32(255, 214, 92, 255),
+        IM_COL32(101, 232, 132, 255),
+        IM_COL32(255, 133, 203, 255),
+        IM_COL32(255, 169, 82, 255),
+        IM_COL32(184, 160, 255, 255),
+        IM_COL32(90, 232, 209, 255),
+    };
+    return kPlayerNameColors[slot];
+}
+
+void clear_player_color_slots() {
+    sPeerColorSlots.clear();
+    reserve_local_player_color_slot(0);
+}
+
 float peer_label_height(const PeerPoseSnapshot& pose) {
     if (pose.isTransforming) {
         return pose.transformFromWolf && pose.transformToWolf ? 115.0f : 205.0f;
@@ -1043,6 +1111,19 @@ bool peer_pose_is_visible_for_labels(const PeerPoseSnapshot& pose, const char* l
     }
 
     return dComIfGp_roomControl_checkRoomDisp(pose.room);
+}
+
+bool should_draw_peer_name_labels_over_game() {
+    if (dComIfGp_isPauseFlag() || dScnPly_c::isPause() || dComIfGp_getMesgStatus() != 0) {
+        return false;
+    }
+
+    dMsgObject_c* msgObject = dMsgObject_getMsgObjectClass();
+    if (msgObject != nullptr && dMsgObject_isTalkNowCheck()) {
+        return false;
+    }
+
+    return true;
 }
 
 bool project_peer_label_position(const PeerPoseSnapshot& pose, ImVec2* outPos) {
@@ -1115,7 +1196,8 @@ bool project_peer_label_position(const PeerPoseSnapshot& pose, ImVec2* outPos) {
 }
 
 void draw_peer_name_labels() {
-    if (!sEnabled || !sDummyModelEnabled || !sSession.debugMarker || !has_recent_peer_pose(30) ||
+    if (!sEnabled || !sNameLabelsEnabled || !sDummyModelEnabled || !sSession.debugMarker ||
+        !has_recent_peer_pose(30) || !should_draw_peer_name_labels_over_game() ||
         !is_peer_dummy_gameplay_ready())
     {
         return;
@@ -1144,14 +1226,26 @@ void draw_peer_name_labels() {
         }
 
         const float fontSize = ImGui::GetFontSize() * 0.92f;
-        const ImVec2 textSize = ImGui::CalcTextSize(label.c_str());
+        const float fontScale = fontSize / ImGui::GetFontSize();
+        const ImVec2 baseTextSize = ImGui::CalcTextSize(label.c_str());
+        const ImVec2 textSize(baseTextSize.x * fontScale, baseTextSize.y * fontScale);
         pos.x -= textSize.x * 0.5f;
         pos.y -= fontSize + 8.0f;
+        pos.x = std::round(pos.x);
+        pos.y = std::round(pos.y);
 
-        const ImU32 shadow = IM_COL32(0, 0, 0, 205);
-        const ImU32 text = IM_COL32(245, 248, 255, 245);
-        drawList->AddText(nullptr, fontSize, ImVec2(pos.x + 1.0f, pos.y + 1.0f),
-                          shadow, label.c_str());
+        const ImU32 outline = IM_COL32(0, 0, 0, 235);
+        const ImU32 text = color_for_peer(entry.first);
+        for (const ImVec2 offset : {ImVec2(-2.0f, 0.0f), ImVec2(-1.0f, 0.0f),
+                                    ImVec2(1.0f, 0.0f), ImVec2(2.0f, 0.0f),
+                                    ImVec2(0.0f, -2.0f), ImVec2(0.0f, -1.0f),
+                                    ImVec2(0.0f, 1.0f), ImVec2(0.0f, 2.0f),
+                                    ImVec2(-1.0f, -1.0f), ImVec2(1.0f, -1.0f),
+                                    ImVec2(-1.0f, 1.0f), ImVec2(1.0f, 1.0f)})
+        {
+            drawList->AddText(nullptr, fontSize, ImVec2(pos.x + offset.x, pos.y + offset.y),
+                              outline, label.c_str());
+        }
         drawList->AddText(nullptr, fontSize, pos, text, label.c_str());
     }
 }
@@ -1187,6 +1281,8 @@ void reset_connection_state() {
     sSession.peerPoseLogTicks = 0;
     sSession.peerPoses.clear();
     sPeerNames.clear();
+    clear_player_color_slots();
+    sNameLabelsEnabled = true;
     sNotifications.clear();
     destroy_all_remote_link_dummies();
 }
@@ -1490,6 +1586,7 @@ void send_welcome_to_peer(DirectPeer& peer) {
         {"protocol_version", 1},
         {"room_id", sSession.room},
         {"client_id", peer.id},
+        {"name_labels", sNameLabelsEnabled},
         {"peers", direct_peer_list(peer.id)},
     });
     peer.snapshotPending = peer.welcomed;
@@ -1506,6 +1603,7 @@ void send_welcome() {
         {"protocol_version", 1},
         {"room_id", sSession.room},
         {"client_id", "host"},
+        {"name_labels", sNameLabelsEnabled},
         {"peers", json::array()},
     });
     sSession.welcomed = sSession.welcomeSent;
@@ -1723,6 +1821,7 @@ void remove_direct_peer(const std::string& peerId, const char* reason) {
     sSession.directPeers.erase(it);
     sSession.peerPoses.erase(peerId);
     sPeerNames.erase(peerId);
+    sPeerColorSlots.erase(peerId);
     destroy_remote_link_dummy(peerId);
 
     json left = {{"type", "peer_left"}, {"client_id", peerId}};
@@ -1775,6 +1874,7 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
 
         sender->name = message.value("name", sender->name);
         sPeerNames[sender->id] = sender->name;
+        assign_peer_color_slot(sender->id);
         DuskLog.info("Multiplayer direct peer joined id={} name={} room={}", sender->id,
                      sender->name, message.value("room_id", ""));
         push_notification(sender->name + " joined");
@@ -1786,16 +1886,28 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         }, sender->id);
     } else if (type == "welcome") {
         sSession.welcomed = true;
+        if (message.contains("name_labels")) {
+            sNameLabelsEnabled = message.value("name_labels", sNameLabelsEnabled);
+        }
         DuskLog.info("Multiplayer joined room={} client_id={} peers={}",
                      message.value("room_id", ""), message.value("client_id", ""),
                      message.value("peers", json::array()).size());
+
+        sPeerColorSlots.clear();
+        uint8_t nextColorSlot = 0;
+        if (sSession.mode == NetworkMode::DirectJoin) {
+            sPeerNames[kDirectPeerId] = "Host";
+            assign_peer_color_slot(kDirectPeerId, nextColorSlot++);
+        }
         for (const json& peer : message.value("peers", json::array())) {
             const std::string peerId = peer.value("client_id", "");
             const std::string peerName = peer.value("name", peerId);
             if (!peerId.empty()) {
                 sPeerNames[peerId] = peerName;
+                assign_peer_color_slot(peerId, nextColorSlot++);
             }
         }
+        reserve_local_player_color_slot(nextColorSlot);
         push_notification("Joined lobby " + message.value("room_id", sSession.room));
         sSession.snapshotPending = true;
     } else if (type == "peer_joined") {
@@ -1803,16 +1915,23 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         const std::string peerName = message.value("name", peerId);
         if (!peerId.empty()) {
             sPeerNames[peerId] = peerName;
+            assign_peer_color_slot(peerId);
         }
         DuskLog.info("Multiplayer peer joined id={} name={}", message.value("client_id", ""),
                      message.value("name", ""));
         push_notification(display_name_for_peer(peerId) + " joined");
+    } else if (type == "name_labels") {
+        if (sSession.mode == NetworkMode::DirectJoin) {
+            sNameLabelsEnabled = message.value("enabled", sNameLabelsEnabled);
+            DuskLog.info("Multiplayer name labels {}", sNameLabelsEnabled ? "enabled" : "disabled");
+        }
     } else if (type == "peer_left") {
         const std::string leftPeerId = resolve_peer_id(routedMessage);
         const std::string peerName = display_name_for_peer(leftPeerId);
         DuskLog.info("Multiplayer peer left id={}", leftPeerId);
         sSession.peerPoses.erase(leftPeerId);
         sPeerNames.erase(leftPeerId);
+        sPeerColorSlots.erase(leftPeerId);
         destroy_remote_link_dummy(leftPeerId);
         push_notification(peerName + " left");
     } else if (type == "save_snapshot") {
@@ -2716,6 +2835,7 @@ bool configure_session() {
     sSession.port = env_int("DUSK_MP_PORT", 34197);
     sSession.debugMarker = env_enabled("DUSK_MP_DEBUG_MARKER");
     sDummyModelEnabled = env_enabled("DUSK_MP_DUMMY_MODEL");
+    sNameLabelsEnabled = !env_enabled("DUSK_MP_HIDE_NAME_LABELS");
     sLayerRiskSyncEnabled = env_enabled("DUSK_MP_LAYER_SYNC");
     sSession.sessionId = make_session_token(9);
     sSession.sessionKey = make_session_token(16);
@@ -2924,6 +3044,7 @@ bool host_direct(const DirectHostOptions& options, std::string* errorOut) {
     sSession.port = options.port;
     sSession.debugMarker = options.debugMarker;
     sDummyModelEnabled = options.dummyModel;
+    sNameLabelsEnabled = options.nameLabels;
     sSession.sessionId = make_session_token(9);
     sSession.sessionKey = make_session_token(16);
 
@@ -2985,6 +3106,7 @@ bool join_direct(const DirectJoinOptions& options, std::string* errorOut) {
     sSession.inviteCode = options.inviteCode;
     sSession.debugMarker = options.debugMarker;
     sDummyModelEnabled = options.dummyModel;
+    sNameLabelsEnabled = options.nameLabels;
 
     DuskLog.info("Multiplayer module enabled mode={} room={}", mode_name(sSession.mode),
                  sSession.room);
@@ -3030,6 +3152,7 @@ bool join_relay(const RelayJoinOptions& options, std::string* errorOut) {
     sSession.relayPassword = options.password;
     sSession.debugMarker = options.debugMarker;
     sDummyModelEnabled = options.dummyModel;
+    sNameLabelsEnabled = options.nameLabels;
 
     DuskLog.info("Multiplayer module enabled mode={} room={}", mode_name(sSession.mode),
                  sSession.room);
@@ -3065,8 +3188,20 @@ SessionStatus get_session_status() {
     status.port = sSession.port;
     status.debugMarker = sSession.debugMarker;
     status.dummyModel = sDummyModelEnabled;
+    status.nameLabels = sNameLabelsEnabled;
+    status.nameLabelsHostControlled = sSession.mode == NetworkMode::DirectJoin;
     status.hasRecentPeerPose = has_recent_peer_pose(90);
     return status;
+}
+
+void set_name_labels_enabled(bool enabled) {
+    sNameLabelsEnabled = enabled;
+    if (sEnabled && sSession.mode == NetworkMode::DirectHost) {
+        send_json({
+            {"type", "name_labels"},
+            {"enabled", sNameLabelsEnabled},
+        });
+    }
 }
 
 bool has_recent_peer_pose(uint32_t maxAgeTicks) {
