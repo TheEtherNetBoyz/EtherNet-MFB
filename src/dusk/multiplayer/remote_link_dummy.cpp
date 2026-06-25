@@ -14,10 +14,14 @@
 #include "dusk/logging.h"
 #include "f_op/f_op_actor_mng.h"
 #include "f_pc/f_pc_name.h"
+#include "JSystem/J3DGraphLoader/J3DAnmLoader.h"
 #include "JSystem/J3DGraphBase/J3DMaterial.h"
 #include "JSystem/J3DGraphBase/J3DShape.h"
+#include "JSystem/J3DGraphBase/J3DTexture.h"
+#include "JSystem/JUtility/JUTNameTab.h"
 #include "m_Do/m_Do_ext.h"
 #include "m_Do/m_Do_mtx.h"
+#include "res/Object/Alink.h"
 
 namespace dusk::multiplayer {
 namespace {
@@ -26,6 +30,18 @@ struct RemoteLinkModel {
     J3DModel* model = nullptr;
     J3DModelData* data = nullptr;
     JKRSolidHeap* heap = nullptr;
+};
+
+struct RemoteFaceAnim {
+    J3DModelData* data = nullptr;
+    void* btpBuffer = nullptr;
+    void* btkBuffer = nullptr;
+};
+
+struct RemoteEquipmentInterp {
+    J3DModel* model = nullptr;
+    dKy_tevstr_c tevStr{};
+    bool suppressMaterialAnm = true;
 };
 
 struct RemoteLinkDummy {
@@ -44,9 +60,29 @@ struct RemoteLinkDummy {
     uint32_t swordLogCount = 0;
     uint32_t wolfDrawLogCount = 0;
     bool lastObservedIsWolf = false;
+    int lastObservedClothesVariant = -1;
+    int lastObservedShieldVariant = -1;
+    bool lastObservedShieldDraw = false;
     RemoteLinkMatrixSnapshot lastLinkMatrices;
     bool lastLinkMatricesIsWolf = false;
     bool loggedReady = false;
+    dEyeHL_c humanEyeHL;
+    dEyeHL_c wolfEyeHL;
+    daAlink_matAnm_c* humanEyeAnm[2] = {nullptr, nullptr};
+    daAlink_matAnm_c* wolfEyeAnm[2] = {nullptr, nullptr};
+    J3DModelData* humanEyeData = nullptr;
+    J3DModelData* wolfEyeData = nullptr;
+    J3DModelData* humanEyeAnmData = nullptr;
+    J3DModelData* wolfEyeAnmData = nullptr;
+    J3DModelData* initializedHumanFaceData = nullptr;
+    J3DModelData* initializedWolfBodyData = nullptr;
+    RemoteFaceAnim humanFaceAnim;
+    RemoteFaceAnim wolfFaceAnim;
+    J3DModelData* initializedOrdonSwordData = nullptr;
+    J3DModelData* initializedMasterSwordData = nullptr;
+    RemoteEquipmentInterp swordInterp;
+    RemoteEquipmentInterp sheathInterp;
+    RemoteEquipmentInterp shieldInterp;
 };
 
 struct RemoteArcRequest {
@@ -82,11 +118,12 @@ RemoteArcRequest sAlinkArc{"Alink"};
 // mismatch for the entire early game. See RemoteClothesVariant
 // (multiplayer.cpp).
 RemoteArcRequest sCasualArc{"Bmdl"};
+RemoteArcRequest sZoraArc{"Zmdl"};
+RemoteArcRequest sMagicArmorArc{"Mmdl"};
 RemoteArcRequest sCarvingWoodShieldArc{"CWShd"};
 RemoteArcRequest sOrdonShieldArc{"SWShd"};
 RemoteArcRequest sHylianShieldArc{"HyShd"};
 uint32_t sRoomSkipLogCount = 0;
-J3DModelData* sInitializedWolfBodyData = nullptr;
 
 // Temporary experiment for the "yellow sword affects the real local
 // character too" report: g_env_light.setLightTevColorType_MAJI() (called
@@ -146,6 +183,10 @@ bool ensure_arc_loaded(RemoteArcRequest& request) {
     }
 
     return false;
+}
+
+bool is_arc_ready(const RemoteArcRequest& request) {
+    return request.complete;
 }
 
 void destroy_model(RemoteLinkModel& model) {
@@ -250,15 +291,17 @@ void log_draw_skip(RemoteLinkDummy& dummy, const char* reason, const std::string
         "pose_mtx_valid={} cache_valid={} cache_wolf={} using_cache={} "
         "draw_path_reached=false selected_body_model_null={} "
         "selected_body_resource_null={} wolf_arc_complete={} "
-        "src_body_null={} body_null={} human_parts={} body_joints={} "
+        "src_body_null={} body_null={} human_parts={} clothes_variant={} "
+        "body_joints={} body_weights={} "
         "mtx_body_valid={} mtx_body_joints={} mtx_body_weights={} "
         "src_hat_null={} src_face_null={} src_hand_null={} src_sword_null={} "
         "src_sheath_null={} src_shield_null={}",
         reason, peerId, pose.isWolf, localIsWolf, pose.linkMatrices.valid, dummy.lastLinkMatrices.valid,
         dummy.lastLinkMatricesIsWolf, usingCachedMatrices, body == nullptr,
         sources.body == nullptr, sWolfArc.complete, sources.body == nullptr,
-        body == nullptr, sources.humanParts,
+        body == nullptr, sources.humanParts, pose.clothesVariant,
         body != nullptr && body->getModelData() != nullptr ? body->getModelData()->getJointNum() : 0,
+        body != nullptr && body->getModelData() != nullptr ? body->getModelData()->getWEvlpMtxNum() : 0,
         matrices != nullptr && matrices->body.valid,
         matrices != nullptr ? matrices->body.jointCount : 0,
         matrices != nullptr ? matrices->body.weightCount : 0,
@@ -286,11 +329,13 @@ void log_draw_reached(RemoteLinkDummy& dummy, const std::string& peerId,
         "local_wolf={} "
         "pose_mtx_valid={} cache_valid={} cache_wolf={} using_cache={} "
         "draw_path_reached=true selected_body_model_null={} "
-        "selected_body_resource_null={} wolf_arc_complete={} "
+        "selected_body_resource_null={} wolf_arc_complete={} clothes_variant={} "
+        "body_weights={} "
         "mtx_body_valid={} mtx_body_joints={} mtx_body_weights={}",
         peerId, pose.isWolf, localIsWolf, pose.linkMatrices.valid, dummy.lastLinkMatrices.valid,
         dummy.lastLinkMatricesIsWolf, usingCachedMatrices, body == nullptr,
-        sources.body == nullptr, sWolfArc.complete,
+        sources.body == nullptr, sWolfArc.complete, pose.clothesVariant,
+        body != nullptr && body->getModelData() != nullptr ? body->getModelData()->getWEvlpMtxNum() : 0,
         matrices != nullptr && matrices->body.valid,
         matrices != nullptr ? matrices->body.jointCount : 0,
         matrices != nullptr ? matrices->body.weightCount : 0);
@@ -335,6 +380,8 @@ struct MaterialAnmSnapshot {
     std::vector<std::pair<J3DMaterial*, J3DMaterialAnm*>> entries;
 };
 
+bool shares_active_local_link_model_data(J3DModel* model, const daAlink_c* link);
+
 MaterialAnmSnapshot suppress_material_anm(J3DModel* model) {
     MaterialAnmSnapshot snapshot;
     if (model == nullptr || model->getModelData() == nullptr) {
@@ -359,6 +406,341 @@ void restore_material_anm(const MaterialAnmSnapshot& snapshot) {
     }
 }
 
+void remote_equipment_interp_callback(bool isSimFrame, void* userWork) {
+    if (isSimFrame || userWork == nullptr) {
+        return;
+    }
+
+    RemoteEquipmentInterp* work = static_cast<RemoteEquipmentInterp*>(userWork);
+    if (work->model == nullptr) {
+        return;
+    }
+
+    g_env_light.setLightTevColorType_MAJI(work->model, &work->tevStr);
+    MaterialAnmSnapshot anmSnapshot = work->suppressMaterialAnm ? suppress_material_anm(work->model)
+                                                                : MaterialAnmSnapshot{};
+    work->model->calcMaterial();
+    restore_material_anm(anmSnapshot);
+    work->model->diff();
+}
+
+void register_remote_equipment_interp(RemoteEquipmentInterp& work, J3DModel* model,
+                                      const dKy_tevstr_c& tevStr,
+                                      bool suppressMaterialAnm) {
+    work.model = model;
+    work.tevStr = tevStr;
+    work.suppressMaterialAnm = suppressMaterialAnm;
+    dusk::frame_interp::add_interpolation_callback(&remote_equipment_interp_callback, &work);
+}
+
+void free_remote_face_anim(RemoteFaceAnim& anim) {
+    if (anim.btpBuffer != nullptr) {
+        JKRFree(anim.btpBuffer);
+    }
+    if (anim.btkBuffer != nullptr) {
+        JKRFree(anim.btkBuffer);
+    }
+    anim = {};
+}
+
+void free_remote_eye_anims(daAlink_matAnm_c* (&anims)[2], J3DModelData*& data) {
+    for (daAlink_matAnm_c*& anm : anims) {
+        if (anm != nullptr) {
+            JKR_DELETE(anm);
+            anm = nullptr;
+        }
+    }
+    data = nullptr;
+}
+
+bool ensure_remote_eye_anims(daAlink_matAnm_c* (&anims)[2]) {
+    for (daAlink_matAnm_c*& anm : anims) {
+        if (anm == nullptr) {
+            anm = JKR_NEW daAlink_matAnm_c();
+            if (anm == nullptr) {
+                return false;
+            }
+        }
+        anm->init();
+        anm->setNowOffsetX(0.0f);
+        anm->setNowOffsetY(0.0f);
+    }
+    return true;
+}
+
+void* load_link_anm(u16 resId, u32 bufferSize, void** outBuffer) {
+    void* buffer = JKRAlloc(bufferSize, 0x20);
+    if (buffer == nullptr) {
+        DuskLog.warn("Multiplayer remote Link dummy: failed to allocate anm buffer size={}",
+                     bufferSize);
+        return nullptr;
+    }
+
+    JKRReadIdxResource(buffer, bufferSize, resId, dComIfGp_getAnmArchive());
+    void* anm = J3DAnmLoaderDataBase::load(buffer, J3DLOADER_UNK_FLAG0);
+    if (anm == nullptr) {
+        JKRFree(buffer);
+        DuskLog.warn("Multiplayer remote Link dummy: failed to load anm res={}", resId);
+        return nullptr;
+    }
+    *outBuffer = buffer;
+    return anm;
+}
+
+J3DAnmTexPattern* load_link_btp(u16 resId, void** outBuffer) {
+    return static_cast<J3DAnmTexPattern*>(load_link_anm(resId, 0x400, outBuffer));
+}
+
+J3DAnmTextureSRTKey* load_link_btk(u16 resId, void** outBuffer) {
+    return static_cast<J3DAnmTextureSRTKey*>(load_link_anm(resId, 0x400, outBuffer));
+}
+
+void set_texture_max_lod(J3DModelData* data, const char* const* names, size_t nameCount,
+                         u8 maxLOD) {
+    if (data == nullptr) {
+        return;
+    }
+
+    J3DTexture* texture = data->getTexture();
+    JUTNameTab* nameTable = data->getTextureName();
+    if (texture == nullptr || nameTable == nullptr) {
+        return;
+    }
+
+    for (u16 i = 0; i < texture->getNum(); ++i) {
+        const char* textureName = nameTable->getName(i);
+        if (textureName == nullptr) {
+            continue;
+        }
+        for (size_t nameIndex = 0; nameIndex < nameCount; ++nameIndex) {
+            if (std::strcmp(textureName, names[nameIndex]) == 0) {
+                ResTIMG* timg = texture->getResTIMG(i);
+                if (timg != nullptr) {
+                    timg->maxLOD = maxLOD;
+                }
+                break;
+            }
+        }
+    }
+}
+
+void bind_material_anm(J3DModelData* data, u16 materialIndex, J3DMaterialAnm* anm) {
+    if (data == nullptr || anm == nullptr || materialIndex >= data->getMaterialNum()) {
+        return;
+    }
+
+    J3DMaterial* material = data->getMaterialNodePointer(materialIndex);
+    if (material != nullptr) {
+        material->setMaterialAnm(anm);
+    }
+}
+
+void bind_remote_eye_material_anms(J3DModelData* data, u16 leftMaterial, u16 rightMaterial,
+                                   daAlink_matAnm_c* (&anims)[2], J3DModelData*& boundData) {
+    if (data == nullptr || data == boundData) {
+        return;
+    }
+
+    if (!ensure_remote_eye_anims(anims)) {
+        DuskLog.warn("Multiplayer remote Link dummy: failed to allocate remote eye material anim");
+        return;
+    }
+
+    bind_material_anm(data, leftMaterial, anims[0]);
+    bind_material_anm(data, rightMaterial, anims[1]);
+    boundData = data;
+}
+
+void clear_material_anm(J3DModelData* data, u16 materialIndex) {
+    if (data == nullptr || materialIndex >= data->getMaterialNum()) {
+        return;
+    }
+
+    J3DMaterial* material = data->getMaterialNodePointer(materialIndex);
+    if (material != nullptr) {
+        material->setMaterialAnm(nullptr);
+    }
+}
+
+void set_material_tev_color1(J3DModelData* data, u16 materialIndex,
+                             const J3DGXColorS10* color) {
+    if (data == nullptr || color == nullptr || materialIndex >= data->getMaterialNum()) {
+        return;
+    }
+
+    J3DMaterial* material = data->getMaterialNodePointer(materialIndex);
+    if (material != nullptr) {
+        material->setTevColor(1, color);
+    }
+}
+
+void prepare_remote_human_body_materials(const PeerPoseSnapshot& pose, daAlink_c* link,
+                                         J3DModel* body, J3DModel* hat) {
+    if (pose.isWolf || link == nullptr || body == nullptr || body->getModelData() == nullptr ||
+        shares_active_local_link_model_data(body, link))
+    {
+        return;
+    }
+
+    // Mirrors the neutral-color path through daAlink_c::setWaterDropColor().
+    // In cross-form draws, the selected human body archive may not have been
+    // initialized by the receiver's local Link draw path, leaving these shared
+    // material color slots at archive defaults.
+    const GXColorS10 neutralBaseColor = {0, 0, 0, 0};
+    const J3DGXColorS10 neutralColor(neutralBaseColor);
+    J3DModelData* bodyData = body->getModelData();
+    J3DModelData* hatData = hat != nullptr ? hat->getModelData() : nullptr;
+
+    if (pose.clothesVariant == 1) {
+        set_material_tev_color1(bodyData, 7, &neutralColor);
+        set_material_tev_color1(bodyData, 5, &neutralColor);
+        set_material_tev_color1(hatData, 0, &neutralColor);
+        return;
+    }
+    if (pose.clothesVariant != 0) {
+        return;
+    }
+
+    set_material_tev_color1(bodyData, 17, &neutralColor);
+    set_material_tev_color1(bodyData, 9, &neutralColor);
+    set_material_tev_color1(bodyData, 0, &neutralColor);
+    set_material_tev_color1(bodyData, 1, &neutralColor);
+    set_material_tev_color1(bodyData, 2, &neutralColor);
+    set_material_tev_color1(bodyData, 16, &neutralColor);
+    set_material_tev_color1(bodyData, 15, &neutralColor);
+    set_material_tev_color1(bodyData, 14, &neutralColor);
+    set_material_tev_color1(hatData, 0, &neutralColor);
+}
+
+void prepare_remote_eye_materials(RemoteLinkDummy& dummy, const PeerPoseSnapshot& pose,
+                                  J3DModel* body, J3DModel* face) {
+    if (pose.isWolf) {
+        if (body == nullptr || body->getModelData() == nullptr) {
+            return;
+        }
+
+        J3DModelData* data = body->getModelData();
+        const char* wolfEyeTextures[] = {"wl_eyeball"};
+        set_texture_max_lod(data, wolfEyeTextures, 1, 0);
+    clear_material_anm(data, 4);
+    clear_material_anm(data, 5);
+        if (data->getMaterialNum() > 1) {
+            J3DMaterial* eyeMaterial = data->getMaterialNodePointer(1);
+            if (eyeMaterial != nullptr && eyeMaterial->getShape() != nullptr) {
+                eyeMaterial->getShape()->show();
+            }
+        }
+
+        if (dummy.wolfEyeData != data) {
+            dummy.wolfEyeHL.remove();
+            dummy.wolfEyeHL.entry(data, "wl_eye_Hilight");
+            dummy.wolfEyeData = data;
+        }
+        return;
+    }
+
+    if (face == nullptr || face->getModelData() == nullptr) {
+        return;
+    }
+
+    J3DModelData* data = face->getModelData();
+    const char* humanEyeTextures[] = {"al_eyeball", "highlight02", "eye_kage01"};
+    set_texture_max_lod(data, humanEyeTextures, 3, 0);
+    clear_material_anm(data, 2);
+    clear_material_anm(data, 3);
+
+    if (dummy.humanEyeData != data) {
+        dummy.humanEyeHL.remove();
+        dummy.humanEyeHL.entry(data, "highlight02");
+        dummy.humanEyeData = data;
+    }
+}
+
+void attach_default_face_animators(RemoteFaceAnim& anim, J3DModelData* data, bool wolf) {
+    if (data == nullptr) {
+        return;
+    }
+
+    if (anim.data != data) {
+        free_remote_face_anim(anim);
+        anim.data = data;
+    }
+
+    J3DAnmTexPattern* btp =
+        load_link_btp(wolf ? dRes_ID_ALANM_BTP_WL_FA_e : dRes_ID_ALANM_BTP_FA_e,
+                      &anim.btpBuffer);
+    if (btp != nullptr) {
+        btp->setFrame(0.0f);
+        btp->searchUpdateMaterialID(data);
+        data->entryTexNoAnimator(btp);
+    }
+
+    J3DAnmTextureSRTKey* btk =
+        load_link_btk(wolf ? dRes_ID_ALANM_BTK_WL_FA_e : dRes_ID_ALANM_BTK_FA_e,
+                      &anim.btkBuffer);
+    if (btk != nullptr) {
+        btk->setFrame(0.0f);
+        btk->searchUpdateMaterialID(data);
+        data->entryTexMtxAnimator(btk);
+    }
+}
+
+void initialize_remote_sword_materials(RemoteLinkDummy& dummy, J3DModel* sword,
+                                       int swordVariant) {
+    if (sword == nullptr || sword->getModelData() == nullptr) {
+        return;
+    }
+
+    J3DModelData* data = sword->getModelData();
+    if (swordVariant == 1 && dummy.initializedOrdonSwordData != data) {
+        J3DAnmTextureSRTKey* btk = static_cast<J3DAnmTextureSRTKey*>(
+            dComIfG_getObjectRes("Alink", dRes_ID_ALINK_BTK_AL_SWA_e));
+        if (btk != nullptr) {
+            btk->searchUpdateMaterialID(data);
+            data->entryTexMtxAnimator(btk);
+            dummy.initializedOrdonSwordData = data;
+        }
+    } else if (swordVariant == 3 && dummy.initializedMasterSwordData != data) {
+        J3DAnmTextureSRTKey* btk = static_cast<J3DAnmTextureSRTKey*>(
+            dComIfG_getObjectRes("Alink", dRes_ID_ALINK_BTK_AL_SWM_e));
+        J3DAnmTevRegKey* brk = static_cast<J3DAnmTevRegKey*>(
+            dComIfG_getObjectRes("Alink", dRes_ID_ALINK_BRK_AL_SWM_e));
+        if (btk != nullptr) {
+            btk->searchUpdateMaterialID(data);
+            data->entryTexMtxAnimator(btk);
+        }
+        if (brk != nullptr) {
+            brk->searchUpdateMaterialID(data);
+            data->entryTevRegAnimator(brk);
+        }
+        if (btk != nullptr || brk != nullptr) {
+            dummy.initializedMasterSwordData = data;
+        }
+    }
+}
+
+void prepare_remote_form_resources(RemoteLinkDummy& dummy, const PeerPoseSnapshot& pose,
+                                   daAlink_c* link, J3DModel* body, J3DModel* hat,
+                                   J3DModel* face, J3DModel* sword) {
+    if (pose.isWolf) {
+        if (body != nullptr && body->getModelData() != nullptr &&
+            dummy.initializedWolfBodyData != body->getModelData())
+        {
+            attach_default_face_animators(dummy.wolfFaceAnim, body->getModelData(), true);
+            dummy.initializedWolfBodyData = body->getModelData();
+        }
+    } else if (face != nullptr && face->getModelData() != nullptr &&
+               dummy.initializedHumanFaceData != face->getModelData())
+    {
+        attach_default_face_animators(dummy.humanFaceAnim, face->getModelData(), false);
+        dummy.initializedHumanFaceData = face->getModelData();
+    }
+
+    prepare_remote_eye_materials(dummy, pose, body, face);
+    prepare_remote_human_body_materials(pose, link, body, hat);
+    initialize_remote_sword_materials(dummy, sword, pose.swordVariant);
+}
+
 // Tried snapshotting AmbColor(0)/TevColor(0)/TevKColor(0) before the light
 // rebind below and restoring them after this dummy's own draw (the same
 // pattern as restore_material_anm() above) -- reverted. Directly poking
@@ -375,7 +757,8 @@ void restore_material_anm(const MaterialAnmSnapshot& snapshot) {
 // specifically, see rebindLight's doc comment: the fix there is to never
 // write this shared state in the first place, not to write-then-undo it.
 void entry_model_without_calc(J3DModel* model, dKy_tevstr_c* tevStr, bool rebindLight = true,
-                              bool useDarkList = false) {
+                              bool useDarkList = false, bool suppressMaterialAnm = true,
+                              bool entryOnNonSimFrame = true) {
     if (model == nullptr) {
         return;
     }
@@ -413,6 +796,12 @@ void entry_model_without_calc(J3DModel* model, dKy_tevstr_c* tevStr, bool rebind
         // mDoExt_modelEntryDL does) and only resubmitting the model is both
         // correct AND avoids the corruption, rather than just disguising
         // it.
+        if (!entryOnNonSimFrame) {
+            if (useDarkList) {
+                dComIfGd_setList();
+            }
+            return;
+        }
         model->diff();
         model->entry();
         model->lock();
@@ -465,13 +854,14 @@ void entry_model_without_calc(J3DModel* model, dKy_tevstr_c* tevStr, bool rebind
     if (rebindLight && tevStr != nullptr) {
         g_env_light.setLightTevColorType_MAJI(model, tevStr);
     }
-    MaterialAnmSnapshot anmSnapshot = suppress_material_anm(model);
+    MaterialAnmSnapshot anmSnapshot = suppressMaterialAnm ? suppress_material_anm(model)
+                                                          : MaterialAnmSnapshot{};
     model->calcMaterial();
-    restore_material_anm(anmSnapshot);
     model->diff();
     model->entry();
     model->lock();
     model->viewCalc();
+    restore_material_anm(anmSnapshot);
     if (useDarkList) {
         dComIfGd_setList();
     }
@@ -498,15 +888,43 @@ dKy_tevstr_c build_dummy_tev_str(const PeerPoseSnapshot& pose) {
     return tevStr;
 }
 
+bool shares_active_local_link_model_data(J3DModel* model, const daAlink_c* link) {
+    if (model == nullptr || model->getModelData() == nullptr || link == nullptr) {
+        return false;
+    }
+
+    J3DModelData* data = model->getModelData();
+    return (link->mpLinkModel != nullptr && data == link->mpLinkModel->getModelData()) ||
+           (link->mpLinkHatModel != nullptr && data == link->mpLinkHatModel->getModelData()) ||
+           (link->mpLinkFaceModel != nullptr && data == link->mpLinkFaceModel->getModelData()) ||
+           (link->mpLinkHandModel != nullptr && data == link->mpLinkHandModel->getModelData()) ||
+           (link->mSwordModel != nullptr && data == link->mSwordModel->getModelData()) ||
+           (link->mSheathModel != nullptr && data == link->mSheathModel->getModelData()) ||
+           (link->mShieldModel != nullptr && data == link->mShieldModel->getModelData());
+}
+
+bool local_link_draws_matching_sword_item(J3DModel* model, J3DModel* localModel,
+                                          daAlink_c* link) {
+    return model != nullptr && model->getModelData() != nullptr && localModel != nullptr &&
+           localModel->getModelData() == model->getModelData() && link != nullptr &&
+           link->checkSwordDraw();
+}
+
+bool local_link_draws_matching_shield_item(J3DModel* model, daAlink_c* link) {
+    return model != nullptr && model->getModelData() != nullptr && link != nullptr &&
+           link->mShieldModel != nullptr &&
+           link->mShieldModel->getModelData() == model->getModelData() && link->checkShieldDraw();
+}
+
 J3DModelData* choose_sword_source_data(int swordVariant) {
     if (swordVariant == 2) {
-        if (!ensure_arc_loaded(sHumanArc)) {
+        if (!is_arc_ready(sHumanArc)) {
             return nullptr;
         }
         return static_cast<J3DModelData*>(dComIfG_getObjectRes("Kmdl", "al_SWB.bmd"));
     }
 
-    if (!ensure_arc_loaded(sAlinkArc)) {
+    if (!is_arc_ready(sAlinkArc)) {
         return nullptr;
     }
 
@@ -530,7 +948,7 @@ J3DModelData* choose_sword_source_data(int swordVariant) {
 }
 
 J3DModelData* choose_sheath_source_data(int swordVariant) {
-    if (!ensure_arc_loaded(sAlinkArc)) {
+    if (!is_arc_ready(sAlinkArc)) {
         return nullptr;
     }
 
@@ -552,57 +970,20 @@ bool is_wood_sword_variant(int swordVariant) {
     return swordVariant == 2;
 }
 
-void initialize_remote_wolf_body_data(J3DModelData* data) {
-    if (data == nullptr || data == sInitializedWolfBodyData) {
-        return;
-    }
-
-    // A local receiver that has never transformed has loaded Wmdl only via
-    // the remote dummy path, so the shared model data has not gone through
-    // daAlink_c::changeWolf()'s one-time setup. Keep this deliberately
-    // narrow: make the body resource drawable from archive defaults without
-    // installing Link's joint callbacks/material animators, which belong to
-    // a real daAlink_c instance and are unsafe for the dummy.
-    for (u16 i = 0; i < data->getMaterialNum(); ++i) {
-        J3DMaterial* material = data->getMaterialNodePointer(i);
-        if (material != nullptr && material->getShape() != nullptr) {
-            material->getShape()->show();
-        }
-    }
-
-#ifdef TARGET_PC
-    J3DTexture* tex = data->getTexture();
-    JUTNameTab* nametable = data->getTextureName();
-    if (tex != nullptr && nametable != nullptr) {
-        for (u16 i = 0; i < tex->getNum(); ++i) {
-            const char* texName = nametable->getName(i);
-            if (texName != nullptr && std::strcmp(texName, "wl_eyeball") == 0) {
-                ResTIMG* timg = tex->getResTIMG(i);
-                if (timg != nullptr) {
-                    timg->maxLOD = 0;
-                }
-            }
-        }
-    }
-#endif
-
-    sInitializedWolfBodyData = data;
-}
-
 J3DModelData* choose_shield_source_data(int shieldVariant) {
     switch (shieldVariant) {
     case 1:
-        if (!ensure_arc_loaded(sCarvingWoodShieldArc)) {
+        if (!is_arc_ready(sCarvingWoodShieldArc)) {
             return nullptr;
         }
         return static_cast<J3DModelData*>(dComIfG_getObjectRes("CWShd", 3));  // AL_SHB
     case 2:
-        if (!ensure_arc_loaded(sOrdonShieldArc)) {
+        if (!is_arc_ready(sOrdonShieldArc)) {
             return nullptr;
         }
         return static_cast<J3DModelData*>(dComIfG_getObjectRes("SWShd", 3));  // AL_SHC
     case 3:
-        if (!ensure_arc_loaded(sHylianShieldArc)) {
+        if (!is_arc_ready(sHylianShieldArc)) {
             return nullptr;
         }
         return static_cast<J3DModelData*>(dComIfG_getObjectRes("HyShd", 3));  // AL_SHA
@@ -631,6 +1012,39 @@ struct SwordShapeVisibility {
     J3DShape* shape = nullptr;
     bool wasHidden = false;
 };
+
+struct ShapeVisibilitySnapshot {
+    std::vector<std::pair<J3DShape*, bool>> shapes;
+};
+
+ShapeVisibilitySnapshot show_model_shapes(J3DModel* model) {
+    ShapeVisibilitySnapshot snapshot;
+    if (model == nullptr || model->getModelData() == nullptr) {
+        return snapshot;
+    }
+
+    J3DModelData* data = model->getModelData();
+    for (u16 i = 0; i < data->getMaterialNum(); ++i) {
+        J3DMaterial* material = data->getMaterialNodePointer(i);
+        if (material == nullptr || material->getShape() == nullptr) {
+            continue;
+        }
+        J3DShape* shape = material->getShape();
+        snapshot.shapes.push_back({shape, shape->checkFlag(J3DShpFlag_Visible)});
+        shape->show();
+    }
+    return snapshot;
+}
+
+void restore_model_shapes(const ShapeVisibilitySnapshot& snapshot) {
+    for (const auto& entry : snapshot.shapes) {
+        if (entry.second) {
+            entry.first->hide();
+        } else {
+            entry.first->show();
+        }
+    }
+}
 
 SwordShapeVisibility apply_sword_shape_visibility(J3DModel* sword, bool swordOut, bool woodSword) {
     SwordShapeVisibility snapshot;
@@ -676,37 +1090,47 @@ RemoteLinkSources resolve_remote_sources(const PeerPoseSnapshot& pose) {
     RemoteLinkSources sources;
 
     if (pose.isWolf) {
-        if (!ensure_arc_loaded(sWolfArc)) {
+        if (!is_arc_ready(sWolfArc)) {
             return sources;
         }
         sources.body = static_cast<J3DModelData*>(dComIfG_getObjectRes("Wmdl", 14));
-        initialize_remote_wolf_body_data(sources.body);
         sources.humanParts = false;
         return sources;
     }
 
-    // Casual/Ordon clothes use a different body archive than Hero's Clothes
-    // (see RemoteClothesVariant, multiplayer.cpp, and the sCasualArc
-    // comment above) -- every other tier still falls back to "Kmdl" until
-    // those are implemented too.
-    if (pose.clothesVariant == 1) {  // RemoteClothesVariant::REMOTE_CLOTHES_CASUAL (multiplayer.cpp)
-        if (!ensure_arc_loaded(sCasualArc)) {
-            return sources;
-        }
+    switch (pose.clothesVariant) {
+    case 1:  // RemoteClothesVariant::REMOTE_CLOTHES_CASUAL (multiplayer.cpp)
+        if (!is_arc_ready(sCasualArc)) return sources;
         sources.body = static_cast<J3DModelData*>(dComIfG_getObjectRes("Bmdl", "bl.bmd"));
         sources.hat = static_cast<J3DModelData*>(dComIfG_getObjectRes("Bmdl", "bl_head.bmd"));
         sources.face = static_cast<J3DModelData*>(dComIfG_getObjectRes("Bmdl", "al_face.bmd"));
         sources.hand = static_cast<J3DModelData*>(dComIfG_getObjectRes("Bmdl", "bl_hands.bmd"));
         sources.humanParts = true;
-    } else {
-        if (!ensure_arc_loaded(sHumanArc)) {
-            return sources;
-        }
+        break;
+    case 2:  // REMOTE_CLOTHES_ZORA
+        if (!is_arc_ready(sZoraArc)) return sources;
+        sources.body = static_cast<J3DModelData*>(dComIfG_getObjectRes("Zmdl", "zl.bmd"));
+        sources.hat = static_cast<J3DModelData*>(dComIfG_getObjectRes("Zmdl", "zl_head.bmd"));
+        sources.face = static_cast<J3DModelData*>(dComIfG_getObjectRes("Zmdl", "zl_face.bmd"));
+        sources.hand = static_cast<J3DModelData*>(dComIfG_getObjectRes("Zmdl", "al_hands.bmd"));
+        sources.humanParts = true;
+        break;
+    case 3:  // REMOTE_CLOTHES_ARMOR
+        if (!is_arc_ready(sMagicArmorArc)) return sources;
+        sources.body = static_cast<J3DModelData*>(dComIfG_getObjectRes("Mmdl", "ml.bmd"));
+        sources.hat = static_cast<J3DModelData*>(dComIfG_getObjectRes("Mmdl", "ml_head.bmd"));
+        sources.face = static_cast<J3DModelData*>(dComIfG_getObjectRes("Mmdl", "al_face.bmd"));
+        sources.hand = static_cast<J3DModelData*>(dComIfG_getObjectRes("Mmdl", "al_hands.bmd"));
+        sources.humanParts = true;
+        break;
+    default:
+        if (!is_arc_ready(sHumanArc)) return sources;
         sources.body = static_cast<J3DModelData*>(dComIfG_getObjectRes("Kmdl", "al.bmd"));
         sources.hat = static_cast<J3DModelData*>(dComIfG_getObjectRes("Kmdl", "al_head.bmd"));
         sources.face = static_cast<J3DModelData*>(dComIfG_getObjectRes("Kmdl", "al_face.bmd"));
         sources.hand = static_cast<J3DModelData*>(dComIfG_getObjectRes("Kmdl", "al_hands.bmd"));
         sources.humanParts = true;
+        break;
     }
 
     if (pose.swordDraw) {
@@ -732,6 +1156,8 @@ void preload_remote_link_dummy_resources() {
     ensure_arc_loaded(sWolfArc);
     ensure_arc_loaded(sAlinkArc);
     ensure_arc_loaded(sCasualArc);
+    ensure_arc_loaded(sZoraArc);
+    ensure_arc_loaded(sMagicArmorArc);
     ensure_arc_loaded(sCarvingWoodShieldArc);
     ensure_arc_loaded(sOrdonShieldArc);
     ensure_arc_loaded(sHylianShieldArc);
@@ -751,6 +1177,13 @@ void destroy_remote_link_dummy(const std::string& peerId) {
     destroy_model(dummy.sword);
     destroy_model(dummy.sheath);
     destroy_model(dummy.shield);
+    dummy.swordInterp = {};
+    dummy.sheathInterp = {};
+    dummy.shieldInterp = {};
+    free_remote_face_anim(dummy.humanFaceAnim);
+    free_remote_face_anim(dummy.wolfFaceAnim);
+    free_remote_eye_anims(dummy.humanEyeAnm, dummy.humanEyeAnmData);
+    free_remote_eye_anims(dummy.wolfEyeAnm, dummy.wolfEyeAnmData);
     dummy.stage.clear();
     dummy.room = -128;
     dummy.stableFrames = 0;
@@ -758,6 +1191,9 @@ void destroy_remote_link_dummy(const std::string& peerId) {
     dummy.matrixRejectLogCount = 0;
     dummy.wolfDrawLogCount = 0;
     dummy.lastObservedIsWolf = false;
+    dummy.lastObservedClothesVariant = -1;
+    dummy.lastObservedShieldVariant = -1;
+    dummy.lastObservedShieldDraw = false;
     dummy.lastLinkMatrices = {};
     dummy.lastLinkMatricesIsWolf = false;
     sDummies.erase(it);
@@ -773,6 +1209,13 @@ void destroy_all_remote_link_dummies() {
         destroy_model(dummy.sword);
         destroy_model(dummy.sheath);
         destroy_model(dummy.shield);
+        dummy.swordInterp = {};
+        dummy.sheathInterp = {};
+        dummy.shieldInterp = {};
+        free_remote_face_anim(dummy.humanFaceAnim);
+        free_remote_face_anim(dummy.wolfFaceAnim);
+        free_remote_eye_anims(dummy.humanEyeAnm, dummy.humanEyeAnmData);
+        free_remote_eye_anims(dummy.wolfEyeAnm, dummy.wolfEyeAnmData);
     }
     sDummies.clear();
 }
@@ -883,6 +1326,23 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
             dummy.lastLinkMatricesIsWolf);
     }
 
+    if (dummy.lastObservedClothesVariant != pose.clothesVariant ||
+        dummy.lastObservedShieldVariant != pose.shieldVariant ||
+        dummy.lastObservedShieldDraw != pose.shieldDraw)
+    {
+        dummy.lastObservedClothesVariant = pose.clothesVariant;
+        dummy.lastObservedShieldVariant = pose.shieldVariant;
+        dummy.lastObservedShieldDraw = pose.shieldDraw;
+        dummy.drawLogCount = 0;
+        dummy.matrixRejectLogCount = 0;
+        dummy.swordLogCount = 0;
+        DuskLog.info(
+            "Multiplayer remote Link dummy: equipment variant changed peer={} "
+            "clothes_variant={} shield_variant={} shield_draw={} pose_mtx_valid={}",
+            peerId, pose.clothesVariant, pose.shieldVariant, pose.shieldDraw,
+            pose.linkMatrices.valid);
+    }
+
     if (dummy.stableFrames < 30) {
         ++dummy.stableFrames;
         return;
@@ -908,6 +1368,7 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
     J3DModel* sword = drawHumanParts && pose.swordDraw ? get_or_create_model_from_data(dummy.sword, sources.sword, 0x100000) : nullptr;
     J3DModel* sheath = drawHumanParts && pose.swordDraw ? get_or_create_model_from_data(dummy.sheath, sources.sheath, 0x100000) : nullptr;
     J3DModel* shield = drawHumanParts && pose.shieldDraw ? get_or_create_model_from_data(dummy.shield, sources.shield, 0x100000) : nullptr;
+    prepare_remote_form_resources(dummy, pose, link, body, hat, face, sword);
     if (!drawHumanParts) {
         destroy_model(dummy.hat);
         destroy_model(dummy.face);
@@ -953,8 +1414,17 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
                       usingCachedMatrices);
         return;
     }
-    entry_model_without_calc(body, &dummyTevStr, /*rebindLight=*/true, /*useDarkList=*/pose.isWolf);
+    const bool bodySharesActiveLocalData =
+        !pose.isWolf && shares_active_local_link_model_data(body, link);
+    entry_model_without_calc(body, &dummyTevStr, /*rebindLight=*/true, /*useDarkList=*/pose.isWolf,
+                             /*suppressMaterialAnm=*/true);
     log_draw_reached(dummy, peerId, pose, sources, body, localIsWolf, matrices, usingCachedMatrices);
+
+#if TARGET_PC
+    const bool drawSwordAndSheathThisFrame = dusk::frame_interp::is_sim_frame();
+#else
+    const bool drawSwordAndSheathThisFrame = true;
+#endif
 
     if (hat != nullptr) {
         bool drewHat = false;
@@ -962,7 +1432,8 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
             drewHat = copy_remote_model_matrices(hat, matrices->hat);
         }
         if (drewHat) {
-            entry_model_without_calc(hat, &dummyTevStr);
+            entry_model_without_calc(hat, &dummyTevStr, /*rebindLight=*/true,
+                                     /*useDarkList=*/false, /*suppressMaterialAnm=*/true);
         }
     }
 
@@ -972,7 +1443,8 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
             drewFace = copy_remote_model_matrices(face, matrices->face);
         }
         if (drewFace) {
-            entry_model_without_calc(face, &dummyTevStr);
+            entry_model_without_calc(face, &dummyTevStr, /*rebindLight=*/true,
+                                     /*useDarkList=*/false, /*suppressMaterialAnm=*/true);
         }
     }
 
@@ -982,11 +1454,12 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
             drewHand = copy_remote_model_matrices(hand, matrices->hand);
         }
         if (drewHand) {
-            entry_model_without_calc(hand, &dummyTevStr);
+            entry_model_without_calc(hand, &dummyTevStr, /*rebindLight=*/true,
+                                     /*useDarkList=*/false, /*suppressMaterialAnm=*/true);
         }
     }
 
-    if (sword != nullptr && !skip_remote_sword_draw()) {
+    if (sword != nullptr && !skip_remote_sword_draw() && drawSwordAndSheathThisFrame) {
         bool drewSword = false;
         if (usedRemoteMatrices && matrices->sword.valid) {
             drewSword = copy_remote_model_matrices(sword, matrices->sword);
@@ -995,18 +1468,27 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
             const bool woodSword = is_wood_sword_variant(pose.swordVariant);
             SwordShapeVisibility visibilitySnapshot =
                 apply_sword_shape_visibility(sword, pose.swordOut, woodSword);
-            // rebindLight=false: confirmed via logging that the sword's
-            // model data is the SAME object as the local player's own real
-            // sword in the common case (shares_local_sword_data=true below)
-            // -- the real character's own draw already correctly rebinds
-            // this shared material's light/color every simulation tick,
-            // moments before this dummy draws. Re-binding it again here
-            // (and then trying to undo it) is what produced the flicker/
-            // dead-shine regression; not touching it at all means this
-            // dummy's sword just inherits whatever the real character's
-            // own draw already set. This remains a shared-material
-            // limitation to isolate in the later material pass.
-            entry_model_without_calc(sword, &dummyTevStr, /*rebindLight=*/false);
+            // Form mismatch (e.g. local client is Wolf, peer dummy is Human
+            // holding a sword) must never be treated as shared state: the
+            // pointer-identity check in local_link_draws_matching_sword_item()
+            // can still match an idle/cached local sword model even when the
+            // local player isn't actually drawing a sword this tick (Wolf
+            // form draws no sword at all), in which case nothing ever calls
+            // setLightTevColorType_MAJI() on that shared material and the
+            // dummy's sword comes out with no light/color whatsoever. Require
+            // the forms to match before trusting the shared-data path, same
+            // guard pattern as bodySharesActiveLocalData's `!pose.isWolf`.
+            const bool swordSharesActiveLocalData =
+                pose.isWolf == localIsWolf &&
+                local_link_draws_matching_sword_item(sword, link->mSwordModel, link);
+            entry_model_without_calc(sword, &dummyTevStr,
+                                     /*rebindLight=*/!swordSharesActiveLocalData,
+                                     /*useDarkList=*/false, swordSharesActiveLocalData,
+                                     /*entryOnNonSimFrame=*/false);
+            if (!pose.isWolf && localIsWolf) {
+                register_remote_equipment_interp(dummy.swordInterp, sword, dummyTevStr,
+                                                 swordSharesActiveLocalData);
+            }
             restore_sword_shape_visibility(visibilitySnapshot);
             if (dummy.swordLogCount < 8) {
                 // Temporary diagnostic for the "flat yellow sword" report:
@@ -1023,7 +1505,8 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
                 DuskLog.info(
                     "Multiplayer remote Link dummy: sword draw peer={} variant={} "
                     "wood={} out={} dummy_joints={} dummy_weights={} matrix_joints={} "
-                    "matrix_weights={} shares_local_sword_data={} dummy_data={} local_data={}",
+                    "matrix_weights={} shares_local_sword_data={} "
+                    "dummy_data={} local_data={}",
                     peerId, pose.swordVariant, woodSword, pose.swordOut,
                     sword->getModelData()->getJointNum(), sword->getModelData()->getWEvlpMtxNum(),
                     matrices->sword.jointCount, matrices->sword.weightCount,
@@ -1042,14 +1525,24 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
         }
     }
 
-    if (sheath != nullptr) {
+    if (sheath != nullptr && drawSwordAndSheathThisFrame) {
         bool drewSheath = false;
         if (usedRemoteMatrices && matrices->sheath.valid) {
             drewSheath = copy_remote_model_matrices(sheath, matrices->sheath);
         }
         if (drewSheath) {
-            // Same reasoning as the sword's call site above.
-            entry_model_without_calc(sheath, &dummyTevStr, /*rebindLight=*/false);
+            // Same form-mismatch guard as the sword case above.
+            const bool sheathSharesActiveLocalData =
+                pose.isWolf == localIsWolf &&
+                local_link_draws_matching_sword_item(sheath, link->mSheathModel, link);
+            entry_model_without_calc(sheath, &dummyTevStr,
+                                     /*rebindLight=*/!sheathSharesActiveLocalData,
+                                     /*useDarkList=*/false, sheathSharesActiveLocalData,
+                                     /*entryOnNonSimFrame=*/false);
+            if (!pose.isWolf && localIsWolf) {
+                register_remote_equipment_interp(dummy.sheathInterp, sheath, dummyTevStr,
+                                                 sheathSharesActiveLocalData);
+            }
         }
     }
 
@@ -1059,7 +1552,17 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
             drewShield = copy_remote_model_matrices(shield, matrices->shield);
         }
         if (drewShield) {
-            entry_model_without_calc(shield, &dummyTevStr);
+            const bool shieldSharesActiveLocalData =
+                pose.isWolf == localIsWolf && local_link_draws_matching_shield_item(shield, link);
+            ShapeVisibilitySnapshot shieldVisibility = show_model_shapes(shield);
+            entry_model_without_calc(shield, &dummyTevStr,
+                                     /*rebindLight=*/!shieldSharesActiveLocalData,
+                                     /*useDarkList=*/false, /*suppressMaterialAnm=*/true);
+            restore_model_shapes(shieldVisibility);
+            if (!pose.isWolf && localIsWolf) {
+                register_remote_equipment_interp(dummy.shieldInterp, shield, dummyTevStr,
+                                                 shieldSharesActiveLocalData);
+            }
         }
     }
 

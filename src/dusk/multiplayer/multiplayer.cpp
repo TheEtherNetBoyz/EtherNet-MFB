@@ -1317,9 +1317,13 @@ void send_save_snapshot(DirectPeer* peer = nullptr) {
         send_json(snapshot);
     }
     DuskLog.info(
-        "Multiplayer sent save snapshot event_flags={} chest_stages={} switch_stages={} item_stages={} dungeon_stages={} key_items={}",
+        "Multiplayer sent save snapshot event_flags={} chest_stages={} switch_stages={} "
+        "item_stages={} dungeon_stages={} key_items={} collect_clothing={} "
+        "collect_sword={} collect_shield={} equip_sword={} equip_shield={} equip_armor={}",
         eventFlags.size(), chestStages.size(), switchStages.size(), itemStages.size(),
-        dungeonStages.size(), keyItems.size());
+        dungeonStages.size(), keyItems.size(), collectClothing.size(), collectSword.size(),
+        collectShield.size(), dComIfGs_getSelectEquipSword(), dComIfGs_getSelectEquipShield(),
+        dComIfGs_getSelectEquipClothes());
 }
 
 json direct_peer_list(const std::string& excludePeerId = "") {
