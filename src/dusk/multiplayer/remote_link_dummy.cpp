@@ -56,7 +56,6 @@ struct RemoteLinkDummy {
     RemoteLinkModel shield;
     std::string stage;
     int room = -128;
-    uint32_t stableFrames = 0;
     uint32_t drawLogCount = 0;
     uint32_t matrixRejectLogCount = 0;
     uint32_t swordLogCount = 0;
@@ -946,40 +945,116 @@ void init_remote_body_collision(RemoteLinkDummy& dummy) {
     dummy.bodyCollisionInitialized = true;
 }
 
+f32 clamp_f32(f32 value, f32 min, f32 max) {
+    if (value < min) {
+        return min;
+    }
+    if (value > max) {
+        return max;
+    }
+    return value;
+}
+
+void get_body_segment(f32 x, f32 z, s16 angleY, bool isWolf, f32* outAx, f32* outAz,
+                      f32* outBx, f32* outBz) {
+    if (!isWolf) {
+        *outAx = x;
+        *outAz = z;
+        *outBx = x;
+        *outBz = z;
+        return;
+    }
+
+    const f32 forwardX = cM_ssin(angleY);
+    const f32 forwardZ = cM_scos(angleY);
+    *outAx = x - forwardX * kRemoteWolfBodyHalfLength;
+    *outAz = z - forwardZ * kRemoteWolfBodyHalfLength;
+    *outBx = x + forwardX * kRemoteWolfBodyHalfLength;
+    *outBz = z + forwardZ * kRemoteWolfBodyHalfLength;
+}
+
+void closest_points_on_segments_xz(f32 aX, f32 aZ, f32 bX, f32 bZ, f32 cX, f32 cZ,
+                                   f32 dX, f32 dZ, f32* outLocalX, f32* outLocalZ,
+                                   f32* outRemoteX, f32* outRemoteZ) {
+    const f32 ux = bX - aX;
+    const f32 uz = bZ - aZ;
+    const f32 vx = dX - cX;
+    const f32 vz = dZ - cZ;
+    const f32 wx = aX - cX;
+    const f32 wz = aZ - cZ;
+
+    const f32 aa = ux * ux + uz * uz;
+    const f32 bb = ux * vx + uz * vz;
+    const f32 cc = vx * vx + vz * vz;
+    const f32 dd = ux * wx + uz * wz;
+    const f32 ee = vx * wx + vz * wz;
+    const f32 denom = aa * cc - bb * bb;
+
+    f32 s = 0.0f;
+    if (denom > 0.0001f) {
+        s = clamp_f32((bb * ee - cc * dd) / denom, 0.0f, 1.0f);
+    }
+
+    f32 t = 0.0f;
+    if (cc > 0.0001f) {
+        t = clamp_f32((bb * s + ee) / cc, 0.0f, 1.0f);
+    }
+
+    if (aa > 0.0001f) {
+        s = clamp_f32((bb * t - dd) / aa, 0.0f, 1.0f);
+    }
+
+    *outLocalX = aX + ux * s;
+    *outLocalZ = aZ + uz * s;
+    *outRemoteX = cX + vx * t;
+    *outRemoteZ = cZ + vz * t;
+}
+
 void apply_remote_body_push(const PeerPoseSnapshot& pose, fopAc_ac_c* playerActor) {
     if (playerActor == nullptr) {
         return;
     }
 
-    const f32 bodyHeight = pose.isWolf ? kRemoteWolfBodyHeight : kRemoteHumanBodyHeight;
-    const f32 minY = pose.y - 20.0f;
-    const f32 maxY = pose.y + bodyHeight;
-    if (playerActor->current.pos.y < minY || playerActor->current.pos.y > maxY) {
+    const bool localIsWolf =
+        fopAcM_GetName(playerActor) == fpcNm_ALINK_e &&
+        static_cast<daAlink_c*>(playerActor)->checkWolf();
+    const f32 localHeight = localIsWolf ? kRemoteWolfBodyHeight : kRemoteHumanBodyHeight;
+    const f32 remoteHeight = pose.isWolf ? kRemoteWolfBodyHeight : kRemoteHumanBodyHeight;
+    const f32 localMinY = playerActor->current.pos.y - 20.0f;
+    const f32 localMaxY = playerActor->current.pos.y + localHeight;
+    const f32 remoteMinY = pose.y - 20.0f;
+    const f32 remoteMaxY = pose.y + remoteHeight;
+    if (localMaxY < remoteMinY || remoteMaxY < localMinY) {
         return;
     }
 
-    const f32 remoteRadius = pose.isWolf ? kRemoteWolfBodyRadius : kRemoteHumanBodyRadius;
-    const f32 combinedRadius = remoteRadius + kLocalLinkBodyRadius;
-    f32 closestX = pose.x;
-    f32 closestZ = pose.z;
-    if (pose.isWolf) {
-        const s16 angleY = static_cast<s16>(pose.angleY);
-        const f32 forwardX = cM_ssin(angleY);
-        const f32 forwardZ = cM_scos(angleY);
-        const f32 toPlayerX = playerActor->current.pos.x - pose.x;
-        const f32 toPlayerZ = playerActor->current.pos.z - pose.z;
-        f32 along = (toPlayerX * forwardX) + (toPlayerZ * forwardZ);
-        if (along < -kRemoteWolfBodyHalfLength) {
-            along = -kRemoteWolfBodyHalfLength;
-        } else if (along > kRemoteWolfBodyHalfLength) {
-            along = kRemoteWolfBodyHalfLength;
-        }
-        closestX += forwardX * along;
-        closestZ += forwardZ * along;
-    }
+    f32 localAx;
+    f32 localAz;
+    f32 localBx;
+    f32 localBz;
+    f32 remoteAx;
+    f32 remoteAz;
+    f32 remoteBx;
+    f32 remoteBz;
+    get_body_segment(playerActor->current.pos.x, playerActor->current.pos.z,
+                     playerActor->shape_angle.y, localIsWolf, &localAx, &localAz, &localBx,
+                     &localBz);
+    get_body_segment(pose.x, pose.z, static_cast<s16>(pose.angleY), pose.isWolf, &remoteAx,
+                     &remoteAz, &remoteBx, &remoteBz);
 
-    f32 dx = playerActor->current.pos.x - closestX;
-    f32 dz = playerActor->current.pos.z - closestZ;
+    f32 localClosestX;
+    f32 localClosestZ;
+    f32 remoteClosestX;
+    f32 remoteClosestZ;
+    closest_points_on_segments_xz(localAx, localAz, localBx, localBz, remoteAx, remoteAz,
+                                  remoteBx, remoteBz, &localClosestX, &localClosestZ,
+                                  &remoteClosestX, &remoteClosestZ);
+
+    const f32 combinedRadius =
+        (localIsWolf ? kRemoteWolfBodyRadius : kLocalLinkBodyRadius) +
+        (pose.isWolf ? kRemoteWolfBodyRadius : kRemoteHumanBodyRadius);
+    f32 dx = localClosestX - remoteClosestX;
+    f32 dz = localClosestZ - remoteClosestZ;
     f32 distSq = dx * dx + dz * dz;
     if (distSq >= combinedRadius * combinedRadius) {
         return;
@@ -1315,7 +1390,6 @@ void destroy_remote_link_dummy(const std::string& peerId) {
     dummy.bodyCollisionInitialized = false;
     dummy.stage.clear();
     dummy.room = -128;
-    dummy.stableFrames = 0;
     dummy.drawLogCount = 0;
     dummy.matrixRejectLogCount = 0;
     dummy.wolfDrawLogCount = 0;
@@ -1424,10 +1498,9 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
     if (dummyIt != sDummies.end() && dummyIt->second.stage != pose.stage) {
         // Only the stage matters for whether the dummy's cloned model/arc
         // resources are still valid -- see the room-display comment above.
-        // Resetting (and paying the 30-stable-frame rebuild delay) on every
-        // room-number change within the same open area would just trade
-        // one visible glitch (disappearing entirely) for another (stutter
-        // on every room crossing).
+        // Resetting on every room-number change within the same open area
+        // would just trade one visible glitch (disappearing entirely) for
+        // another (stutter on every room crossing).
         destroy_remote_link_dummy(peerId);
         dummyIt = sDummies.end();
     }
@@ -1473,11 +1546,6 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
             "clothes_variant={} shield_variant={} shield_draw={} pose_mtx_valid={}",
             peerId, pose.clothesVariant, pose.shieldVariant, pose.shieldDraw,
             pose.linkMatrices.valid);
-    }
-
-    if (dummy.stableFrames < 30) {
-        ++dummy.stableFrames;
-        return;
     }
 
     if (!dummy.loggedReady) {
