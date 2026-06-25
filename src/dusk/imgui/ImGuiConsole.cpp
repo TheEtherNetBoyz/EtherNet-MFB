@@ -25,6 +25,7 @@
 #include "dusk/frame_interpolation.h"
 #include "dusk/input_macro.h"
 #include "dusk/livesplit.h"
+#include "dusk/multiplayer/multiplayer.hpp"
 #include "dusk/texture_replacements.hpp"
 #include "dusk/main.h"
 #include "dusk/settings.h"
@@ -505,6 +506,7 @@ namespace dusk {
             m_menuTools.ShowOnline();
             m_menuTools.ShowActorSpawner();
         }
+        dusk::multiplayer::draw_notifications_overlay();
 
     }
 

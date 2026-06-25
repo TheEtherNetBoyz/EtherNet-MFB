@@ -41,16 +41,12 @@ struct RemoteLinkDummy {
     uint32_t stableFrames = 0;
     uint32_t drawLogCount = 0;
     uint32_t matrixRejectLogCount = 0;
-    uint32_t formMismatchLogCount = 0;
     uint32_t swordLogCount = 0;
-    // Tracks the previous frame's form-match state so the log caps above can
-    // be reset on a transition. Without this, a dummy that already logged 5
-    // successful draws while forms matched goes permanently silent the
-    // moment a mismatch begins (or vice versa), even if its draw outcome
-    // changes -- making it look identical in the log whether the new
-    // mismatched-form path is actually succeeding or silently failing.
-    bool hasFormMatchState = false;
-    bool lastFormMatches = true;
+    uint32_t wolfDrawLogCount = 0;
+    bool lastObservedIsWolf = false;
+    RemoteLinkMatrixSnapshot lastLinkMatrices;
+    bool lastLinkMatricesIsWolf = false;
+    bool loggedReady = false;
 };
 
 struct RemoteArcRequest {
@@ -67,13 +63,13 @@ struct RemoteLinkSources {
     J3DModelData* hand = nullptr;
     J3DModelData* sword = nullptr;
     J3DModelData* sheath = nullptr;
-    J3DModel* shieldSource = nullptr;
+    J3DModelData* shield = nullptr;
     bool humanParts = false;
 };
 
-// Keyed by PeerPoseSnapshot::peerId. Only one peer exists in practice today
-// (see remote_link_dummy.hpp), but storage is peer-keyed so adding real
-// multi-peer rendering later is a drawing-loop change, not a data-model one.
+// Keyed by PeerPoseSnapshot::peerId. Direct host sessions can draw multiple
+// remote peers at once (direct1/direct2/etc.), so every clone/model cache and
+// log throttle in RemoteLinkDummy must stay per-peer.
 std::map<std::string, RemoteLinkDummy> sDummies;
 RemoteArcRequest sHumanArc{"Kmdl"};
 RemoteArcRequest sWolfArc{"Wmdl"};
@@ -86,7 +82,11 @@ RemoteArcRequest sAlinkArc{"Alink"};
 // mismatch for the entire early game. See RemoteClothesVariant
 // (multiplayer.cpp).
 RemoteArcRequest sCasualArc{"Bmdl"};
+RemoteArcRequest sCarvingWoodShieldArc{"CWShd"};
+RemoteArcRequest sOrdonShieldArc{"SWShd"};
+RemoteArcRequest sHylianShieldArc{"HyShd"};
 uint32_t sRoomSkipLogCount = 0;
+J3DModelData* sInitializedWolfBodyData = nullptr;
 
 // Temporary experiment for the "yellow sword affects the real local
 // character too" report: g_env_light.setLightTevColorType_MAJI() (called
@@ -158,45 +158,8 @@ void destroy_model(RemoteLinkModel& model) {
     model.heap = nullptr;
 }
 
-J3DModel* get_or_create_model(RemoteLinkModel& dst, J3DModel* source, u32 heapSize) {
-    if (source == nullptr || source->getModelData() == nullptr) {
-        destroy_model(dst);
-        return nullptr;
-    }
-
-    J3DModelData* sourceData = source->getModelData();
-    if (dst.model != nullptr && dst.data == sourceData) {
-        return dst.model;
-    }
-
-    destroy_model(dst);
-
-    dst.heap = mDoExt_createSolidHeapFromGameToCurrent(heapSize, 0x20);
-    if (dst.heap == nullptr) {
-        DuskLog.warn("Multiplayer remote Link dummy: heap allocation failed size={}", heapSize);
-        return nullptr;
-    }
-
-    dst.model = mDoExt_J3DModel__create(sourceData, 0x80000, 0x11000084);
-    if (dst.model == nullptr) {
-        DuskLog.warn("Multiplayer remote Link dummy: J3DModel creation failed");
-        mDoExt_destroySolidHeap(dst.heap);
-        dst.heap = nullptr;
-        mDoExt_restoreCurrentHeap();
-        return nullptr;
-    }
-
-    dst.data = sourceData;
-    dst.model->setBaseScale(*source->getBaseScale());
-    dst.model->setUserArea(0);
-    mDoExt_adjustSolidHeapToSystem(dst.heap);
-    DuskLog.info("Multiplayer remote Link dummy: cloned model={} joints={}",
-                 static_cast<void*>(dst.model), sourceData->getJointNum());
-    return dst.model;
-}
-
 J3DModel* get_or_create_model_from_data(RemoteLinkModel& dst, J3DModelData* sourceData,
-                                        u32 heapSize) {
+                                        u32 heapSize, u32 differedDlistFlag = 0x11000084) {
     if (sourceData == nullptr) {
         destroy_model(dst);
         return nullptr;
@@ -214,7 +177,7 @@ J3DModel* get_or_create_model_from_data(RemoteLinkModel& dst, J3DModelData* sour
         return nullptr;
     }
 
-    dst.model = mDoExt_J3DModel__create(sourceData, 0x80000, 0x11000084);
+    dst.model = mDoExt_J3DModel__create(sourceData, 0x80000, differedDlistFlag);
     if (dst.model == nullptr) {
         DuskLog.warn("Multiplayer remote Link dummy: J3DModel creation from data failed");
         mDoExt_destroySolidHeap(dst.heap);
@@ -230,53 +193,6 @@ J3DModel* get_or_create_model_from_data(RemoteLinkModel& dst, J3DModelData* sour
     DuskLog.info("Multiplayer remote Link dummy: cloned resource model={} joints={}",
                  static_cast<void*>(dst.model), sourceData->getJointNum());
     return dst.model;
-}
-
-// copy_model_matrices() below has no joint/weight-count check of its own --
-// it was written for the matched-form case, where dst was always cloned from
-// the same source it's about to copy from. The local-fallback path in
-// draw_remote_link_dummy() can call it with a dst cloned from the PEER's
-// form (e.g. a wolf body) and a source that's the LOCAL player's own model
-// (e.g. still human), whenever pose.linkMatrices is momentarily invalid
-// (which happens for a few frames right as either side starts a real
-// transform -- add_link_matrices() skips capture during PROC_METAMORPHOSE).
-// Without this guard, copy_model_matrices iterates source's joint/weight
-// count and writes into dst's arrays regardless of whether dst actually has
-// that many, leaving some of dst's joints with stale/uninitialized matrices
-// when the shapes don't match -- the likely cause of the mismatched-form
-// dummy rendering as broken/invisible geometry.
-bool shapes_compatible(J3DModel* dst, J3DModel* source) {
-    if (dst == nullptr || source == nullptr || dst->getModelData() == nullptr ||
-        source->getModelData() == nullptr)
-    {
-        return false;
-    }
-
-    return dst->getModelData()->getJointNum() == source->getModelData()->getJointNum() &&
-           dst->getModelData()->getWEvlpMtxNum() == source->getModelData()->getWEvlpMtxNum();
-}
-
-void copy_model_matrices(J3DModel* dst, J3DModel* source, CMtxP localToRemote) {
-    if (dst == nullptr || source == nullptr || source->getModelData() == nullptr) {
-        return;
-    }
-
-    Mtx outMtx;
-    mDoMtx_concat(localToRemote, source->getBaseTRMtx(), outMtx);
-    dst->setBaseTRMtx(outMtx);
-    dst->setBaseScale(*source->getBaseScale());
-
-    const u16 jointNum = source->getModelData()->getJointNum();
-    for (u16 i = 0; i < jointNum; i++) {
-        mDoMtx_concat(localToRemote, source->getAnmMtx(i), outMtx);
-        dst->setAnmMtx(i, outMtx);
-    }
-
-    const u16 weightMtxNum = source->getModelData()->getWEvlpMtxNum();
-    for (u16 i = 0; i < weightMtxNum; i++) {
-        mDoMtx_concat(localToRemote, source->getWeightAnmMtx(i), outMtx);
-        mDoMtx_copy(outMtx, dst->getWeightAnmMtx(i));
-    }
 }
 
 void flat_matrix_to_mtx(const float* values, Mtx outMtx) {
@@ -317,6 +233,67 @@ bool copy_remote_model_matrices(J3DModel* dst, const RemoteModelMatrixSnapshot& 
     }
 
     return true;
+}
+
+void log_draw_skip(RemoteLinkDummy& dummy, const char* reason, const std::string& peerId,
+                   const PeerPoseSnapshot& pose, const RemoteLinkSources& sources,
+                   J3DModel* body, bool localIsWolf, const RemoteLinkMatrixSnapshot* matrices,
+                   bool usingCachedMatrices) {
+    if (dummy.matrixRejectLogCount >= 8) {
+        return;
+    }
+
+    ++dummy.matrixRejectLogCount;
+    DuskLog.info(
+        "Multiplayer remote Link dummy: draw skip reason={} peer={} peer_wolf={} "
+        "local_wolf={} "
+        "pose_mtx_valid={} cache_valid={} cache_wolf={} using_cache={} "
+        "draw_path_reached=false selected_body_model_null={} "
+        "selected_body_resource_null={} wolf_arc_complete={} "
+        "src_body_null={} body_null={} human_parts={} body_joints={} "
+        "mtx_body_valid={} mtx_body_joints={} mtx_body_weights={} "
+        "src_hat_null={} src_face_null={} src_hand_null={} src_sword_null={} "
+        "src_sheath_null={} src_shield_null={}",
+        reason, peerId, pose.isWolf, localIsWolf, pose.linkMatrices.valid, dummy.lastLinkMatrices.valid,
+        dummy.lastLinkMatricesIsWolf, usingCachedMatrices, body == nullptr,
+        sources.body == nullptr, sWolfArc.complete, sources.body == nullptr,
+        body == nullptr, sources.humanParts,
+        body != nullptr && body->getModelData() != nullptr ? body->getModelData()->getJointNum() : 0,
+        matrices != nullptr && matrices->body.valid,
+        matrices != nullptr ? matrices->body.jointCount : 0,
+        matrices != nullptr ? matrices->body.weightCount : 0,
+        sources.hat == nullptr, sources.face == nullptr, sources.hand == nullptr,
+        sources.sword == nullptr, sources.sheath == nullptr, sources.shield == nullptr);
+}
+
+void log_draw_reached(RemoteLinkDummy& dummy, const std::string& peerId,
+                      const PeerPoseSnapshot& pose, const RemoteLinkSources& sources,
+                      J3DModel* body, bool localIsWolf, const RemoteLinkMatrixSnapshot* matrices,
+                      bool usingCachedMatrices) {
+    if (pose.isWolf) {
+        if (dummy.wolfDrawLogCount >= 8) {
+            return;
+        }
+        ++dummy.wolfDrawLogCount;
+    } else if (dummy.drawLogCount >= 8) {
+        return;
+    } else {
+        ++dummy.drawLogCount;
+    }
+
+    DuskLog.info(
+        "Multiplayer remote Link dummy: draw state reason=body_drawn peer={} peer_wolf={} "
+        "local_wolf={} "
+        "pose_mtx_valid={} cache_valid={} cache_wolf={} using_cache={} "
+        "draw_path_reached=true selected_body_model_null={} "
+        "selected_body_resource_null={} wolf_arc_complete={} "
+        "mtx_body_valid={} mtx_body_joints={} mtx_body_weights={}",
+        peerId, pose.isWolf, localIsWolf, pose.linkMatrices.valid, dummy.lastLinkMatrices.valid,
+        dummy.lastLinkMatricesIsWolf, usingCachedMatrices, body == nullptr,
+        sources.body == nullptr, sWolfArc.complete,
+        matrices != nullptr && matrices->body.valid,
+        matrices != nullptr ? matrices->body.jointCount : 0,
+        matrices != nullptr ? matrices->body.weightCount : 0);
 }
 
 // J3DModel::calcMaterial() (J3DModel.cpp:267) calls
@@ -397,12 +374,17 @@ void restore_material_anm(const MaterialAnmSnapshot& snapshot) {
 // confirmed by testing to meaningfully help on its own. For sword/sheath
 // specifically, see rebindLight's doc comment: the fix there is to never
 // write this shared state in the first place, not to write-then-undo it.
-void entry_model_without_calc(J3DModel* model, dKy_tevstr_c* tevStr, bool rebindLight = true) {
+void entry_model_without_calc(J3DModel* model, dKy_tevstr_c* tevStr, bool rebindLight = true,
+                              bool useDarkList = false) {
     if (model == nullptr) {
         return;
     }
 
-    dComIfGd_setList();
+    if (useDarkList) {
+        dComIfGd_setListDark();
+    } else {
+        dComIfGd_setList();
+    }
     model->unlock();
 
 #if TARGET_PC
@@ -435,6 +417,9 @@ void entry_model_without_calc(J3DModel* model, dKy_tevstr_c* tevStr, bool rebind
         model->entry();
         model->lock();
         model->viewCalc();
+        if (useDarkList) {
+            dComIfGd_setList();
+        }
         return;
     }
 #endif
@@ -445,7 +430,7 @@ void entry_model_without_calc(J3DModel* model, dKy_tevstr_c* tevStr, bool rebind
     // that reads/writes the real daAlink_c via getUserArea(), unsafe on a
     // model with no real actor owner. The joint/weight matrices this dummy
     // needs are instead set directly by the caller (copy_remote_model_
-    // matrices/copy_model_matrices) before this runs.
+    // matrices before this runs.
     //
     // setLightTevColorType_MAJI()+calcMaterial()+diff() mirror exactly what
     // daAlink_c::basicModelDraw()/modelDraw() (d_a_alink.cpp) do for the
@@ -487,6 +472,9 @@ void entry_model_without_calc(J3DModel* model, dKy_tevstr_c* tevStr, bool rebind
     model->entry();
     model->lock();
     model->viewCalc();
+    if (useDarkList) {
+        dComIfGd_setList();
+    }
 }
 
 // Mirrors daAlink_c::draw() (d_a_alink.cpp): the real Link actor computes
@@ -497,9 +485,7 @@ void entry_model_without_calc(J3DModel* model, dKy_tevstr_c* tevStr, bool rebind
 // to own a persistent tevStr, so this builds an equivalent one fresh each
 // draw from the peer's own reported position and form. Environment
 // lighting is a property of where the peer is standing, not of which local
-// player is asking, so this is exact, not an approximation -- unlike the
-// joint-matrix local-fallback path, there is no peer-vs-local mismatch
-// concern here.
+// player is asking, so this is exact, not an approximation.
 dKy_tevstr_c build_dummy_tev_str(const PeerPoseSnapshot& pose) {
     dKy_tevstr_c tevStr{};
     cXyz pos(pose.x, pose.y, pose.z);
@@ -510,26 +496,6 @@ dKy_tevstr_c build_dummy_tev_str(const PeerPoseSnapshot& pose) {
     tevStr.TevKColor.r = 0;
     tevStr.TevKColor.b = 0;
     return tevStr;
-}
-
-bool build_local_to_remote_mtx(daAlink_c* link, const PeerPoseSnapshot& pose, Mtx outMtx) {
-    if (link == nullptr || link->mpLinkModel == nullptr) {
-        return false;
-    }
-
-    Mtx remoteBase;
-    Mtx invLocalBase;
-
-    mDoMtx_stack_c::transS(pose.x, pose.y, pose.z);
-    mDoMtx_stack_c::YrotM(static_cast<s16>(pose.angleY));
-    mDoMtx_copy(mDoMtx_stack_c::get(), remoteBase);
-
-    if (!MTXInverse(link->mpLinkModel->getBaseTRMtx(), invLocalBase)) {
-        return false;
-    }
-
-    mDoMtx_concat(remoteBase, invLocalBase, outMtx);
-    return true;
 }
 
 J3DModelData* choose_sword_source_data(int swordVariant) {
@@ -584,6 +550,65 @@ J3DModelData* choose_sheath_source_data(int swordVariant) {
 
 bool is_wood_sword_variant(int swordVariant) {
     return swordVariant == 2;
+}
+
+void initialize_remote_wolf_body_data(J3DModelData* data) {
+    if (data == nullptr || data == sInitializedWolfBodyData) {
+        return;
+    }
+
+    // A local receiver that has never transformed has loaded Wmdl only via
+    // the remote dummy path, so the shared model data has not gone through
+    // daAlink_c::changeWolf()'s one-time setup. Keep this deliberately
+    // narrow: make the body resource drawable from archive defaults without
+    // installing Link's joint callbacks/material animators, which belong to
+    // a real daAlink_c instance and are unsafe for the dummy.
+    for (u16 i = 0; i < data->getMaterialNum(); ++i) {
+        J3DMaterial* material = data->getMaterialNodePointer(i);
+        if (material != nullptr && material->getShape() != nullptr) {
+            material->getShape()->show();
+        }
+    }
+
+#ifdef TARGET_PC
+    J3DTexture* tex = data->getTexture();
+    JUTNameTab* nametable = data->getTextureName();
+    if (tex != nullptr && nametable != nullptr) {
+        for (u16 i = 0; i < tex->getNum(); ++i) {
+            const char* texName = nametable->getName(i);
+            if (texName != nullptr && std::strcmp(texName, "wl_eyeball") == 0) {
+                ResTIMG* timg = tex->getResTIMG(i);
+                if (timg != nullptr) {
+                    timg->maxLOD = 0;
+                }
+            }
+        }
+    }
+#endif
+
+    sInitializedWolfBodyData = data;
+}
+
+J3DModelData* choose_shield_source_data(int shieldVariant) {
+    switch (shieldVariant) {
+    case 1:
+        if (!ensure_arc_loaded(sCarvingWoodShieldArc)) {
+            return nullptr;
+        }
+        return static_cast<J3DModelData*>(dComIfG_getObjectRes("CWShd", 3));  // AL_SHB
+    case 2:
+        if (!ensure_arc_loaded(sOrdonShieldArc)) {
+            return nullptr;
+        }
+        return static_cast<J3DModelData*>(dComIfG_getObjectRes("SWShd", 3));  // AL_SHC
+    case 3:
+        if (!ensure_arc_loaded(sHylianShieldArc)) {
+            return nullptr;
+        }
+        return static_cast<J3DModelData*>(dComIfG_getObjectRes("HyShd", 3));  // AL_SHA
+    default:
+        return nullptr;
+    }
 }
 
 // J3DShape::hide()/show() (J3DShape.h) toggle a flag stored on the J3DShape
@@ -647,7 +672,7 @@ void restore_sword_shape_visibility(const SwordShapeVisibility& snapshot) {
     }
 }
 
-RemoteLinkSources resolve_remote_sources(daAlink_c* link, const PeerPoseSnapshot& pose) {
+RemoteLinkSources resolve_remote_sources(const PeerPoseSnapshot& pose) {
     RemoteLinkSources sources;
 
     if (pose.isWolf) {
@@ -655,6 +680,7 @@ RemoteLinkSources resolve_remote_sources(daAlink_c* link, const PeerPoseSnapshot
             return sources;
         }
         sources.body = static_cast<J3DModelData*>(dComIfG_getObjectRes("Wmdl", 14));
+        initialize_remote_wolf_body_data(sources.body);
         sources.humanParts = false;
         return sources;
     }
@@ -688,11 +714,8 @@ RemoteLinkSources resolve_remote_sources(daAlink_c* link, const PeerPoseSnapshot
         sources.sheath = choose_sheath_source_data(pose.swordVariant);
     }
 
-    if (link != nullptr && pose.shieldDraw) {
-        // Shield archives depend on equipped shield and are not yet sent as
-        // peer-owned source identity. Keep the current local source fallback
-        // for now; if absent (common on wolf-local mixed tests), hide it.
-        sources.shieldSource = link->mShieldModel;
+    if (pose.shieldDraw) {
+        sources.shield = choose_shield_source_data(pose.shieldVariant);
     }
 
     return sources;
@@ -709,6 +732,9 @@ void preload_remote_link_dummy_resources() {
     ensure_arc_loaded(sWolfArc);
     ensure_arc_loaded(sAlinkArc);
     ensure_arc_loaded(sCasualArc);
+    ensure_arc_loaded(sCarvingWoodShieldArc);
+    ensure_arc_loaded(sOrdonShieldArc);
+    ensure_arc_loaded(sHylianShieldArc);
 }
 
 void destroy_remote_link_dummy(const std::string& peerId) {
@@ -730,7 +756,10 @@ void destroy_remote_link_dummy(const std::string& peerId) {
     dummy.stableFrames = 0;
     dummy.drawLogCount = 0;
     dummy.matrixRejectLogCount = 0;
-    dummy.formMismatchLogCount = 0;
+    dummy.wolfDrawLogCount = 0;
+    dummy.lastObservedIsWolf = false;
+    dummy.lastLinkMatrices = {};
+    dummy.lastLinkMatricesIsWolf = false;
     sDummies.erase(it);
 }
 
@@ -790,10 +819,7 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
         // same tradeoff already accepted for transforms and cutscenes.
         return;
     }
-
-    if (link->mpLinkModel == nullptr) {
-        return;
-    }
+    const bool localIsWolf = static_cast<bool>(link->checkWolf());
 
     // Hyrule Field (and other open continuous areas) are split into many
     // room numbers purely for load-streaming/culling -- they are not
@@ -842,46 +868,46 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
 
     RemoteLinkDummy& dummy = dummyIt->second;
 
+    if (dummy.lastObservedIsWolf != pose.isWolf) {
+        dummy.lastObservedIsWolf = pose.isWolf;
+        dummy.drawLogCount = 0;
+        dummy.matrixRejectLogCount = 0;
+        dummy.swordLogCount = 0;
+        if (pose.isWolf) {
+            dummy.wolfDrawLogCount = 0;
+        }
+        DuskLog.info(
+            "Multiplayer remote Link dummy: peer form changed peer={} peer_wolf={} "
+            "pose_mtx_valid={} cache_valid={} cache_wolf={}",
+            peerId, pose.isWolf, pose.linkMatrices.valid, dummy.lastLinkMatrices.valid,
+            dummy.lastLinkMatricesIsWolf);
+    }
+
     if (dummy.stableFrames < 30) {
         ++dummy.stableFrames;
         return;
     }
 
-    const bool localWolf = static_cast<bool>(link->checkWolf());
-    const bool formMatches = localWolf == pose.isWolf;
-    if (!dummy.hasFormMatchState || formMatches != dummy.lastFormMatches) {
-        // Reset the per-state log caps on every match/mismatch transition.
-        // Otherwise a dummy that already used up its 5 successful "drew
-        // copy" logs while forms matched goes silent for the rest of the
-        // session the moment a mismatch begins (or the reverse), making it
-        // impossible to tell from the log whether the new state is actually
-        // drawing or failing.
+    if (!dummy.loggedReady) {
         dummy.drawLogCount = 0;
         dummy.matrixRejectLogCount = 0;
-        dummy.formMismatchLogCount = 0;
         dummy.swordLogCount = 0;
-        dummy.hasFormMatchState = true;
-        dummy.lastFormMatches = formMatches;
+        dummy.loggedReady = true;
         DuskLog.info(
-            "Multiplayer remote Link dummy: form-match state changed to {} local_wolf={} peer_wolf={} peer={}",
-            formMatches ? "matched" : "mismatched", localWolf, pose.isWolf, peerId);
-    }
-    if (!formMatches && dummy.formMismatchLogCount < 5) {
-        ++dummy.formMismatchLogCount;
-        DuskLog.info(
-            "Multiplayer remote Link dummy: local/peer form mismatch local_wolf={} peer_wolf={} peer={} -- attempting matrix-compatible parts only",
-            localWolf, pose.isWolf, peerId);
+            "Multiplayer remote Link dummy: peer form state ready peer_wolf={} peer={}",
+            pose.isWolf, peerId);
     }
 
-    const RemoteLinkSources sources = resolve_remote_sources(link, pose);
+    const RemoteLinkSources sources = resolve_remote_sources(pose);
     const bool drawHumanParts = sources.humanParts;
-    J3DModel* body = get_or_create_model_from_data(dummy.body, sources.body, 0x200000);
+    const u32 bodyDiffFlags = pose.isWolf ? 0x11020284 : 0x11000084;
+    J3DModel* body = get_or_create_model_from_data(dummy.body, sources.body, 0x200000, bodyDiffFlags);
     J3DModel* hat = drawHumanParts ? get_or_create_model_from_data(dummy.hat, sources.hat, 0x100000) : nullptr;
     J3DModel* face = drawHumanParts ? get_or_create_model_from_data(dummy.face, sources.face, 0x100000) : nullptr;
     J3DModel* hand = drawHumanParts ? get_or_create_model_from_data(dummy.hand, sources.hand, 0x100000) : nullptr;
     J3DModel* sword = drawHumanParts && pose.swordDraw ? get_or_create_model_from_data(dummy.sword, sources.sword, 0x100000) : nullptr;
     J3DModel* sheath = drawHumanParts && pose.swordDraw ? get_or_create_model_from_data(dummy.sheath, sources.sheath, 0x100000) : nullptr;
-    J3DModel* shield = drawHumanParts && pose.shieldDraw ? get_or_create_model(dummy.shield, sources.shieldSource, 0x100000) : nullptr;
+    J3DModel* shield = drawHumanParts && pose.shieldDraw ? get_or_create_model_from_data(dummy.shield, sources.shield, 0x100000) : nullptr;
     if (!drawHumanParts) {
         destroy_model(dummy.hat);
         destroy_model(dummy.face);
@@ -895,62 +921,45 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
         destroy_model(dummy.shield);
     }
     if (body == nullptr) {
+        log_draw_skip(dummy, "body_null", peerId, pose, sources, body, localIsWolf, nullptr, false);
         return;
     }
 
     dKy_tevstr_c dummyTevStr = build_dummy_tev_str(pose);
 
+    const RemoteLinkMatrixSnapshot* matrices = nullptr;
     const bool hasRemoteMatrices = pose.linkMatrices.valid;
-    bool usedRemoteMatrices = false;
     if (hasRemoteMatrices) {
-        usedRemoteMatrices = copy_remote_model_matrices(body, pose.linkMatrices.body);
+        matrices = &pose.linkMatrices;
+    } else if (dummy.lastLinkMatrices.valid && dummy.lastLinkMatricesIsWolf == pose.isWolf) {
+        matrices = &dummy.lastLinkMatrices;
+    }
+
+    bool usedRemoteMatrices = false;
+    const bool usingCachedMatrices = matrices != nullptr && !hasRemoteMatrices;
+    if (matrices != nullptr) {
+        usedRemoteMatrices = copy_remote_model_matrices(body, matrices->body);
         if (!usedRemoteMatrices) {
-            if (dummy.matrixRejectLogCount < 5) {
-                ++dummy.matrixRejectLogCount;
-                DuskLog.warn(
-                    "Multiplayer remote Link dummy: rejected peer body matrices peer={} local_wolf={} peer_wolf={} local_joints={} peer_joints={} local_weights={} peer_weights={}",
-                    peerId, localWolf, pose.isWolf, body->getModelData()->getJointNum(),
-                    pose.linkMatrices.body.jointCount,
-                    body->getModelData()->getWEvlpMtxNum(),
-                    pose.linkMatrices.body.weightCount);
-            }
+            log_draw_skip(dummy, "body_matrix_rejected", peerId, pose, sources, body, localIsWolf, matrices,
+                          usingCachedMatrices);
             return;
+        }
+        if (hasRemoteMatrices) {
+            dummy.lastLinkMatrices = pose.linkMatrices;
+            dummy.lastLinkMatricesIsWolf = pose.isWolf;
         }
     } else {
-        if (!shapes_compatible(body, link->mpLinkModel)) {
-            // The peer's reported form doesn't match what the local player's
-            // own model can drive (see shapes_compatible()'s comment) -- skip
-            // this draw rather than copy a mismatched joint/weight count
-            // across two different skeletons.
-            if (dummy.matrixRejectLogCount < 5) {
-                ++dummy.matrixRejectLogCount;
-                DuskLog.warn(
-                    "Multiplayer remote Link dummy: local-fallback shape mismatch peer={} local_wolf={} peer_wolf={} dummy_joints={} local_joints={}",
-                    peerId, localWolf, pose.isWolf, body->getModelData()->getJointNum(),
-                    link->mpLinkModel->getModelData() != nullptr
-                        ? link->mpLinkModel->getModelData()->getJointNum()
-                        : 0);
-            }
-            return;
-        }
-        Mtx localToRemote;
-        if (!build_local_to_remote_mtx(link, pose, localToRemote)) {
-            return;
-        }
-        copy_model_matrices(body, link->mpLinkModel, localToRemote);
+        log_draw_skip(dummy, "no_matrices_for_form", peerId, pose, sources, body, localIsWolf, matrices,
+                      usingCachedMatrices);
+        return;
     }
-    entry_model_without_calc(body, &dummyTevStr);
+    entry_model_without_calc(body, &dummyTevStr, /*rebindLight=*/true, /*useDarkList=*/pose.isWolf);
+    log_draw_reached(dummy, peerId, pose, sources, body, localIsWolf, matrices, usingCachedMatrices);
 
     if (hat != nullptr) {
         bool drewHat = false;
-        if (usedRemoteMatrices && pose.linkMatrices.hat.valid) {
-            drewHat = copy_remote_model_matrices(hat, pose.linkMatrices.hat);
-        } else if (!usedRemoteMatrices && shapes_compatible(hat, link->mpLinkHatModel)) {
-            Mtx localToRemote;
-            if (build_local_to_remote_mtx(link, pose, localToRemote)) {
-                copy_model_matrices(hat, link->mpLinkHatModel, localToRemote);
-                drewHat = true;
-            }
+        if (usedRemoteMatrices && matrices->hat.valid) {
+            drewHat = copy_remote_model_matrices(hat, matrices->hat);
         }
         if (drewHat) {
             entry_model_without_calc(hat, &dummyTevStr);
@@ -959,14 +968,8 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
 
     if (face != nullptr) {
         bool drewFace = false;
-        if (usedRemoteMatrices && pose.linkMatrices.face.valid) {
-            drewFace = copy_remote_model_matrices(face, pose.linkMatrices.face);
-        } else if (!usedRemoteMatrices && shapes_compatible(face, link->mpLinkFaceModel)) {
-            Mtx localToRemote;
-            if (build_local_to_remote_mtx(link, pose, localToRemote)) {
-                copy_model_matrices(face, link->mpLinkFaceModel, localToRemote);
-                drewFace = true;
-            }
+        if (usedRemoteMatrices && matrices->face.valid) {
+            drewFace = copy_remote_model_matrices(face, matrices->face);
         }
         if (drewFace) {
             entry_model_without_calc(face, &dummyTevStr);
@@ -975,14 +978,8 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
 
     if (hand != nullptr) {
         bool drewHand = false;
-        if (usedRemoteMatrices && pose.linkMatrices.hand.valid) {
-            drewHand = copy_remote_model_matrices(hand, pose.linkMatrices.hand);
-        } else if (!usedRemoteMatrices && shapes_compatible(hand, link->mpLinkHandModel)) {
-            Mtx localToRemote;
-            if (build_local_to_remote_mtx(link, pose, localToRemote)) {
-                copy_model_matrices(hand, link->mpLinkHandModel, localToRemote);
-                drewHand = true;
-            }
+        if (usedRemoteMatrices && matrices->hand.valid) {
+            drewHand = copy_remote_model_matrices(hand, matrices->hand);
         }
         if (drewHand) {
             entry_model_without_calc(hand, &dummyTevStr);
@@ -991,8 +988,8 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
 
     if (sword != nullptr && !skip_remote_sword_draw()) {
         bool drewSword = false;
-        if (usedRemoteMatrices && pose.linkMatrices.sword.valid) {
-            drewSword = copy_remote_model_matrices(sword, pose.linkMatrices.sword);
+        if (usedRemoteMatrices && matrices->sword.valid) {
+            drewSword = copy_remote_model_matrices(sword, matrices->sword);
         }
         if (drewSword) {
             const bool woodSword = is_wood_sword_variant(pose.swordVariant);
@@ -1007,10 +1004,8 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
             // (and then trying to undo it) is what produced the flicker/
             // dead-shine regression; not touching it at all means this
             // dummy's sword just inherits whatever the real character's
-            // own draw already set, which is correct whenever they share
-            // data (the tested/common case) and merely stale -- the same
-            // already-accepted limitation as body/hat/face/hand during a
-            // form mismatch -- when they don't.
+            // own draw already set. This remains a shared-material
+            // limitation to isolate in the later material pass.
             entry_model_without_calc(sword, &dummyTevStr, /*rebindLight=*/false);
             restore_sword_shape_visibility(visibilitySnapshot);
             if (dummy.swordLogCount < 8) {
@@ -1031,7 +1026,7 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
                     "matrix_weights={} shares_local_sword_data={} dummy_data={} local_data={}",
                     peerId, pose.swordVariant, woodSword, pose.swordOut,
                     sword->getModelData()->getJointNum(), sword->getModelData()->getWEvlpMtxNum(),
-                    pose.linkMatrices.sword.jointCount, pose.linkMatrices.sword.weightCount,
+                    matrices->sword.jointCount, matrices->sword.weightCount,
                     sharesLocalSwordData, static_cast<void*>(sword->getModelData()),
                     static_cast<void*>(link->mSwordModel != nullptr
                                             ? link->mSwordModel->getModelData()
@@ -1043,14 +1038,14 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
                 "Multiplayer remote Link dummy: sword present but NOT drawn peer={} "
                 "variant={} out={} usedRemoteMatrices={} sword_matrices_valid={}",
                 peerId, pose.swordVariant, pose.swordOut, usedRemoteMatrices,
-                pose.linkMatrices.sword.valid);
+                matrices != nullptr && matrices->sword.valid);
         }
     }
 
     if (sheath != nullptr) {
         bool drewSheath = false;
-        if (usedRemoteMatrices && pose.linkMatrices.sheath.valid) {
-            drewSheath = copy_remote_model_matrices(sheath, pose.linkMatrices.sheath);
+        if (usedRemoteMatrices && matrices->sheath.valid) {
+            drewSheath = copy_remote_model_matrices(sheath, matrices->sheath);
         }
         if (drewSheath) {
             // Same reasoning as the sword's call site above.
@@ -1060,14 +1055,8 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
 
     if (shield != nullptr) {
         bool drewShield = false;
-        if (usedRemoteMatrices && pose.linkMatrices.shield.valid) {
-            drewShield = copy_remote_model_matrices(shield, pose.linkMatrices.shield);
-        } else if (!usedRemoteMatrices && shapes_compatible(shield, link->mShieldModel)) {
-            Mtx localToRemote;
-            if (build_local_to_remote_mtx(link, pose, localToRemote)) {
-                copy_model_matrices(shield, link->mShieldModel, localToRemote);
-                drewShield = true;
-            }
+        if (usedRemoteMatrices && matrices->shield.valid) {
+            drewShield = copy_remote_model_matrices(shield, matrices->shield);
         }
         if (drewShield) {
             entry_model_without_calc(shield, &dummyTevStr);
@@ -1078,7 +1067,8 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
         ++dummy.drawLogCount;
         DuskLog.info(
             "Multiplayer remote Link dummy: drew copy #{} peer={} matrices={} pos=({}, {}, {}) angleY={}",
-            dummy.drawLogCount, peerId, usedRemoteMatrices ? "remote" : "local-fallback",
+            dummy.drawLogCount, peerId,
+            usingCachedMatrices ? "cached-remote" : "remote",
             pose.x, pose.y, pose.z, pose.angleY);
     }
 }

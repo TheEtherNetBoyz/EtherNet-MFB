@@ -16,7 +16,12 @@ private:
     char m_bindHost[64] = "0.0.0.0";
     char m_publicHost[128] = "127.0.0.1";
     char m_inviteCode[512] = "";
+    char m_relayName[64] = "Player";
+    char m_relayRoom[64] = "dev";
+    char m_relayPassword[128] = "";
+    char m_relayHost[128] = "127.0.0.1";
     int m_port = 34197;
+    int m_relayPort = 34197;
     bool m_debugMarker = true;
     bool m_dummyModel = true;
     std::string m_statusMessage;

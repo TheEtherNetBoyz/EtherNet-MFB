@@ -47,6 +47,7 @@ struct PeerPoseSnapshot {
     bool isWolf = false;
     uint16_t equipItem = 0xFFFF;
     int swordVariant = 0;
+    int shieldVariant = 0;
     int clothesVariant = 0;
     bool swordDraw = false;
     bool shieldDraw = false;
@@ -67,6 +68,16 @@ struct DirectHostOptions {
 struct DirectJoinOptions {
     std::string name = "Joiner";
     std::string inviteCode;
+    bool debugMarker = true;
+    bool dummyModel = true;
+};
+
+struct RelayJoinOptions {
+    std::string name = "Player";
+    std::string room = "dev";
+    std::string password;
+    std::string host = "127.0.0.1";
+    int port = 34197;
     bool debugMarker = true;
     bool dummyModel = true;
 };
@@ -93,11 +104,13 @@ void shutdown();
 bool is_enabled();
 bool host_direct(const DirectHostOptions& options, std::string* errorOut = nullptr);
 bool join_direct(const DirectJoinOptions& options, std::string* errorOut = nullptr);
+bool join_relay(const RelayJoinOptions& options, std::string* errorOut = nullptr);
 void disconnect_session();
 SessionStatus get_session_status();
 bool has_recent_peer_pose(uint32_t maxAgeTicks);
 PeerPoseSnapshot get_latest_peer_pose();
 void draw_debug_peer_marker();
+void draw_notifications_overlay();
 bool was_switch_recently_remote_set(int stage, int flag, uint32_t* ageTicks = nullptr);
 
 }  // namespace dusk::multiplayer

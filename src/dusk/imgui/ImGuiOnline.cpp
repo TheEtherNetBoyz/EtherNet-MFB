@@ -71,64 +71,105 @@ void ImGuiOnline::draw(bool& open) {
     }
 
     ImGui::Separator();
-    if (ImGui::CollapsingHeader("Host", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::SetNextItemWidth(190.0f);
-        ImGui::InputText("Name##hostName", m_hostName, sizeof(m_hostName));
-        ImGui::SetNextItemWidth(190.0f);
-        ImGui::InputText("Room", m_room, sizeof(m_room));
-        ImGui::SetNextItemWidth(190.0f);
-        ImGui::InputText("Bind", m_bindHost, sizeof(m_bindHost));
-        ImGui::SetNextItemWidth(190.0f);
-        ImGui::InputText("Public Host", m_publicHost, sizeof(m_publicHost));
-        ImGui::SetNextItemWidth(190.0f);
-        ImGui::InputInt("Port", &m_port);
-        ImGui::Checkbox("Debug marker", &m_debugMarker);
-        ImGui::SameLine();
-        ImGui::Checkbox("Remote Link model", &m_dummyModel);
+    if (ImGui::BeginTabBar("OnlineModeTabs")) {
+        if (ImGui::BeginTabItem("Direct")) {
+            if (ImGui::CollapsingHeader("Host", ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::SetNextItemWidth(190.0f);
+                ImGui::InputText("Name##hostName", m_hostName, sizeof(m_hostName));
+                ImGui::SetNextItemWidth(190.0f);
+                ImGui::InputText("Room", m_room, sizeof(m_room));
+                ImGui::SetNextItemWidth(190.0f);
+                ImGui::InputText("Bind", m_bindHost, sizeof(m_bindHost));
+                ImGui::SetNextItemWidth(190.0f);
+                ImGui::InputText("Public Host", m_publicHost, sizeof(m_publicHost));
+                ImGui::SetNextItemWidth(190.0f);
+                ImGui::InputInt("Port", &m_port);
+                ImGui::Checkbox("Debug marker", &m_debugMarker);
+                ImGui::SameLine();
+                ImGui::Checkbox("Remote Link model", &m_dummyModel);
 
-        if (ImGui::Button("Host Lobby")) {
-            multiplayer::DirectHostOptions options;
-            options.name = m_hostName;
-            options.room = m_room;
-            options.bindHost = m_bindHost;
-            options.publicHost = m_publicHost;
-            options.port = m_port;
-            options.debugMarker = m_debugMarker;
-            options.dummyModel = m_dummyModel;
+                if (ImGui::Button("Host Lobby")) {
+                    multiplayer::DirectHostOptions options;
+                    options.name = m_hostName;
+                    options.room = m_room;
+                    options.bindHost = m_bindHost;
+                    options.publicHost = m_publicHost;
+                    options.port = m_port;
+                    options.debugMarker = m_debugMarker;
+                    options.dummyModel = m_dummyModel;
 
-            std::string error;
-            if (multiplayer::host_direct(options, &error)) {
-                m_statusMessage = "Lobby hosted. Share the invite code.";
-            } else {
-                m_statusMessage = "Host failed: " + error;
+                    std::string error;
+                    if (multiplayer::host_direct(options, &error)) {
+                        m_statusMessage = "Lobby hosted. Share the invite code.";
+                    } else {
+                        m_statusMessage = "Host failed: " + error;
+                    }
+                }
             }
-        }
-    }
 
-    ImGui::Separator();
-    if (ImGui::CollapsingHeader("Join", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::SetNextItemWidth(190.0f);
-        ImGui::InputText("Name##joinName", m_joinName, sizeof(m_joinName));
-        ImGui::SetNextItemWidth(-1.0f);
-        ImGui::InputTextMultiline("Invite Code", m_inviteCode, sizeof(m_inviteCode), ImVec2(0.0f, ImGui::GetTextLineHeight() * 3.0f));
-        ImGui::Checkbox("Debug marker##join", &m_debugMarker);
-        ImGui::SameLine();
-        ImGui::Checkbox("Remote Link model##join", &m_dummyModel);
+            ImGui::Separator();
+            if (ImGui::CollapsingHeader("Join", ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::SetNextItemWidth(190.0f);
+                ImGui::InputText("Name##joinName", m_joinName, sizeof(m_joinName));
+                ImGui::SetNextItemWidth(-1.0f);
+                ImGui::InputTextMultiline("Invite Code", m_inviteCode, sizeof(m_inviteCode), ImVec2(0.0f, ImGui::GetTextLineHeight() * 3.0f));
+                ImGui::Checkbox("Debug marker##join", &m_debugMarker);
+                ImGui::SameLine();
+                ImGui::Checkbox("Remote Link model##join", &m_dummyModel);
 
-        if (ImGui::Button("Join Lobby")) {
-            multiplayer::DirectJoinOptions options;
-            options.name = m_joinName;
-            options.inviteCode = m_inviteCode;
-            options.debugMarker = m_debugMarker;
-            options.dummyModel = m_dummyModel;
+                if (ImGui::Button("Join Lobby")) {
+                    multiplayer::DirectJoinOptions options;
+                    options.name = m_joinName;
+                    options.inviteCode = m_inviteCode;
+                    options.debugMarker = m_debugMarker;
+                    options.dummyModel = m_dummyModel;
 
-            std::string error;
-            if (multiplayer::join_direct(options, &error)) {
-                m_statusMessage = "Joining lobby.";
-            } else {
-                m_statusMessage = "Join failed: " + error;
+                    std::string error;
+                    if (multiplayer::join_direct(options, &error)) {
+                        m_statusMessage = "Joining lobby.";
+                    } else {
+                        m_statusMessage = "Join failed: " + error;
+                    }
+                }
             }
+            ImGui::EndTabItem();
         }
+
+        if (ImGui::BeginTabItem("Relay")) {
+            ImGui::SetNextItemWidth(190.0f);
+            ImGui::InputText("Username##relayName", m_relayName, sizeof(m_relayName));
+            ImGui::SetNextItemWidth(190.0f);
+            ImGui::InputText("Lobby", m_relayRoom, sizeof(m_relayRoom));
+            ImGui::SetNextItemWidth(190.0f);
+            ImGui::InputText("Password", m_relayPassword, sizeof(m_relayPassword), ImGuiInputTextFlags_Password);
+            ImGui::SetNextItemWidth(190.0f);
+            ImGui::InputText("Relay Host", m_relayHost, sizeof(m_relayHost));
+            ImGui::SetNextItemWidth(190.0f);
+            ImGui::InputInt("Relay Port", &m_relayPort);
+            ImGui::Checkbox("Debug marker##relay", &m_debugMarker);
+            ImGui::SameLine();
+            ImGui::Checkbox("Remote Link model##relay", &m_dummyModel);
+
+            if (ImGui::Button("Join Relay Lobby")) {
+                multiplayer::RelayJoinOptions options;
+                options.name = m_relayName;
+                options.room = m_relayRoom;
+                options.password = m_relayPassword;
+                options.host = m_relayHost;
+                options.port = m_relayPort;
+                options.debugMarker = m_debugMarker;
+                options.dummyModel = m_dummyModel;
+
+                std::string error;
+                if (multiplayer::join_relay(options, &error)) {
+                    m_statusMessage = "Joining relay lobby.";
+                } else {
+                    m_statusMessage = "Relay join failed: " + error;
+                }
+            }
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
     }
 
     ImGui::Separator();

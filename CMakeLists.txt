@@ -531,6 +531,14 @@ target_compile_definitions(dusklight PRIVATE ${GAME_COMPILE_DEFS})
 target_include_directories(dusklight PRIVATE ${GAME_INCLUDE_DIRS})
 target_link_libraries(dusklight PRIVATE aurora::main ${GAME_LIBS} ${JSYSTEM_LINK_LIBRARIES})
 target_precompile_headers(dusklight PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/include/dusk_pch.hpp>")
+
+add_executable(tp_multiplayer_relay tools/multiplayer_relay/relay.cpp)
+target_link_libraries(tp_multiplayer_relay PRIVATE nlohmann_json::nlohmann_json)
+set_target_properties(tp_multiplayer_relay PROPERTIES FOLDER "tools")
+if (WIN32)
+    target_link_libraries(tp_multiplayer_relay PRIVATE ws2_32)
+endif ()
+
 if (TARGET crashpad_handler)
     add_dependencies(dusklight crashpad_handler)
     add_custom_command(TARGET dusklight POST_BUILD

@@ -23,6 +23,7 @@
 #include "f_pc/f_pc_manager.h"
 #include "f_pc/f_pc_name.h"
 #include "m_Do/m_Do_mtx.h"
+#include "imgui.h"
 #include "nlohmann/json.hpp"
 
 #if _WIN32
@@ -53,6 +54,7 @@
     #endif
 #endif
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cstdint>
@@ -65,18 +67,20 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace dusk::multiplayer {
 namespace {
 
 using json = nlohmann::json;
 
-// Direct mode (DirectHost/DirectJoin) is a raw 1:1 TCP pipe -- the peer
-// never tags its own messages with a client_id, unlike the relay
-// (tools/multiplayer_relay), which assigns one and stamps every routed
-// message with the sender's. This placeholder key stands in for "the one
-// peer" when there's no real client_id to key peer-specific state by.
+// Direct joiners still talk to one endpoint, but direct hosts now behave as a
+// small hub: every accepted TCP peer gets a host-assigned client_id and the
+// host forwards peer messages to the rest of the room. Messages from the host
+// itself still omit client_id, so direct joiners render the host under this
+// placeholder key.
 const char* const kDirectPeerId = "direct";
+constexpr size_t kMaxDirectPeers = 7;
 
 std::string resolve_peer_id(const json& message) {
     return message.value("client_id", kDirectPeerId);
@@ -103,6 +107,13 @@ enum RemoteSwordVariant {
     REMOTE_SWORD_MASTER = 3,
 };
 
+enum RemoteShieldVariant {
+    REMOTE_SHIELD_UNKNOWN = 0,
+    REMOTE_SHIELD_CARVING_WOOD = 1,
+    REMOTE_SHIELD_ORDON = 2,
+    REMOTE_SHIELD_HYLIAN = 3,
+};
+
 // Mirrors daAlink_c::changeLink()'s clothing-tier branches
 // (d_a_alink_wolf.inc:312-369) -- each tier uses a different body archive
 // (joint/weight-envelope counts differ even when the skeleton's joint count
@@ -115,6 +126,15 @@ enum RemoteClothesVariant {
     REMOTE_CLOTHES_CASUAL = 1,  // "Bmdl" -- checkCasualWearFlg()
     REMOTE_CLOTHES_ZORA = 2,    // "Zmdl" -- checkZoraWearFlg()
     REMOTE_CLOTHES_ARMOR = 3,   // "Mmdl" -- checkMagicArmorWearFlg()
+};
+
+struct DirectPeer {
+    socket_t sock = INVALID_SOCKET;
+    std::string id;
+    std::string name = "Peer";
+    std::string rxBuffer;
+    bool welcomed = false;
+    bool snapshotPending = false;
 };
 
 int detect_clothes_variant() {
@@ -143,6 +163,7 @@ struct Session {
     std::string inviteCode;
     std::string sessionId;
     std::string sessionKey;
+    std::string relayPassword;
     std::string rxBuffer;
     int port = 34197;
     bool debugMarker = false;
@@ -150,16 +171,16 @@ struct Session {
     uint32_t pingTicks = 0;
     uint32_t poseSequence = 0;
     uint32_t peerPoseLogTicks = 0;
-    // Keyed by peer ID (relay client_id, or kDirectPeerId in direct mode).
-    // Only one peer exists in practice today (direct mode is 1:1), but this
-    // is peer-keyed so multi-peer support is a drawing/networking-layer
-    // change later, not a data-model one -- see remote_link_dummy.hpp.
+    // Keyed by peer ID (relay client_id, the direct host's placeholder
+    // kDirectPeerId, or host-assigned directN IDs for direct joiners).
     std::map<std::string, PeerPoseSnapshot> peerPoses;
     bool helloSent = false;
     bool welcomeSent = false;
     bool welcomed = false;
     bool snapshotPending = false;
     uint32_t repairSweepTicks = 0;
+    uint32_t nextDirectPeerId = 1;
+    std::map<std::string, DirectPeer> directPeers;
 };
 
 bool sInitialized = false;
@@ -180,6 +201,15 @@ bool sDummyModelEnabled = false;
 // or for testing with both peers in the same room at the same time.
 bool sLayerRiskSyncEnabled = false;
 bool sNetworkStackStarted = false;
+
+struct Notification {
+    std::string text;
+    float ageSeconds = 0.0f;
+    float durationSeconds = 5.0f;
+};
+
+std::vector<Notification> sNotifications;
+std::map<std::string, std::string> sPeerNames;
 
 // Set while applying any remote save-state bit (event bit, chest bit, ...),
 // so the dComIfGs_* setter call that applies it doesn't loop back through
@@ -297,6 +327,16 @@ int detect_sword_variant(const daAlink_c* link) {
         return REMOTE_SWORD_ORDON;
     }
     return REMOTE_SWORD_UNKNOWN;
+}
+
+int detect_shield_variant() {
+    const u16 equipShield = dComIfGs_getSelectEquipShield();
+    switch (equipShield) {
+    case dItemNo_WOOD_SHIELD_e: return REMOTE_SHIELD_CARVING_WOOD;
+    case dItemNo_SHIELD_e: return REMOTE_SHIELD_ORDON;
+    case dItemNo_HYLIA_SHIELD_e: return REMOTE_SHIELD_HYLIAN;
+    default: return REMOTE_SHIELD_UNKNOWN;
+    }
 }
 
 bool is_stage_dependent_message_type(const std::string& type) {
@@ -955,9 +995,33 @@ bool set_nonblocking(socket_t sock) {
 #endif
 }
 
+void push_notification(std::string text, float durationSeconds = 5.0f) {
+    if (text.empty()) {
+        return;
+    }
+
+    sNotifications.push_back({std::move(text), 0.0f, durationSeconds});
+    if (sNotifications.size() > 5) {
+        sNotifications.erase(sNotifications.begin());
+    }
+}
+
+std::string display_name_for_peer(const std::string& peerId) {
+    const auto name = sPeerNames.find(peerId);
+    if (name != sPeerNames.end() && !name->second.empty()) {
+        return name->second;
+    }
+    return peerId.empty() ? "Peer" : peerId;
+}
+
 void reset_connection_state() {
     close_socket(sSession.sock);
     close_socket(sSession.listenSock);
+    for (auto& entry : sSession.directPeers) {
+        close_socket(entry.second.sock);
+    }
+    sSession.directPeers.clear();
+    sSession.nextDirectPeerId = 1;
     sSession.state = ConnectionState::Disconnected;
     sSession.helloSent = false;
     sSession.welcomeSent = false;
@@ -980,6 +1044,8 @@ void reset_connection_state() {
     sSession.poseSequence = 0;
     sSession.peerPoseLogTicks = 0;
     sSession.peerPoses.clear();
+    sPeerNames.clear();
+    sNotifications.clear();
     destroy_all_remote_link_dummies();
 }
 
@@ -1010,18 +1076,22 @@ bool ensure_network_stack(std::string* errorOut = nullptr) {
     return true;
 }
 
-bool send_json(const json& message) {
-    if (sSession.sock == INVALID_SOCKET) {
+std::string serialize_json_line(const json& message) {
+    std::string bytes = message.dump();
+    bytes.push_back('\n');
+    return bytes;
+}
+
+bool send_bytes(socket_t sock, const std::string& bytes) {
+    if (sock == INVALID_SOCKET) {
         return false;
     }
 
-    std::string bytes = message.dump();
-    bytes.push_back('\n');
     const char* cursor = bytes.data();
     int remaining = static_cast<int>(bytes.size());
 
     while (remaining > 0) {
-        const int sent = send(sSession.sock, cursor, remaining, kSendFlags);
+        const int sent = send(sock, cursor, remaining, kSendFlags);
         if (sent > 0) {
             cursor += sent;
             remaining -= sent;
@@ -1032,11 +1102,44 @@ bool send_json(const json& message) {
             return true;
         }
 
-        disconnect("send failed");
         return false;
     }
 
     return true;
+}
+
+bool send_json_to_socket(socket_t sock, const json& message) {
+    return send_bytes(sock, serialize_json_line(message));
+}
+
+bool send_json_to_peer(DirectPeer& peer, const json& message) {
+    if (send_json_to_socket(peer.sock, message)) {
+        return true;
+    }
+
+    DuskLog.warn("Multiplayer direct peer send failed id={} name={}", peer.id, peer.name);
+    close_socket(peer.sock);
+    return false;
+}
+
+bool send_json(const json& message) {
+    if (sSession.mode == NetworkMode::DirectHost) {
+        bool sentAny = false;
+        for (auto& entry : sSession.directPeers) {
+            DirectPeer& peer = entry.second;
+            if (peer.welcomed && send_json_to_peer(peer, message)) {
+                sentAny = true;
+            }
+        }
+        return sentAny || sSession.directPeers.empty();
+    }
+
+    if (send_json_to_socket(sSession.sock, message)) {
+        return true;
+    }
+
+    disconnect("send failed");
+    return false;
 }
 
 void send_hello() {
@@ -1049,6 +1152,7 @@ void send_hello() {
         {"protocol_version", 1},
         {"room_id", sSession.room},
         {"session_id", sSession.sessionId},
+        {"password", sSession.relayPassword},
         {"name", sSession.name},
     });
 }
@@ -1061,7 +1165,7 @@ void send_hello() {
 // means a late-set local bit during the brief gap before this snapshot
 // arrives is naturally preserved -- these are all monotonic OR-merges, so
 // receiving a bit twice or in any order is harmless.
-void send_save_snapshot() {
+void send_save_snapshot(DirectPeer* peer = nullptr) {
     json eventFlags = json::array();
     for (int i = 0; i < 256 * 8; ++i) {
         if (dComIfGs_isEventBit(static_cast<u16>(i))) {
@@ -1185,7 +1289,7 @@ void send_save_snapshot() {
         }
     }
 
-    send_json({
+    json snapshot = {
         {"type", "save_snapshot"},
         {"event_flags", eventFlags},
         {"chests", chestStages},
@@ -1206,11 +1310,44 @@ void send_save_snapshot() {
         {"letter_get_flags", letterGetFlags},
         {"max_life", dComIfGs_getMaxLife()},
         {"bottle_slots", dComIfGs_getBottleSlotCount()},
-    });
+    };
+    if (peer != nullptr) {
+        send_json_to_peer(*peer, snapshot);
+    } else {
+        send_json(snapshot);
+    }
     DuskLog.info(
         "Multiplayer sent save snapshot event_flags={} chest_stages={} switch_stages={} item_stages={} dungeon_stages={} key_items={}",
         eventFlags.size(), chestStages.size(), switchStages.size(), itemStages.size(),
         dungeonStages.size(), keyItems.size());
+}
+
+json direct_peer_list(const std::string& excludePeerId = "") {
+    json peers = json::array();
+    for (const auto& entry : sSession.directPeers) {
+        const DirectPeer& peer = entry.second;
+        if (!peer.welcomed || peer.id == excludePeerId) {
+            continue;
+        }
+        peers.push_back({{"client_id", peer.id}, {"name", peer.name}});
+    }
+    return peers;
+}
+
+void send_welcome_to_peer(DirectPeer& peer) {
+    if (peer.welcomed) {
+        return;
+    }
+
+    peer.welcomed = send_json_to_peer(peer, {
+        {"type", "welcome"},
+        {"protocol_version", 1},
+        {"room_id", sSession.room},
+        {"client_id", peer.id},
+        {"peers", direct_peer_list(peer.id)},
+    });
+    peer.snapshotPending = peer.welcomed;
+    sSession.welcomed = sSession.welcomed || peer.welcomed;
 }
 
 void send_welcome() {
@@ -1279,11 +1416,7 @@ json model_matrices_to_json_if(bool enabled, J3DModel* model) {
     return enabled ? model_matrices_to_json(model) : json(nullptr);
 }
 
-void add_link_matrices(json& state) {
-    if (!sDummyModelEnabled) {
-        return;
-    }
-
+bool add_link_matrices(json& state) {
     // Note: deliberately not gated on dComIfGp_event_runCheck() here, unlike
     // the dummy draw path. This only reads already-built matrices off the
     // real local Link actor; it doesn't allocate/destroy anything. Personal
@@ -1294,7 +1427,7 @@ void add_link_matrices(json& state) {
     // check guards directly.
     fopAc_ac_c* playerActor = dComIfGp_getPlayer(0);
     if (playerActor == nullptr || fopAcM_GetName(playerActor) != fpcNm_ALINK_e) {
-        return;
+        return false;
     }
 
     daAlink_c* link = static_cast<daAlink_c*>(playerActor);
@@ -1304,7 +1437,7 @@ void add_link_matrices(json& state) {
         // Skipping capture here too means we don't send a pose mid-change
         // in the first place, same defense-in-depth as the metamorphosis
         // guard below.
-        return;
+        return false;
     }
     if (link->mProcID == daAlink_c::PROC_METAMORPHOSE || link->mProcID == daAlink_c::PROC_METAMORPHOSE_ONLY) {
         // Wolf<->human transformation. daAlink_c::changeWolf()/changeLink()
@@ -1313,14 +1446,18 @@ void add_link_matrices(json& state) {
         // objects partway through this state, not atomically with the state
         // transition itself -- reading those fields during the window is a
         // use-after-free risk, not just a stale-data one.
-        return;
+        return false;
     }
 
     if (link->mpLinkModel == nullptr) {
-        return;
+        return false;
     }
 
     const bool isWolf = static_cast<bool>(link->checkWolf());
+    if (!sDummyModelEnabled && !isWolf) {
+        return true;
+    }
+
     const bool includeHumanParts = !isWolf;
     state["link_matrices"] = {
         {"body", model_matrices_to_json(link->mpLinkModel)},
@@ -1334,11 +1471,13 @@ void add_link_matrices(json& state) {
 
     state["equip_item"] = static_cast<int>(link->mEquipItem);
     state["sword_variant"] = detect_sword_variant(link);
+    state["shield_variant"] = detect_shield_variant();
     state["clothes_variant"] = detect_clothes_variant();
     state["sword_draw"] = !isWolf && static_cast<bool>(link->checkSwordDraw());
     state["shield_draw"] = !isWolf && static_cast<bool>(link->checkShieldDraw());
     state["sword_out"] = !isWolf && link->mEquipItem == 0x103;
     state["form"] = isWolf ? "wolf" : "human";
+    return true;
 }
 
 bool read_matrix_array(const json& source, std::array<float, 12>& out) {
@@ -1425,31 +1564,111 @@ RemoteLinkMatrixSnapshot parse_link_matrices(const json& state) {
 
 void apply_remote_tbox_bit(int stage, int flag);
 
-void handle_message(const json& message) {
+void remove_direct_peer(const std::string& peerId, const char* reason) {
+    auto it = sSession.directPeers.find(peerId);
+    if (it == sSession.directPeers.end()) {
+        return;
+    }
+
+    DuskLog.warn("Multiplayer direct peer disconnected id={} reason={}", peerId, reason);
+    const std::string peerName = display_name_for_peer(peerId);
+    push_notification(peerName + " left");
+    close_socket(it->second.sock);
+    sSession.directPeers.erase(it);
+    sSession.peerPoses.erase(peerId);
+    sPeerNames.erase(peerId);
+    destroy_remote_link_dummy(peerId);
+
+    json left = {{"type", "peer_left"}, {"client_id", peerId}};
+    for (auto& entry : sSession.directPeers) {
+        if (entry.second.welcomed) {
+            send_json_to_peer(entry.second, left);
+        }
+    }
+}
+
+void broadcast_to_direct_peers(const json& message, const std::string& excludePeerId = "") {
+    std::vector<std::string> failedPeers;
+    for (auto& entry : sSession.directPeers) {
+        DirectPeer& peer = entry.second;
+        if (!peer.welcomed || peer.id == excludePeerId) {
+            continue;
+        }
+        if (!send_json_to_peer(peer, message)) {
+            failedPeers.push_back(peer.id);
+        }
+    }
+
+    for (const std::string& peerId : failedPeers) {
+        remove_direct_peer(peerId, "send failed");
+    }
+}
+
+bool should_forward_peer_message(const std::string& type) {
+    return type != "hello" && type != "ping" && type != "pong" && type != "error";
+}
+
+void handle_message(const json& message, DirectPeer* sender = nullptr) {
     const std::string type = message.value("type", "");
+    json routedMessage = message;
+    if (sender != nullptr && type != "hello") {
+        routedMessage["client_id"] = sender->id;
+    }
     if (is_stage_dependent_message_type(type) && dComIfGp_getStageStagInfo() == nullptr) {
-        sPendingStageMessages.push_back(message);
+        sPendingStageMessages.push_back(routedMessage);
+        if (sender != nullptr && should_forward_peer_message(type)) {
+            broadcast_to_direct_peers(routedMessage, sender->id);
+        }
         return;
     }
 
     if (type == "hello" && sSession.mode == NetworkMode::DirectHost) {
-        DuskLog.info("Multiplayer direct peer joined name={} room={}", message.value("name", ""),
-                     message.value("room_id", ""));
-        send_welcome();
+        if (sender == nullptr) {
+            return;
+        }
+
+        sender->name = message.value("name", sender->name);
+        sPeerNames[sender->id] = sender->name;
+        DuskLog.info("Multiplayer direct peer joined id={} name={} room={}", sender->id,
+                     sender->name, message.value("room_id", ""));
+        push_notification(sender->name + " joined");
+        send_welcome_to_peer(*sender);
+        broadcast_to_direct_peers({
+            {"type", "peer_joined"},
+            {"client_id", sender->id},
+            {"name", sender->name},
+        }, sender->id);
     } else if (type == "welcome") {
         sSession.welcomed = true;
         DuskLog.info("Multiplayer joined room={} client_id={} peers={}",
                      message.value("room_id", ""), message.value("client_id", ""),
                      message.value("peers", json::array()).size());
+        for (const json& peer : message.value("peers", json::array())) {
+            const std::string peerId = peer.value("client_id", "");
+            const std::string peerName = peer.value("name", peerId);
+            if (!peerId.empty()) {
+                sPeerNames[peerId] = peerName;
+            }
+        }
+        push_notification("Joined lobby " + message.value("room_id", sSession.room));
         sSession.snapshotPending = true;
     } else if (type == "peer_joined") {
+        const std::string peerId = message.value("client_id", "");
+        const std::string peerName = message.value("name", peerId);
+        if (!peerId.empty()) {
+            sPeerNames[peerId] = peerName;
+        }
         DuskLog.info("Multiplayer peer joined id={} name={}", message.value("client_id", ""),
                      message.value("name", ""));
+        push_notification(display_name_for_peer(peerId) + " joined");
     } else if (type == "peer_left") {
-        const std::string leftPeerId = resolve_peer_id(message);
+        const std::string leftPeerId = resolve_peer_id(routedMessage);
+        const std::string peerName = display_name_for_peer(leftPeerId);
         DuskLog.info("Multiplayer peer left id={}", leftPeerId);
         sSession.peerPoses.erase(leftPeerId);
+        sPeerNames.erase(leftPeerId);
         destroy_remote_link_dummy(leftPeerId);
+        push_notification(peerName + " left");
     } else if (type == "save_snapshot") {
         sApplyingRemoteSaveBit = true;
         for (const json& flag : message.value("event_flags", json::array())) {
@@ -1595,8 +1814,8 @@ void handle_message(const json& message) {
         }
         DuskLog.info("Multiplayer applied save snapshot from peer");
     } else if (type == "pose") {
-        const std::string peerId = resolve_peer_id(message);
-        const uint32_t sequence = message.value("sequence", 0U);
+        const std::string peerId = resolve_peer_id(routedMessage);
+        const uint32_t sequence = routedMessage.value("sequence", 0U);
         auto existing = sSession.peerPoses.find(peerId);
         if (existing != sSession.peerPoses.end() && existing->second.valid &&
             sequence <= existing->second.sequence)
@@ -1604,7 +1823,7 @@ void handle_message(const json& message) {
             return;
         }
 
-        const json state = message.value("state", json::object());
+        const json state = routedMessage.value("state", json::object());
         PeerPoseSnapshot pose;
         pose.valid = true;
         pose.peerId = peerId;
@@ -1620,6 +1839,7 @@ void handle_message(const json& message) {
         pose.isWolf = state.value("is_wolf", false);
         pose.equipItem = static_cast<uint16_t>(state.value("equip_item", 0xFFFF));
         pose.swordVariant = state.value("sword_variant", REMOTE_SWORD_UNKNOWN);
+        pose.shieldVariant = state.value("shield_variant", REMOTE_SHIELD_UNKNOWN);
         pose.clothesVariant = state.value("clothes_variant", REMOTE_CLOTHES_HERO);
         pose.swordDraw = state.value("sword_draw", false);
         pose.shieldDraw = state.value("shield_draw", false);
@@ -1633,14 +1853,14 @@ void handle_message(const json& message) {
                          pose.y, pose.z);
         }
     } else if (type == "event_bit") {
-        const uint16_t flag = message.value("flag", 0U);
+        const uint16_t flag = routedMessage.value("flag", 0U);
         sApplyingRemoteSaveBit = true;
         dComIfGs_onEventBit(flag);
         sApplyingRemoteSaveBit = false;
         DuskLog.info("Multiplayer applied remote event bit flag={}", flag);
     } else if (type == "tbox_bit") {
-        const int stage = message.value("stage", -1);
-        const int flag = message.value("flag", -1);
+        const int stage = routedMessage.value("stage", -1);
+        const int flag = routedMessage.value("flag", -1);
         if (stage >= 0 && flag >= 0) {
             sApplyingRemoteSaveBit = true;
             apply_remote_tbox_bit(stage, flag);
@@ -1849,6 +2069,12 @@ void handle_message(const json& message) {
             sApplyingRemoteSaveBit = false;
             DuskLog.info("Multiplayer applied remote letter get no={}", no);
         }
+    } else if (type == "ping") {
+        if (sender != nullptr) {
+            send_json_to_peer(*sender, {{"type", "pong"}});
+        } else {
+            send_json({{"type", "pong"}});
+        }
     } else if (type == "pong") {
         DuskLog.debug("Multiplayer pong");
     } else if (type == "error") {
@@ -1856,26 +2082,30 @@ void handle_message(const json& message) {
     } else {
         DuskLog.debug("Multiplayer message type={}", type);
     }
+
+    if (sender != nullptr && should_forward_peer_message(type)) {
+        broadcast_to_direct_peers(routedMessage, sender->id);
+    }
 }
 
-void pump_receive() {
+bool pump_receive_from_socket(socket_t sock, std::string& rxBuffer, DirectPeer* sender = nullptr) {
     std::array<char, 4096> buffer{};
 
     while (true) {
-        const int read = recv(sSession.sock, buffer.data(), static_cast<int>(buffer.size()), 0);
+        const int read = recv(sock, buffer.data(), static_cast<int>(buffer.size()), 0);
         if (read > 0) {
-            sSession.rxBuffer.append(buffer.data(), static_cast<size_t>(read));
+            rxBuffer.append(buffer.data(), static_cast<size_t>(read));
 
             size_t newline = std::string::npos;
-            while ((newline = sSession.rxBuffer.find('\n')) != std::string::npos) {
-                const std::string line = sSession.rxBuffer.substr(0, newline);
-                sSession.rxBuffer.erase(0, newline + 1);
+            while ((newline = rxBuffer.find('\n')) != std::string::npos) {
+                const std::string line = rxBuffer.substr(0, newline);
+                rxBuffer.erase(0, newline + 1);
                 if (line.empty()) {
                     continue;
                 }
 
                 try {
-                    handle_message(json::parse(line));
+                    handle_message(json::parse(line), sender);
                 } catch (const json::exception& e) {
                     DuskLog.warn("Multiplayer received invalid JSON: {}", e.what());
                 }
@@ -1884,16 +2114,34 @@ void pump_receive() {
         }
 
         if (read == 0) {
-            disconnect("remote closed");
-            return;
+            return false;
         }
 
         if (would_block()) {
-            return;
+            return true;
         }
 
-        disconnect("recv failed");
-        return;
+        return false;
+    }
+}
+
+void pump_receive() {
+    if (!pump_receive_from_socket(sSession.sock, sSession.rxBuffer)) {
+        disconnect("remote closed");
+    }
+}
+
+void pump_direct_peer_receives() {
+    std::vector<std::string> disconnectedPeers;
+    for (auto& entry : sSession.directPeers) {
+        DirectPeer& peer = entry.second;
+        if (!pump_receive_from_socket(peer.sock, peer.rxBuffer, &peer)) {
+            disconnectedPeers.push_back(peer.id);
+        }
+    }
+
+    for (const std::string& peerId : disconnectedPeers) {
+        remove_direct_peer(peerId, "remote closed");
     }
 }
 
@@ -1961,7 +2209,7 @@ void begin_host() {
     }
 
     if (bind(sSession.listenSock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 ||
-        listen(sSession.listenSock, 1) != 0) {
+        listen(sSession.listenSock, SOMAXCONN) != 0) {
         disconnect("listen failed");
         return;
     }
@@ -1999,6 +2247,10 @@ void update_connecting() {
 }
 
 void update_listening() {
+    if (sSession.listenSock == INVALID_SOCKET) {
+        return;
+    }
+
     sockaddr_in peerAddr{};
 #if _WIN32
     int peerLen = sizeof(peerAddr);
@@ -2013,15 +2265,25 @@ void update_listening() {
         return;
     }
 
-    close_socket(sSession.listenSock);
-    sSession.sock = accepted;
-    if (!set_nonblocking(sSession.sock)) {
+    if (!set_nonblocking(accepted)) {
+        close_socket(accepted);
         disconnect("accepted nonblocking failed");
         return;
     }
+    if (sSession.directPeers.size() >= kMaxDirectPeers) {
+        close_socket(accepted);
+        DuskLog.warn("Multiplayer direct peer refused: room is full current_peers={} max_peers={}",
+                     sSession.directPeers.size(), kMaxDirectPeers);
+        return;
+    }
 
+    DirectPeer peer;
+    peer.sock = accepted;
+    peer.id = "direct" + std::to_string(sSession.nextDirectPeerId++);
+    const std::string peerId = peer.id;
+    sSession.directPeers.emplace(peerId, std::move(peer));
     sSession.state = ConnectionState::Connected;
-    DuskLog.info("Multiplayer direct peer connected");
+    DuskLog.info("Multiplayer direct peer connected id={}", peerId);
 }
 
 void send_pose() {
@@ -2038,8 +2300,8 @@ void send_pose() {
     // flag rather than touching model pointers, so unlike add_link_matrices()
     // this doesn't need the metamorphosis-state guard -- just the same
     // actor-type check before the cast.
-    const bool isWolf = fopAcM_GetName(player) == fpcNm_ALINK_e &&
-                         static_cast<daAlink_c*>(player)->checkWolf();
+    const bool isLink = fopAcM_GetName(player) == fpcNm_ALINK_e;
+    const bool isWolf = isLink && static_cast<daAlink_c*>(player)->checkWolf();
 
     json state = {
         {"stage", dComIfGp_getStartStageName()},
@@ -2051,7 +2313,10 @@ void send_pose() {
         {"angle_y", static_cast<int>(player->shape_angle.y)},
         {"is_wolf", isWolf},
     };
-    add_link_matrices(state);
+    if (isLink && (sDummyModelEnabled || isWolf) && !add_link_matrices(state))
+    {
+        return;
+    }
 
     send_json({
         {"type", "pose"},
@@ -2136,11 +2401,19 @@ void update_connected() {
     update_remote_switch_policy_room_state();
     age_recent_remote_switches();
 
+    if (sSession.mode == NetworkMode::DirectHost) {
+        update_listening();
+    }
+
     if (sSession.mode == NetworkMode::RelayHarness || sSession.mode == NetworkMode::DirectJoin) {
         send_hello();
     }
 
-    pump_receive();
+    if (sSession.mode == NetworkMode::DirectHost) {
+        pump_direct_peer_receives();
+    } else {
+        pump_receive();
+    }
 
     if (sSession.state != ConnectionState::Connected) {
         return;
@@ -2155,6 +2428,13 @@ void update_connected() {
             // without a null check, so wait for a real stage before sending.
             send_save_snapshot();
             sSession.snapshotPending = false;
+        }
+        for (auto& entry : sSession.directPeers) {
+            DirectPeer& peer = entry.second;
+            if (peer.snapshotPending) {
+                send_save_snapshot(&peer);
+                peer.snapshotPending = false;
+            }
         }
 
         if (!sPendingStageMessages.empty()) {
@@ -2198,6 +2478,7 @@ bool configure_session() {
     sSession.mode = parse_mode();
     sSession.name = env_string("DUSK_MP_NAME", "TP Player");
     sSession.room = env_string("DUSK_MP_ROOM", "dev");
+    sSession.relayPassword = env_string("DUSK_MP_PASSWORD", "");
     sSession.port = env_int("DUSK_MP_PORT", 34197);
     sSession.debugMarker = env_enabled("DUSK_MP_DEBUG_MARKER");
     sDummyModelEnabled = env_enabled("DUSK_MP_DUMMY_MODEL");
@@ -2239,6 +2520,7 @@ bool configure_session() {
     if (sSession.mode == NetworkMode::RelayHarness) {
         sSession.host = env_string("DUSK_MP_HOST", "127.0.0.1");
         sSession.room = env_string("DUSK_MP_ROOM", "dev");
+        sSession.relayPassword = env_string("DUSK_MP_PASSWORD", "");
         return true;
     }
 
@@ -2484,6 +2766,51 @@ bool join_direct(const DirectJoinOptions& options, std::string* errorOut) {
     return true;
 }
 
+bool join_relay(const RelayJoinOptions& options, std::string* errorOut) {
+    if (options.port <= 0 || options.port > 65535) {
+        if (errorOut != nullptr) {
+            *errorOut = "Port must be between 1 and 65535";
+        }
+        return false;
+    }
+    if (options.host.empty() || options.room.empty()) {
+        if (errorOut != nullptr) {
+            *errorOut = "Relay host and lobby name cannot be empty";
+        }
+        return false;
+    }
+
+    sInitialized = true;
+    if (!ensure_network_stack(errorOut)) {
+        sEnabled = false;
+        return false;
+    }
+
+    reset_connection_state();
+    sEnabled = true;
+    sSession.mode = NetworkMode::RelayHarness;
+    sSession.name = options.name.empty() ? "Player" : options.name;
+    sSession.host = options.host;
+    sSession.port = options.port;
+    sSession.room = options.room;
+    sSession.relayPassword = options.password;
+    sSession.debugMarker = options.debugMarker;
+    sDummyModelEnabled = options.dummyModel;
+
+    DuskLog.info("Multiplayer module enabled mode={} room={}", mode_name(sSession.mode),
+                 sSession.room);
+    begin_connect();
+    if (sSession.state == ConnectionState::Disconnected) {
+        sEnabled = false;
+        sSession.mode = NetworkMode::Disabled;
+        if (errorOut != nullptr) {
+            *errorOut = "Failed to begin relay connection";
+        }
+        return false;
+    }
+    return true;
+}
+
 void disconnect_session() {
     disconnect("user requested");
     sEnabled = false;
@@ -2541,23 +2868,66 @@ void draw_debug_peer_marker() {
         return;
     }
 
-    const int localRoom = static_cast<int>(fopAcM_GetRoomNo(player));
     const char* localStage = dComIfGp_getStartStageName();
 
-    // Only one entry exists in practice today (direct mode is 1:1), but
-    // this iterates the full map so multi-peer rendering later is just a
-    // matter of more peers showing up here -- no further changes needed
-    // to this loop.
+    // Draw every fresh peer pose for the local stage. Room display filtering
+    // happens inside draw_remote_link_dummy(), where it can use
+    // dComIfGp_roomControl_checkRoomDisp() instead of requiring exact room
+    // equality; open fields often display adjacent rooms at the same time.
     for (const auto& entry : sSession.peerPoses) {
         const PeerPoseSnapshot& pose = entry.second;
         if (!pose.valid || pose.ageTicks > 30) {
             continue;
         }
-        if (pose.stage != localStage || pose.room != localRoom) {
+        if (pose.stage != localStage) {
             continue;
         }
         draw_remote_link_dummy(entry.first, pose);
     }
+}
+
+void draw_notifications_overlay() {
+    if (!sEnabled || sNotifications.empty()) {
+        return;
+    }
+
+    const float dt = ImGui::GetIO().DeltaTime;
+    for (Notification& notification : sNotifications) {
+        notification.ageSeconds += dt;
+    }
+    sNotifications.erase(
+        std::remove_if(sNotifications.begin(), sNotifications.end(), [](const Notification& item) {
+            return item.ageSeconds >= item.durationSeconds;
+        }),
+        sNotifications.end());
+
+    if (sNotifications.empty()) {
+        return;
+    }
+
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImVec2 workPos = viewport != nullptr ? viewport->WorkPos : ImVec2(0.0f, 0.0f);
+    ImGui::SetNextWindowPos(ImVec2(workPos.x + 16.0f, workPos.y + 44.0f), ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.58f);
+
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration |
+        ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoFocusOnAppearing |
+        ImGuiWindowFlags_NoNav |
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoInputs;
+
+    if (ImGui::Begin("Multiplayer Notices", nullptr, flags)) {
+        for (const Notification& notification : sNotifications) {
+            const float remaining = notification.durationSeconds - notification.ageSeconds;
+            const float alpha = remaining < 1.0f ? remaining : 1.0f;
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.94f, 0.97f, 1.0f, alpha));
+            ImGui::TextUnformatted(notification.text.c_str());
+            ImGui::PopStyleColor();
+        }
+    }
+    ImGui::End();
 }
 
 void notify_local_event_bit_set(uint16_t flag) {
