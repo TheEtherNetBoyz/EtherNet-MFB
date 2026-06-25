@@ -19,6 +19,7 @@
 #include "JSystem/JAudio2/JAUSectionHeap.h"
 #include <cmath>
 #include <cstring>
+#include <set>
 
 #if TARGET_PC
 #include "dusk/dusk.h"
@@ -596,12 +597,43 @@ static void* daHorse_searchSingleBoar(fopAc_ac_c* i_actor, void* i_data) {
     return NULL;
 }
 
+#if TARGET_PC
+static const char* horseLogStageName() {
+    const char* stage = dComIfGp_getStartStageName();
+    return stage != nullptr ? stage : "<null>";
+}
+
+#define HORSE_LOG_CTX "pid={} stage={} startRoom={} stayRoom={} actorRoom={} homeRoom={}"
+#define HORSE_LOG_ARGS fopAcM_GetID(this), horseLogStageName(), dComIfGp_getStartStageRoomNo(), \
+                       dComIfGp_roomControl_getStayNo(), fopAcM_GetRoomNo(this), home.roomNo
+#endif
+
 int daHorse_c::createHeap() {
+#if TARGET_PC
+    // Checkpoint: "model creation begins". Only reached once resLoad
+    // returned cPhs_COMPLEATE_e, so seeing this fire confirms the resource
+    // system genuinely finished for this pid.
+    DuskLog.warn("daHorse_c::createHeap BEGIN " HORSE_LOG_CTX " pos=({}, {}, {})",
+                 HORSE_LOG_ARGS, home.pos.x, home.pos.y, home.pos.z);
+#endif
     m_modelData = (J3DModelData*)dComIfG_getObjectRes(l_arcName, 0x26);
     JUT_ASSERT(0x487, m_modelData != NULL);
+#if TARGET_PC
+    if (m_modelData == nullptr) {
+        DuskLog.warn("daHorse_c::createHeap MODEL_DATA_NULL " HORSE_LOG_CTX
+                     " -- archive marked complete but "
+                     "this resource index came back null",
+                     HORSE_LOG_ARGS);
+    }
+#endif
 
     m_model = mDoExt_J3DModel__create(m_modelData, 0x80000, 0x11020084);
     if (m_model == NULL) {
+#if TARGET_PC
+        DuskLog.warn("daHorse_c::createHeap FAIL " HORSE_LOG_CTX
+                     " -- mDoExt_J3DModel__create returned null",
+                     HORSE_LOG_ARGS);
+#endif
         return 0;
     }
 
@@ -658,6 +690,12 @@ int daHorse_c::createHeap() {
         }
     }
 
+#if TARGET_PC
+    // Checkpoint: "model creation completes".
+    DuskLog.warn("daHorse_c::createHeap COMPLETE " HORSE_LOG_CTX " model={} modelData={}",
+                 HORSE_LOG_ARGS, static_cast<const void*>(m_model),
+                 static_cast<const void*>(m_modelData));
+#endif
     return 1;
 }
 
@@ -679,6 +717,21 @@ extern int g_horsePosInit;
 
 int daHorse_c::create() {
     fopAcM_ct(this, daHorse_c);
+
+#if TARGET_PC
+    // Diagnostic: is m_stateFlg0 already non-zero right after construction,
+    // before any of create()'s own logic runs? A fresh object should read
+    // 0 here. A non-zero value (especially FLG0_CALL_HORSE=0x8000000 or
+    // FLG0_NO_DRAW_WAIT=0x80 already set) would mean this object's memory
+    // still holds bits from whatever previously occupied this slot.
+    DuskLog.warn("daHorse_c::create CONSTRUCTED " HORSE_LOG_CTX
+                 " pos=({}, {}, {}) shapeY={} restart_stage='{}' restart_room={} "
+                 "restart_pos=({}, {}, {}) restart_angle={} m_stateFlg0={:#x}",
+                 HORSE_LOG_ARGS, home.pos.x, home.pos.y, home.pos.z, shape_angle.y,
+                 dComIfGs_getHorseRestartStageName(), dComIfGs_getHorseRestartRoomNo(),
+                 dComIfGs_getHorseRestartPos().x, dComIfGs_getHorseRestartPos().y,
+                 dComIfGs_getHorseRestartPos().z, dComIfGs_getHorseRestartAngleY(), m_stateFlg0);
+#endif
 
     if (checkEnding()) {
         onStateFlg0(FLG0_UNK_8000);
@@ -703,8 +756,10 @@ int daHorse_c::create() {
         // collapsing the normally multi-frame fadeout into one frame) is
         // the likely cause, not a save-state/progression difference.
         DuskLog.warn(
-            "daHorse_c::create rejected: ending={} kidnapped_m008={} rescued_m023={} "
+            "daHorse_c::create rejected " HORSE_LOG_CTX
+            " ending={} kidnapped_m008={} rescued_m023={} "
             "stage_sp109={} goron_f0066={} no_telop={}",
+            HORSE_LOG_ARGS,
             static_cast<bool>(checkStateFlg0(FLG0_UNK_8000)),
             static_cast<bool>(dComIfGs_isEventBit(dSv_event_flag_c::M_008)),
             static_cast<bool>(dComIfGs_isEventBit(dSv_event_flag_c::M_023)),
@@ -737,9 +792,10 @@ int daHorse_c::create() {
         // advancing id looks identical to a fresh id=0 request at this
         // logging point.
         DuskLog.warn(
-            "daHorse_c::create resLoad phase={} phase_id={} arcName={} pid={} pos=({}, {}, {}) "
+            "daHorse_c::create resLoad " HORSE_LOG_CTX
+            " phase={} phase_id={} arcName={} pos=({}, {}, {}) "
             "(0=INIT 1=LOADING 4=COMPLEATE 5=ERROR)",
-            phase_state, m_phase.id, l_arcName, fopAcM_GetID(this), home.pos.x, home.pos.y,
+            HORSE_LOG_ARGS, phase_state, m_phase.id, l_arcName, home.pos.x, home.pos.y,
             home.pos.z);
     }
 #endif
@@ -748,7 +804,9 @@ int daHorse_c::create() {
 #if TARGET_PC
             // Retried every frame (not a permanent rejection), so this is
             // only a problem if it never stops firing for this placement.
-            DuskLog.warn("daHorse_c::create stalled: daAlink_getAlinkActorClass() is null");
+            DuskLog.warn("daHorse_c::create stalled " HORSE_LOG_CTX
+                         " daAlink_getAlinkActorClass() is null",
+                         HORSE_LOG_ARGS);
 #endif
             return cPhs_INIT_e;
         }
@@ -759,7 +817,9 @@ int daHorse_c::create() {
             // also a permanent (non-retried) rejection, triggered if a
             // horse actor singleton is already registered -- worth knowing
             // if this fires instead of/alongside the other rejection.
-            DuskLog.warn("daHorse_c::create rejected: horse actor singleton already set");
+            DuskLog.warn("daHorse_c::create rejected " HORSE_LOG_CTX
+                         " horse actor singleton already set existing={}",
+                         HORSE_LOG_ARGS, static_cast<void*>(dComIfGp_getHorseActor()));
 #endif
             return cPhs_ERROR_e;
         }
@@ -795,6 +855,15 @@ int daHorse_c::create() {
             if (daAlink_c::checkStageName(dComIfGs_getHorseRestartStageName()) &&
                 (room_no == -1 || fopAcM_GetRoomNo(this) == dComIfGs_getHorseRestartRoomNo()))
             {
+#if TARGET_PC
+                DuskLog.warn("daHorse_c::create USE_RESTART " HORSE_LOG_CTX
+                             " restart_stage='{}' restart_room={} restart_pos=({}, {}, {}) "
+                             "restart_angle={} room_no_param={}",
+                             HORSE_LOG_ARGS, dComIfGs_getHorseRestartStageName(),
+                             dComIfGs_getHorseRestartRoomNo(), dComIfGs_getHorseRestartPos().x,
+                             dComIfGs_getHorseRestartPos().y, dComIfGs_getHorseRestartPos().z,
+                             dComIfGs_getHorseRestartAngleY(), room_no);
+#endif
                 current.pos = dComIfGs_getHorseRestartPos();
                 old.pos = current.pos;
                 shape_angle.y = dComIfGs_getHorseRestartAngleY();
@@ -812,9 +881,14 @@ int daHorse_c::create() {
                 // that string/room/pos data isn't actually at its fresh-
                 // save default for this client.
                 DuskLog.warn(
-                    "daHorse_c::create hides actor (FLG0_NO_DRAW_WAIT): "
-                    "restart_stage='{}' restart_room={} current_room={} room_no_param={}",
-                    dComIfGs_getHorseRestartStageName(), dComIfGs_getHorseRestartRoomNo(),
+                    "daHorse_c::create HIDE_NO_DRAW_WAIT " HORSE_LOG_CTX
+                    " restart_stage='{}' restart_room={} restart_pos=({}, {}, {}) "
+                    "restart_angle={} current_stage_match={} current_room={} room_no_param={}",
+                    HORSE_LOG_ARGS, dComIfGs_getHorseRestartStageName(),
+                    dComIfGs_getHorseRestartRoomNo(), dComIfGs_getHorseRestartPos().x,
+                    dComIfGs_getHorseRestartPos().y, dComIfGs_getHorseRestartPos().z,
+                    dComIfGs_getHorseRestartAngleY(),
+                    daAlink_c::checkStageName(dComIfGs_getHorseRestartStageName()),
                     fopAcM_GetRoomNo(this), room_no);
 #endif
                 onStateFlg0(FLG0_NO_DRAW_WAIT);
@@ -823,7 +897,9 @@ int daHorse_c::create() {
 
         if (!fopAcM_entrySolidHeap(this, daHorse_createHeap, 0x6E60)) {
 #if TARGET_PC
-            DuskLog.warn("daHorse_c::create rejected: fopAcM_entrySolidHeap failed");
+            DuskLog.warn("daHorse_c::create rejected " HORSE_LOG_CTX
+                         " fopAcM_entrySolidHeap failed",
+                         HORSE_LOG_ARGS);
 #endif
             return cPhs_ERROR_e;
         }
@@ -939,6 +1015,12 @@ int daHorse_c::create() {
         setRoomInfo(1);
 
         dComIfGp_setHorseActor(this);
+#if TARGET_PC
+        DuskLog.warn("daHorse_c::create SET_SINGLETON " HORSE_LOG_CTX
+                     " no_draw_wait={} pos=({}, {}, {}) shapeY={} model={}",
+                     HORSE_LOG_ARGS, checkStateFlg0(FLG0_NO_DRAW_WAIT), current.pos.x,
+                     current.pos.y, current.pos.z, shape_angle.y, static_cast<void*>(m_model));
+#endif
         field_0x16e8 = shape_angle.y;
 
         cXyz* sp2C;
@@ -3546,6 +3628,12 @@ void daHorse_c::setBoarHit(fopAc_ac_c* param_0, int param_1) {
 
 void daHorse_c::savePos() {
     if (this->model != NULL && !checkStateFlg0(FLG0_UNK_8000) && !checkStateFlg0(FLG0_NO_DRAW_WAIT)) {
+#if TARGET_PC
+        DuskLog.warn("daHorse_c::savePos " HORSE_LOG_CTX
+                     " save_stage={} pos=({}, {}, {}) angle={} no_draw_wait={}",
+                     HORSE_LOG_ARGS, dComIfGp_getStartStageName(), current.pos.x, current.pos.y,
+                     current.pos.z, shape_angle.y, checkStateFlg0(FLG0_NO_DRAW_WAIT));
+#endif
         dComIfGs_setHorseRestart(dComIfGp_getStartStageName(), current.pos, shape_angle.y, fopAcM_GetRoomNo(this));
     }
 }
@@ -3612,12 +3700,27 @@ int daHorse_c::callHorseSubstance(cXyz const* i_pos) {
         cXyz pos(farthest_pos->x, farthest_pos->y, farthest_pos->z);
         #endif
         setHorsePosAndAngle(&pos, shape_angle.y);
+#if TARGET_PC
+        DuskLog.warn("daHorse_c::callHorseSubstance PATH_REPOSITION " HORSE_LOG_CTX
+                     " caller_pos=({}, {}, {}) chosen_pos=({}, {}, {}) dist_xz2={} "
+                     "no_draw_wait={} path_points={} shapeY={}",
+                     HORSE_LOG_ARGS, i_pos->x, i_pos->y, i_pos->z, pos.x, pos.y, pos.z,
+                     dist_xz2, checkStateFlg0(FLG0_NO_DRAW_WAIT), static_cast<int>(m_path->m_num),
+                     shape_angle.y);
+#endif
         rt = 1;
     } else if (dist_xz2 <= SQUARE(800.0f)) {
         return 3;
     }
 
     onStateFlg0(FLG0_CALL_HORSE);
+#if TARGET_PC
+    DuskLog.warn("daHorse_c::callHorseSubstance SET_CALL " HORSE_LOG_CTX
+                 " rt={} no_draw_wait={} call_horse={} pos=({}, {}, {}) shapeY={}",
+                 HORSE_LOG_ARGS, rt, checkStateFlg0(FLG0_NO_DRAW_WAIT),
+                 checkStateFlg0(FLG0_CALL_HORSE), current.pos.x, current.pos.y, current.pos.z,
+                 shape_angle.y);
+#endif
     changeOriginalDemo();
     changeDemoMode(12, 0);
     return rt;
@@ -3639,6 +3742,14 @@ void daHorse_c::setHorsePosAndAngleSubstance(cXyz const* param_0, s16 param_1) {
     field_0x16e8 = shape_angle.y;
     field_0x170e = param_1;
     field_0x1710 = param_1;
+
+#if TARGET_PC
+    DuskLog.warn("daHorse_c::setHorsePosAndAngle " HORSE_LOG_CTX
+                 " old_pos=({}, {}, {}) new_pos=({}, {}, {}) old_angle={} new_angle={} "
+                 "no_draw_wait={}",
+                 HORSE_LOG_ARGS, sp10.x, sp10.y, sp10.z, current.pos.x, current.pos.y,
+                 current.pos.z, var_r24, param_1, checkStateFlg0(FLG0_NO_DRAW_WAIT));
+#endif
 
     mDoMtx_stack_c::transS(current.pos.x, current.pos.y, current.pos.z);
     mDoMtx_stack_c::YrotM(shape_angle.y - var_r24);
@@ -4507,14 +4618,50 @@ static void* daHorse_searchSceneChangeArea(fopAc_ac_c* i_actor, void* i_data) {
 }
 
 int daHorse_c::execute() {
+#if TARGET_PC
+    // Checkpoint: "actor enters normal Execute() loop". Logged once per
+    // pid (first tick only) -- this runs every frame for the rest of the
+    // actor's life otherwise.
+    {
+        static std::set<int> sLoggedPids;
+        const int pid = fopAcM_GetID(this);
+        if (sLoggedPids.insert(pid).second) {
+            DuskLog.warn("daHorse_c::execute FIRST_TICK " HORSE_LOG_CTX
+                         " no_draw_wait={} call_horse={} resetFlg0={:#x} stateFlg0={:#x} "
+                         "model={} pos=({}, {}, {}) shapeY={}",
+                         HORSE_LOG_ARGS, checkStateFlg0(FLG0_NO_DRAW_WAIT),
+                         checkStateFlg0(FLG0_CALL_HORSE), m_resetStateFlg0, m_stateFlg0,
+                         static_cast<void*>(m_model), current.pos.x, current.pos.y, current.pos.z,
+                         shape_angle.y);
+        }
+    }
+#endif
     m_scnChg_num = 0;
     fopAcIt_Executor((fopAcIt_ExecutorFunc)daHorse_searchSceneChangeArea, NULL);
     m_zeldaActorKeep.setActor();
 
     if (checkStateFlg0(FLG0_NO_DRAW_WAIT)) {
         if (checkStateFlg0(FLG0_CALL_HORSE)) {
+#if TARGET_PC
+            DuskLog.warn("daHorse_c::execute CLEAR_NO_DRAW_WAIT " HORSE_LOG_CTX
+                         " stateFlg0_before={:#x} pos=({}, {}, {}) shapeY={}",
+                         HORSE_LOG_ARGS, m_stateFlg0, current.pos.x, current.pos.y, current.pos.z,
+                         shape_angle.y);
+#endif
             offStateFlg0(FLG0_NO_DRAW_WAIT);
         } else {
+#if TARGET_PC
+            {
+                static std::set<int> sLoggedWaitPids;
+                const int pid = fopAcM_GetID(this);
+                if (sLoggedWaitPids.insert(pid).second) {
+                    DuskLog.warn("daHorse_c::execute EARLY_RETURN_NO_DRAW_WAIT " HORSE_LOG_CTX
+                                 " call_horse={} stateFlg0={:#x} pos=({}, {}, {}) shapeY={}",
+                                 HORSE_LOG_ARGS, checkStateFlg0(FLG0_CALL_HORSE), m_stateFlg0,
+                                 current.pos.x, current.pos.y, current.pos.z, shape_angle.y);
+                }
+            }
+#endif
             return 1;
         } 
     }
@@ -4770,8 +4917,36 @@ static int daHorse_Execute(daHorse_c* i_this) {
 int daHorse_c::draw() {
     g_env_light.settingTevStruct(0, &current.pos, &tevStr);
     if (checkStateFlg0(FLG0_NO_DRAW_WAIT) || checkResetStateFlg0(RFLG0_UNK_80)) {
+#if TARGET_PC
+        {
+            static std::set<int> sLoggedDrawSuppressedPids;
+            const int pid = fopAcM_GetID(this);
+            if (sLoggedDrawSuppressedPids.insert(pid).second) {
+                DuskLog.warn("daHorse_c::draw SUPPRESSED " HORSE_LOG_CTX
+                             " no_draw_wait={} reset_80={} stateFlg0={:#x} resetFlg0={:#x} "
+                             "model={} pos=({}, {}, {}) shapeY={}",
+                             HORSE_LOG_ARGS, checkStateFlg0(FLG0_NO_DRAW_WAIT),
+                             checkResetStateFlg0(RFLG0_UNK_80), m_stateFlg0, m_resetStateFlg0,
+                             static_cast<void*>(m_model), current.pos.x, current.pos.y,
+                             current.pos.z, shape_angle.y);
+            }
+        }
+#endif
         return 1;
     }
+
+#if TARGET_PC
+    {
+        static std::set<int> sLoggedDrawPids;
+        const int pid = fopAcM_GetID(this);
+        if (sLoggedDrawPids.insert(pid).second) {
+            DuskLog.warn("daHorse_c::draw FIRST_VISIBLE_DRAW " HORSE_LOG_CTX
+                         " stateFlg0={:#x} resetFlg0={:#x} model={} pos=({}, {}, {}) shapeY={}",
+                         HORSE_LOG_ARGS, m_stateFlg0, m_resetStateFlg0, static_cast<void*>(m_model),
+                         current.pos.x, current.pos.y, current.pos.z, shape_angle.y);
+        }
+    }
+#endif
 
     g_env_light.setLightTevColorType_MAJI(m_model, &tevStr);
 

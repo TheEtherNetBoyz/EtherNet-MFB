@@ -200,6 +200,58 @@ std::map<int, std::set<int>> sObservedMemoryItems;
 // (and silently losing catch-up data).
 std::vector<json> sPendingStageMessages;
 
+enum class RemoteSwitchApplyReason {
+    Immediate,
+    Flush,
+};
+
+enum class RemoteSwitchPolicyMode {
+    ApplyImmediately,
+    DeferUntilRoomInit,
+    SuppressRemote,
+};
+
+struct RemoteSwitchPolicy {
+    int stage;
+    int flag;
+    RemoteSwitchPolicyMode mode;
+    const char* stageName;
+    int room;
+    const char* reason;
+};
+
+struct DeferredRemoteSwitch {
+    int stage;
+    int flag;
+    const RemoteSwitchPolicy* policy;
+    uint32_t ageTicks = 0;
+};
+
+struct RecentRemoteSwitch {
+    int stage;
+    int flag;
+    uint32_t ageTicks = 0;
+    bool deferred = false;
+};
+
+constexpr uint32_t kRemoteSwitchRoomInitTicks = 3;
+constexpr uint32_t kRecentRemoteSwitchTicks = 600;
+
+const RemoteSwitchPolicy kRemoteSwitchPolicies[] = {
+    {0, 4, RemoteSwitchPolicyMode::DeferUntilRoomInit, "F_SP104", 1,
+     "Tag_Hinit horse initializer output switch"},
+    {0, 11, RemoteSwitchPolicyMode::SuppressRemote, "F_SP104", 1,
+     "Tag_Hinit local trigger switch"},
+    {0, 12, RemoteSwitchPolicyMode::DeferUntilRoomInit, "F_SP104", 1,
+     "Tag_Hinit secondary horse initializer output switch"},
+};
+
+std::vector<DeferredRemoteSwitch> sDeferredRemoteSwitches;
+std::vector<RecentRemoteSwitch> sRecentRemoteSwitches;
+std::string sPolicyStageName;
+int sPolicyRoom = -128;
+uint32_t sPolicyRoomStableTicks = 0;
+
 int detect_sword_variant(const daAlink_c* link) {
     if (link == nullptr || link->mSwordModel == nullptr) {
         // Without this guard, a momentarily-null mSwordModel (equip/sheath
@@ -341,6 +393,200 @@ void reapply_observed_memory_items_for_stage(int stageNo) {
         sApplyingRemoteSaveBit = false;
         DuskLog.info("Multiplayer restored cached item bit stage={} flag={}", stageNo, flag);
     }
+}
+
+const char* current_stage_name() {
+    const char* stage = dComIfGp_getStartStageName();
+    return stage != nullptr ? stage : "";
+}
+
+const RemoteSwitchPolicy* find_remote_switch_policy(int stage, int flag) {
+    for (const RemoteSwitchPolicy& policy : kRemoteSwitchPolicies) {
+        if (policy.stage == stage && policy.flag == flag) {
+            return &policy;
+        }
+    }
+
+    return nullptr;
+}
+
+const char* remote_switch_policy_mode_name(RemoteSwitchPolicyMode mode) {
+    switch (mode) {
+    case RemoteSwitchPolicyMode::ApplyImmediately: return "apply";
+    case RemoteSwitchPolicyMode::DeferUntilRoomInit: return "defer_until_room_init";
+    case RemoteSwitchPolicyMode::SuppressRemote: return "suppress_remote";
+    default: return "unknown";
+    }
+}
+
+void remember_remote_switch(int stage, int flag, bool deferred) {
+    for (RecentRemoteSwitch& recent : sRecentRemoteSwitches) {
+        if (recent.stage == stage && recent.flag == flag) {
+            recent.ageTicks = 0;
+            recent.deferred = deferred;
+            return;
+        }
+    }
+
+    sRecentRemoteSwitches.push_back({stage, flag, 0, deferred});
+}
+
+void dispatch_remote_switch_repair_hook(int stage, int flag, const char* reason) {
+    // Category-3 switches from the audit belong here: the switch is valid
+    // shared world state, but an already-created actor may need to refresh
+    // cached state after a remote bit arrives. Keep this empty until a
+    // switch's semantics and repair behavior are proven.
+    (void)stage;
+    (void)flag;
+    (void)reason;
+}
+
+void update_remote_switch_policy_room_state() {
+    const char* stage = current_stage_name();
+    const int room = dComIfGp_roomControl_getStayNo();
+
+    if (sPolicyStageName == stage && sPolicyRoom == room) {
+        if (sPolicyRoomStableTicks < kRemoteSwitchRoomInitTicks) {
+            ++sPolicyRoomStableTicks;
+        }
+        return;
+    }
+
+    sPolicyStageName = stage;
+    sPolicyRoom = room;
+    sPolicyRoomStableTicks = 0;
+}
+
+bool is_remote_switch_policy_ready(const RemoteSwitchPolicy& policy) {
+    return sPolicyStageName == policy.stageName && sPolicyRoom == policy.room &&
+           sPolicyRoomStableTicks >= kRemoteSwitchRoomInitTicks;
+}
+
+bool is_remote_switch_deferred(int stage, int flag) {
+    for (const DeferredRemoteSwitch& deferred : sDeferredRemoteSwitches) {
+        if (deferred.stage == stage && deferred.flag == flag) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void apply_remote_switch_bit_now(int stage, int flag, const char* reason,
+                                 RemoteSwitchApplyReason applyReason) {
+    if (dComIfGs_isStageSwitch(stage, flag)) {
+        DuskLog.info("Multiplayer remote switch already set stage={} flag={} reason={} mode={}",
+                     stage, flag, reason,
+                     applyReason == RemoteSwitchApplyReason::Flush ? "flush" : "immediate");
+        return;
+    }
+
+    sApplyingRemoteSaveBit = true;
+    dComIfGs_onStageSwitch(stage, flag);
+    sApplyingRemoteSaveBit = false;
+    remember_remote_switch(stage, flag, applyReason == RemoteSwitchApplyReason::Flush);
+
+    DuskLog.info("Multiplayer applied remote switch bit stage={} flag={} reason={} mode={}",
+                 stage, flag, reason,
+                 applyReason == RemoteSwitchApplyReason::Flush ? "flush" : "immediate");
+    dispatch_remote_switch_repair_hook(stage, flag, reason);
+}
+
+void defer_remote_switch_bit(int stage, int flag, const RemoteSwitchPolicy& policy) {
+    if (is_remote_switch_deferred(stage, flag)) {
+        DuskLog.info("Multiplayer remote switch defer duplicate stage={} flag={} policyMode={} "
+                     "targetStage={} targetRoom={} currentStage={} currentRoom={} stableTicks={} "
+                     "reason={}",
+                     stage, flag, remote_switch_policy_mode_name(policy.mode), policy.stageName,
+                     policy.room, current_stage_name(), dComIfGp_roomControl_getStayNo(),
+                     sPolicyRoomStableTicks, policy.reason);
+        return;
+    }
+
+    sDeferredRemoteSwitches.push_back({stage, flag, &policy, 0});
+    DuskLog.info("Multiplayer deferred remote switch bit stage={} flag={} policyMode={} "
+                 "targetStage={} targetRoom={} currentStage={} currentRoom={} stableTicks={} "
+                 "reason={}",
+                 stage, flag, remote_switch_policy_mode_name(policy.mode), policy.stageName,
+                 policy.room, current_stage_name(), dComIfGp_roomControl_getStayNo(),
+                 sPolicyRoomStableTicks, policy.reason);
+}
+
+void suppress_remote_switch_bit(int stage, int flag, const RemoteSwitchPolicy& policy) {
+    DuskLog.info("Multiplayer suppressed remote switch bit stage={} flag={} policyMode={} "
+                 "targetStage={} targetRoom={} currentStage={} currentRoom={} reason={}",
+                 stage, flag, remote_switch_policy_mode_name(policy.mode), policy.stageName,
+                 policy.room, current_stage_name(), dComIfGp_roomControl_getStayNo(),
+                 policy.reason);
+}
+
+void apply_remote_switch_bit(int stage, int flag) {
+    const RemoteSwitchPolicy* policy = find_remote_switch_policy(stage, flag);
+    if (policy == nullptr) {
+        apply_remote_switch_bit_now(stage, flag, "default", RemoteSwitchApplyReason::Immediate);
+        return;
+    }
+
+    switch (policy->mode) {
+    case RemoteSwitchPolicyMode::ApplyImmediately:
+        apply_remote_switch_bit_now(stage, flag, policy->reason, RemoteSwitchApplyReason::Immediate);
+        return;
+    case RemoteSwitchPolicyMode::DeferUntilRoomInit:
+        if (!is_remote_switch_policy_ready(*policy)) {
+            defer_remote_switch_bit(stage, flag, *policy);
+            return;
+        }
+        apply_remote_switch_bit_now(stage, flag, policy->reason, RemoteSwitchApplyReason::Immediate);
+        return;
+    case RemoteSwitchPolicyMode::SuppressRemote:
+        suppress_remote_switch_bit(stage, flag, *policy);
+        return;
+    }
+
+    DuskLog.warn("Multiplayer remote switch policy has unknown mode stage={} flag={} reason={}",
+                 stage, flag, policy->reason);
+}
+
+void flush_deferred_remote_switches() {
+    if (sDeferredRemoteSwitches.empty()) {
+        return;
+    }
+
+    std::vector<DeferredRemoteSwitch> stillDeferred;
+    stillDeferred.reserve(sDeferredRemoteSwitches.size());
+
+    for (DeferredRemoteSwitch& deferred : sDeferredRemoteSwitches) {
+        ++deferred.ageTicks;
+
+        if (deferred.policy != nullptr && is_remote_switch_policy_ready(*deferred.policy)) {
+            DuskLog.info("Multiplayer flushing deferred remote switch bit stage={} flag={} "
+                         "policyMode={} currentStage={} currentRoom={} stableTicks={} "
+                         "ageTicks={} reason={}",
+                         deferred.stage, deferred.flag,
+                         remote_switch_policy_mode_name(deferred.policy->mode),
+                         current_stage_name(), dComIfGp_roomControl_getStayNo(),
+                         sPolicyRoomStableTicks, deferred.ageTicks, deferred.policy->reason);
+            apply_remote_switch_bit_now(deferred.stage, deferred.flag, deferred.policy->reason,
+                                        RemoteSwitchApplyReason::Flush);
+        } else {
+            stillDeferred.push_back(deferred);
+        }
+    }
+
+    sDeferredRemoteSwitches = std::move(stillDeferred);
+}
+
+void age_recent_remote_switches() {
+    std::vector<RecentRemoteSwitch> stillRecent;
+    stillRecent.reserve(sRecentRemoteSwitches.size());
+
+    for (RecentRemoteSwitch& recent : sRecentRemoteSwitches) {
+        if (++recent.ageTicks <= kRecentRemoteSwitchTicks) {
+            stillRecent.push_back(recent);
+        }
+    }
+
+    sRecentRemoteSwitches = std::move(stillRecent);
 }
 
 #if 0
@@ -618,6 +864,11 @@ void reset_connection_state() {
     sSession.welcomed = false;
     sSession.snapshotPending = false;
     sPendingStageMessages.clear();
+    sDeferredRemoteSwitches.clear();
+    sRecentRemoteSwitches.clear();
+    sPolicyStageName.clear();
+    sPolicyRoom = -128;
+    sPolicyRoomStableTicks = 0;
     sSession.rxBuffer.clear();
     sSession.reconnectTicks = 0;
     sSession.pingTicks = 0;
@@ -1369,10 +1620,7 @@ void handle_message(const json& message) {
         const int stage = message.value("stage", -1);
         const int flag = message.value("flag", -1);
         if (stage >= 0 && flag >= 0) {
-            sApplyingRemoteSaveBit = true;
-            dComIfGs_onStageSwitch(stage, flag);
-            sApplyingRemoteSaveBit = false;
-            DuskLog.info("Multiplayer applied remote switch bit stage={} flag={}", stage, flag);
+            apply_remote_switch_bit(stage, flag);
         }
     } else if (type == "item_bit") {
         const int stage = message.value("stage", -1);
@@ -1777,6 +2025,9 @@ void repair_current_stage_collectibles() {
 }
 
 void update_connected() {
+    update_remote_switch_policy_room_state();
+    age_recent_remote_switches();
+
     if (sSession.mode == NetworkMode::RelayHarness || sSession.mode == NetworkMode::DirectJoin) {
         send_hello();
     }
@@ -1809,6 +2060,9 @@ void update_connected() {
                 handle_message(queued);
             }
         }
+
+        update_remote_switch_policy_room_state();
+        flush_deferred_remote_switches();
 
         if (++sSession.repairSweepTicks >= 60) {
             sSession.repairSweepTicks = 0;
@@ -2001,6 +2255,19 @@ void shutdown() {
 
 bool is_enabled() {
     return sEnabled;
+}
+
+bool was_switch_recently_remote_set(int stage, int flag, uint32_t* ageTicks) {
+    for (const RecentRemoteSwitch& recent : sRecentRemoteSwitches) {
+        if (recent.stage == stage && recent.flag == flag) {
+            if (ageTicks != nullptr) {
+                *ageTicks = recent.ageTicks;
+            }
+            return true;
+        }
+    }
+
+    return false;
 }
 
 bool host_direct(const DirectHostOptions& options, std::string* errorOut) {

@@ -584,8 +584,31 @@ int dRes_info_c::setRes(JKRArchive* i_archive, JKRHeap* i_heap) {
 bool data_8074C6C0_debug;
 
 int dRes_info_c::setRes() {
+#if TARGET_PC
+    // Diagnostic for the Epona spawn investigation, scoped to "Horse" only.
+    // This is the per-frame poll (called every frame this resource is
+    // pending). Checkpoint: distinguishes "no mDMCommand at all" (silent -1,
+    // no engine error logged anywhere) from "mDMCommand exists but
+    // mIsDone is still false" (the async DVD-thread mount itself never
+    // finishing) -- these look identical from daHorse_c::create()'s level,
+    // this is the only place that can tell them apart.
+    const bool isHorse = strcmp(mArchiveName, "Horse") == 0;
+    if (isHorse && mArchive == NULL) {
+        DuskLog.warn(
+            "dRes_info_c::setRes POLL arcName={} slot={} dmCommand={} dmCommandIsDone={}",
+            mArchiveName, static_cast<const void*>(this), static_cast<const void*>(mDMCommand),
+            mDMCommand != nullptr ? mDMCommand->sync() : -1);
+    }
+#endif
     if (mArchive == NULL) {
         if (mDMCommand == NULL) {
+#if TARGET_PC
+            if (isHorse) {
+                DuskLog.warn("dRes_info_c::setRes NO_DM_COMMAND arcName={} slot={} -- request "
+                             "was never (re-)issued, returning -1 silently",
+                             mArchiveName, static_cast<const void*>(this));
+            }
+#endif
             return -1;
         }
         if (mDMCommand->sync() == 0) {
@@ -600,8 +623,24 @@ int dRes_info_c::setRes() {
 
         if (mArchive == NULL) {
             OSReport_Error("<%s.arc> setRes: archive mount error !!\n", mArchiveName);
+#if TARGET_PC
+            if (isHorse) {
+                DuskLog.warn("dRes_info_c::setRes MOUNT_RETURNED_NULL_ARCHIVE arcName={} slot={}",
+                             mArchiveName, static_cast<const void*>(this));
+            }
+#endif
             return -1;
         }
+
+#if TARGET_PC
+        // Checkpoint: "archive load completes" -- mDMCommand->sync() just
+        // became non-zero and produced a real archive pointer.
+        if (isHorse) {
+            DuskLog.warn(
+                "dRes_info_c::setRes ARCHIVE_MOUNT_COMPLETE arcName={} slot={} archive={}",
+                mArchiveName, static_cast<const void*>(this), static_cast<const void*>(mArchive));
+        }
+#endif
 
         u32 r28;
 
@@ -661,6 +700,15 @@ int dRes_info_c::setRes() {
 #endif
     }
 
+#if TARGET_PC
+    // Checkpoint: "resource lookup/request completes" -- loadResource()
+    // (called above) finished populating mRes from the mounted archive,
+    // this is the true end of the resource system's job for this request.
+    if (isHorse) {
+        DuskLog.warn("dRes_info_c::setRes COMPLETE arcName={} slot={}", mArchiveName,
+                     static_cast<const void*>(this));
+    }
+#endif
     return 0;
 }
 
@@ -794,6 +842,22 @@ int dRes_control_c::setRes(char const* i_arcName, dRes_info_c* i_resInfo, int i_
                            char const* i_path, u8 i_mountDirection, JKRHeap* i_heap) {
     dRes_info_c* resInfo = getResInfo(i_arcName, i_resInfo, i_infoNum);
 
+#if TARGET_PC
+    // Diagnostic for the Epona spawn investigation, scoped to "Horse" only
+    // to avoid drowning in every other archive request in the game.
+    // Checkpoint: "resource lookup/request begins". cacheHit tells us
+    // whether this call found an existing refcounted slot (incCount only,
+    // no new mount) or had to allocate a fresh one (a real cold reload --
+    // confirms/refutes the premature-free hypothesis without assuming it).
+    const bool isHorse = strcmp(i_arcName, "Horse") == 0;
+    const bool cacheHit = resInfo != nullptr;
+    if (isHorse) {
+        DuskLog.warn("dRes_control_c::setRes BEGIN arcName={} cacheHit={} existingSlot={} count={}",
+                     i_arcName, cacheHit, static_cast<const void*>(resInfo),
+                     cacheHit ? resInfo->getCount() : -1);
+    }
+#endif
+
     if (resInfo == NULL) {
         resInfo = newResInfo(i_resInfo, i_infoNum);
 
@@ -809,9 +873,27 @@ int dRes_control_c::setRes(char const* i_arcName, dRes_info_c* i_resInfo, int i_
             resInfo->~dRes_info_c();
             return 0;
         }
+
+#if TARGET_PC
+        // Checkpoint: "archive load begins" -- a fresh mDMCommand was just
+        // created by resInfo->set() above (see dRes_info_c::set()), kicking
+        // off the actual async DVD-thread mount.
+        if (isHorse) {
+            DuskLog.warn(
+                "dRes_control_c::setRes NEW_SLOT_MOUNT_STARTED arcName={} slot={} dmCommand={}",
+                i_arcName, static_cast<const void*>(resInfo),
+                static_cast<const void*>(resInfo->getDMCommand()));
+        }
+#endif
     }
 
     resInfo->incCount();
+#if TARGET_PC
+    if (isHorse) {
+        DuskLog.warn("dRes_control_c::setRes END arcName={} slot={} count_after={}", i_arcName,
+                     static_cast<const void*>(resInfo), resInfo->getCount());
+    }
+#endif
     return 1;
 }
 

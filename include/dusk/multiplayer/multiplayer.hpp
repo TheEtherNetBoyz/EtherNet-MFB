@@ -98,5 +98,6 @@ SessionStatus get_session_status();
 bool has_recent_peer_pose(uint32_t maxAgeTicks);
 PeerPoseSnapshot get_latest_peer_pose();
 void draw_debug_peer_marker();
+bool was_switch_recently_remote_set(int stage, int flag, uint32_t* ageTicks = nullptr);
 
 }  // namespace dusk::multiplayer
