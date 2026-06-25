@@ -22,7 +22,10 @@
 #include "f_op/f_op_actor_mng.h"
 #include "f_pc/f_pc_manager.h"
 #include "f_pc/f_pc_name.h"
+#include "m_Do/m_Do_graphic.h"
+#include "m_Do/m_Do_lib.h"
 #include "m_Do/m_Do_mtx.h"
+#include "aurora/lib/window.hpp"
 #include "imgui.h"
 #include "nlohmann/json.hpp"
 
@@ -57,6 +60,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -1023,6 +1027,133 @@ std::string display_name_for_peer(const std::string& peerId) {
         return name->second;
     }
     return peerId.empty() ? "Peer" : peerId;
+}
+
+float peer_label_height(const PeerPoseSnapshot& pose) {
+    if (pose.isTransforming) {
+        return pose.transformFromWolf && pose.transformToWolf ? 115.0f : 205.0f;
+    }
+
+    return pose.isWolf ? 115.0f : 205.0f;
+}
+
+bool peer_pose_is_visible_for_labels(const PeerPoseSnapshot& pose, const char* localStage) {
+    if (!pose.valid || pose.ageTicks > 30 || localStage == nullptr || pose.stage != localStage) {
+        return false;
+    }
+
+    return dComIfGp_roomControl_checkRoomDisp(pose.room);
+}
+
+bool project_peer_label_position(const PeerPoseSnapshot& pose, ImVec2* outPos) {
+    if (outPos == nullptr) {
+        return false;
+    }
+
+    cXyz worldPos(pose.x, pose.y + peer_label_height(pose), pose.z);
+    cXyz cameraPos;
+    mDoLib_pos2camera(&worldPos, &cameraPos);
+    if (cameraPos.z >= -1.0f) {
+        return false;
+    }
+
+    cXyz projected;
+    mDoLib_project(&worldPos, &projected);
+
+    const float gameMinX = mDoGph_gInf_c::getMinXF();
+    const float gameMinY = mDoGph_gInf_c::getMinYF();
+    const float gameWidth = mDoGph_gInf_c::getWidthF();
+    const float gameHeight = mDoGph_gInf_c::getHeightF();
+    if (gameWidth <= 0.0f || gameHeight <= 0.0f ||
+        projected.x < gameMinX || projected.x > gameMinX + gameWidth ||
+        projected.y < gameMinY || projected.y > gameMinY + gameHeight)
+    {
+        return false;
+    }
+
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    if (viewport == nullptr) {
+        return false;
+    }
+
+    const AuroraWindowSize windowSize = aurora::window::get_window_size();
+    if (windowSize.native_fb_width == 0 || windowSize.native_fb_height == 0 ||
+        windowSize.fb_width == 0 || windowSize.fb_height == 0)
+    {
+        return false;
+    }
+
+    uint32_t presentWidth = windowSize.native_fb_width;
+    uint32_t presentHeight = std::min<uint32_t>(
+        windowSize.native_fb_height,
+        std::max<uint32_t>(1u, static_cast<uint32_t>(std::lround(
+                                  static_cast<double>(presentWidth) *
+                                  static_cast<double>(windowSize.fb_height) /
+                                  static_cast<double>(windowSize.fb_width)))));
+    if (presentHeight == windowSize.native_fb_height) {
+        presentWidth = std::min<uint32_t>(
+            windowSize.native_fb_width,
+            std::max<uint32_t>(1u, static_cast<uint32_t>(std::lround(
+                                      static_cast<double>(presentHeight) *
+                                      static_cast<double>(windowSize.fb_width) /
+                                      static_cast<double>(windowSize.fb_height)))));
+    }
+
+    const float presentLeft =
+        static_cast<float>((windowSize.native_fb_width - presentWidth) / 2u);
+    const float presentTop =
+        static_cast<float>((windowSize.native_fb_height - presentHeight) / 2u);
+    const ImVec2 framebufferScale = ImGui::GetIO().DisplayFramebufferScale;
+    const float scaleX = framebufferScale.x > 0.0f ? framebufferScale.x : 1.0f;
+    const float scaleY = framebufferScale.y > 0.0f ? framebufferScale.y : 1.0f;
+
+    const float normX = (projected.x - gameMinX) / gameWidth;
+    const float normY = (projected.y - gameMinY) / gameHeight;
+    outPos->x = viewport->Pos.x + (presentLeft + normX * static_cast<float>(presentWidth)) / scaleX;
+    outPos->y = viewport->Pos.y + (presentTop + normY * static_cast<float>(presentHeight)) / scaleY;
+    return std::isfinite(outPos->x) && std::isfinite(outPos->y);
+}
+
+void draw_peer_name_labels() {
+    if (!sEnabled || !sDummyModelEnabled || !sSession.debugMarker || !has_recent_peer_pose(30) ||
+        !is_peer_dummy_gameplay_ready())
+    {
+        return;
+    }
+
+    const char* localStage = dComIfGp_getStartStageName();
+    ImDrawList* drawList = ImGui::GetForegroundDrawList();
+    if (drawList == nullptr) {
+        return;
+    }
+
+    for (const auto& entry : sSession.peerPoses) {
+        const PeerPoseSnapshot& pose = entry.second;
+        if (!peer_pose_is_visible_for_labels(pose, localStage)) {
+            continue;
+        }
+
+        const std::string label = display_name_for_peer(entry.first);
+        if (label.empty()) {
+            continue;
+        }
+
+        ImVec2 pos;
+        if (!project_peer_label_position(pose, &pos)) {
+            continue;
+        }
+
+        const float fontSize = ImGui::GetFontSize() * 0.92f;
+        const ImVec2 textSize = ImGui::CalcTextSize(label.c_str());
+        pos.x -= textSize.x * 0.5f;
+        pos.y -= fontSize + 8.0f;
+
+        const ImU32 shadow = IM_COL32(0, 0, 0, 205);
+        const ImU32 text = IM_COL32(245, 248, 255, 245);
+        drawList->AddText(nullptr, fontSize, ImVec2(pos.x + 1.0f, pos.y + 1.0f),
+                          shadow, label.c_str());
+        drawList->AddText(nullptr, fontSize, pos, text, label.c_str());
+    }
 }
 
 void reset_connection_state() {
@@ -3036,6 +3167,8 @@ void draw_debug_peer_marker() {
 }
 
 void draw_notifications_overlay() {
+    draw_peer_name_labels();
+
     if (!sEnabled || sNotifications.empty()) {
         return;
     }

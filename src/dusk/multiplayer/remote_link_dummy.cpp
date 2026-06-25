@@ -678,7 +678,7 @@ bool draw_remote_transform_body(RemoteLinkDummy& dummy, const std::string& peerI
     }
 
     const bool targetMatricesReady = pose.linkMatrices.valid && pose.isWolf == anim.toWolf;
-    if ((!pose.isTransforming || anim.holdFinal) && targetMatricesReady) {
+    if (targetMatricesReady) {
         anim.active = false;
         if (dummy.transformLogCount < 24) {
             ++dummy.transformLogCount;
