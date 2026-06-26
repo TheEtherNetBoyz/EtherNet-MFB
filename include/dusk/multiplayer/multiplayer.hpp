@@ -25,6 +25,20 @@ struct RemoteLinkMatrixSnapshot {
     RemoteModelMatrixSnapshot sword;
     RemoteModelMatrixSnapshot sheath;
     RemoteModelMatrixSnapshot shield;
+    RemoteModelMatrixSnapshot heldItem;
+    RemoteModelMatrixSnapshot hookTip;
+    RemoteModelMatrixSnapshot hookSubItem;
+    RemoteModelMatrixSnapshot hookSubTip;
+    RemoteModelMatrixSnapshot arrow;
+    RemoteModelMatrixSnapshot kantera;
+    RemoteModelMatrixSnapshot kanteraGlow;
+    RemoteModelMatrixSnapshot itemActor;
+    RemoteModelMatrixSnapshot rideActor;
+    RemoteModelMatrixSnapshot midna;
+    RemoteModelMatrixSnapshot midnaMask;
+    RemoteModelMatrixSnapshot midnaHand;
+    RemoteModelMatrixSnapshot midnaHair;
+    int midnaHairShape = 0;
 };
 
 struct PeerPoseSnapshot {
@@ -44,6 +58,19 @@ struct PeerPoseSnapshot {
     float y = 0.0f;
     float z = 0.0f;
     int angleY = 0;
+    int procId = 0;
+    int procVar0 = 0;
+    int procVar1 = 0;
+    int procVar2 = 0;
+    int procVar3 = 0;
+    int procVar5 = 0;
+    float underFrame = 0.0f;
+    int underBck0 = 0;
+    float underFrame0 = 0.0f;
+    float underRate0 = 1.0f;
+    int upperBck2 = 0;
+    float upperFrame2 = 0.0f;
+    float upperRate2 = 1.0f;
     bool isWolf = false;
     bool isTransforming = false;
     bool transformFromWolf = false;
@@ -62,6 +89,10 @@ struct PeerPoseSnapshot {
     bool swordDraw = false;
     bool shieldDraw = false;
     bool swordOut = false;
+    bool itemDraw = false;
+    bool kanteraDraw = false;
+    int itemActorKind = 0;
+    int rideActorKind = 0;
     RemoteLinkMatrixSnapshot linkMatrices;
 };
 

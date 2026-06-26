@@ -11,8 +11,10 @@
 #include "d/actor/d_a_obj_scannon.h"
 #include "d/actor/d_a_obj_smallkey.h"
 #include "d/actor/d_a_obj_sword.h"
+#include "d/actor/d_a_spinner.h"
 #include "d/actor/d_a_tbox.h"
 #include "d/d_com_inf_game.h"
+#include "d/d_bomb.h"
 #include "d/d_item.h"
 #include "d/d_item_data.h"
 #include "d/d_msg_object.h"
@@ -25,6 +27,8 @@
 #include "f_op/f_op_actor_mng.h"
 #include "f_pc/f_pc_manager.h"
 #include "f_pc/f_pc_name.h"
+#include "JSystem/J3DGraphBase/J3DMaterial.h"
+#include "JSystem/J3DGraphBase/J3DShape.h"
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_lib.h"
 #include "m_Do/m_Do_mtx.h"
@@ -135,6 +139,50 @@ enum RemoteClothesVariant {
     REMOTE_CLOTHES_ARMOR = 3,   // "Mmdl" -- checkMagicArmorWearFlg()
 };
 
+enum RemoteItemActorKind {
+    REMOTE_ITEM_ACTOR_NONE = 0,
+    REMOTE_ITEM_ACTOR_BOOMERANG = 1,
+    REMOTE_ITEM_ACTOR_BOMB_NORMAL = 2,
+    REMOTE_ITEM_ACTOR_BOMB_WATER = 3,
+    REMOTE_ITEM_ACTOR_BOMB_INSECT = 4,
+};
+
+enum RemoteRideActorKind {
+    REMOTE_RIDE_ACTOR_NONE = 0,
+    REMOTE_RIDE_ACTOR_SPINNER = 1,
+};
+
+int detect_item_actor_kind(fopAc_ac_c* actor) {
+    if (actor == nullptr) {
+        return REMOTE_ITEM_ACTOR_NONE;
+    }
+
+    switch (fopAcM_GetName(actor)) {
+    case fpcNm_BOOMERANG_e:
+        return REMOTE_ITEM_ACTOR_BOOMERANG;
+    case fpcNm_NBOMB_e:
+        switch (fopAcM_GetParam(actor)) {
+        case dBomb_c::PRM_WATER_BOMB_PLAYER:
+            return REMOTE_ITEM_ACTOR_BOMB_WATER;
+        case dBomb_c::PRM_INSECT_BOMB_PLAYER:
+            return REMOTE_ITEM_ACTOR_BOMB_INSECT;
+        case dBomb_c::PRM_NORMAL_BOMB_PLAYER:
+        default:
+            return REMOTE_ITEM_ACTOR_BOMB_NORMAL;
+        }
+    default:
+        return REMOTE_ITEM_ACTOR_NONE;
+    }
+}
+
+int detect_ride_actor_kind(fopAc_ac_c* actor) {
+    if (actor != nullptr && fopAcM_GetName(actor) == fpcNm_SPINNER_e) {
+        return REMOTE_RIDE_ACTOR_SPINNER;
+    }
+
+    return REMOTE_RIDE_ACTOR_NONE;
+}
+
 struct DirectPeer {
     socket_t sock = INVALID_SOCKET;
     std::string id;
@@ -196,6 +244,7 @@ Session sSession;
 
 bool sDummyModelEnabled = false;
 bool sNameLabelsEnabled = true;
+fpc_ProcID sLastPlayerBombActorId = fpcM_ERROR_PROCESS_ID_e;
 
 // DarkClearLV/TransformLV (Twilight-clear / wolf-transform region levels)
 // double as room-layer/actor-set selectors in at least Ordon Village and
@@ -1691,6 +1740,24 @@ json model_matrices_to_json_if(bool enabled, J3DModel* model) {
     return enabled ? model_matrices_to_json(model) : json(nullptr);
 }
 
+int visible_material_shape_index(J3DModel* model, int count, int fallback) {
+    if (model == nullptr || model->getModelData() == nullptr) {
+        return fallback;
+    }
+
+    J3DModelData* data = model->getModelData();
+    const int materialCount = data->getMaterialNum();
+    for (int i = 0; i < count && i < materialCount; ++i) {
+        J3DMaterial* material = data->getMaterialNodePointer(i);
+        J3DShape* shape = material != nullptr ? material->getShape() : nullptr;
+        if (shape != nullptr && !shape->checkFlag(J3DShpFlag_Visible)) {
+            return i;
+        }
+    }
+
+    return fallback;
+}
+
 bool add_link_matrices(json& state) {
     // Note: deliberately not gated on dComIfGp_event_runCheck() here, unlike
     // the dummy draw path. This only reads already-built matrices off the
@@ -1734,6 +1801,55 @@ bool add_link_matrices(json& state) {
     }
 
     const bool includeHumanParts = !isWolf;
+    J3DModel* arrowModel = nullptr;
+    J3DModel* itemActorModel = nullptr;
+    J3DModel* rideActorModel = nullptr;
+    int itemActorKind = REMOTE_ITEM_ACTOR_NONE;
+    int rideActorKind = REMOTE_RIDE_ACTOR_NONE;
+    if (includeHumanParts) {
+        fopAc_ac_c* itemActor = link->mItemAcKeep.getActor();
+        fopAc_ac_c* thrownBoomerangActor = link->getThrowBoomerangAcKeep()->getActor();
+        fopAc_ac_c* grabActor = link->mGrabItemAcKeep.getActor();
+        fopAc_ac_c* rememberedBombActor =
+            sLastPlayerBombActorId != fpcM_ERROR_PROCESS_ID_e
+                ? fopAcM_SearchByID(sLastPlayerBombActorId)
+                : nullptr;
+        if (rememberedBombActor == nullptr ||
+            fopAcM_GetName(rememberedBombActor) != fpcNm_NBOMB_e)
+        {
+            rememberedBombActor = nullptr;
+            sLastPlayerBombActorId = fpcM_ERROR_PROCESS_ID_e;
+        }
+
+        if (grabActor != nullptr && fopAcM_GetName(grabActor) == fpcNm_NBOMB_e) {
+            sLastPlayerBombActorId = fopAcM_GetID(grabActor);
+            rememberedBombActor = grabActor;
+        }
+
+        if (thrownBoomerangActor != nullptr &&
+            fopAcM_GetName(thrownBoomerangActor) == fpcNm_BOOMERANG_e)
+        {
+            itemActor = thrownBoomerangActor;
+        } else if (grabActor != nullptr && detect_item_actor_kind(grabActor) != REMOTE_ITEM_ACTOR_NONE) {
+            itemActor = grabActor;
+        } else if (rememberedBombActor != nullptr) {
+            itemActor = rememberedBombActor;
+        }
+
+        if (itemActor != nullptr && fopAcM_GetName(itemActor) == fpcNm_ARROW_e) {
+            arrowModel = itemActor->model;
+        } else if (itemActor != nullptr) {
+            itemActorModel = itemActor->model;
+            itemActorKind = detect_item_actor_kind(itemActor);
+        }
+
+        fopAc_ac_c* rideActor = link->mRideAcKeep.getActor();
+        rideActorKind = detect_ride_actor_kind(rideActor);
+        if (rideActorKind == REMOTE_RIDE_ACTOR_SPINNER) {
+            rideActorModel = rideActor->model;
+        }
+    }
+
     state["link_matrices"] = {
         {"body", model_matrices_to_json(link->mpLinkModel)},
         {"hat", model_matrices_to_json_if(includeHumanParts, link->mpLinkHatModel)},
@@ -1742,6 +1858,20 @@ bool add_link_matrices(json& state) {
         {"sword", model_matrices_to_json_if(includeHumanParts, link->mSwordModel)},
         {"sheath", model_matrices_to_json_if(includeHumanParts, link->mSheathModel)},
         {"shield", model_matrices_to_json_if(includeHumanParts, link->mShieldModel)},
+        {"held_item", model_matrices_to_json_if(includeHumanParts, link->mHeldItemModel)},
+        {"hook_tip", model_matrices_to_json_if(includeHumanParts, link->mpHookTipModel)},
+        {"hook_sub_item", model_matrices_to_json_if(includeHumanParts, link->field_0x0710)},
+        {"hook_sub_tip", model_matrices_to_json_if(includeHumanParts, link->field_0x0714)},
+        {"arrow", model_matrices_to_json_if(includeHumanParts, arrowModel)},
+        {"kantera", model_matrices_to_json_if(includeHumanParts, link->mpKanteraModel)},
+        {"kantera_glow", model_matrices_to_json_if(includeHumanParts, link->mpKanteraGlowModel)},
+        {"item_actor", model_matrices_to_json_if(includeHumanParts, itemActorModel)},
+        {"ride_actor", model_matrices_to_json_if(includeHumanParts, rideActorModel)},
+        {"midna", model_matrices_to_json_if(isWolf, link->getMidnaModel())},
+        {"midna_mask", model_matrices_to_json_if(isWolf, link->getMidnaMaskModel())},
+        {"midna_hand", model_matrices_to_json_if(isWolf, link->getMidnaHandModel())},
+        {"midna_hair", model_matrices_to_json_if(isWolf, link->getMidnaHairHandModel())},
+        {"midna_hair_shape", isWolf ? visible_material_shape_index(link->getMidnaHairHandModel(), 3, 0) : 0},
     };
 
     state["equip_item"] = static_cast<int>(link->mEquipItem);
@@ -1751,6 +1881,12 @@ bool add_link_matrices(json& state) {
     state["sword_draw"] = !isWolf && static_cast<bool>(link->checkSwordDraw());
     state["shield_draw"] = !isWolf && static_cast<bool>(link->checkShieldDraw());
     state["sword_out"] = !isWolf && link->mEquipItem == 0x103;
+    state["item_draw"] = !isWolf && static_cast<bool>(link->checkItemDraw());
+    state["kantera_draw"] =
+        !isWolf && (link->checkNoResetFlg2(daPy_py_c::FLG2_UNK_1) ||
+                    link->checkNoResetFlg2(daPy_py_c::FLG2_UNK_20000));
+    state["item_actor_kind"] = itemActorKind;
+    state["ride_actor_kind"] = rideActorKind;
     state["form"] = isWolf ? "wolf" : "human";
     return true;
 }
@@ -1833,6 +1969,23 @@ RemoteLinkMatrixSnapshot parse_link_matrices(const json& state) {
     snapshot.sword = parse_model_matrices(it->value("sword", json::object()));
     snapshot.sheath = parse_model_matrices(it->value("sheath", json::object()));
     snapshot.shield = parse_model_matrices(it->value("shield", json::object()));
+    snapshot.heldItem = parse_model_matrices(it->value("held_item", json::object()));
+    snapshot.hookTip = parse_model_matrices(it->value("hook_tip", json::object()));
+    snapshot.hookSubItem = parse_model_matrices(it->value("hook_sub_item", json::object()));
+    snapshot.hookSubTip = parse_model_matrices(it->value("hook_sub_tip", json::object()));
+    snapshot.arrow = parse_model_matrices(it->value("arrow", json::object()));
+    snapshot.kantera = parse_model_matrices(it->value("kantera", json::object()));
+    snapshot.kanteraGlow = parse_model_matrices(it->value("kantera_glow", json::object()));
+    snapshot.itemActor = parse_model_matrices(it->value("item_actor", json::object()));
+    snapshot.rideActor = parse_model_matrices(it->value("ride_actor", json::object()));
+    snapshot.midna = parse_model_matrices(it->value("midna", json::object()));
+    snapshot.midnaMask = parse_model_matrices(it->value("midna_mask", json::object()));
+    snapshot.midnaHand = parse_model_matrices(it->value("midna_hand", json::object()));
+    snapshot.midnaHair = parse_model_matrices(it->value("midna_hair", json::object()));
+    snapshot.midnaHairShape = it->value("midna_hair_shape", 0);
+    if (snapshot.midnaHairShape < 0 || snapshot.midnaHairShape > 2) {
+        snapshot.midnaHairShape = 0;
+    }
     snapshot.valid = snapshot.body.valid;
     return snapshot;
 }
@@ -2132,6 +2285,19 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         pose.y = state.value("y", 0.0f);
         pose.z = state.value("z", 0.0f);
         pose.angleY = state.value("angle_y", 0);
+        pose.procId = state.value("proc_id", 0);
+        pose.procVar0 = state.value("proc_v0", 0);
+        pose.procVar1 = state.value("proc_v1", 0);
+        pose.procVar2 = state.value("proc_v2", 0);
+        pose.procVar3 = state.value("proc_v3", 0);
+        pose.procVar5 = state.value("proc_v5", 0);
+        pose.underFrame = state.value("under_frame", 0.0f);
+        pose.underBck0 = state.value("under_bck0", 0);
+        pose.underFrame0 = state.value("under_frame0", pose.underFrame);
+        pose.underRate0 = state.value("under_rate0", 1.0f);
+        pose.upperBck2 = state.value("upper_bck2", 0);
+        pose.upperFrame2 = state.value("upper_frame2", 0.0f);
+        pose.upperRate2 = state.value("upper_rate2", 1.0f);
         pose.isWolf = state.value("is_wolf", false);
         pose.isTransforming = state.value("is_transforming", false);
         pose.transformFromWolf = state.value("transform_from_wolf", pose.isWolf);
@@ -2150,6 +2316,10 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         pose.swordDraw = state.value("sword_draw", false);
         pose.shieldDraw = state.value("shield_draw", false);
         pose.swordOut = state.value("sword_out", false);
+        pose.itemDraw = state.value("item_draw", false);
+        pose.kanteraDraw = state.value("kantera_draw", false);
+        pose.itemActorKind = state.value("item_actor_kind", REMOTE_ITEM_ACTOR_NONE);
+        pose.rideActorKind = state.value("ride_actor_kind", REMOTE_RIDE_ACTOR_NONE);
         pose.linkMatrices = parse_link_matrices(state);
         const bool wasTransforming =
             existing != sSession.peerPoses.end() && existing->second.valid &&
@@ -2671,6 +2841,19 @@ void send_pose() {
         {"y", player->current.pos.y},
         {"z", player->current.pos.z},
         {"angle_y", static_cast<int>(player->shape_angle.y)},
+        {"proc_id", link != nullptr ? static_cast<int>(link->mProcID) : 0},
+        {"proc_v0", link != nullptr ? link->mProcVar0.field_0x3008 : 0},
+        {"proc_v1", link != nullptr ? link->mProcVar1.field_0x300a : 0},
+        {"proc_v2", link != nullptr ? link->mProcVar2.field_0x300c : 0},
+        {"proc_v3", link != nullptr ? link->mProcVar3.field_0x300e : 0},
+        {"proc_v5", link != nullptr ? link->mProcVar5.field_0x3012 : 0},
+        {"under_frame", link != nullptr ? link->mUnderFrameCtrl[0].getFrame() : 0.0f},
+        {"under_bck0", link != nullptr ? static_cast<int>(link->mUnderAnmHeap[0].getIdx()) : 0},
+        {"under_frame0", link != nullptr ? link->mUnderFrameCtrl[0].getFrame() : 0.0f},
+        {"under_rate0", link != nullptr ? link->mUnderFrameCtrl[0].getRate() : 1.0f},
+        {"upper_bck2", link != nullptr ? static_cast<int>(link->mUpperAnmHeap[2].getIdx()) : 0},
+        {"upper_frame2", link != nullptr ? link->mUpperFrameCtrl[2].getFrame() : 0.0f},
+        {"upper_rate2", link != nullptr ? link->mUpperFrameCtrl[2].getRate() : 1.0f},
         {"is_wolf", isWolf},
         {"is_transforming", isTransforming},
         {"transform_from_wolf", transformFromWolf},
@@ -2689,6 +2872,13 @@ void send_pose() {
         {"sword_draw", link != nullptr && !isWolf && static_cast<bool>(link->checkSwordDraw())},
         {"shield_draw", link != nullptr && !isWolf && static_cast<bool>(link->checkShieldDraw())},
         {"sword_out", link != nullptr && !isWolf && link->mEquipItem == 0x103},
+        {"item_draw", link != nullptr && !isWolf && static_cast<bool>(link->checkItemDraw())},
+        {"kantera_draw",
+         link != nullptr && !isWolf &&
+             (link->checkNoResetFlg2(daPy_py_c::FLG2_UNK_1) ||
+              link->checkNoResetFlg2(daPy_py_c::FLG2_UNK_20000))},
+        {"item_actor_kind", REMOTE_ITEM_ACTOR_NONE},
+        {"ride_actor_kind", REMOTE_RIDE_ACTOR_NONE},
     };
     if (!isTransforming && isLink && (sDummyModelEnabled || isWolf) && !add_link_matrices(state)) {
         static uint32_t sMatrixPoseDropLogCount = 0;
@@ -2964,7 +3154,8 @@ void update() {
         return;
     }
 
-    if (sDummyModelEnabled && is_peer_dummy_gameplay_ready()) {
+    const bool dummyGameplayReady = is_peer_dummy_gameplay_ready();
+    if (sDummyModelEnabled && dummyGameplayReady) {
         // Must happen here (the simulation tick), not from the draw phase --
         // see the comment on preload_remote_link_dummy_resources()'s
         // declaration for why issuing these archive loads from the draw
@@ -2988,6 +3179,12 @@ void update() {
         if (entry.second.valid) {
             ++entry.second.ageTicks;
         }
+    }
+
+    if (sDummyModelEnabled && dummyGameplayReady) {
+        sync_remote_link_actor_dummies(sSession.peerPoses);
+    } else if (!sDummyModelEnabled) {
+        destroy_all_remote_link_dummies();
     }
 
     if (sSession.state == ConnectionState::Disconnected) {

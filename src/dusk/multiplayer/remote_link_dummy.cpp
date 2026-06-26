@@ -9,6 +9,7 @@
 
 #include "SSystem/SComponent/c_phase.h"
 #include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_remote_link.h"
 #include "d/d_cc_d.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_kankyo.h"
@@ -16,6 +17,7 @@
 #include "dusk/frame_interpolation.h"
 #include "dusk/logging.h"
 #include "f_op/f_op_actor_mng.h"
+#include "f_pc/f_pc_manager.h"
 #include "f_pc/f_pc_name.h"
 #include "JSystem/J3DGraphLoader/J3DAnmLoader.h"
 #include "JSystem/J3DGraphAnimator/J3DJoint.h"
@@ -119,6 +121,17 @@ struct RemoteLinkDummy {
     bool bodyCollisionInitialized = false;
 };
 
+struct RemoteLinkActorDummy {
+    fpc_ProcID actorId = fpcM_ERROR_PROCESS_ID_e;
+    uint32_t logCount = 0;
+    int clothesVariant = -1;
+    int pendingClothesVariant = -1;
+    bool isWolf = false;
+    bool pendingIsWolf = false;
+    uint8_t recreateDelayTicks = 0;
+    bool recreatePending = false;
+};
+
 struct RemoteArcRequest {
     const char* arcName = nullptr;
     request_of_phase_process_class phase{};
@@ -141,6 +154,7 @@ struct RemoteLinkSources {
 // remote peers at once (direct1/direct2/etc.), so every clone/model cache and
 // log throttle in RemoteLinkDummy must stay per-peer.
 std::map<std::string, RemoteLinkDummy> sDummies;
+std::map<std::string, RemoteLinkActorDummy> sActorDummies;
 RemoteArcRequest sHumanArc{"Kmdl"};
 RemoteArcRequest sWolfArc{"Wmdl"};
 RemoteArcRequest sAlinkArc{"Alink"};
@@ -158,6 +172,7 @@ RemoteArcRequest sCarvingWoodShieldArc{"CWShd"};
 RemoteArcRequest sOrdonShieldArc{"SWShd"};
 RemoteArcRequest sHylianShieldArc{"HyShd"};
 uint32_t sRoomSkipLogCount = 0;
+uint32_t sActorSyncLogCount = 0;
 
 constexpr f32 kRemoteHumanBodyRadius = 35.0f;
 constexpr f32 kRemoteHumanBodyHeight = 180.0f;
@@ -185,6 +200,8 @@ static dCcD_SrcCyl l_remoteLinkBodyCylSrc = {
 };
 
 RemoteLinkSources resolve_remote_sources(const PeerPoseSnapshot& pose);
+void destroy_remote_link_actor_dummy(const std::string& peerId);
+bool remote_link_actor_dummy_active(const std::string& peerId);
 void prepare_remote_form_resources(RemoteLinkDummy& dummy, const PeerPoseSnapshot& pose,
                                    daAlink_c* link, J3DModel* body, J3DModel* hat,
                                    J3DModel* face, J3DModel* sword);
@@ -1920,6 +1937,72 @@ RemoteLinkSources resolve_remote_sources(const PeerPoseSnapshot& pose) {
     return sources;
 }
 
+bool remote_link_actor_pose_supported(const PeerPoseSnapshot& pose) {
+    return pose.valid && pose.ageTicks <= 30 && !pose.isTransforming;
+}
+
+daRemoteLink_c* find_remote_link_actor(RemoteLinkActorDummy& dummy) {
+    if (dummy.actorId == fpcM_ERROR_PROCESS_ID_e) {
+        return nullptr;
+    }
+
+    fopAc_ac_c* actor = fopAcM_SearchByID(dummy.actorId);
+    if (actor == nullptr) {
+        if (!fpcM_IsCreating(dummy.actorId)) {
+            dummy.actorId = fpcM_ERROR_PROCESS_ID_e;
+        }
+        return nullptr;
+    }
+
+    if (fopAcM_GetName(actor) != fpcNm_REMOTE_LINK_e) {
+        DuskLog.warn("Multiplayer remote Link actor: proc id {} resolved to unexpected actor {}",
+                     dummy.actorId, fopAcM_GetName(actor));
+        dummy.actorId = fpcM_ERROR_PROCESS_ID_e;
+        return nullptr;
+    }
+
+    return static_cast<daRemoteLink_c*>(actor);
+}
+
+void destroy_remote_link_actor_dummy(const std::string& peerId) {
+    auto it = sActorDummies.find(peerId);
+    if (it == sActorDummies.end()) {
+        return;
+    }
+
+    if (it->second.actorId != fpcM_ERROR_PROCESS_ID_e) {
+        fopAcM_delete(it->second.actorId);
+    }
+    sActorDummies.erase(it);
+}
+
+bool remote_link_actor_dummy_active(const std::string& peerId) {
+    auto it = sActorDummies.find(peerId);
+    if (it == sActorDummies.end()) {
+        return false;
+    }
+
+    if (find_remote_link_actor(it->second) != nullptr) {
+        return true;
+    }
+
+    return it->second.actorId != fpcM_ERROR_PROCESS_ID_e;
+}
+
+bool remote_link_actor_dummy_claimed(const std::string& peerId) {
+    return sActorDummies.find(peerId) != sActorDummies.end();
+}
+
+void update_actor_dummy_collision(const std::string& peerId, const PeerPoseSnapshot& pose) {
+    fopAc_ac_c* playerActor = dComIfGp_getPlayer(0);
+    if (playerActor == nullptr) {
+        return;
+    }
+
+    RemoteLinkDummy& dummy = sDummies[peerId];
+    update_remote_body_collision(dummy, pose, playerActor);
+}
+
 }  // namespace
 
 void preload_remote_link_dummy_resources() {
@@ -1938,7 +2021,135 @@ void preload_remote_link_dummy_resources() {
     ensure_arc_loaded(sHylianShieldArc);
 }
 
+void sync_remote_link_actor_dummies(const std::map<std::string, PeerPoseSnapshot>& poses) {
+    const char* localStage = dComIfGp_getStartStageName();
+    if (localStage == nullptr) {
+        for (auto it = sActorDummies.begin(); it != sActorDummies.end();) {
+            const std::string peerId = it->first;
+            ++it;
+            destroy_remote_link_actor_dummy(peerId);
+        }
+        return;
+    }
+
+    for (auto it = sActorDummies.begin(); it != sActorDummies.end();) {
+        const std::string peerId = it->first;
+        if (poses.find(peerId) == poses.end()) {
+            ++it;
+            destroy_remote_link_actor_dummy(peerId);
+            continue;
+        }
+        ++it;
+    }
+
+    for (const auto& entry : poses) {
+        const std::string& peerId = entry.first;
+        const PeerPoseSnapshot& pose = entry.second;
+        const bool supported = remote_link_actor_pose_supported(pose) &&
+                               pose.stage == localStage &&
+                               dComIfGp_roomControl_checkRoomDisp(pose.room);
+        if (!supported) {
+            auto existing = sActorDummies.find(peerId);
+            if (pose.valid && pose.isTransforming && existing != sActorDummies.end()) {
+                update_actor_dummy_collision(peerId, pose);
+                continue;
+            }
+            destroy_remote_link_actor_dummy(peerId);
+            continue;
+        }
+
+        RemoteLinkActorDummy& dummy = sActorDummies[peerId];
+        daRemoteLink_c* actor = find_remote_link_actor(dummy);
+        if (dummy.clothesVariant != -1 &&
+            (dummy.clothesVariant != pose.clothesVariant || dummy.isWolf != pose.isWolf))
+        {
+            if (!dummy.recreatePending) {
+                if (dummy.actorId != fpcM_ERROR_PROCESS_ID_e) {
+                    fopAcM_delete(dummy.actorId);
+                }
+                dummy.pendingClothesVariant = pose.clothesVariant;
+                dummy.pendingIsWolf = pose.isWolf;
+                dummy.recreateDelayTicks = 3;
+                dummy.recreatePending = true;
+                if (sActorSyncLogCount < 20) {
+                    ++sActorSyncLogCount;
+                    DuskLog.info("Multiplayer remote Link actor: recreate requested peer={} "
+                                 "old_clothes={} new_clothes={} old_wolf={} new_wolf={} "
+                                 "old_id={}",
+                                 peerId, dummy.clothesVariant, pose.clothesVariant,
+                                 dummy.isWolf, pose.isWolf, dummy.actorId);
+                }
+            }
+
+            if (actor != nullptr || dummy.actorId != fpcM_ERROR_PROCESS_ID_e) {
+                update_actor_dummy_collision(peerId, pose);
+                continue;
+            }
+
+            dummy.clothesVariant = -1;
+            dummy.isWolf = false;
+            if (dummy.recreateDelayTicks > 0) {
+                --dummy.recreateDelayTicks;
+                update_actor_dummy_collision(peerId, pose);
+                continue;
+            }
+            dummy.recreatePending = false;
+        }
+
+        if (actor == nullptr) {
+            if (dummy.actorId != fpcM_ERROR_PROCESS_ID_e) {
+                continue;
+            }
+
+            cXyz pos(pose.x, pose.y, pose.z);
+            csXyz angle(0, static_cast<s16>(pose.angleY), 0);
+            cXyz scale(1.0f, 1.0f, 1.0f);
+            dummy.clothesVariant = pose.clothesVariant;
+            dummy.isWolf = pose.isWolf;
+            dummy.pendingClothesVariant = -1;
+            dummy.pendingIsWolf = false;
+            dummy.recreateDelayTicks = 0;
+            dummy.recreatePending = false;
+            const u32 actorParams =
+                static_cast<u32>(pose.clothesVariant & 0xFF) | (pose.isWolf ? 0x100 : 0);
+            dummy.actorId = fopAcM_create(fpcNm_REMOTE_LINK_e,
+                                          actorParams, &pos, pose.room, &angle, &scale, -1);
+            if (sActorSyncLogCount < 20) {
+                ++sActorSyncLogCount;
+                DuskLog.info(
+                    "Multiplayer remote Link actor: spawn requested peer={} id={} clothes={} "
+                    "wolf={} pos=({}, {}, {}) room={} angleY={}",
+                    peerId, dummy.actorId, pose.clothesVariant, pose.isWolf, pose.x, pose.y,
+                    pose.z, pose.room, pose.angleY);
+            }
+            continue;
+        }
+
+        update_actor_dummy_collision(peerId, pose);
+        cXyz pos(pose.x, pose.y, pose.z);
+        actor->setRemotePose(pos, static_cast<s16>(pose.angleY), static_cast<s8>(pose.room));
+        actor->setRemoteActionState(pose.procId, pose.procVar0, pose.procVar1, pose.procVar2,
+                                    pose.procVar3, pose.procVar5, pose.underFrame,
+                                    static_cast<u16>(pose.underBck0), pose.underFrame0,
+                                    pose.underRate0, static_cast<u16>(pose.upperBck2),
+                                    pose.upperFrame2, pose.upperRate2, pose.equipItem,
+                                    pose.swordVariant, pose.shieldVariant, pose.swordDraw,
+                                    pose.shieldDraw, pose.swordOut, pose.itemDraw,
+                                    pose.kanteraDraw, pose.itemActorKind,
+                                    pose.rideActorKind);
+        actor->setRemoteMatrices(pose.linkMatrices);
+        if (dummy.logCount < 5) {
+            ++dummy.logCount;
+            DuskLog.info("Multiplayer remote Link actor: updated peer={} id={} pos=({}, {}, {}) "
+                         "room={} angleY={}",
+                         peerId, dummy.actorId, pose.x, pose.y, pose.z, pose.room, pose.angleY);
+        }
+    }
+}
+
 void destroy_remote_link_dummy(const std::string& peerId) {
+    destroy_remote_link_actor_dummy(peerId);
+
     auto it = sDummies.find(peerId);
     if (it == sDummies.end()) {
         return;
@@ -1979,6 +2190,12 @@ void destroy_remote_link_dummy(const std::string& peerId) {
 }
 
 void destroy_all_remote_link_dummies() {
+    for (auto it = sActorDummies.begin(); it != sActorDummies.end();) {
+        const std::string peerId = it->first;
+        ++it;
+        destroy_remote_link_actor_dummy(peerId);
+    }
+
     for (auto& entry : sDummies) {
         RemoteLinkDummy& dummy = entry.second;
         destroy_model(dummy.body);
@@ -2002,6 +2219,11 @@ void destroy_all_remote_link_dummies() {
 }
 
 void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& pose) {
+    if (pose.valid && remote_link_actor_dummy_claimed(peerId)) {
+        update_actor_dummy_collision(peerId, pose);
+        return;
+    }
+
     fopAc_ac_c* playerActor = dComIfGp_getPlayer(0);
     if (playerActor == nullptr) {
         if (pose.isTransforming) {

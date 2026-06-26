@@ -147,6 +147,7 @@ set(DOLZEL_FILES
         src/d/d_debug_viewer.cpp
         src/d/d_debug_camera.cpp
         src/d/actor/d_a_alink.cpp
+        src/d/actor/d_a_remote_link.cpp
         src/d/actor/d_a_itembase.cpp
         src/d/actor/d_a_no_chg_room.cpp
         src/d/actor/d_a_npc.cpp
