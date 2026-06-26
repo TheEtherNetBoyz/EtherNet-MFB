@@ -464,18 +464,9 @@ bool is_stage_dependent_message_type(const std::string& type) {
            type == "visited_room";
 }
 
-bool is_room_scene_initialized_for_multiplayer() {
-    const char* stage = dComIfGp_getStartStageName();
-    const int room = dComIfGp_roomControl_getStayNo();
-    return stage != nullptr && stage[0] != '\0' && room >= 0 && sPolicyRoomInitialized &&
-           sPolicyInitializedStageName == stage && sPolicyInitializedRoom == room &&
-           sPolicyRoomInitializedTicks >= kRemoteSwitchRoomInitTicks;
-}
-
 bool is_stage_load_unsafe_for_multiplayer() {
     return dComIfGp_getStageStagInfo() == nullptr || dComIfGp_event_runCheck() ||
-           dComIfGp_isEnableNextStage() || fopOvlpM_IsPeek() || fopOvlpM_IsDoingReq() ||
-           !is_room_scene_initialized_for_multiplayer();
+           dComIfGp_isEnableNextStage() || fopOvlpM_IsPeek() || fopOvlpM_IsDoingReq();
 }
 
 // Key items / progression unlocks that are safe to apply on a remote peer by
@@ -858,107 +849,6 @@ void age_recent_remote_switches() {
     sRecentRemoteSwitches = std::move(stillRecent);
 }
 
-#if 0
-J3DModel* get_or_create_peer_dummy_model() {
-    if (sPeerDummyModel != nullptr) {
-        return sPeerDummyModel;
-    }
-
-    if (sPeerDummyModelLoadFailed) {
-        return nullptr;
-    }
-
-    DuskLog.info("Multiplayer dummy model: requesting Always/0x20 resource");
-    // NOT al.bmd (Link's human-form body model). al.bmd's joint hierarchy
-    // bakes in a per-joint calc callback (daAlink_modelCallBack,
-    // d_a_alink.cpp:2586) that every J3DModel instance built from that shared
-    // model data runs through, regardless of which instance is calc'ing it.
-    // The callback unconditionally casts j3dSys.getModel()->getUserArea() to
-    // daAlink_c* and calls mutating methods on it (modelCallBack ->
-    // jointControll -> resetRootMtx/setFootMatrix/setArmMatrix/
-    // changeBlendRate). A bare J3DModel defaults userArea to 0, so that's a
-    // null-deref crash; pointing userArea at the real local player instead
-    // avoids the crash but corrupts the player's own root/foot/arm matrices
-    // every frame using the dummy's transform, which manifested as a
-    // whole-PC GPU freeze a frame or two later (degenerate matrices feeding
-    // the GPU). daAlink_c::changeModelDataDirect
-    // (d_a_alink_swindow.inc:179-193) re-applies this callback onto al.bmd's
-    // shared joints continuously, so there is no way to use al.bmd here
-    // safely without a real daAlink_c-shaped owner. "Always"/0x20 (the broken
-    // jar model used by d_a_obj.cpp's tsubo effect) is a plain static prop
-    // with no per-joint callback and no skeleton-owner assumptions, so it's
-    // safe to drive from a bare J3DModel. It's a placeholder shape, not the
-    // final remote-player visual — see architecture.md.
-    sPeerDummyModelData = static_cast<J3DModelData*>(dComIfG_getObjectRes("Always", 0x20));
-    if (sPeerDummyModelData == nullptr) {
-        if ((sPeerDummyModelRetryTicks++ % 90) == 0) {
-            DuskLog.warn("Multiplayer peer dummy model unavailable: Always/0x20 not resident");
-        }
-        return nullptr;
-    }
-    sPeerDummyModelRetryTicks = 0;
-    DuskLog.info("Multiplayer dummy model: resource resident, creating solid heap");
-
-    // The model must own a dedicated solid heap, like every other long-lived
-    // J3DModel in this codebase (d_simple_model.cpp, f_ap_game.cpp). Without
-    // one, mDoExt_J3DModel__create allocates from whatever heap happens to be
-    // "current" at this call site.
-    sPeerDummyHeap = mDoExt_createSolidHeapFromGameToCurrent(0x80000, 0x20);
-    if (sPeerDummyHeap == nullptr) {
-        sPeerDummyModelLoadFailed = true;
-        DuskLog.warn("Multiplayer peer dummy model heap allocation failed");
-        return nullptr;
-    }
-    DuskLog.info("Multiplayer dummy model: heap={} created, creating J3DModel",
-                 (void*)sPeerDummyHeap);
-
-    sPeerDummyModel = mDoExt_J3DModel__create(sPeerDummyModelData, 0x80000, 0x11000084);
-    if (sPeerDummyModel == nullptr) {
-        sPeerDummyModelLoadFailed = true;
-        DuskLog.warn("Multiplayer peer dummy model creation failed");
-        mDoExt_destroySolidHeap(sPeerDummyHeap);
-        sPeerDummyHeap = nullptr;
-        mDoExt_restoreCurrentHeap();
-        return nullptr;
-    }
-    DuskLog.info("Multiplayer dummy model: J3DModel={} created, setting base transform",
-                 (void*)sPeerDummyModel);
-
-    sPeerDummyModel->setBaseScale(cXyz(8.0f, 8.0f, 8.0f));
-    sPeerDummyModel->setBaseTRMtx(mDoMtx_getIdentity());
-    std::strncpy(sPeerDummyStage, dComIfGp_getStartStageName(), sizeof(sPeerDummyStage) - 1);
-    sPeerDummyStage[sizeof(sPeerDummyStage) - 1] = '\0';
-
-    DuskLog.info("Multiplayer dummy model: adjusting solid heap to system");
-    mDoExt_adjustSolidHeapToSystem(sPeerDummyHeap);
-    DuskLog.info("Multiplayer dummy model: creation complete");
-    return sPeerDummyModel;
-}
-
-void remove_peer_dummy_simple_model_registration() {
-    if (sPeerDummyModelData != nullptr && sPeerDummyRegisteredRoom != -128) {
-        dComIfGp_removeSimpleModel(sPeerDummyModelData, sPeerDummyRegisteredRoom);
-        sPeerDummyRegisteredRoom = -128;
-    }
-}
-
-void destroy_peer_dummy_model() {
-    remove_peer_dummy_simple_model_registration();
-
-    if (sPeerDummyHeap != nullptr) {
-        mDoExt_destroySolidHeap(sPeerDummyHeap);
-    }
-
-    sPeerDummyModel = nullptr;
-    sPeerDummyHeap = nullptr;
-    sPeerDummyModelData = nullptr;
-    sPeerDummyRegisteredRoom = -128;
-    sPeerDummyModelLoadFailed = false;
-    sPeerDummyModelRetryTicks = 0;
-    sPeerDummyStage[0] = '\0';
-    sDummyModelDrawLogCount = 0;
-}
-#endif
 
 bool is_peer_dummy_gameplay_ready() {
     if (fpcM_SearchByName(fpcNm_TITLE_e) != nullptr ||
@@ -1031,41 +921,7 @@ bool has_transforming_peer_pose() {
     return false;
 }
 
-#if 0
-void destroy_peer_dummy_model_if_stage_changed() {
-    if (sPeerDummyModel != nullptr && sPeerDummyStage[0] != '\0' &&
-        std::strcmp(sPeerDummyStage, dComIfGp_getStartStageName()) != 0)
-    {
-        DuskLog.info("Multiplayer peer dummy model discarded for stage change {} -> {}",
-                     sPeerDummyStage, dComIfGp_getStartStageName());
-        destroy_peer_dummy_model();
-    }
-}
-#endif
 
-#if 0
-bool ensure_peer_dummy_simple_model_registered(int roomNo) {
-    if (sPeerDummyModelData == nullptr || dComIfGp_getSimpleModel() == nullptr) {
-        return false;
-    }
-
-    if (sPeerDummyRegisteredRoom == roomNo) {
-        return true;
-    }
-
-    remove_peer_dummy_simple_model_registration();
-
-    if (dComIfGp_addSimpleModel(sPeerDummyModelData, roomNo, 0) != 1) {
-        DuskLog.warn("Multiplayer peer dummy model simple-model registration failed room={}", roomNo);
-        return false;
-    }
-
-    sPeerDummyRegisteredRoom = roomNo;
-    sDummyModelDrawLogCount = 0;
-    DuskLog.info("Multiplayer peer dummy model registered with simple-model manager room={}", roomNo);
-    return true;
-}
-#endif
 
 bool env_enabled(const char* name) {
     const char* value = std::getenv(name);
@@ -3391,13 +3247,6 @@ void record_local_link_audio_event(uint32_t soundId, bool level) {
     // mirrors vanilla one-shot Link sounds only.
     if (level) {
         return;
-    }
-
-    if (!sPendingLocalAudioEvents.empty()) {
-        const RemoteAudioEvent& last = sPendingLocalAudioEvents.back();
-        if (last.soundId == soundId && !last.level) {
-            return;
-        }
     }
 
     if (sPendingLocalAudioEvents.size() >= 32) {

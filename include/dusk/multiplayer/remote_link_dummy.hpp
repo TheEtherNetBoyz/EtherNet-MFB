@@ -7,27 +7,12 @@
 
 namespace dusk::multiplayer {
 
-// peerId selects which peer's dummy clone to draw/destroy -- see
-// PeerPoseSnapshot::peerId. Direct host sessions can have several remote
-// peers, so dummy storage is keyed by peerId and cleanup must be per-peer.
+// peerId selects which peer's actor-backed visual dummy to update/destroy.
+// Direct host sessions can have several remote peers, so dummy storage is
+// keyed by peerId and cleanup must be per-peer.
 void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& pose);
 void sync_remote_link_actor_dummies(const std::map<std::string, PeerPoseSnapshot>& poses);
 void destroy_remote_link_dummy(const std::string& peerId);
 void destroy_all_remote_link_dummies();
-
-// Issues the Wmdl/Kmdl/Alink archive load requests this module needs, if not
-// already loaded. Must be called from the simulation-tick update phase, not
-// the draw phase: draw_remote_link_dummy() used to issue these requests
-// itself (via resolve_remote_sources()) on first use, but that runs from the
-// draw-list-build phase (see f_ap_game.cpp/f_pc_manager.cpp call sites),
-// which races the engine's own dRes_control_c/JKRArchive resource-loading
-// calls made from daAlink_c::changeWolf()/changeLink() during a real local
-// transform (those run from the simulation tick via fapGm_Execute). That
-// race is the suspected cause of a JKRArchive::findNameResource crash seen
-// during a remote-peer transform. Calling this from update() instead ensures
-// all the archive load requests this module ever issues happen on the same
-// phase the engine's own resource manager expects, and draw_remote_link_dummy
-// only ever consumes already-resolved resources.
-void preload_remote_link_dummy_resources();
 
 }  // namespace dusk::multiplayer
