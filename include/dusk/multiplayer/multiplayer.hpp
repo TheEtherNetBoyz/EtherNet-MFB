@@ -41,6 +41,12 @@ struct RemoteLinkMatrixSnapshot {
     int midnaHairShape = 0;
 };
 
+struct RemoteAudioEvent {
+    uint32_t sequence = 0;
+    uint32_t soundId = 0;
+    bool level = false;
+};
+
 struct PeerPoseSnapshot {
     bool valid = false;
     // Identifies which peer this pose belongs to: the relay-assigned
@@ -89,11 +95,13 @@ struct PeerPoseSnapshot {
     bool swordDraw = false;
     bool shieldDraw = false;
     bool swordOut = false;
+    bool heavyBoots = false;
     bool itemDraw = false;
     bool kanteraDraw = false;
     int itemActorKind = 0;
     int rideActorKind = 0;
     RemoteLinkMatrixSnapshot linkMatrices;
+    std::vector<RemoteAudioEvent> audioEvents;
 };
 
 struct DirectHostOptions {
@@ -158,10 +166,12 @@ void initialize();
 void update();
 void shutdown();
 bool is_enabled();
+void record_local_link_audio_event(uint32_t soundId, bool level);
 bool host_direct(const DirectHostOptions& options, std::string* errorOut = nullptr);
 bool join_direct(const DirectJoinOptions& options, std::string* errorOut = nullptr);
 bool join_relay(const RelayJoinOptions& options, std::string* errorOut = nullptr);
 void disconnect_session();
+bool request_manual_sync(const std::string& peerId, std::string* errorOut = nullptr);
 SessionStatus get_session_status();
 std::vector<PlayerListEntry> get_player_list();
 void set_name_labels_enabled(bool enabled);

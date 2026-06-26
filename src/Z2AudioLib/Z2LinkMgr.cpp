@@ -1,8 +1,111 @@
 #include "Z2AudioLib/Z2LinkMgr.h"
 #include "d/d_com_inf_game.h"
 
+#if TARGET_PC
+#include "d/actor/d_a_alink.h"
+#include "dusk/logging.h"
+#include "dusk/multiplayer/multiplayer.hpp"
+#endif
+
 #if PLATFORM_WII || PLATFORM_SHIELD
 #include "Z2AudioCS/Z2AudioCS.h"
+#endif
+
+#if TARGET_PC
+namespace {
+
+void log_link_audio_event(const char* source, u32 soundID, u32 mapinfo, s8 reverb,
+                          bool level) {
+    daAlink_c* link = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
+    if (link == NULL) {
+        DuskLog.info("LinkAudio: source={} sound={:#x} mapinfo={} reverb={} level={}",
+                     source, soundID, mapinfo, reverb, level);
+        return;
+    }
+
+    const int procId = static_cast<int>(link->mProcID);
+    const int procVar0 = link->mProcVar0.field_0x3008;
+    const int procVar1 = link->mProcVar1.field_0x300a;
+    const int procVar2 = link->mProcVar2.field_0x300c;
+    const int procVar3 = link->mProcVar3.field_0x300e;
+    const int procVar5 = link->mProcVar5.field_0x3012;
+    const int under0 = static_cast<int>(link->mUnderAnmHeap[0].getIdx());
+    const int upper2 = static_cast<int>(link->mUpperAnmHeap[2].getIdx());
+    const u32 equipItem = static_cast<u32>(link->mEquipItem);
+
+    struct LevelLogKey {
+        const char* source;
+        u32 soundID;
+        u32 mapinfo;
+        bool wolf;
+        int procId;
+        int procVar0;
+        int procVar1;
+        int procVar2;
+        int procVar3;
+        int procVar5;
+        int under0;
+        int upper2;
+        u32 equipItem;
+    };
+
+    static LevelLogKey sLastLevelKey = {};
+    static bool sLastLevelKeyValid = false;
+    static u32 sSuppressedLevelRepeats = 0;
+    const LevelLogKey key = {
+        source,
+        soundID,
+        mapinfo,
+        static_cast<bool>(link->checkWolf()),
+        procId,
+        procVar0,
+        procVar1,
+        procVar2,
+        procVar3,
+        procVar5,
+        under0,
+        upper2,
+        equipItem,
+    };
+    const bool sameLevelKey =
+        sLastLevelKeyValid && sLastLevelKey.source == key.source &&
+        sLastLevelKey.soundID == key.soundID && sLastLevelKey.mapinfo == key.mapinfo &&
+        sLastLevelKey.wolf == key.wolf && sLastLevelKey.procId == key.procId &&
+        sLastLevelKey.procVar0 == key.procVar0 && sLastLevelKey.procVar1 == key.procVar1 &&
+        sLastLevelKey.procVar2 == key.procVar2 && sLastLevelKey.procVar3 == key.procVar3 &&
+        sLastLevelKey.procVar5 == key.procVar5 && sLastLevelKey.under0 == key.under0 &&
+        sLastLevelKey.upper2 == key.upper2 && sLastLevelKey.equipItem == key.equipItem;
+    if (level && sameLevelKey) {
+        ++sSuppressedLevelRepeats;
+        return;
+    }
+    if (sSuppressedLevelRepeats != 0) {
+        DuskLog.info("LinkAudio: suppressed_level_repeats count={}", sSuppressedLevelRepeats);
+        sSuppressedLevelRepeats = 0;
+    }
+    if (level) {
+        sLastLevelKey = key;
+        sLastLevelKeyValid = true;
+    } else {
+        sLastLevelKeyValid = false;
+    }
+
+    DuskLog.info(
+        "LinkAudio: source={} sound={:#x} mapinfo={} reverb={} level={} form={} "
+        "proc={} proc_v0={} proc_v1={} proc_v2={} proc_v3={} proc_v5={} "
+        "under0={} under0_frame={} under0_rate={} upper2={} upper2_frame={} upper2_rate={} "
+        "equip={:#x} sword_draw={} shield_draw={} item_draw={} pos=({}, {}, {})",
+        source, soundID, mapinfo, reverb, level, link->checkWolf() ? "wolf" : "human",
+        procId, procVar0, procVar1, procVar2, procVar3, procVar5, under0,
+        link->mUnderFrameCtrl[0].getFrame(), link->mUnderFrameCtrl[0].getRate(),
+        upper2, link->mUpperFrameCtrl[2].getFrame(), link->mUpperFrameCtrl[2].getRate(),
+        static_cast<unsigned int>(equipItem), static_cast<bool>(link->checkSwordDraw()),
+        static_cast<bool>(link->checkShieldDraw()), static_cast<bool>(link->checkItemDraw()),
+        link->current.pos.x, link->current.pos.y, link->current.pos.z);
+    dusk::multiplayer::record_local_link_audio_event(soundID, level);
+}
+
+}  // namespace
 #endif
 
 void Z2CreatureLink::setLinkGroupInfo(u8) {}
@@ -222,6 +325,10 @@ void Z2CreatureLink::setWolfEyeOpen(bool wolfEyeOpen) {
 }
 
 Z2SoundHandlePool* Z2CreatureLink::startLinkSound(JAISoundID soundID, u32 mapinfo, s8 reverb) {
+    #if TARGET_PC
+    log_link_audio_event("link_sound", soundID, mapinfo, reverb, false);
+    #endif
+
     Z2SoundHandlePool* handle = startCreatureSound(soundID, mapinfo, reverb);
 
     switch (soundID) {
@@ -282,6 +389,10 @@ JAISoundHandle* Z2CreatureLink::startLinkSoundLevel(JAISoundID soundID, u32 mapi
     if (soundID == Z2SE_AL_LIGHTNING_SW_GLOW && (Z2GetStatusMgr()->getDemoStatus() == 2 || !Z2GetSceneMgr()->isInGame())) {
         return NULL;
     }
+
+    #if TARGET_PC
+    log_link_audio_event("link_sound_level", soundID, mapinfo, reverb, true);
+    #endif
 
     Z2SoundHandlePool* handle = startCreatureSoundLevel((u32)soundID, mapinfo, reverb);
     if (handle != NULL && *handle) {
@@ -350,6 +461,8 @@ JAISoundHandle* Z2CreatureLink::startLinkSoundLevel(JAISoundID soundID, u32 mapi
 }
 
 Z2SoundHandlePool* Z2CreatureLink::startLinkVoice(JAISoundID soundID, s8 reverb) {
+    const JAISoundID originalSoundID = soundID;
+
     if (mLinkState == 1) {
         switch (soundID) {
         case Z2SE_WL_V_BREATH_WAIT:
@@ -415,6 +528,11 @@ Z2SoundHandlePool* Z2CreatureLink::startLinkVoice(JAISoundID soundID, s8 reverb)
         }
     }
 
+    #if TARGET_PC
+    log_link_audio_event(originalSoundID == soundID ? "link_voice" : "link_voice_remap",
+                         soundID, 0, reverb, false);
+    #endif
+
     return startCreatureVoice(soundID, reverb);
 }
 
@@ -448,14 +566,25 @@ Z2SoundHandlePool* Z2CreatureLink::startLinkVoiceLevel(JAISoundID soundID, s8 re
                 (*handle)->getAuxiliary().moveVolume(volume, 0);
                 Z2GetSoundStarter()->setPortData(handle, 8, port_data, -1);
             }
+            #if TARGET_PC
+            log_link_audio_event("link_voice_level", Z2SE_WL_V_ROAR, 0, reverb, true);
+            #endif
             return handle;
         }
     }
     
+    #if TARGET_PC
+    log_link_audio_event("link_voice_level", soundID, 0, reverb, true);
+    #endif
+
     return startCreatureVoiceLevel(soundID, reverb);
 }
 
 void Z2CreatureLink::startLinkSwordSound(JAISoundID soundID, u32 mapinfo, s8 reverb) {
+    #if TARGET_PC
+    log_link_audio_event("link_sword", soundID, mapinfo, reverb, false);
+    #endif
+
     u32 sound_ID = soundID;  // fakematch
 
     switch (sound_ID) {
@@ -482,6 +611,10 @@ void Z2CreatureLink::startLinkSwordSound(JAISoundID soundID, u32 mapinfo, s8 rev
 }
 
 Z2SoundHandlePool* Z2CreatureLink::startCollisionSE(u32 hitID, u32 mapinfo) {
+    #if TARGET_PC
+    log_link_audio_event("link_collision", hitID, mapinfo, -1, false);
+    #endif
+
     switch (mapinfo) {
     case 0x28:
     case 0x29:
@@ -499,6 +632,10 @@ Z2SoundHandlePool* Z2CreatureLink::startCollisionSE(u32 hitID, u32 mapinfo) {
 }
 
 Z2SoundHandlePool* Z2CreatureLink::startHitItemSE(u32 soundID, u32 mapinfo, Z2SoundObjBase* other, f32 speed) {
+    #if TARGET_PC
+    log_link_audio_event("link_hit_item", soundID, mapinfo, -1, false);
+    #endif
+
     if (other == NULL) {
         other = &mSoundObjSimple2;
     }

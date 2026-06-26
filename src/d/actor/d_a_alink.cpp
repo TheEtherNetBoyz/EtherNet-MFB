@@ -43,6 +43,7 @@
 #include "d/d_meter2_info.h"
 #include "d/actor/d_a_kytag05.h"
 #include "d/actor/d_a_b_mgn.h"
+#include "dusk/logging.h"
 #include "d/actor/d_a_npc_bou.h"
 #include "d/actor/d_a_npc_kolin.h"
 #include "f_op/f_op_kankyo_mng.h"
@@ -4248,13 +4249,23 @@ J3DModel* daAlink_c::initModel(J3DModelData* i_modelData, u32 i_mdlFlags, u32 i_
 
     J3DTexture* tex = i_modelData->getTexture();
     int texNo = tex->getNum() - 1;
+    uintptr_t* rawModelData = reinterpret_cast<uintptr_t*>(i_modelData);
+
+#if TARGET_PC
+    uintptr_t imgTable = tex != NULL ? *reinterpret_cast<uintptr_t*>(
+                                           reinterpret_cast<uintptr_t>(tex) + 0x28) :
+                                       0;
+    const bool safeImgTable = imgTable > 0x100000000ULL &&
+                              !(imgTable >= 0x59000000ULL && imgTable < 0x59100000ULL);
+#endif
 
     int warpMaterial = false;
     if (texNo >= 0) {
 #if TARGET_PC
-        u8* imgData = tex->getImgDataPtr(texNo);
-        if (mpWarpTexData == imgData)
+        u8* imgData = safeImgTable ? tex->getImgDataPtr(texNo) : NULL;
+        if (mpWarpTexData == imgData) {
             warpMaterial = true;
+        }
 #else
         ResTIMG* timg = tex->getResTIMG(texNo);
         if (mpWarpTexData == (void*)((uintptr_t)timg + timg->imageOffset)) {
@@ -4266,6 +4277,31 @@ J3DModel* daAlink_c::initModel(J3DModelData* i_modelData, u32 i_mdlFlags, u32 i_
     if (warpMaterial) {
         dRes_info_c::onWarpMaterial(i_modelData);
         i_diffFlags |= 0x2000400;
+    }
+
+    const uintptr_t rawData = rawModelData[1];
+    static int sInitModelLogCount = 0;
+    if (sInitModelLogCount < 80
+#if TARGET_PC
+        || !safeImgTable
+#endif
+    ) {
+        ++sInitModelLogCount;
+        DuskLog.info(
+            "ALink initModel modelData={} raw={} rawHead={:#x}/{:#x}/{:#x}/{:#x} "
+            "joints={} materials={} shapes={} drawMtx={} envelopes={} vtx={} tex={} texNo={} "
+            "imgTable={} imgTableSafe={} flags={:#x} mdlFlags={:#x} diffFlags={:#x} warp={}",
+            (void*)i_modelData, (void*)rawData, rawModelData[0], rawModelData[1],
+            rawModelData[2], rawModelData[3], i_modelData->getJointNum(),
+            i_modelData->getMaterialNum(), i_modelData->getShapeNum(),
+            i_modelData->getDrawMtxNum(), i_modelData->getWEvlpMtxNum(),
+            i_modelData->getVtxNum(), (void*)tex, texNo,
+#if TARGET_PC
+            (void*)imgTable, safeImgTable,
+#else
+            (void*)NULL, true,
+#endif
+            i_modelData->getFlag(), i_mdlFlags, i_diffFlags, warpMaterial);
     }
 
     J3DModel* model = mDoExt_J3DModel__create(i_modelData, i_mdlFlags, i_diffFlags | 0x11000084);

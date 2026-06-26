@@ -24,7 +24,9 @@
 #include "dusk/multiplayer/event_sync.hpp"
 #include "dusk/multiplayer/invite_code.hpp"
 #include "dusk/multiplayer/remote_link_dummy.hpp"
+#include "dusk/autosave.h"
 #include "f_op/f_op_actor_mng.h"
+#include "f_op/f_op_overlap_mng.h"
 #include "f_pc/f_pc_manager.h"
 #include "f_pc/f_pc_name.h"
 #include "JSystem/J3DGraphBase/J3DMaterial.h"
@@ -33,8 +35,10 @@
 #include "m_Do/m_Do_lib.h"
 #include "m_Do/m_Do_mtx.h"
 #include "aurora/lib/window.hpp"
+#include "absl/strings/escaping.h"
 #include "imgui.h"
 #include "nlohmann/json.hpp"
+#include <zstd.h>
 
 #if _WIN32
     #ifndef NOMINMAX
@@ -73,6 +77,7 @@
 #include <cstring>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -96,6 +101,18 @@ constexpr size_t kMaxDirectPeers = 7;
 std::string resolve_peer_id(const json& message) {
     return message.value("client_id", kDirectPeerId);
 }
+
+#pragma pack(push, 1)
+struct ManualSyncStatePacket {
+    char stageName[8];
+    int8_t roomNo;
+    int8_t layer;
+    int16_t startPoint;
+};
+#pragma pack(pop)
+
+constexpr size_t kManualSyncStatePacketSize =
+    sizeof(ManualSyncStatePacket) + sizeof(dSv_info_c);
 
 enum class NetworkMode {
     Disabled,
@@ -183,6 +200,37 @@ int detect_ride_actor_kind(fopAc_ac_c* actor) {
     return REMOTE_RIDE_ACTOR_NONE;
 }
 
+json audio_events_to_json(const std::vector<RemoteAudioEvent>& events) {
+    json out = json::array();
+    for (const RemoteAudioEvent& event : events) {
+        out.push_back({
+            {"seq", event.sequence},
+            {"sound_id", event.soundId},
+            {"level", event.level},
+        });
+    }
+    return out;
+}
+
+std::vector<RemoteAudioEvent> parse_audio_events(const json& state) {
+    std::vector<RemoteAudioEvent> events;
+    const json entries = state.value("audio_events", json::array());
+    for (const json& entry : entries) {
+        if (!entry.is_object() || events.size() >= 8) {
+            continue;
+        }
+
+        RemoteAudioEvent event;
+        event.sequence = entry.value("seq", 0U);
+        event.soundId = entry.value("sound_id", 0U);
+        event.level = entry.value("level", false);
+        if (event.sequence != 0 && event.soundId != 0) {
+            events.push_back(event);
+        }
+    }
+    return events;
+}
+
 struct DirectPeer {
     socket_t sock = INVALID_SOCKET;
     std::string id;
@@ -216,6 +264,7 @@ struct Session {
     std::string room = "dev";
     std::string name = "TP Player";
     std::string inviteCode;
+    std::string clientId;
     std::string sessionId;
     std::string sessionKey;
     std::string relayPassword;
@@ -270,6 +319,11 @@ std::map<std::string, std::string> sPeerNames;
 std::map<std::string, uint8_t> sPeerColorSlots;
 uint8_t sLocalPlayerColorSlot = 0;
 bool sLocalPlayerColorSlotReserved = true;
+std::vector<RemoteAudioEvent> sPendingLocalAudioEvents;
+uint32_t sLocalAudioEventSequence = 0;
+bool sManualSyncReloadPending = false;
+std::optional<dSv_info_c> sPendingManualSyncInfo;
+std::optional<u8> sPendingManualSyncVibration;
 
 // Set while applying any remote save-state bit (event bit, chest bit, ...),
 // so the dComIfGs_* setter call that applies it doesn't loop back through
@@ -406,7 +460,22 @@ bool is_stage_dependent_message_type(const std::string& type) {
     // player-level save data with no per-stage lookup, same exemption as
     // event_bit.
     return type == "save_snapshot" || type == "tbox_bit" || type == "switch_bit" ||
-           type == "item_bit" || type == "dungeon_item_bit" || type == "key_num";
+           type == "item_bit" || type == "dungeon_item_bit" || type == "key_num" ||
+           type == "visited_room";
+}
+
+bool is_room_scene_initialized_for_multiplayer() {
+    const char* stage = dComIfGp_getStartStageName();
+    const int room = dComIfGp_roomControl_getStayNo();
+    return stage != nullptr && stage[0] != '\0' && room >= 0 && sPolicyRoomInitialized &&
+           sPolicyInitializedStageName == stage && sPolicyInitializedRoom == room &&
+           sPolicyRoomInitializedTicks >= kRemoteSwitchRoomInitTicks;
+}
+
+bool is_stage_load_unsafe_for_multiplayer() {
+    return dComIfGp_getStageStagInfo() == nullptr || dComIfGp_event_runCheck() ||
+           dComIfGp_isEnableNextStage() || fopOvlpM_IsPeek() || fopOvlpM_IsDoingReq() ||
+           !is_room_scene_initialized_for_multiplayer();
 }
 
 // Key items / progression unlocks that are safe to apply on a remote peer by
@@ -894,7 +963,8 @@ void destroy_peer_dummy_model() {
 bool is_peer_dummy_gameplay_ready() {
     if (fpcM_SearchByName(fpcNm_TITLE_e) != nullptr ||
         fpcM_SearchByName(fpcNm_PLAY_SCENE_e) == nullptr ||
-        dComIfGp_getWindowNum() == 0)
+        dComIfGp_getWindowNum() == 0 ||
+        is_stage_load_unsafe_for_multiplayer())
     {
         return false;
     }
@@ -1343,6 +1413,10 @@ void reset_connection_state() {
     sSession.welcomeSent = false;
     sSession.welcomed = false;
     sSession.snapshotPending = false;
+    sSession.clientId.clear();
+    sManualSyncReloadPending = false;
+    sPendingManualSyncInfo.reset();
+    sPendingManualSyncVibration.reset();
     sPendingStageMessages.clear();
     sDeferredRemoteSwitches.clear();
     sRecentRemoteSwitches.clear();
@@ -1360,6 +1434,7 @@ void reset_connection_state() {
     sSession.poseSequence = 0;
     sSession.peerPoseLogTicks = 0;
     sSession.peerPoses.clear();
+    sPendingLocalAudioEvents.clear();
     sPeerNames.clear();
     clear_player_color_slots();
     sNameLabelsEnabled = true;
@@ -1475,6 +1550,88 @@ void send_hello() {
     });
 }
 
+std::string encode_manual_sync_full_state() {
+    ManualSyncStatePacket packet = {};
+    std::strncpy(packet.stageName, dComIfGp_getStartStageName(), sizeof(packet.stageName) - 1);
+    packet.roomNo = static_cast<int8_t>(dComIfGp_roomControl_getStayNo());
+    if (packet.roomNo < 0) {
+        packet.roomNo = dComIfGp_getStartStageRoomNo();
+    }
+    packet.layer = dComIfGp_getStartStageLayer();
+    // Manual sync is meant to land in the sender's current room, not replay
+    // the sender's original entrance index from an older scene load.
+    packet.startPoint = -1;
+
+    std::string raw(kManualSyncStatePacketSize, '\0');
+    std::memcpy(raw.data(), &packet, sizeof(packet));
+    std::memcpy(raw.data() + sizeof(packet), &g_dComIfG_gameInfo.info, sizeof(dSv_info_c));
+
+    const size_t bound = ZSTD_compressBound(raw.size());
+    std::string compressed(bound, '\0');
+    const size_t compressedSize =
+        ZSTD_compress(compressed.data(), bound, raw.data(), raw.size(), 1);
+    if (ZSTD_isError(compressedSize)) {
+        DuskLog.warn("Multiplayer manual sync full-state compression failed: {}",
+                     ZSTD_getErrorName(compressedSize));
+        return "";
+    }
+    compressed.resize(compressedSize);
+    DuskLog.info("Multiplayer encoded manual sync full state stage={} room={} layer={} bytes={}",
+                 packet.stageName, static_cast<int>(packet.roomNo), static_cast<int>(packet.layer),
+                 compressed.size());
+    return absl::Base64Escape(compressed);
+}
+
+bool apply_manual_sync_full_state(const std::string& encoded) {
+    std::string decoded;
+    if (!absl::Base64Unescape(encoded, &decoded)) {
+        DuskLog.warn("Multiplayer manual sync full state rejected: invalid base64");
+        return false;
+    }
+
+    const unsigned long long decodedSize =
+        ZSTD_getFrameContentSize(decoded.data(), decoded.size());
+    if (decodedSize != kManualSyncStatePacketSize) {
+        DuskLog.warn("Multiplayer manual sync full state rejected: size={}", decodedSize);
+        return false;
+    }
+
+    std::string raw(static_cast<size_t>(decodedSize), '\0');
+    const size_t result = ZSTD_decompress(raw.data(), raw.size(), decoded.data(), decoded.size());
+    if (ZSTD_isError(result)) {
+        DuskLog.warn("Multiplayer manual sync full-state decompression failed: {}",
+                     ZSTD_getErrorName(result));
+        return false;
+    }
+
+    ManualSyncStatePacket packet = {};
+    std::memcpy(&packet, raw.data(), sizeof(packet));
+    packet.stageName[sizeof(packet.stageName) - 1] = '\0';
+    if (packet.stageName[0] == '\0') {
+        DuskLog.warn("Multiplayer manual sync full state rejected: empty stage");
+        return false;
+    }
+
+    toggleAutoSave(false);
+    const u8 vibration = dComIfGs_getOptVibration();
+    std::memcpy(&g_dComIfG_gameInfo.info, raw.data() + sizeof(packet), sizeof(dSv_info_c));
+    g_dComIfG_gameInfo.info.getPlayer().getConfig().setVibration(vibration);
+    sPendingManualSyncInfo = g_dComIfG_gameInfo.info;
+    sPendingManualSyncVibration = vibration;
+
+    const s16 spawnPoint = packet.startPoint == -4 ? -1 : packet.startPoint;
+    if (spawnPoint == -1) {
+        dComIfGs_setRestartRoomParam(packet.roomNo & 0x3F);
+    }
+
+    DuskLog.info("Multiplayer applying manual sync full state stage={} room={} layer={} point={}",
+                 packet.stageName, static_cast<int>(packet.roomNo), static_cast<int>(packet.layer),
+                 static_cast<int>(spawnPoint));
+    dComIfGp_setNextStage(packet.stageName, spawnPoint, packet.roomNo, packet.layer, 0.0f, 0, 1,
+                          0, 0, 1, 3);
+    return true;
+}
+
 // Sent once, immediately after this side becomes "welcomed", so a peer that
 // joined or reconnected mid-session catches up on durable state it missed
 // instead of only receiving bits set after it connected. Lists only
@@ -1483,7 +1640,8 @@ void send_hello() {
 // means a late-set local bit during the brief gap before this snapshot
 // arrives is naturally preserved -- these are all monotonic OR-merges, so
 // receiving a bit twice or in any order is harmless.
-void send_save_snapshot(DirectPeer* peer = nullptr) {
+void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetClientId = "",
+                        bool manualSync = false) {
     json eventFlags = json::array();
     for (int i = 0; i < 256 * 8; ++i) {
         if (dComIfGs_isEventBit(static_cast<u16>(i))) {
@@ -1629,6 +1787,16 @@ void send_save_snapshot(DirectPeer* peer = nullptr) {
         {"max_life", dComIfGs_getMaxLife()},
         {"bottle_slots", dComIfGs_getBottleSlotCount()},
     };
+    if (!targetClientId.empty()) {
+        snapshot["target_client_id"] = targetClientId;
+    }
+    if (manualSync) {
+        snapshot["manual_sync"] = true;
+        const std::string fullState = encode_manual_sync_full_state();
+        if (!fullState.empty()) {
+            snapshot["full_state"] = fullState;
+        }
+    }
     if (peer != nullptr) {
         send_json_to_peer(*peer, snapshot);
     } else {
@@ -1669,7 +1837,6 @@ void send_welcome_to_peer(DirectPeer& peer) {
         {"name_labels", sNameLabelsEnabled},
         {"peers", direct_peer_list(peer.id)},
     });
-    peer.snapshotPending = peer.welcomed;
     sSession.welcomed = sSession.welcomed || peer.welcomed;
 }
 
@@ -1687,9 +1854,6 @@ void send_welcome() {
         {"peers", json::array()},
     });
     sSession.welcomed = sSession.welcomeSent;
-    if (sSession.welcomed) {
-        sSession.snapshotPending = true;
-    }
 }
 
 json matrix_to_json(CMtxP matrix) {
@@ -1881,6 +2045,7 @@ bool add_link_matrices(json& state) {
     state["sword_draw"] = !isWolf && static_cast<bool>(link->checkSwordDraw());
     state["shield_draw"] = !isWolf && static_cast<bool>(link->checkShieldDraw());
     state["sword_out"] = !isWolf && link->mEquipItem == 0x103;
+    state["heavy_boots"] = !isWolf && static_cast<bool>(link->checkEquipHeavyBoots());
     state["item_draw"] = !isWolf && static_cast<bool>(link->checkItemDraw());
     state["kantera_draw"] =
         !isWolf && (link->checkNoResetFlg2(daPy_py_c::FLG2_UNK_1) ||
@@ -2043,9 +2208,11 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
     if (sender != nullptr && type != "hello") {
         routedMessage["client_id"] = sender->id;
     }
-    if (is_stage_dependent_message_type(type) && dComIfGp_getStageStagInfo() == nullptr) {
+    if (is_stage_dependent_message_type(type) && is_stage_load_unsafe_for_multiplayer()) {
         sPendingStageMessages.push_back(routedMessage);
-        if (sender != nullptr && should_forward_peer_message(type)) {
+        if (sender != nullptr && should_forward_peer_message(type) &&
+            !(type == "save_snapshot" && routedMessage.value("manual_sync", false)))
+        {
             broadcast_to_direct_peers(routedMessage, sender->id);
         }
         return;
@@ -2076,6 +2243,7 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         DuskLog.info("Multiplayer joined room={} client_id={} peers={}",
                      message.value("room_id", ""), message.value("client_id", ""),
                      message.value("peers", json::array()).size());
+        sSession.clientId = message.value("client_id", "");
 
         sPeerColorSlots.clear();
         uint8_t nextColorSlot = 0;
@@ -2093,7 +2261,6 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         }
         reserve_local_player_color_slot(nextColorSlot);
         push_notification("Joined lobby " + message.value("room_id", sSession.room));
-        sSession.snapshotPending = true;
     } else if (type == "peer_joined") {
         const std::string peerId = message.value("client_id", "");
         const std::string peerName = message.value("name", peerId);
@@ -2119,6 +2286,14 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         destroy_remote_link_dummy(leftPeerId);
         push_notification(peerName + " left");
     } else if (type == "save_snapshot") {
+        if (message.value("manual_sync", false) && message.contains("full_state")) {
+            if (apply_manual_sync_full_state(message.value("full_state", ""))) {
+                sManualSyncReloadPending = false;
+                DuskLog.info("Multiplayer applied manual sync full-state snapshot from peer");
+            }
+            return;
+        }
+
         sApplyingRemoteSaveBit = true;
         for (const json& flag : message.value("event_flags", json::array())) {
             dComIfGs_onEventBit(static_cast<uint16_t>(flag.get<int>()));
@@ -2261,7 +2436,27 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             }
             DuskLog.info("Multiplayer snapshot bottle slots set to {}", remoteBottleSlots);
         }
+        if (message.value("manual_sync", false)) {
+            sManualSyncReloadPending = true;
+            DuskLog.info("Multiplayer manual sync snapshot applied; queued room restart");
+        }
         DuskLog.info("Multiplayer applied save snapshot from peer");
+    } else if (type == "sync_request") {
+        if (dComIfGp_getStageStagInfo() == nullptr || dComIfGp_event_runCheck()) {
+            DuskLog.warn("Multiplayer manual sync request ignored while stage/event is not ready");
+        } else if (sender != nullptr) {
+            send_save_snapshot(sender, "", true);
+            DuskLog.info("Multiplayer replied to direct manual sync request peer={}", sender->id);
+        } else {
+            const std::string requesterId = routedMessage.value("client_id", "");
+            if (sSession.mode == NetworkMode::RelayHarness && !requesterId.empty()) {
+                send_save_snapshot(nullptr, requesterId, true);
+                DuskLog.info("Multiplayer replied to relay manual sync request peer={}", requesterId);
+            } else {
+                send_save_snapshot(nullptr, "", true);
+                DuskLog.info("Multiplayer replied to manual sync request");
+            }
+        }
     } else if (type == "pose") {
         const std::string peerId = resolve_peer_id(routedMessage);
         const uint32_t sequence = routedMessage.value("sequence", 0U);
@@ -2316,11 +2511,13 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         pose.swordDraw = state.value("sword_draw", false);
         pose.shieldDraw = state.value("shield_draw", false);
         pose.swordOut = state.value("sword_out", false);
+        pose.heavyBoots = state.value("heavy_boots", false);
         pose.itemDraw = state.value("item_draw", false);
         pose.kanteraDraw = state.value("kantera_draw", false);
         pose.itemActorKind = state.value("item_actor_kind", REMOTE_ITEM_ACTOR_NONE);
         pose.rideActorKind = state.value("ride_actor_kind", REMOTE_RIDE_ACTOR_NONE);
         pose.linkMatrices = parse_link_matrices(state);
+        pose.audioEvents = parse_audio_events(state);
         const bool wasTransforming =
             existing != sSession.peerPoses.end() && existing->second.valid &&
             existing->second.isTransforming;
@@ -2578,7 +2775,9 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         DuskLog.debug("Multiplayer message type={}", type);
     }
 
-    if (sender != nullptr && should_forward_peer_message(type)) {
+    if (sender != nullptr && should_forward_peer_message(type) && type != "sync_request" &&
+        !(type == "save_snapshot" && routedMessage.value("manual_sync", false)))
+    {
         broadcast_to_direct_peers(routedMessage, sender->id);
     }
 }
@@ -2741,6 +2940,24 @@ void update_connecting() {
     send_hello();
 }
 
+std::vector<RemoteAudioEvent> drain_local_link_audio_events() {
+    std::vector<RemoteAudioEvent> events;
+    const size_t count = std::min<size_t>(sPendingLocalAudioEvents.size(), 8);
+    events.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        events.push_back(sPendingLocalAudioEvents[i]);
+    }
+
+    if (count == sPendingLocalAudioEvents.size()) {
+        sPendingLocalAudioEvents.clear();
+    } else {
+        sPendingLocalAudioEvents.erase(sPendingLocalAudioEvents.begin(),
+                                       sPendingLocalAudioEvents.begin() + count);
+    }
+
+    return events;
+}
+
 void update_listening() {
     if (sSession.listenSock == INVALID_SOCKET) {
         return;
@@ -2833,6 +3050,15 @@ void send_pose() {
     }
     sWasSendingTransform = isTransforming;
 
+    std::vector<RemoteAudioEvent> audioEvents = drain_local_link_audio_events();
+    static uint32_t sAudioTxLogCount = 0;
+    if (!audioEvents.empty() && sAudioTxLogCount < 20) {
+        ++sAudioTxLogCount;
+        DuskLog.info("Multiplayer audio tx count={} first_seq={} first_sound={:#x}",
+                     audioEvents.size(), audioEvents.front().sequence,
+                     audioEvents.front().soundId);
+    }
+
     json state = {
         {"stage", dComIfGp_getStartStageName()},
         {"room", static_cast<int>(fopAcM_GetRoomNo(player))},
@@ -2872,6 +3098,8 @@ void send_pose() {
         {"sword_draw", link != nullptr && !isWolf && static_cast<bool>(link->checkSwordDraw())},
         {"shield_draw", link != nullptr && !isWolf && static_cast<bool>(link->checkShieldDraw())},
         {"sword_out", link != nullptr && !isWolf && link->mEquipItem == 0x103},
+        {"heavy_boots",
+         link != nullptr && !isWolf && static_cast<bool>(link->checkEquipHeavyBoots())},
         {"item_draw", link != nullptr && !isWolf && static_cast<bool>(link->checkItemDraw())},
         {"kantera_draw",
          link != nullptr && !isWolf &&
@@ -2879,6 +3107,7 @@ void send_pose() {
               link->checkNoResetFlg2(daPy_py_c::FLG2_UNK_20000))},
         {"item_actor_kind", REMOTE_ITEM_ACTOR_NONE},
         {"ride_actor_kind", REMOTE_RIDE_ACTOR_NONE},
+        {"audio_events", audio_events_to_json(audioEvents)},
     };
     if (!isTransforming && isLink && (sDummyModelEnabled || isWolf) && !add_link_matrices(state)) {
         static uint32_t sMatrixPoseDropLogCount = 0;
@@ -2971,9 +3200,31 @@ void repair_current_stage_collectibles() {
     }
 }
 
+void tick_pending_manual_sync_apply() {
+    if (!sPendingManualSyncInfo.has_value()) {
+        return;
+    }
+    if (is_stage_load_unsafe_for_multiplayer()) {
+        return;
+    }
+
+    g_dComIfG_gameInfo.info = *sPendingManualSyncInfo;
+    sPendingManualSyncInfo.reset();
+    if (sPendingManualSyncVibration.has_value()) {
+        dComIfGs_setOptVibration(*sPendingManualSyncVibration);
+        dComIfGp_setNowVibration(*sPendingManualSyncVibration);
+        sPendingManualSyncVibration.reset();
+    }
+    dComIfGp_offOxygenShowFlag();
+    dComIfGp_setMaxOxygen(600);
+    dComIfGp_setOxygen(600);
+    DuskLog.info("Multiplayer manual sync full-state save info reapplied after stage load");
+}
+
 void update_connected() {
     update_remote_switch_policy_room_state();
     age_recent_remote_switches();
+    tick_pending_manual_sync_apply();
 
     if (sSession.mode == NetworkMode::DirectHost) {
         update_listening();
@@ -2993,7 +3244,7 @@ void update_connected() {
         return;
     }
 
-    if (dComIfGp_getStageStagInfo() != nullptr) {
+    if (!is_stage_load_unsafe_for_multiplayer()) {
         if (sSession.snapshotPending) {
             // The network handshake can complete within milliseconds, well
             // before the game has finished booting to a loaded stage (still
@@ -3011,16 +3262,23 @@ void update_connected() {
             }
         }
 
-        if (!sPendingStageMessages.empty()) {
+        if (!sPendingStageMessages.empty() && !is_stage_load_unsafe_for_multiplayer()) {
             // Same problem on the receive side: a peer's save_snapshot (or
-            // even a live tbox_bit/etc.) can arrive before we have a stage
-            // loaded ourselves. handle_message() queued those; replay them
-            // now that dComIfGp_getStageStagInfo() is safe to use.
+            // even a live tbox_bit/etc.) can arrive before we have a stable
+            // stage, or while vanilla is inside a connected cutscene/state
+            // transition. handle_message() queued those; replay them only
+            // once stage access is safe and the event window is over.
             std::vector<json> pending = std::move(sPendingStageMessages);
             sPendingStageMessages.clear();
             for (const json& queued : pending) {
                 handle_message(queued);
             }
+        }
+
+        if (sManualSyncReloadPending && !is_stage_load_unsafe_for_multiplayer()) {
+            sManualSyncReloadPending = false;
+            DuskLog.info("Multiplayer manual sync restarting current room");
+            daPy_py_c::forceRestartRoom(0, 5, 0xC9);
         }
 
         update_remote_switch_policy_room_state();
@@ -3123,6 +3381,36 @@ const char* state_name(ConnectionState state) {
 
 }  // namespace
 
+void record_local_link_audio_event(uint32_t soundId, bool level) {
+    if (!sEnabled || !sSession.welcomed || soundId == 0) {
+        return;
+    }
+
+    // Level sounds need an update/stop protocol before they are safe to mirror.
+    // Sending them as one-shots can leave remote loops hanging, so this pass
+    // mirrors vanilla one-shot Link sounds only.
+    if (level) {
+        return;
+    }
+
+    if (!sPendingLocalAudioEvents.empty()) {
+        const RemoteAudioEvent& last = sPendingLocalAudioEvents.back();
+        if (last.soundId == soundId && !last.level) {
+            return;
+        }
+    }
+
+    if (sPendingLocalAudioEvents.size() >= 32) {
+        sPendingLocalAudioEvents.erase(sPendingLocalAudioEvents.begin());
+    }
+
+    RemoteAudioEvent event;
+    event.sequence = ++sLocalAudioEventSequence;
+    event.soundId = soundId;
+    event.level = false;
+    sPendingLocalAudioEvents.push_back(event);
+}
+
 void initialize() {
     if (sInitialized) {
         return;
@@ -3155,26 +3443,6 @@ void update() {
     }
 
     const bool dummyGameplayReady = is_peer_dummy_gameplay_ready();
-    if (sDummyModelEnabled && dummyGameplayReady) {
-        // Must happen here (the simulation tick), not from the draw phase --
-        // see the comment on preload_remote_link_dummy_resources()'s
-        // declaration for why issuing these archive loads from the draw
-        // phase was a suspected cause of a real crash during a peer's
-        // transform.
-        //
-        // is_peer_dummy_gameplay_ready() is required here too: without it,
-        // this fired from the very first update() tick after enabling the
-        // module -- including at the boot logo, before any stage/player
-        // exists -- and crashed inside the engine's own resource/texture
-        // loader (dRes_info_c::loadResource -> addWarpMaterial ->
-        // J3DTexture::addResTIMG, null deref) because the object-archive
-        // loading path isn't safe to use that early. The old lazy-load (from
-        // inside draw_remote_link_dummy(), only reachable once this same
-        // readiness check already passed) never hit this because it could
-        // only ever run once real gameplay had started.
-        preload_remote_link_dummy_resources();
-    }
-
     for (auto& entry : sSession.peerPoses) {
         if (entry.second.valid) {
             ++entry.second.ageTicks;
@@ -3183,7 +3451,7 @@ void update() {
 
     if (sDummyModelEnabled && dummyGameplayReady) {
         sync_remote_link_actor_dummies(sSession.peerPoses);
-    } else if (!sDummyModelEnabled) {
+    } else {
         destroy_all_remote_link_dummies();
     }
 
@@ -3400,6 +3668,57 @@ void disconnect_session() {
     disconnect("user requested");
     sEnabled = false;
     sSession.mode = NetworkMode::Disabled;
+}
+
+bool request_manual_sync(const std::string& peerId, std::string* errorOut) {
+    if (!sEnabled || !sSession.welcomed) {
+        if (errorOut != nullptr) {
+            *errorOut = "Not connected.";
+        }
+        return false;
+    }
+
+    if (peerId.empty() || peerId == "local") {
+        if (errorOut != nullptr) {
+            *errorOut = "Choose a peer to sync from.";
+        }
+        return false;
+    }
+
+    json request = {
+        {"type", "sync_request"},
+        {"target_client_id", peerId},
+    };
+
+    if (sSession.mode == NetworkMode::DirectHost) {
+        auto peerIt = sSession.directPeers.find(peerId);
+        if (peerIt == sSession.directPeers.end() || !peerIt->second.welcomed) {
+            if (errorOut != nullptr) {
+                *errorOut = "Selected peer is not connected.";
+            }
+            return false;
+        }
+        request["client_id"] = "host";
+        send_json_to_peer(peerIt->second, request);
+    } else if (sSession.mode == NetworkMode::DirectJoin) {
+        if (peerId != kDirectPeerId) {
+            if (errorOut != nullptr) {
+                *errorOut = "Direct join can only sync from the host.";
+            }
+            return false;
+        }
+        send_json(request);
+    } else {
+        if (sSession.clientId.empty()) {
+            if (errorOut != nullptr) {
+                *errorOut = "Relay has not assigned a client id yet.";
+            }
+            return false;
+        }
+        send_json(request);
+    }
+
+    return true;
 }
 
 SessionStatus get_session_status() {

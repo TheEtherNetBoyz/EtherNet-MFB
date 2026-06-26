@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <cstring>
+#include <vector>
 
 namespace dusk {
 namespace {
@@ -64,6 +65,40 @@ void ImGuiOnline::draw(bool& open) {
             ImGui::EndDisabled();
             ImGui::SameLine();
             ImGui::TextDisabled("(host controlled)");
+        }
+
+        const auto players = multiplayer::get_player_list();
+        std::vector<const multiplayer::PlayerListEntry*> syncPeers;
+        std::vector<const char*> syncPeerLabels;
+        for (const multiplayer::PlayerListEntry& player : players) {
+            if (!player.local) {
+                syncPeers.push_back(&player);
+                syncPeerLabels.push_back(player.name.c_str());
+            }
+        }
+        if (m_syncPeerIndex >= static_cast<int>(syncPeers.size())) {
+            m_syncPeerIndex = 0;
+        }
+
+        if (syncPeers.empty()) {
+            ImGui::BeginDisabled();
+        }
+        ImGui::SetNextItemWidth(190.0f);
+        ImGui::Combo("Sync From", &m_syncPeerIndex, syncPeerLabels.data(),
+                     static_cast<int>(syncPeerLabels.size()));
+        ImGui::SameLine();
+        if (ImGui::Button("Sync")) {
+            std::string error;
+            const std::string peerId = syncPeers[m_syncPeerIndex]->id;
+            const std::string peerName = syncPeers[m_syncPeerIndex]->name;
+            if (multiplayer::request_manual_sync(peerId, &error)) {
+                m_statusMessage = error.empty() ? "Sync requested from " + peerName + "." : error;
+            } else {
+                m_statusMessage = "Sync failed: " + error;
+            }
+        }
+        if (syncPeers.empty()) {
+            ImGui::EndDisabled();
         }
     }
 

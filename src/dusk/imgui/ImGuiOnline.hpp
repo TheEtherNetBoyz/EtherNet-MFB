@@ -25,6 +25,7 @@ private:
     bool m_debugMarker = true;
     bool m_dummyModel = true;
     bool m_nameLabels = true;
+    int m_syncPeerIndex = 0;
     std::string m_statusMessage;
 };
 

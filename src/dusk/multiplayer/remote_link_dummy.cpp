@@ -128,6 +128,9 @@ struct RemoteLinkActorDummy {
     int pendingClothesVariant = -1;
     bool isWolf = false;
     bool pendingIsWolf = false;
+    bool transformAnchorValid = false;
+    cXyz transformAnchorPos;
+    uint32_t lastAudioEventSequence = 0;
     uint8_t recreateDelayTicks = 0;
     bool recreatePending = false;
 };
@@ -1938,7 +1941,7 @@ RemoteLinkSources resolve_remote_sources(const PeerPoseSnapshot& pose) {
 }
 
 bool remote_link_actor_pose_supported(const PeerPoseSnapshot& pose) {
-    return pose.valid && pose.ageTicks <= 30 && !pose.isTransforming;
+    return pose.valid && pose.ageTicks <= 30;
 }
 
 daRemoteLink_c* find_remote_link_actor(RemoteLinkActorDummy& dummy) {
@@ -2006,19 +2009,10 @@ void update_actor_dummy_collision(const std::string& peerId, const PeerPoseSnaps
 }  // namespace
 
 void preload_remote_link_dummy_resources() {
-    // Called from dusk::multiplayer::update() (the simulation tick), not the
-    // draw phase. See the declaration comment in remote_link_dummy.hpp for
-    // why this split exists. ensure_arc_loaded() itself is a no-op once a
-    // request is already complete, so calling this every tick is cheap.
-    ensure_arc_loaded(sHumanArc);
-    ensure_arc_loaded(sWolfArc);
-    ensure_arc_loaded(sAlinkArc);
-    ensure_arc_loaded(sCasualArc);
-    ensure_arc_loaded(sZoraArc);
-    ensure_arc_loaded(sMagicArmorArc);
-    ensure_arc_loaded(sCarvingWoodShieldArc);
-    ensure_arc_loaded(sOrdonShieldArc);
-    ensure_arc_loaded(sHylianShieldArc);
+    // The actor-backed remote Link owns independent JKRMemArchives. Do not
+    // pre-load Link archives through dComIfG here; that resurrects the old
+    // shared-resource path and can leave vanilla Link with stale J3DModelData
+    // across room loads.
 }
 
 void sync_remote_link_actor_dummies(const std::map<std::string, PeerPoseSnapshot>& poses) {
@@ -2060,6 +2054,25 @@ void sync_remote_link_actor_dummies(const std::map<std::string, PeerPoseSnapshot
 
         RemoteLinkActorDummy& dummy = sActorDummies[peerId];
         daRemoteLink_c* actor = find_remote_link_actor(dummy);
+        const bool anchorWolfToHumanTransform =
+            pose.isTransforming && pose.transformFromWolf && !pose.transformToWolf;
+        if (anchorWolfToHumanTransform && !dummy.transformAnchorValid) {
+            dummy.transformAnchorPos.set(pose.x, pose.y, pose.z);
+            dummy.transformAnchorValid = true;
+            if (sActorSyncLogCount < 20) {
+                ++sActorSyncLogCount;
+                DuskLog.info("Multiplayer remote Link actor: wolf->human transform anchor peer={} "
+                             "pos=({}, {}, {}) seq={}",
+                             peerId, pose.x, pose.y, pose.z, pose.sequence);
+            }
+        } else if (!pose.isTransforming) {
+            dummy.transformAnchorValid = false;
+        }
+
+        const cXyz actorPos =
+            anchorWolfToHumanTransform && dummy.transformAnchorValid
+                ? dummy.transformAnchorPos
+                : cXyz(pose.x, pose.y, pose.z);
         if (dummy.clothesVariant != -1 &&
             (dummy.clothesVariant != pose.clothesVariant || dummy.isWolf != pose.isWolf))
         {
@@ -2101,7 +2114,6 @@ void sync_remote_link_actor_dummies(const std::map<std::string, PeerPoseSnapshot
                 continue;
             }
 
-            cXyz pos(pose.x, pose.y, pose.z);
             csXyz angle(0, static_cast<s16>(pose.angleY), 0);
             cXyz scale(1.0f, 1.0f, 1.0f);
             dummy.clothesVariant = pose.clothesVariant;
@@ -2112,32 +2124,44 @@ void sync_remote_link_actor_dummies(const std::map<std::string, PeerPoseSnapshot
             dummy.recreatePending = false;
             const u32 actorParams =
                 static_cast<u32>(pose.clothesVariant & 0xFF) | (pose.isWolf ? 0x100 : 0);
+            cXyz spawnPos = actorPos;
             dummy.actorId = fopAcM_create(fpcNm_REMOTE_LINK_e,
-                                          actorParams, &pos, pose.room, &angle, &scale, -1);
+                                          actorParams, &spawnPos, pose.room, &angle, &scale, -1);
             if (sActorSyncLogCount < 20) {
                 ++sActorSyncLogCount;
                 DuskLog.info(
                     "Multiplayer remote Link actor: spawn requested peer={} id={} clothes={} "
                     "wolf={} pos=({}, {}, {}) room={} angleY={}",
-                    peerId, dummy.actorId, pose.clothesVariant, pose.isWolf, pose.x, pose.y,
-                    pose.z, pose.room, pose.angleY);
+                    peerId, dummy.actorId, pose.clothesVariant, pose.isWolf, actorPos.x,
+                    actorPos.y, actorPos.z, pose.room, pose.angleY);
             }
             continue;
         }
 
         update_actor_dummy_collision(peerId, pose);
-        cXyz pos(pose.x, pose.y, pose.z);
-        actor->setRemotePose(pos, static_cast<s16>(pose.angleY), static_cast<s8>(pose.room));
+        actor->setRemotePose(actorPos, static_cast<s16>(pose.angleY), static_cast<s8>(pose.room));
         actor->setRemoteActionState(pose.procId, pose.procVar0, pose.procVar1, pose.procVar2,
                                     pose.procVar3, pose.procVar5, pose.underFrame,
                                     static_cast<u16>(pose.underBck0), pose.underFrame0,
                                     pose.underRate0, static_cast<u16>(pose.upperBck2),
                                     pose.upperFrame2, pose.upperRate2, pose.equipItem,
                                     pose.swordVariant, pose.shieldVariant, pose.swordDraw,
-                                    pose.shieldDraw, pose.swordOut, pose.itemDraw,
+                                    pose.shieldDraw, pose.swordOut, pose.heavyBoots, pose.itemDraw,
                                     pose.kanteraDraw, pose.itemActorKind,
                                     pose.rideActorKind);
         actor->setRemoteMatrices(pose.linkMatrices);
+        for (const RemoteAudioEvent& event : pose.audioEvents) {
+            if (event.sequence > dummy.lastAudioEventSequence) {
+                actor->playRemoteSound(event.soundId, event.level);
+                dummy.lastAudioEventSequence = event.sequence;
+                static uint32_t sAudioRxLogCount = 0;
+                if (sAudioRxLogCount < 20) {
+                    ++sAudioRxLogCount;
+                    DuskLog.info("Multiplayer audio rx peer={} seq={} sound={:#x} level={}",
+                                 peerId, event.sequence, event.soundId, event.level);
+                }
+            }
+        }
         if (dummy.logCount < 5) {
             ++dummy.logCount;
             DuskLog.info("Multiplayer remote Link actor: updated peer={} id={} pos=({}, {}, {}) "
@@ -2223,6 +2247,10 @@ void draw_remote_link_dummy(const std::string& peerId, const PeerPoseSnapshot& p
         update_actor_dummy_collision(peerId, pose);
         return;
     }
+
+    // The legacy no-calc renderer below depends on dComIfG_getObjectRes() and
+    // shared Link J3DModelData. Keep it out of the actor-dummy architecture.
+    return;
 
     fopAc_ac_c* playerActor = dComIfGp_getPlayer(0);
     if (playerActor == nullptr) {

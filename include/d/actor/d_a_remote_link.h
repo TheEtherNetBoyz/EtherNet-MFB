@@ -39,9 +39,10 @@ public:
                               u16 i_upperBck2, f32 i_upperFrame2, f32 i_upperRate2,
                               u16 i_equipItem, int i_swordVariant, int i_shieldVariant,
                               bool i_swordDraw, bool i_shieldDraw, bool i_swordOut,
-                              bool i_itemDraw, bool i_kanteraDraw, int i_itemActorKind,
-                              int i_rideActorKind);
+                              bool i_heavyBoots, bool i_itemDraw, bool i_kanteraDraw,
+                              int i_itemActorKind, int i_rideActorKind);
     void setRemoteMatrices(const dusk::multiplayer::RemoteLinkMatrixSnapshot& i_matrices);
+    void playRemoteSound(u32 i_soundId, bool i_level);
 
     static int createHeapCallBack(fopAc_ac_c* i_this);
 
@@ -136,6 +137,8 @@ private:
     void drawLinkedItemActorModel();
     void hideAllHandShapes();
     void setupDrawHands();
+    void setupHeavyBootModels();
+    void applyHeavyBootMatrices();
 
     /* 0x568 */ request_of_phase_process_class mPhase;
     /* 0x570 */ JKRExpHeap* mpArcHeap;
@@ -166,13 +169,14 @@ private:
     /* 0x96C */ J3DModel* mpMidnaMaskModel;
     /* 0x970 */ J3DModel* mpMidnaHandModel;
     /* 0x974 */ J3DModel* mpMidnaHairModel;
-    /* 0x978 */ J3DAnmTevRegKey* mpHeldItemBrk;
-    /* 0x97C */ AramResourceCacheEntry mAramResourceCache[16];
-    /* 0x9FC */ J3DAnmTevRegKey* mpMagicArmorBodyBrk;
-    /* 0xA00 */ J3DAnmTevRegKey* mpMagicArmorHeadBrk;
-    /* 0xA04 */ mDoExt_bckAnm* mpMotionBck;
-    /* 0xA08 */ BckCacheEntry mBckCache[48];
-    /* 0xB88 */ u16 mMotionBckResId;
+    /* 0x978 */ J3DModel* mpHeavyBootModels[2];
+    /* 0x988 */ J3DAnmTevRegKey* mpHeldItemBrk;
+    /* 0x98C */ AramResourceCacheEntry mAramResourceCache[16];
+    /* 0xA0C */ J3DAnmTevRegKey* mpMagicArmorBodyBrk;
+    /* 0xA10 */ J3DAnmTevRegKey* mpMagicArmorHeadBrk;
+    /* 0xA14 */ mDoExt_bckAnm* mpMotionBck;
+    /* 0xA18 */ BckCacheEntry mBckCache[48];
+    /* 0xB98 */ u16 mMotionBckResId;
     /* 0xB8C */ f32 mRemoteMoveSpeed;
     /* 0xB90 */ cXyz mLastRemotePos;
     /* 0xB9C */ int mRemoteProcId;
@@ -188,42 +192,45 @@ private:
     /* 0xBC4 */ u16 mRemoteUpperBck2;
     /* 0xBC8 */ f32 mRemoteUpperFrame2;
     /* 0xBCC */ f32 mRemoteUpperRate2;
-    /* 0xBD0 */ u16 mRemoteEquipItem;
-    /* 0xBD4 */ int mRemoteSwordVariant;
-    /* 0xBD8 */ int mRemoteShieldVariant;
-    /* 0xBDC */ int mLoadedSwordVariant;
-    /* 0xBE0 */ int mLoadedShieldVariant;
-    /* 0xBE4 */ u16 mLoadedHeldItem;
-    /* 0xBE8 */ bool mRemoteSwordDraw;
-    /* 0xBE9 */ bool mRemoteShieldDraw;
-    /* 0xBEA */ bool mRemoteSwordOut;
-    /* 0xBEB */ bool mHeldItemMatrixValid;
-    /* 0xBEC */ bool mHookTipMatrixValid;
-    /* 0xBED */ bool mHookSubItemMatrixValid;
-    /* 0xBEE */ bool mHookSubTipMatrixValid;
-    /* 0xBEF */ bool mArrowMatrixValid;
-    /* 0xBF0 */ bool mKanteraMatrixValid;
-    /* 0xBF1 */ bool mKanteraGlowMatrixValid;
-    /* 0xBF2 */ bool mItemActorMatrixValid;
-    /* 0xBF3 */ bool mRideActorMatrixValid;
-    /* 0xBF4 */ bool mMidnaMatrixValid;
-    /* 0xBF5 */ bool mMidnaMaskMatrixValid;
-    /* 0xBF6 */ bool mMidnaHandMatrixValid;
-    /* 0xBF7 */ bool mMidnaHairMatrixValid;
-    /* 0xBF8 */ bool mRemoteItemDraw;
-    /* 0xBF9 */ bool mRemoteKanteraDraw;
-    /* 0xBFA */ bool mHasRemotePose;
-    /* 0xBFB */ bool mHasRemoteMatrices;
-    /* 0xBFC */ int mClothesVariant;
-    /* 0xC00 */ J3DShape* mpLeftBodyHandShape;
-    /* 0xC04 */ J3DShape* mpRightBodyHandShape;
-    /* 0xC08 */ int mRemoteItemActorKind;
-    /* 0xC0C */ int mRemoteRideActorKind;
-    /* 0xC10 */ int mLoadedItemActorKind;
-    /* 0xC14 */ int mLoadedRideActorKind;
-    /* 0xC18 */ int mRemoteBombFlashTicks;
-    /* 0xC1C */ int mMidnaHairShape;
-    /* 0xC20 */ bool mSlotReserved;
+    /* 0xBD0 */ f32 mRemoteTransformFrame;
+    /* 0xBD4 */ bool mRemoteTransformFrameValid;
+    /* 0xBD8 */ u16 mRemoteEquipItem;
+    /* 0xBDC */ int mRemoteSwordVariant;
+    /* 0xBE0 */ int mRemoteShieldVariant;
+    /* 0xBE4 */ int mLoadedSwordVariant;
+    /* 0xBE8 */ int mLoadedShieldVariant;
+    /* 0xBEC */ u16 mLoadedHeldItem;
+    /* 0xBEE */ bool mRemoteSwordDraw;
+    /* 0xBEF */ bool mRemoteShieldDraw;
+    /* 0xBF0 */ bool mRemoteSwordOut;
+    /* 0xBF1 */ bool mRemoteHeavyBoots;
+    /* 0xBF1 */ bool mHeldItemMatrixValid;
+    /* 0xBF2 */ bool mHookTipMatrixValid;
+    /* 0xBF3 */ bool mHookSubItemMatrixValid;
+    /* 0xBF4 */ bool mHookSubTipMatrixValid;
+    /* 0xBF5 */ bool mArrowMatrixValid;
+    /* 0xBF6 */ bool mKanteraMatrixValid;
+    /* 0xBF7 */ bool mKanteraGlowMatrixValid;
+    /* 0xBF8 */ bool mItemActorMatrixValid;
+    /* 0xBF9 */ bool mRideActorMatrixValid;
+    /* 0xBFA */ bool mMidnaMatrixValid;
+    /* 0xBFB */ bool mMidnaMaskMatrixValid;
+    /* 0xBFC */ bool mMidnaHandMatrixValid;
+    /* 0xBFD */ bool mMidnaHairMatrixValid;
+    /* 0xC04 */ bool mRemoteItemDraw;
+    /* 0xC05 */ bool mRemoteKanteraDraw;
+    /* 0xC06 */ bool mHasRemotePose;
+    /* 0xC07 */ bool mHasRemoteMatrices;
+    /* 0xC14 */ int mClothesVariant;
+    /* 0xC08 */ J3DShape* mpLeftBodyHandShape;
+    /* 0xC0C */ J3DShape* mpRightBodyHandShape;
+    /* 0xC10 */ int mRemoteItemActorKind;
+    /* 0xC14 */ int mRemoteRideActorKind;
+    /* 0xC18 */ int mLoadedItemActorKind;
+    /* 0xC1C */ int mLoadedRideActorKind;
+    /* 0xC20 */ int mRemoteBombFlashTicks;
+    /* 0xC24 */ int mMidnaHairShape;
+    /* 0xC28 */ bool mSlotReserved;
 };
 
 #endif /* D_A_REMOTE_LINK_H */

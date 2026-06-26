@@ -28,6 +28,7 @@
 #include "res/Object/Alink.h"
 #include "res/Object/Always.h"
 #include "res/Object/Wmdl.h"
+#include "Z2AudioLib/Z2AudioMgr.h"
 #include "dusk/logging.h"
 #include <dvd.h>
 
@@ -42,7 +43,6 @@ static int const l_eqArcKmdl = 1;
 static int const l_eqArcCarvingShield = 2;
 static int const l_eqArcOrdonShield = 3;
 static int const l_eqArcHylianShield = 4;
-
 static int sCreateLogCount;
 static int sDrawLogCount;
 static int sCalcLogCount;
@@ -59,6 +59,11 @@ static bool isBottleItem(u16 i_itemNo) {
 
 static bool isRemoteBombActorKind(int i_kind) {
     return i_kind >= 2 && i_kind <= 4;
+}
+
+static bool isRemoteTransformProc(int i_procId) {
+    return i_procId == daAlink_c::PROC_METAMORPHOSE ||
+           i_procId == daAlink_c::PROC_METAMORPHOSE_ONLY;
 }
 
 static J3DShape* getMaterialShape(J3DModelData* i_modelData, u16 i_materialNo) {
@@ -193,6 +198,7 @@ daRemoteLink_c::daRemoteLink_c()
       mpMidnaMaskModel(NULL),
       mpMidnaHandModel(NULL),
       mpMidnaHairModel(NULL),
+      mpHeavyBootModels{NULL, NULL},
       mpHeldItemBrk(NULL),
       mAramResourceCache(),
       mpMagicArmorBodyBrk(NULL),
@@ -215,6 +221,8 @@ daRemoteLink_c::daRemoteLink_c()
       mRemoteUpperBck2(0),
       mRemoteUpperFrame2(0.0f),
       mRemoteUpperRate2(1.0f),
+      mRemoteTransformFrame(0.0f),
+      mRemoteTransformFrameValid(false),
       mRemoteEquipItem(0xFFFF),
       mRemoteSwordVariant(0),
       mRemoteShieldVariant(0),
@@ -224,6 +232,7 @@ daRemoteLink_c::daRemoteLink_c()
       mRemoteSwordDraw(false),
       mRemoteShieldDraw(false),
       mRemoteSwordOut(false),
+      mRemoteHeavyBoots(false),
       mHeldItemMatrixValid(false),
       mHookTipMatrixValid(false),
       mHookSubItemMatrixValid(false),
@@ -706,6 +715,8 @@ void daRemoteLink_c::setupHumanKokiriModel() {
         return;
     }
 
+    setupHeavyBootModels();
+
     if (sCreateLogCount < 2 || mClothesVariant == 3) {
         daAlink_c* localLink = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
         J3DModelData* localBodyData =
@@ -723,6 +734,34 @@ void daRemoteLink_c::setupHumanKokiriModel() {
             sCreateLogCount++;
         }
     }
+}
+
+void daRemoteLink_c::setupHeavyBootModels() {
+    if (mVisualState.form == FORM_WOLF) {
+        return;
+    }
+
+    J3DModelData* bootData =
+        static_cast<J3DModelData*>(getOwnedObjectRes("al_bootsh.bmd"));
+    if (bootData == NULL) {
+        DuskLog.warn("RemoteLink: heavy boots model missing arc={}", getCurrentArcName());
+        return;
+    }
+
+    for (int i = 0; i < 2; ++i) {
+        mpHeavyBootModels[i] = initModel(bootData, 0);
+    }
+
+    if (mpHeavyBootModels[0] == NULL || mpHeavyBootModels[1] == NULL) {
+        mpHeavyBootModels[0] = NULL;
+        mpHeavyBootModels[1] = NULL;
+        DuskLog.warn("RemoteLink: heavy boots model create failed arc={}", getCurrentArcName());
+        return;
+    }
+
+    DuskLog.info("RemoteLink: heavy boots models loaded left={} right={} arc={}",
+                 (void*)mpHeavyBootModels[0], (void*)mpHeavyBootModels[1],
+                 getCurrentArcName());
 }
 
 void daRemoteLink_c::setupWolfModel() {
@@ -1272,9 +1311,16 @@ bool daRemoteLink_c::setMotionBck(u16 i_resId, f32 i_speed) {
 }
 
 void daRemoteLink_c::setupMotionAnimation() {
-    J3DAnmTransform* waitBck = getMotionBck(dRes_ID_ALANM_BCK_WAITS_e);
-    getMotionBck(dRes_ID_ALANM_BCK_WALKS_e);
-    getMotionBck(dRes_ID_ALANM_BCK_DASHS_e);
+    const u16 waitResId = mVisualState.form == FORM_WOLF ? dRes_ID_ALANM_BCK_WL_WAITA_e :
+                                                            dRes_ID_ALANM_BCK_WAITS_e;
+    J3DAnmTransform* waitBck = getMotionBck(waitResId);
+    if (mVisualState.form == FORM_WOLF) {
+        getMotionBck(dRes_ID_ALANM_BCK_WL_WALKA_e);
+        getMotionBck(dRes_ID_ALANM_BCK_WL_DASHA_e);
+    } else {
+        getMotionBck(dRes_ID_ALANM_BCK_WALKS_e);
+        getMotionBck(dRes_ID_ALANM_BCK_DASHS_e);
+    }
     if (waitBck == NULL) {
         return;
     }
@@ -1286,9 +1332,10 @@ void daRemoteLink_c::setupMotionAnimation() {
         mpMotionBck = NULL;
         return;
     }
-    mMotionBckResId = dRes_ID_ALANM_BCK_WAITS_e;
+    mMotionBckResId = waitResId;
 
-    DuskLog.info("RemoteLink: motion BCK cache initialized wait={}", (void*)waitBck);
+    DuskLog.info("RemoteLink: motion BCK cache initialized form={} wait={}",
+                 mVisualState.form == FORM_WOLF ? "wolf" : "human", (void*)waitBck);
 }
 
 u16 daRemoteLink_c::selectActionBck(f32* o_speed) {
@@ -1483,6 +1530,16 @@ u16 daRemoteLink_c::selectActionBck(f32* o_speed) {
         return dRes_ID_ALANM_BCK_WAITHS_e;
     }
 
+    if (mVisualState.form == FORM_WOLF) {
+        if (mRemoteMoveSpeed >= l_dashSpeedThreshold) {
+            return dRes_ID_ALANM_BCK_WL_DASHA_e;
+        }
+        if (mRemoteMoveSpeed >= l_walkSpeedThreshold) {
+            return dRes_ID_ALANM_BCK_WL_WALKA_e;
+        }
+        return dRes_ID_ALANM_BCK_WL_WAITA_e;
+    }
+
     if (mRemoteMoveSpeed >= l_dashSpeedThreshold) {
         return dRes_ID_ALANM_BCK_DASHS_e;
     }
@@ -1495,7 +1552,49 @@ u16 daRemoteLink_c::selectActionBck(f32* o_speed) {
 void daRemoteLink_c::updateMotionAnimation() {
     f32 speed = 1.0f;
     const u16 bckResId = selectActionBck(&speed);
+    const bool transformProc = isRemoteTransformProc(mRemoteProcId);
+    const bool bckChanged = mMotionBckResId != bckResId;
     if (setMotionBck(bckResId, speed)) {
+        if (transformProc) {
+            const f32 targetFrame =
+                bckResId == mRemoteUpperBck2 ? mRemoteUpperFrame2 : mRemoteUnderFrame0;
+            f32 frameStep = std::fabs(bckResId == mRemoteUpperBck2 ? mRemoteUpperRate2 :
+                                                                      mRemoteUnderRate0);
+            if (frameStep < 0.01f) {
+                frameStep = 1.0f;
+            }
+
+            if (!mRemoteTransformFrameValid || bckChanged ||
+                targetFrame + 8.0f < mRemoteTransformFrame)
+            {
+                mRemoteTransformFrame = targetFrame;
+                mRemoteTransformFrameValid = true;
+            } else {
+                const bool wolfToHumanHumanPhase =
+                    mVisualState.form != FORM_WOLF && mRemoteProcVar5 != 0;
+                const f32 maxPredictAhead = wolfToHumanHumanPhase ? 0.0f : 2.0f;
+                if (mRemoteTransformFrame < targetFrame) {
+                    mRemoteTransformFrame += frameStep;
+                    if (mRemoteTransformFrame > targetFrame) {
+                        mRemoteTransformFrame = targetFrame;
+                    }
+                } else if (mRemoteTransformFrame < targetFrame + maxPredictAhead) {
+                    mRemoteTransformFrame += frameStep;
+                    if (mRemoteTransformFrame > targetFrame + maxPredictAhead) {
+                        mRemoteTransformFrame = targetFrame + maxPredictAhead;
+                    }
+                }
+            }
+
+            const f32 endFrame = mpMotionBck->getEndFrame();
+            if (endFrame > 0.0f && mRemoteTransformFrame > endFrame) {
+                mRemoteTransformFrame = endFrame;
+            }
+            mpMotionBck->setFrame(mRemoteTransformFrame);
+            return;
+        }
+
+        mRemoteTransformFrameValid = false;
         if (bckResId == mRemoteUpperBck2) {
             mpMotionBck->setFrame(mRemoteUpperFrame2);
         } else if (bckResId == mRemoteUnderBck0) {
@@ -1556,12 +1655,12 @@ int daRemoteLink_c::CreateHeap() {
             DuskLog.warn("RemoteLink: failed to create human visual model set");
             return FALSE;
         }
+    }
 
-        setupMotionAnimation();
-        if (mpMotionBck == NULL) {
-            DuskLog.warn("RemoteLink: failed to create motion animation");
-            return FALSE;
-        }
+    setupMotionAnimation();
+    if (mpMotionBck == NULL) {
+        DuskLog.warn("RemoteLink: failed to create motion animation");
+        return FALSE;
     }
 
     return TRUE;
@@ -1631,14 +1730,52 @@ void daRemoteLink_c::setupDrawHands() {
     mpHandModel->setAnmMtx(2, mpBodyModel->getAnmMtx(0xE));
 }
 
+void daRemoteLink_c::applyHeavyBootMatrices() {
+    if (!mRemoteHeavyBoots || mVisualState.form == FORM_WOLF || mpBodyModel == NULL ||
+        mpHeavyBootModels[0] == NULL || mpHeavyBootModels[1] == NULL)
+    {
+        return;
+    }
+
+    J3DModelData* bodyData = mpBodyModel->getModelData();
+    J3DModelData* bootData0 = mpHeavyBootModels[0]->getModelData();
+    J3DModelData* bootData1 = mpHeavyBootModels[1]->getModelData();
+    if (bodyData == NULL || bodyData->getJointNum() <= 0x1A ||
+        bootData0 == NULL || bootData0->getJointNum() <= 3 ||
+        bootData1 == NULL || bootData1->getJointNum() <= 3)
+    {
+        return;
+    }
+
+    for (int i = 0; i < 2; ++i) {
+        mpHeavyBootModels[i]->setBaseTRMtx(mpBodyModel->getBaseTRMtx());
+        mpHeavyBootModels[i]->calc();
+    }
+
+    mpHeavyBootModels[0]->setAnmMtx(1, mpBodyModel->getAnmMtx(0x13));
+    mpHeavyBootModels[0]->setAnmMtx(2, mpBodyModel->getAnmMtx(0x14));
+    mpHeavyBootModels[0]->setAnmMtx(3, mpBodyModel->getAnmMtx(0x15));
+
+    mDoMtx_stack_c::XrotS(-0x8000);
+    Mtx bootMtx;
+    mDoMtx_concat(mpBodyModel->getAnmMtx(0x18), mDoMtx_stack_c::get(), bootMtx);
+    mpHeavyBootModels[1]->setAnmMtx(1, bootMtx);
+    mDoMtx_concat(mpBodyModel->getAnmMtx(0x19), mDoMtx_stack_c::get(), bootMtx);
+    mpHeavyBootModels[1]->setAnmMtx(2, bootMtx);
+    mDoMtx_concat(mpBodyModel->getAnmMtx(0x1A), mDoMtx_stack_c::get(), bootMtx);
+    mpHeavyBootModels[1]->setAnmMtx(3, bootMtx);
+}
+
 void daRemoteLink_c::calcModels() {
     if (mHasRemoteMatrices) {
         return;
     }
 
-    if (mVisualState.form != FORM_WOLF && mpMotionBck != NULL) {
+    if (mpMotionBck != NULL) {
         updateMotionAnimation();
-        mpMotionBck->play();
+        if (!isRemoteTransformProc(mRemoteProcId)) {
+            mpMotionBck->play();
+        }
         mpMotionBck->entry(mpBodyModel->getModelData());
     }
     mpBodyModel->calc();
@@ -1660,6 +1797,7 @@ void daRemoteLink_c::calcModels() {
     }
 
     setupDrawHands();
+    applyHeavyBootMatrices();
 
     if (mpFaceModel != NULL) {
         mpFaceModel->setBaseTRMtx(mpBodyModel->getAnmMtx(4));
@@ -1749,7 +1887,7 @@ void daRemoteLink_c::setRemoteActionState(int i_procId, int i_procVar0, int i_pr
                                           f32 i_upperRate2, u16 i_equipItem,
                                           int i_swordVariant, int i_shieldVariant,
                                           bool i_swordDraw, bool i_shieldDraw, bool i_swordOut,
-                                          bool i_itemDraw, bool i_kanteraDraw,
+                                          bool i_heavyBoots, bool i_itemDraw, bool i_kanteraDraw,
                                           int i_itemActorKind, int i_rideActorKind) {
     mRemoteProcId = i_procId;
     mRemoteProcVar0 = i_procVar0;
@@ -1770,6 +1908,7 @@ void daRemoteLink_c::setRemoteActionState(int i_procId, int i_procVar0, int i_pr
     mRemoteSwordDraw = i_swordDraw;
     mRemoteShieldDraw = i_shieldDraw;
     mRemoteSwordOut = i_swordOut;
+    mRemoteHeavyBoots = i_heavyBoots;
     mRemoteItemDraw = i_itemDraw;
     mRemoteKanteraDraw = i_kanteraDraw;
     if (mRemoteItemActorKind != i_itemActorKind && isRemoteBombActorKind(i_itemActorKind)) {
@@ -1777,6 +1916,28 @@ void daRemoteLink_c::setRemoteActionState(int i_procId, int i_procVar0, int i_pr
     }
     mRemoteItemActorKind = i_itemActorKind;
     mRemoteRideActorKind = i_rideActorKind;
+    if (isRemoteTransformProc(mRemoteProcId)) {
+        mRemoteSwordDraw = false;
+        mRemoteShieldDraw = false;
+        mRemoteSwordOut = false;
+        mRemoteHeavyBoots = false;
+        mRemoteItemDraw = false;
+        mRemoteKanteraDraw = false;
+        mRemoteItemActorKind = 0;
+        mRemoteRideActorKind = 0;
+        mHeldItemMatrixValid = false;
+        mHookTipMatrixValid = false;
+        mHookSubItemMatrixValid = false;
+        mHookSubTipMatrixValid = false;
+        mArrowMatrixValid = false;
+        mKanteraMatrixValid = false;
+        mKanteraGlowMatrixValid = false;
+        mItemActorMatrixValid = false;
+        mRideActorMatrixValid = false;
+        return;
+    }
+
+    mRemoteTransformFrameValid = false;
     setupEquipmentModels();
     setupHeldItemModel();
     setupLinkedItemModels();
@@ -1868,6 +2029,7 @@ void daRemoteLink_c::setRemoteMatrices(
         return;
     }
 
+    applyHeavyBootMatrices();
     copyRemoteModelMatrices(mpHeadModel, i_matrices.hat);
     copyRemoteModelMatrices(mpFaceModel, i_matrices.face);
     copyRemoteModelMatrices(mpHandModel, i_matrices.hand);
@@ -1987,6 +2149,19 @@ void daRemoteLink_c::drawLinkedItemActorModel() {
     }
 }
 
+void daRemoteLink_c::playRemoteSound(u32 i_soundId, bool i_level) {
+    Z2AudioMgr* audioMgr = Z2GetAudioMgr();
+    if (audioMgr == NULL || i_soundId == 0) {
+        return;
+    }
+
+    if (i_level) {
+        audioMgr->seStartLevel(i_soundId, &current.pos, 0, -1, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    } else {
+        audioMgr->seStart(i_soundId, &current.pos, 0, -1, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    }
+}
+
 int daRemoteLink_c::Draw() {
     if (sDrawLogCount < 5) {
         DuskLog.info("RemoteLink: Draw visual body={} head={} hands={} face={} pos=({}, {}, {})",
@@ -2021,6 +2196,18 @@ int daRemoteLink_c::Draw() {
     drawModel(mpHandModel);
     drawModel(mpHeadModel);
     drawModel(mpFaceModel);
+    if (isRemoteTransformProc(mRemoteProcId)) {
+        if (mVisualState.form == FORM_WOLF) {
+            dComIfGd_setList();
+        }
+        return TRUE;
+    }
+
+    if (mRemoteHeavyBoots && mVisualState.form != FORM_WOLF) {
+        drawModel(mpHeavyBootModels[0]);
+        drawModel(mpHeavyBootModels[1]);
+    }
+
     if (mHeldItemMatrixValid) {
         drawModel(mpHeldItemModel);
     }
@@ -2058,6 +2245,20 @@ int daRemoteLink_c::Draw() {
 }
 
 int daRemoteLink_c::Delete() {
+    DuskLog.info(
+        "RemoteLink: deleting body={} bodyData={} headData={} handData={} faceData={} "
+        "swordData={} sheathData={} shieldData={} heldData={} itemActorData={} arcHeap={}",
+        (void*)mpBodyModel,
+        mpBodyModel != NULL ? (void*)mpBodyModel->getModelData() : NULL,
+        mpHeadModel != NULL ? (void*)mpHeadModel->getModelData() : NULL,
+        mpHandModel != NULL ? (void*)mpHandModel->getModelData() : NULL,
+        mpFaceModel != NULL ? (void*)mpFaceModel->getModelData() : NULL,
+        mpSwordModel != NULL ? (void*)mpSwordModel->getModelData() : NULL,
+        mpSheathModel != NULL ? (void*)mpSheathModel->getModelData() : NULL,
+        mpShieldModel != NULL ? (void*)mpShieldModel->getModelData() : NULL,
+        mpHeldItemModel != NULL ? (void*)mpHeldItemModel->getModelData() : NULL,
+        mpItemActorModel != NULL ? (void*)mpItemActorModel->getModelData() : NULL,
+        (void*)mpArcHeap);
     releaseSlot();
     destroyEquipmentModels();
     for (u32 i = 0; i < ARRAY_SIZE(mEquipmentArchives); ++i) {

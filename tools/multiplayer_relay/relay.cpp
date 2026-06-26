@@ -48,7 +48,7 @@ namespace {
 using json = nlohmann::json;
 
 constexpr int kProtocolVersion = 1;
-constexpr size_t kMaxLineBytes = 64 * 1024;
+constexpr size_t kMaxLineBytes = 512 * 1024;
 constexpr size_t kMaxRoomClients = 8;
 
 const std::set<std::string> kStateBroadcastTypes = {
@@ -305,10 +305,32 @@ private:
             return;
         }
 
+        if (type == "sync_request") {
+            const std::string targetClientId = message.value("target_client_id", "");
+            if (targetClientId.empty()) {
+                send_error(client, "missing_target");
+                return;
+            }
+
+            json routed = message;
+            routed["client_id"] = client.id;
+            if (!send_to_client(client, targetClientId, routed)) {
+                send_error(client, "unknown_target");
+            }
+            return;
+        }
+
         if (kStateBroadcastTypes.find(type) != kStateBroadcastTypes.end()) {
             json routed = message;
             routed["client_id"] = client.id;
-            broadcast(client, routed);
+            const std::string targetClientId = message.value("target_client_id", "");
+            if (!targetClientId.empty()) {
+                if (!send_to_client(client, targetClientId, routed)) {
+                    send_error(client, "unknown_target");
+                }
+            } else {
+                broadcast(client, routed);
+            }
             return;
         }
 
@@ -403,6 +425,24 @@ private:
                 send_json(peerIt->second, message);
             }
         }
+    }
+
+    bool send_to_client(const Client& sender, const std::string& targetClientId,
+                        const json& message) {
+        const auto roomIt = mRooms.find(sender.roomId);
+        if (roomIt == mRooms.end() ||
+            roomIt->second.clientIds.find(targetClientId) == roomIt->second.clientIds.end())
+        {
+            return false;
+        }
+
+        auto peerIt = mClients.find(targetClientId);
+        if (peerIt == mClients.end()) {
+            return false;
+        }
+
+        send_json(peerIt->second, message);
+        return true;
     }
 
     void remove_client(const std::string& clientId) {
