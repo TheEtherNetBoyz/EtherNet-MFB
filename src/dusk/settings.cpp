@@ -106,6 +106,7 @@ UserSettings g_userSettings = {
         .invertMouseY {"game.invertMouseY", false},
         .freeCamera {"game.freeCamera", false},
         .enableTouchControls {"game.enableTouchControls", false},
+        .touchTargeting {"game.touchTargeting", TouchTargeting::Hybrid},
         .enableMenuPointer {"game.enableMenuPointer", true},
         .touchControlsLayout {"game.touchControlsLayout", ui::ControlLayout{}},
         .invertCameraXAxis {"game.invertCameraXAxis", false},
@@ -184,7 +185,6 @@ UserSettings g_userSettings = {
         .isoVerification {"backend.isoVerification", DiscVerificationState::Unknown},
         .graphicsBackend {"backend.graphicsBackend", "auto"},
         .skipPreLaunchUI {"backend.skipPreLaunchUI", false},
-        .showPipelineCompilation {"backend.showPipelineCompilation", false},
         .wasPresetChosen {"backend.wasPresetChosen", false},
         .checkForUpdates {"backend.checkForUpdates", false},
         .cardFileType {"backend.cardFileType", static_cast<int>(CARD_GCIFOLDER)},
@@ -463,6 +463,7 @@ void registerSettings() {
     Register(g_userSettings.game.invertMouseY);
     Register(g_userSettings.game.freeCamera);
     Register(g_userSettings.game.enableTouchControls);
+    Register(g_userSettings.game.touchTargeting);
     Register(g_userSettings.game.enableMenuPointer);
     Register(g_userSettings.game.touchControlsLayout);
     Register(g_userSettings.game.debugFlyCam);
@@ -479,7 +480,6 @@ void registerSettings() {
     Register(g_userSettings.backend.isoVerification);
     Register(g_userSettings.backend.graphicsBackend);
     Register(g_userSettings.backend.skipPreLaunchUI);
-    Register(g_userSettings.backend.showPipelineCompilation);
     Register(g_userSettings.backend.wasPresetChosen);
     Register(g_userSettings.backend.checkForUpdates);
     Register(g_userSettings.backend.cardFileType);
