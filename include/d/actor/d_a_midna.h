@@ -384,6 +384,12 @@ public:
         return checkStateFlg1(FLG1_NO_MASK_DRAW);
     }
 
+    J3DModel* getShadowModel() const { return mpShadowModel; }
+    J3DModel* getShadowMaskModel() const { return mpShadowMaskBmd; }
+    J3DModel* getShadowHandModel() const { return mpShadowHandsBmd; }
+    J3DModel* getShadowHairHandModel() const { return mpShadowHairhandBmd; }
+    J3DModel* getGokouModel() const { return mpGokouBmd; }
+
     BOOL checkDemoPortalWarpWait() const { return mDemoMode == 11; }
 
     static BOOL checkMidnaRealBody() {

@@ -38,6 +38,7 @@ struct RemoteLinkMatrixSnapshot {
     RemoteModelMatrixSnapshot midnaMask;
     RemoteModelMatrixSnapshot midnaHand;
     RemoteModelMatrixSnapshot midnaHair;
+    RemoteModelMatrixSnapshot midnaGlow;
     int midnaHairShape = 0;
 };
 
@@ -70,6 +71,7 @@ struct PeerPoseSnapshot {
     int procVar2 = 0;
     int procVar3 = 0;
     int procVar5 = 0;
+    bool manualSyncReady = false;
     float underFrame = 0.0f;
     int underBck0 = 0;
     float underFrame0 = 0.0f;
@@ -95,6 +97,11 @@ struct PeerPoseSnapshot {
     bool swordDraw = false;
     bool shieldDraw = false;
     bool swordOut = false;
+    bool midnaDraw = false;
+    bool midnaMaskDraw = false;
+    bool midnaHandDraw = false;
+    bool midnaHairDraw = false;
+    bool midnaShadowForm = false;
     bool heavyBoots = false;
     bool itemDraw = false;
     bool kanteraDraw = false;
@@ -164,6 +171,7 @@ struct PlayerListEntry {
 
 void initialize();
 void update();
+void consume_progression_prompt_start_button();
 void shutdown();
 bool is_enabled();
 void record_local_link_audio_event(uint32_t soundId, bool level);

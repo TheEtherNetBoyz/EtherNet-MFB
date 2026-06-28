@@ -2,9 +2,12 @@
 
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_e_pz.h"
+#include "d/actor/d_a_midna.h"
 #include "d/actor/d_a_npc_chin.h"
 #include "d/actor/d_a_obj_drop.h"
 #include "d/actor/d_a_obj_cblock.h"
+#include "d/actor/d_a_obj_bbox.h"
+#include "d/actor/d_a_obj_carry.h"
 #include "d/actor/d_a_obj_life_container.h"
 #include "d/actor/d_a_obj_lv4PoGate.h"
 #include "d/actor/d_a_obj_picture.h"
@@ -14,6 +17,7 @@
 #include "d/actor/d_a_spinner.h"
 #include "d/actor/d_a_tbox.h"
 #include "d/d_com_inf_game.h"
+#include "d/d_meter2_info.h"
 #include "d/d_bomb.h"
 #include "d/d_item.h"
 #include "d/d_item_data.h"
@@ -34,6 +38,7 @@
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_lib.h"
 #include "m_Do/m_Do_mtx.h"
+#include "m_Do/m_Do_controller_pad.h"
 #include "aurora/lib/window.hpp"
 #include "absl/strings/escaping.h"
 #include "imgui.h"
@@ -86,6 +91,10 @@
 #include <vector>
 
 namespace dusk::multiplayer {
+
+void flush_pending_progression_sync();
+void consume_progression_prompt_start_button();
+
 namespace {
 
 using json = nlohmann::json;
@@ -292,6 +301,7 @@ bool sEnabled = false;
 Session sSession;
 
 bool sDummyModelEnabled = false;
+bool sDummyTraceEnabled = false;
 bool sNameLabelsEnabled = true;
 fpc_ProcID sLastPlayerBombActorId = fpcM_ERROR_PROCESS_ID_e;
 
@@ -314,7 +324,62 @@ struct Notification {
     float durationSeconds = 5.0f;
 };
 
+struct ProgressionSyncPrompt {
+    bool active = false;
+    std::string peerId;
+    std::string peerName;
+    std::string cueKey;
+    std::string title;
+    std::string body;
+    float ageSeconds = 0.0f;
+    float holdSeconds = 0.0f;
+    bool waiting = false;
+};
+
+struct PendingProgressionSync {
+    bool active = false;
+    std::string peerId;
+    std::string peerName;
+    std::string cueKey;
+    uint32_t stableReadyTicks = 0;
+};
+
+// A progression cue (event bit) can fire while the peer is still mid-walkout
+// in the stage they're leaving, well before the stage actually swaps to the
+// destination. Showing the sync prompt at that instant lets the user sync
+// into the peer's still-stale stage. So these cues wait here, invisible to
+// the player, until the peer's broadcast pose actually reports the
+// destination stage before becoming a real ProgressionSyncPrompt.
+struct PendingProgressionCueArrival {
+    bool active = false;
+    std::string peerId;
+    std::string cueKey;
+    std::string title;
+    std::string body;
+    std::string expectedStage;
+};
+
+// Held on the *replying* side of a sync_request when this client's own live
+// state doesn't yet satisfy the requested cue's readiness condition (see
+// is_local_state_ready_for_cue()). Retried each tick so the eventual
+// snapshot+reply reflects this client's state at the moment it's actually
+// taken, instead of racing whatever was true when the request first arrived.
+struct PendingSyncReply {
+    bool active = false;
+    bool isDirectPeer = false;
+    std::string peerKey;        // DirectPeer id, re-resolved at flush time.
+    std::string targetClientId; // Relay mode requester id.
+    std::string cueKey;
+    uint32_t waitTicks = 0;
+};
+
 std::vector<Notification> sNotifications;
+ProgressionSyncPrompt sProgressionSyncPrompt;
+PendingProgressionSync sPendingProgressionSync;
+std::vector<PendingProgressionCueArrival> sPendingProgressionCueArrivals;
+std::vector<PendingSyncReply> sPendingSyncReplies;
+bool sProgressionPromptExactStartHeld = false;
+std::set<std::string> sShownPoseProgressionCues;
 std::map<std::string, std::string> sPeerNames;
 std::map<std::string, uint8_t> sPeerColorSlots;
 uint8_t sLocalPlayerColorSlot = 0;
@@ -324,12 +389,53 @@ uint32_t sLocalAudioEventSequence = 0;
 bool sManualSyncReloadPending = false;
 std::optional<dSv_info_c> sPendingManualSyncInfo;
 std::optional<u8> sPendingManualSyncVibration;
+// Set right before a manual-sync request goes out for a progression cue, so
+// that when the peer's full-state reply lands, apply_manual_sync_full_state
+// knows to override the warp target instead of trusting the peer's raw
+// position/layer snapshot (see kProgressionCueDescriptors).
+std::string sAwaitingManualSyncCueKey;
 
 // Set while applying any remote save-state bit (event bit, chest bit, ...),
 // so the dComIfGs_* setter call that applies it doesn't loop back through
 // its notify_local_*_set() hook and re-send it to the peer that just sent it
 // to us.
 bool sApplyingRemoteSaveBit = false;
+
+constexpr int kProgressionCueSewersStage = dStage_SaveTbl_PRISON;
+constexpr int kProgressionCueWakeUpInJailSwitch = 27; // ImGui flag 08:08 / "wake up in jail cs".
+constexpr uint16_t kProgressionCueSewersCompleteEventBit = 0x6140; // offset 0x61 bit 64 - "remove midna from z (temporary flag after sewers)".
+constexpr uint16_t kProgressionCueFaronTwilightEventBit = 0x0640; // offset 0x06 bit 64 - "watched faron twilight intro cutscene".
+constexpr int kProgressionCueHyruleFieldStage = dStage_SaveTbl_FIELD;
+constexpr int kProgressionCueEldinTwilightSwitch = 0x0C; // Hyrule Field area flag 0A:10 - "entered Eldin twilight cs".
+constexpr int kProgressionCueLanayruTwilightSwitch = 0x0D; // Hyrule Field area flag 0A:20 - "entered Lanayru twilight cs".
+constexpr int kProgressionCueForestTempleStage = dStage_SaveTbl_FARON;
+constexpr int kProgressionCueForestTempleSavePromptSwitch = 0x01; // Faron area flag 0B:02 - "FT save prompt".
+constexpr int kProgressionCueGoronMinesStage = dStage_SaveTbl_ELDIN;
+constexpr int kProgressionCueGoronMinesSavePromptSwitch = 0x7C; // Eldin area flag 14:10 - "GM save prompt".
+constexpr int kProgressionCueLakebedTempleStage = dStage_SaveTbl_LANAYRU;
+constexpr int kProgressionCueLakebedTempleSavePromptSwitch = 0x0E; // Lanayru area flag 0A:40 - "Save Prompt after Lakebed".
+constexpr int kProgressionCueArbitersGroundsStage = dStage_SaveTbl_DESERT;
+constexpr int kProgressionCueArbitersGroundsSavePromptSwitch = 0x0A; // Desert area flag 0A:04 - "save prompt after beating Arbiter's Grounds".
+constexpr int kProgressionCueSnowpeakRuinsStage = dStage_SaveTbl_SNOWPEAK;
+constexpr int kProgressionCueSnowpeakRuinsSavePromptSwitch = 0x19; // Snowpeak area flag 08:02 - "Post SPR Save Prompt".
+constexpr int kProgressionCueCityInTheSkyStage = dStage_SaveTbl_LV7;
+constexpr int kProgressionCueCityInTheSkySavePromptSwitch = 0x25; // CitS area flag 0F:20 - "save promt after boss".
+constexpr int kProgressionCuePalaceOfTwilightStage = dStage_SaveTbl_LV8;
+constexpr int kProgressionCuePalaceOfTwilightSavePromptSwitch = 0x16; // PoT area flag 09:40 - "save prompt after boss".
+constexpr uint16_t kProgressionCueTempleOfTimeClearEventBit = 0x2004; // LV6 dungeon clear; prompt waits for peer to reach F_SP117.
+constexpr const char* kProgressionCueTempleOfTimeExitStage = "F_SP117";
+constexpr const char* kProgressionCueFinalGanondorfStage = "D_MN09C"; // Dark Lord Ganondorf arena, after horseback phase.
+constexpr const char* kProgressionCueSewersCompleteDestStage = "F_SP104"; // Ordon Spring.
+constexpr const char* kProgressionCueFaronTwilightDestStage = "F_SP108"; // Faron Woods (twilight).
+constexpr float kProgressionSyncPromptDuration = 12.0f;
+constexpr float kProgressionSyncHoldDuration = 1.0f;
+constexpr uint32_t kProgressionSyncStableReadyTicks = 1;
+constexpr uint32_t kFlagTraceActorWindowTicks = 180;
+// Generous cap on how long a deferred sync_request reply waits for this
+// client's own state to satisfy the cue's readiness condition before giving
+// up and replying anyway (better than leaving the requester hanging forever
+// if something about the expected stage/form never actually materializes).
+constexpr uint32_t kPendingSyncReplyTimeoutTicks = 1800;
 
 // Local memory-tier item bits observed through the live setter hook. This
 // intentionally records before the network "welcomed" check, so a player can
@@ -389,6 +495,7 @@ struct LocalSwitchActorContext {
     int actorName = -1;
     int room = -128;
     int flag = -1;
+    uint32_t actorParams = 0xFFFFFFFF;
     int depth = 0;
 };
 
@@ -420,6 +527,7 @@ int sPolicyInitializedRoom = -128;
 uint32_t sPolicyRoomInitializedTicks = 0;
 bool sPolicyRoomInitialized = false;
 LocalSwitchActorContext sLocalSwitchActorContext;
+uint32_t sFlagTraceActorWindowTicks = 0;
 
 int detect_sword_variant(const daAlink_c* link) {
     if (link == nullptr || link->mSwordModel == nullptr) {
@@ -585,6 +693,21 @@ const char* current_stage_name() {
     return stage != nullptr ? stage : "";
 }
 
+void begin_flag_trace_window(const char* source, const char* lane, int stage, int flag, bool set,
+                             int sourceActor = -1, int sourceRoom = -128,
+                             uint32_t sourceParams = 0xFFFFFFFF) {
+    sFlagTraceActorWindowTicks = kFlagTraceActorWindowTicks;
+    DuskLog.info(
+        "MP_FLAG_TRACE flag source={} lane={} stage={} flag={} set={} sourceActor={} "
+        "sourceRoom={} sourceParams=0x{:08X} currentStage={} currentRoom={} actorWindowTicks={}",
+        source, lane, stage, flag, set, sourceActor, sourceRoom, sourceParams,
+        current_stage_name(), dComIfGp_roomControl_getStayNo(), sFlagTraceActorWindowTicks);
+}
+
+bool is_flag_trace_actor_window_active() {
+    return sEnabled && sFlagTraceActorWindowTicks > 0;
+}
+
 const RemoteSwitchPolicy* find_remote_switch_policy(int stage, int flag) {
     for (const RemoteSwitchPolicy& policy : kRemoteSwitchPolicies) {
         if (policy.stage == stage && policy.flag == flag) {
@@ -633,6 +756,9 @@ void remember_remote_switch(int stage, int flag, bool deferred) {
     sRecentRemoteSwitches.push_back({stage, flag, 0, deferred});
 }
 
+bool repair_remote_breakable_carry_box_switch(int stage, int flag);
+bool is_sewers_progression_switch(int stage, int flag);
+
 void dispatch_remote_switch_repair_hook(int stage, int flag, const char* reason) {
     stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
     if (stagInfo == nullptr || stage != dStage_stagInfo_GetSaveTbl(stagInfo)) {
@@ -646,23 +772,28 @@ void dispatch_remote_switch_repair_hook(int stage, int flag, const char* reason)
     const bool repairedLv4PoGate = stage == 19 && flag == 0x26 && duskRepairLv4PoGateOpen();
     const bool repairedPZ = duskRepairE_PZRemoteDefeat(flag);
     const bool repairedSCannon = duskRepairSCannonRemotePortalClosed(flag);
+    const bool repairedBreakableCarryBox = repair_remote_breakable_carry_box_switch(stage, flag);
 
-    if (repairedCBlock || repairedJumpTbox || repairedLv4PoGate || repairedPZ || repairedSCannon) {
+    if (repairedCBlock || repairedJumpTbox || repairedLv4PoGate || repairedPZ ||
+        repairedSCannon || repairedBreakableCarryBox)
+    {
         DuskLog.info("Multiplayer remote switch repair stage={} flag={} reason={} "
-                     "cblock={} jump_tbox={} lv4_poe_gate={} e_pz={} scannon={} "
+                     "cblock={} jump_tbox={} lv4_poe_gate={} e_pz={} scannon={} breakable_box={} "
                      "picture_monitor={} npc_chin_monitor={}",
                      stage, flag, reason, repairedCBlock, repairedJumpTbox, repairedLv4PoGate,
-                     repairedPZ, repairedSCannon, monitoredPicture, monitoredNpcChin);
+                     repairedPZ, repairedSCannon, repairedBreakableCarryBox, monitoredPicture,
+                     monitoredNpcChin);
     } else if (monitoredPicture || monitoredNpcChin) {
         DuskLog.info("Multiplayer remote switch monitor stage={} flag={} reason={} "
                      "picture_monitor={} npc_chin_monitor={} repair=reload_or_cosmetic",
                      stage, flag, reason, monitoredPicture, monitoredNpcChin);
     } else {
         DuskLog.info("Multiplayer remote switch repair checked stage={} flag={} reason={} "
-                     "cblock={} jump_tbox={} lv4_poe_gate={} e_pz={} scannon={} "
+                     "cblock={} jump_tbox={} lv4_poe_gate={} e_pz={} scannon={} breakable_box={} "
                      "picture_monitor={} npc_chin_monitor={}",
                      stage, flag, reason, repairedCBlock, repairedJumpTbox, repairedLv4PoGate,
-                     repairedPZ, repairedSCannon, monitoredPicture, monitoredNpcChin);
+                     repairedPZ, repairedSCannon, repairedBreakableCarryBox, monitoredPicture,
+                     monitoredNpcChin);
     }
 }
 
@@ -711,6 +842,90 @@ bool is_remote_switch_deferred(int stage, int flag) {
     return false;
 }
 
+struct BreakableCarryBoxRepairSearch {
+    int flag;
+    bool repaired;
+    bool sawCarryBox;
+    bool sawBBox;
+};
+
+void* repair_breakable_carry_box_by_switch(void* actor, void* data) {
+    if (actor == nullptr || data == nullptr || !fopAcM_IsActor(actor) ||
+        fopAcM_GetName(actor) != fpcNm_Obj_Carry_e)
+    {
+        return nullptr;
+    }
+
+    auto* search = static_cast<BreakableCarryBoxRepairSearch*>(data);
+    auto* carry = static_cast<daObjCarry_c*>(actor);
+    if (carry->getType() != daObjCarry_c::TYPE_KIBAKO) {
+        return nullptr;
+    }
+
+    search->sawCarryBox = true;
+    DuskLog.info("Multiplayer sewers 09:02 saw Obj_Carry KIBAKO room={} homeRoom={} "
+                 "swbit={} params=0x{:08X} pos=({}, {}, {})",
+                 fopAcM_GetRoomNo(carry), fopAcM_GetHomeRoomNo(carry), carry->getSwbit(),
+                 fopAcM_GetParam(carry), carry->current.pos.x, carry->current.pos.y,
+                 carry->current.pos.z);
+
+    carry->obj_break(false, true, true);
+    fopAcM_delete(carry);
+    search->repaired = true;
+    return actor;
+}
+
+void* repair_breakable_bbox_by_switch(void* actor, void* data) {
+    if (actor == nullptr || data == nullptr || !fopAcM_IsActor(actor) ||
+        fopAcM_GetName(actor) != fpcNm_Obj_BBox_e)
+    {
+        return nullptr;
+    }
+
+    auto* search = static_cast<BreakableCarryBoxRepairSearch*>(data);
+    auto* bbox = static_cast<daObjBBox_c*>(actor);
+    if (bbox->getSwNo() != search->flag) {
+        return nullptr;
+    }
+
+    search->sawBBox = true;
+    DuskLog.info("Multiplayer sewers box saw Obj_BBox room={} homeRoom={} sw={} "
+                 "params=0x{:08X} pos=({}, {}, {})",
+                 fopAcM_GetRoomNo(bbox), fopAcM_GetHomeRoomNo(bbox), bbox->getSwNo(),
+                 fopAcM_GetParam(bbox), bbox->current.pos.x, bbox->current.pos.y,
+                 bbox->current.pos.z);
+
+    static const u16 particleId[5] = {0x83B0, 0x83B1, 0x83B2, 0x83B3, 0x83B4};
+    for (u16 id : particleId) {
+        dComIfGp_particle_set(id, &bbox->current.pos, nullptr, &bbox->scale, 0xff, nullptr, -1,
+                              nullptr, nullptr, nullptr);
+    }
+    fopAcM_seStart(bbox, Z2SE_OBJ_WOODBOX_BREAK, 0);
+    fopAcM_delete(bbox);
+    search->repaired = true;
+    return actor;
+}
+
+bool repair_remote_breakable_carry_box_switch(int stage, int flag) {
+    if (stage != kProgressionCueSewersStage || (flag != 10 && flag != 17)) {
+        return false;
+    }
+
+    BreakableCarryBoxRepairSearch search = {flag, false, false, false};
+    if (flag == 10) {
+        fopAcM_Search(repair_breakable_bbox_by_switch, &search);
+        if (!search.sawBBox) {
+            DuskLog.info("Multiplayer sewers 0A:04 found no live Obj_BBox to repair");
+        }
+    } else {
+        fopAcM_Search(repair_breakable_carry_box_by_switch, &search);
+        if (!search.sawCarryBox) {
+            DuskLog.info("Multiplayer sewers 09:02 found no live Obj_Carry KIBAKO to repair");
+        }
+    }
+    return search.repaired;
+}
+
 void apply_remote_switch_bit_now(int stage, int flag, const char* reason,
                                  RemoteSwitchApplyReason applyReason) {
     if (dComIfGs_isStageSwitch(stage, flag)) {
@@ -731,6 +946,24 @@ void apply_remote_switch_bit_now(int stage, int flag, const char* reason,
                  stage, flag, reason,
                  applyReason == RemoteSwitchApplyReason::Flush ? "flush" : "immediate");
     dispatch_remote_switch_repair_hook(stage, flag, reason);
+}
+
+// Clearing a switch doesn't reposition anything the way setting one can
+// (cblocks, jump-trigger Tboxes, etc.), so unlike apply_remote_switch_bit
+// this doesn't need the deferred/room-init policy machinery -- a direct,
+// idempotent apply is enough.
+void apply_remote_switch_bit_off(int stage, int flag) {
+    if (!dComIfGs_isStageSwitch(stage, flag)) {
+        DuskLog.info("Multiplayer remote switch already cleared stage={} flag={}", stage, flag);
+        return;
+    }
+
+    const bool wasApplyingRemoteSaveBit = sApplyingRemoteSaveBit;
+    sApplyingRemoteSaveBit = true;
+    dComIfGs_offStageSwitch(stage, flag);
+    sApplyingRemoteSaveBit = wasApplyingRemoteSaveBit;
+
+    DuskLog.info("Multiplayer applied remote switch bit cleared stage={} flag={}", stage, flag);
 }
 
 void defer_remote_switch_bit(int stage, int flag, const RemoteSwitchPolicy& policy) {
@@ -768,6 +1001,13 @@ void suppress_remote_switch_bit(int stage, int flag, const RemoteSwitchPolicy& p
 bool suppress_remote_switch_from_source_actor(int stage, int flag, int sourceActor) {
     const char* reason = group2_lifecycle_actor_reason(sourceActor);
     if (reason == nullptr) {
+        return false;
+    }
+
+    if (is_sewers_progression_switch(stage, flag)) {
+        DuskLog.info("Multiplayer allowed remote sewers progression switch stage={} flag={} "
+                     "sourceActor={} reason={}",
+                     stage, flag, sourceActor, reason);
         return false;
     }
 
@@ -931,6 +1171,14 @@ bool env_enabled(const char* name) {
             std::strcmp(value, "ON") == 0);
 }
 
+bool env_disabled(const char* name) {
+    const char* value = std::getenv(name);
+    return value != nullptr &&
+           (std::strcmp(value, "0") == 0 || std::strcmp(value, "false") == 0 ||
+            std::strcmp(value, "FALSE") == 0 || std::strcmp(value, "off") == 0 ||
+            std::strcmp(value, "OFF") == 0);
+}
+
 std::string env_string(const char* name, std::string fallback) {
     const char* value = std::getenv(name);
     return value != nullptr && value[0] != '\0' ? std::string(value) : fallback;
@@ -1009,6 +1257,252 @@ std::string display_name_for_peer(const std::string& peerId) {
         return name->second;
     }
     return peerId.empty() ? "Peer" : peerId;
+}
+
+void show_progression_sync_prompt(const std::string& peerId, std::string cueKey,
+                                  std::string title, std::string body) {
+    if (peerId.empty()) {
+        return;
+    }
+
+    if (sProgressionSyncPrompt.active && sProgressionSyncPrompt.peerId == peerId &&
+        sProgressionSyncPrompt.cueKey == cueKey)
+    {
+        return;
+    }
+    if (sPendingProgressionSync.active && sPendingProgressionSync.peerId == peerId &&
+        sPendingProgressionSync.cueKey == cueKey)
+    {
+        return;
+    }
+
+    sProgressionSyncPrompt = {
+        true,
+        peerId,
+        display_name_for_peer(peerId),
+        std::move(cueKey),
+        std::move(title),
+        std::move(body),
+        0.0f,
+        0.0f,
+        false,
+    };
+
+    DuskLog.info("Multiplayer progression sync prompt peer={} cue={} title={}", peerId,
+                 sProgressionSyncPrompt.cueKey, sProgressionSyncPrompt.title);
+}
+
+void queue_progression_event_prompt(const std::string& peerId, const char* cueKey,
+                                    const char* action, const char* areaName);
+
+void maybe_show_progression_sync_prompt_for_switch(const std::string& peerId, int stage, int flag) {
+    if (stage == kProgressionCueSewersStage && flag == kProgressionCueWakeUpInJailSwitch) {
+        show_progression_sync_prompt(peerId, "sewers_wake_up_in_jail",
+                                     display_name_for_peer(peerId) + " entered Hyrule Sewers",
+                                     "Hold START to sync and reload");
+    } else if (stage == kProgressionCueHyruleFieldStage &&
+               flag == kProgressionCueEldinTwilightSwitch)
+    {
+        queue_progression_event_prompt(peerId, "eldin_twilight_entered", "entered",
+                                       "Eldin Twilight");
+    } else if (stage == kProgressionCueHyruleFieldStage &&
+               flag == kProgressionCueLanayruTwilightSwitch)
+    {
+        queue_progression_event_prompt(peerId, "lanayru_twilight_entered", "entered",
+                                       "Lanayru Twilight");
+    } else if (stage == kProgressionCueForestTempleStage &&
+               flag == kProgressionCueForestTempleSavePromptSwitch)
+    {
+        queue_progression_event_prompt(peerId, "forest_temple_complete", "completed",
+                                       "Forest Temple");
+    } else if (stage == kProgressionCueGoronMinesStage &&
+               flag == kProgressionCueGoronMinesSavePromptSwitch)
+    {
+        queue_progression_event_prompt(peerId, "goron_mines_complete", "completed",
+                                       "Goron Mines");
+    } else if (stage == kProgressionCueLakebedTempleStage &&
+               flag == kProgressionCueLakebedTempleSavePromptSwitch)
+    {
+        queue_progression_event_prompt(peerId, "lakebed_temple_complete", "completed",
+                                       "Lakebed Temple");
+    } else if (stage == kProgressionCueArbitersGroundsStage &&
+               flag == kProgressionCueArbitersGroundsSavePromptSwitch)
+    {
+        queue_progression_event_prompt(peerId, "arbiters_grounds_complete", "completed",
+                                       "Arbiter's Grounds");
+    } else if (stage == kProgressionCueSnowpeakRuinsStage &&
+               flag == kProgressionCueSnowpeakRuinsSavePromptSwitch)
+    {
+        queue_progression_event_prompt(peerId, "snowpeak_ruins_complete", "completed",
+                                       "Snowpeak Ruins");
+    } else if (stage == kProgressionCueCityInTheSkyStage &&
+               flag == kProgressionCueCityInTheSkySavePromptSwitch)
+    {
+        queue_progression_event_prompt(peerId, "city_in_the_sky_complete", "completed",
+                                       "City in the Sky");
+    } else if (stage == kProgressionCuePalaceOfTwilightStage &&
+               flag == kProgressionCuePalaceOfTwilightSavePromptSwitch)
+    {
+        queue_progression_event_prompt(peerId, "palace_of_twilight_complete", "completed",
+                                       "Palace of Twilight");
+    }
+}
+
+// Queues a cue to appear only once the peer's broadcast pose reports they've
+// actually reached expectedStage, instead of the instant the triggering
+// event bit arrives (which can be while the peer is still mid-walkout in the
+// stage they're leaving -- see update_pending_progression_cue_arrivals()).
+void queue_progression_cue_arrival(const std::string& peerId, std::string cueKey, std::string title,
+                                   std::string body, std::string expectedStage) {
+    if (peerId.empty()) {
+        return;
+    }
+
+    if (sProgressionSyncPrompt.active && sProgressionSyncPrompt.peerId == peerId &&
+        sProgressionSyncPrompt.cueKey == cueKey)
+    {
+        return;
+    }
+    if (sPendingProgressionSync.active && sPendingProgressionSync.peerId == peerId &&
+        sPendingProgressionSync.cueKey == cueKey)
+    {
+        return;
+    }
+    for (const auto& pending : sPendingProgressionCueArrivals) {
+        if (pending.active && pending.peerId == peerId && pending.cueKey == cueKey) {
+            return;
+        }
+    }
+
+    DuskLog.info("Multiplayer progression cue awaiting peer readiness peer={} cue={} stage={}",
+                 peerId, cueKey, expectedStage.empty() ? "<any>" : expectedStage);
+    sPendingProgressionCueArrivals.push_back({
+        true,
+        peerId,
+        std::move(cueKey),
+        std::move(title),
+        std::move(body),
+        std::move(expectedStage),
+    });
+}
+
+void queue_progression_cue_ready(const std::string& peerId, std::string cueKey, std::string title,
+                                 std::string body) {
+    queue_progression_cue_arrival(peerId, std::move(cueKey), std::move(title), std::move(body), "");
+}
+
+void update_pending_progression_cue_arrivals() {
+    if (sPendingProgressionCueArrivals.empty()) {
+        return;
+    }
+
+    for (auto it = sPendingProgressionCueArrivals.begin(); it != sPendingProgressionCueArrivals.end();) {
+        const auto poseIt = sSession.peerPoses.find(it->peerId);
+        if (poseIt == sSession.peerPoses.end() || !poseIt->second.valid ||
+            poseIt->second.ageTicks > 30 || !poseIt->second.manualSyncReady ||
+            (!it->expectedStage.empty() && poseIt->second.stage != it->expectedStage))
+        {
+            ++it;
+            continue;
+        }
+
+        DuskLog.info("Multiplayer progression cue peer arrived peer={} cue={} stage={}", it->peerId,
+                     it->cueKey, poseIt->second.stage);
+        show_progression_sync_prompt(it->peerId, it->cueKey, it->title, it->body);
+        it = sPendingProgressionCueArrivals.erase(it);
+    }
+}
+
+void queue_progression_event_prompt(const std::string& peerId, const char* cueKey,
+                                    const char* action, const char* areaName) {
+    queue_progression_cue_ready(peerId, cueKey,
+                                display_name_for_peer(peerId) + " " + action + " " + areaName,
+                                "Hold START to sync and reload");
+}
+
+void maybe_show_progression_sync_prompt_for_pose_stage(const std::string& peerId,
+                                                       const std::string& stage,
+                                                       bool finalGanondorfReady) {
+    if (peerId.empty() ||
+        (stage != kProgressionCueFinalGanondorfStage && !finalGanondorfReady))
+    {
+        return;
+    }
+
+    const std::string cueKey = "final_ganondorf_entered";
+    const std::string guardKey = peerId + ":" + cueKey;
+    if (sShownPoseProgressionCues.find(guardKey) != sShownPoseProgressionCues.end()) {
+        return;
+    }
+
+    sShownPoseProgressionCues.insert(guardKey);
+    queue_progression_cue_ready(peerId, cueKey,
+                                display_name_for_peer(peerId) +
+                                    " reached the final Ganondorf fight",
+                                "Hold START to sync and reload");
+}
+
+void maybe_show_progression_sync_prompt_for_event_bit(const std::string& peerId, uint16_t flag) {
+    if (flag == kProgressionCueSewersCompleteEventBit) {
+        queue_progression_cue_arrival(peerId, "sewers_complete",
+                                      display_name_for_peer(peerId) + " completed Sewers",
+                                      "Hold START to sync and reload",
+                                      kProgressionCueSewersCompleteDestStage);
+    } else if (flag == kProgressionCueFaronTwilightEventBit) {
+        queue_progression_cue_arrival(peerId, "faron_twilight_entered",
+                                      display_name_for_peer(peerId) + " entered Faron Twilight",
+                                      "Hold START to sync and reload",
+                                      kProgressionCueFaronTwilightDestStage);
+    } else {
+        switch (flag) {
+        case 0x0610:
+            queue_progression_event_prompt(peerId, "faron_twilight_complete", "completed",
+                                           "Faron Twilight");
+            break;
+        case 0x0708:
+            queue_progression_event_prompt(peerId, "eldin_twilight_complete", "completed",
+                                           "Eldin Twilight");
+            break;
+        case 0x0C02:
+            queue_progression_event_prompt(peerId, "lanayru_twilight_complete", "completed",
+                                           "Lanayru Twilight");
+            break;
+        case kProgressionCueTempleOfTimeClearEventBit:
+            queue_progression_cue_arrival(peerId, "temple_of_time_complete",
+                                          display_name_for_peer(peerId) +
+                                              " completed Temple of Time",
+                                          "Hold START to sync and reload",
+                                          kProgressionCueTempleOfTimeExitStage);
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+bool is_sewers_progression_switch(int stage, int flag) {
+    if (stage != dStage_SaveTbl_PRISON) {
+        return false;
+    }
+
+    switch (flag) {
+    case 1: // Obj_Wchain stairs sequence.
+    case 2: // Stairs sequence follow-up.
+    case 3: // Sewers progression sequence observed during stair/water test.
+    case 6: // Tag_Mwait sewers progression sequence.
+    case 13: // Sewers progression sequence observed during stair/water test.
+    case 17: // 09:02 broke fragile floor first jump of stairway.
+    case 18: // 09:04 waited long enough in jail.
+    case 19: // 09:08 midna intro cs.
+    case 20: // 09:10 midna cs after digging out of jail.
+    case 21: // 09:20 first water gate in sewers cs.
+    case 22: // 09:40 second water gate in sewers cs.
+    case 24: // 08:01 pulled lever of first water gate in sewers.
+    case 27: // 08:08 wake up in jail cs.
+        return true;
+    default:
+        return false;
+    }
 }
 
 std::string display_area_for_stage(std::string_view stage, int room) {
@@ -1284,6 +1778,7 @@ void reset_connection_state() {
     sPolicyRoomInitializedTicks = 0;
     sPolicyRoomInitialized = false;
     sLocalSwitchActorContext = {};
+    sFlagTraceActorWindowTicks = 0;
     sSession.rxBuffer.clear();
     sSession.reconnectTicks = 0;
     sSession.pingTicks = 0;
@@ -1295,6 +1790,12 @@ void reset_connection_state() {
     clear_player_color_slots();
     sNameLabelsEnabled = true;
     sNotifications.clear();
+    sProgressionSyncPrompt = {};
+    sPendingProgressionSync = {};
+    sPendingProgressionCueArrivals.clear();
+    sPendingSyncReplies.clear();
+    sShownPoseProgressionCues.clear();
+    sAwaitingManualSyncCueKey.clear();
     destroy_all_remote_link_dummies();
 }
 
@@ -1438,6 +1939,78 @@ std::string encode_manual_sync_full_state() {
     return absl::Base64Escape(compressed);
 }
 
+struct ProgressionCueDescriptor {
+    const char* cueKey;
+    // Stage the *replying* peer must actually be in -- checked against their
+    // own live state right before they snapshot+reply to a sync_request, not
+    // just the broadcast pose used to gate showing the prompt -- so the
+    // snapshot reflects reality at the moment it's taken, not whatever was
+    // true a network round-trip earlier.
+    const char* expectedStage;
+    // -1 = don't care, 0 = require human, 1 = require wolf. Lets a future cue
+    // (e.g. entering Eldin/Lanayru twilight, which force-transforms the
+    // player mid-cutscene) hold the reply until the transform has actually
+    // landed, instead of racing it.
+    int8_t requireWolf;
+    const char* warpStage;
+    int8_t warpRoom;
+    int8_t warpLayer;
+    int16_t warpStartPoint;
+};
+
+// Known-good canonical entrances for progression cues that warp a joining
+// player into a new area, used instead of the peer's raw position/layer
+// snapshot. Even after the stage-arrival gate in
+// update_pending_progression_cue_arrivals() passes, the peer's live pose can
+// still carry a layer that hasn't settled yet, which reloads into the wrong
+// layer and replays the wrong cutscene. These exact stage/room/layer/point
+// values are taken from known-working reference save states (gzsaves.json
+// "hugo" -> Ordon Spring, "faron_twilight" -> Faron Woods), which load
+// cleanly with no glitch.
+constexpr ProgressionCueDescriptor kProgressionCueDescriptors[] = {
+    {"sewers_complete", "F_SP104", -1, "F_SP104", 1, -1, 30},
+    {"faron_twilight_entered", "F_SP108", -1, "F_SP108", 0, -1, 0},
+};
+
+const ProgressionCueDescriptor* find_progression_cue_descriptor(const std::string& cueKey) {
+    if (cueKey.empty()) {
+        return nullptr;
+    }
+    for (const auto& descriptor : kProgressionCueDescriptors) {
+        if (cueKey == descriptor.cueKey) {
+            return &descriptor;
+        }
+    }
+    return nullptr;
+}
+
+// -1 = unknown (no player actor / not ALINK), 0 = human, 1 = wolf.
+int8_t local_player_wolf_form() {
+    fopAc_ac_c* player = dComIfGp_getPlayer(0);
+    if (player == nullptr || fopAcM_GetName(player) != fpcNm_ALINK_e) {
+        return -1;
+    }
+    return static_cast<daAlink_c*>(player)->checkWolf() ? 1 : 0;
+}
+
+// Checked on the *replying* side right before it snapshots+sends its save
+// state, so the snapshot reflects this client's own live state at the
+// instant it's captured -- not the broadcast pose the requester gated the
+// prompt on, which can be a few ticks stale by the time the request arrives.
+bool is_local_state_ready_for_cue(const std::string& cueKey) {
+    const ProgressionCueDescriptor* descriptor = find_progression_cue_descriptor(cueKey);
+    if (descriptor == nullptr) {
+        return true;
+    }
+    if (current_stage_name() != std::string_view(descriptor->expectedStage)) {
+        return false;
+    }
+    if (descriptor->requireWolf >= 0 && local_player_wolf_form() != descriptor->requireWolf) {
+        return false;
+    }
+    return true;
+}
+
 bool apply_manual_sync_full_state(const std::string& encoded) {
     std::string decoded;
     if (!absl::Base64Unescape(encoded, &decoded)) {
@@ -1467,6 +2040,21 @@ bool apply_manual_sync_full_state(const std::string& encoded) {
         DuskLog.warn("Multiplayer manual sync full state rejected: empty stage");
         return false;
     }
+
+    const ProgressionCueDescriptor* descriptor =
+        find_progression_cue_descriptor(sAwaitingManualSyncCueKey);
+    if (descriptor != nullptr) {
+        DuskLog.info("Multiplayer manual sync warp override cue={} stage={} room={} layer={} point={}",
+                     sAwaitingManualSyncCueKey, descriptor->warpStage,
+                     static_cast<int>(descriptor->warpRoom), static_cast<int>(descriptor->warpLayer),
+                     static_cast<int>(descriptor->warpStartPoint));
+        std::strncpy(packet.stageName, descriptor->warpStage, sizeof(packet.stageName) - 1);
+        packet.stageName[sizeof(packet.stageName) - 1] = '\0';
+        packet.roomNo = descriptor->warpRoom;
+        packet.layer = descriptor->warpLayer;
+        packet.startPoint = descriptor->warpStartPoint;
+    }
+    sAwaitingManualSyncCueKey.clear();
 
     toggleAutoSave(false);
     const u8 vibration = dComIfGs_getOptVibration();
@@ -1577,10 +2165,14 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
     }
 
     json lightDropCounts = json::array();
+    json lightDropGetFlags = json::array();
     for (int area = 0; area < 4; ++area) {
         const u8 num = dComIfGs_getLightDropNum(static_cast<u8>(area));
         if (num > 0) {
             lightDropCounts.push_back({{"area", area}, {"count", num}});
+        }
+        if (area < 3 && dComIfGs_isLightDropGetFlag(static_cast<u8>(area))) {
+            lightDropGetFlags.push_back(area);
         }
     }
 
@@ -1630,6 +2222,7 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
         {"dungeon_items", dungeonStages},
         {"key_counts", keyCounts},
         {"light_drop_counts", lightDropCounts},
+        {"light_drop_get_flags", lightDropGetFlags},
         {"key_items", keyItems},
         {"crystals", crystals},
         {"mirrors", mirrors},
@@ -1666,6 +2259,54 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
         dungeonStages.size(), keyItems.size(), collectClothing.size(), collectSword.size(),
         collectShield.size(), dComIfGs_getSelectEquipSword(), dComIfGs_getSelectEquipShield(),
         dComIfGs_getSelectEquipClothes());
+}
+
+// Retries deferred sync_request replies (see is_local_state_ready_for_cue())
+// until this client's own live state actually satisfies the cue, or the
+// timeout is hit. Ticked alongside the requester-side gates so both ends of
+// a progression-cue sync agree on "ready" using fresh state, not a stale
+// broadcast pose.
+void update_pending_sync_replies() {
+    if (sPendingSyncReplies.empty()) {
+        return;
+    }
+    if (dComIfGp_getStageStagInfo() == nullptr || dComIfGp_event_runCheck()) {
+        return;
+    }
+
+    for (auto it = sPendingSyncReplies.begin(); it != sPendingSyncReplies.end();) {
+        ++it->waitTicks;
+        const bool ready = is_local_state_ready_for_cue(it->cueKey);
+        const bool timedOut = it->waitTicks >= kPendingSyncReplyTimeoutTicks;
+        if (!ready && !timedOut) {
+            ++it;
+            continue;
+        }
+        if (!ready && timedOut) {
+            DuskLog.warn(
+                "Multiplayer deferred sync reply timed out waiting for local state cue={}, "
+                "replying anyway",
+                it->cueKey);
+        }
+
+        if (it->isDirectPeer) {
+            const auto peerIt = sSession.directPeers.find(it->peerKey);
+            if (peerIt != sSession.directPeers.end()) {
+                send_save_snapshot(&peerIt->second, "", true);
+                DuskLog.info(
+                    "Multiplayer replied to deferred direct manual sync request peer={} cue={}",
+                    it->peerKey, it->cueKey);
+            }
+        } else if (sSession.mode == NetworkMode::RelayHarness && !it->targetClientId.empty()) {
+            send_save_snapshot(nullptr, it->targetClientId, true);
+            DuskLog.info("Multiplayer replied to deferred relay manual sync request peer={} cue={}",
+                         it->targetClientId, it->cueKey);
+        } else {
+            send_save_snapshot(nullptr, "", true);
+            DuskLog.info("Multiplayer replied to deferred manual sync request cue={}", it->cueKey);
+        }
+        it = sPendingSyncReplies.erase(it);
+    }
 }
 
 json direct_peer_list(const std::string& excludePeerId = "") {
@@ -1778,6 +2419,65 @@ int visible_material_shape_index(J3DModel* model, int count, int fallback) {
     return fallback;
 }
 
+struct LocalMidnaVisualState {
+    bool body = false;
+    bool mask = false;
+    bool hand = false;
+    bool hair = false;
+    bool shadowForm = false;
+    bool glow = false;
+};
+
+LocalMidnaVisualState detect_midna_visual_state(daAlink_c* link, bool isWolf) {
+    LocalMidnaVisualState state;
+    if (link == nullptr) {
+        return state;
+    }
+
+    daMidna_c* midna = daPy_py_c::getMidnaActor();
+    if (midna == nullptr) {
+        return state;
+    }
+
+    const bool playerNoDrawSuppressed =
+        !midna->checkStateFlg1(static_cast<daMidna_c::daMidna_FLG1>(
+            daMidna_c::FLG1_SHADOW_MODEL_DRAW_DEMO_FORCE | daMidna_c::FLG1_UNK_1)) &&
+        link->checkPlayerNoDraw() &&
+        !midna->checkStateFlg0(static_cast<daMidna_c::daMidna_FLG0>(
+            daMidna_c::FLG0_TAG_WAIT | daMidna_c::FLG0_UNK_100));
+
+    const bool globallySuppressed = midna->checkStateFlg1(daMidna_c::FLG1_UNK_20) ||
+                                    playerNoDrawSuppressed;
+    if (globallySuppressed) {
+        return state;
+    }
+
+    state.shadowForm = midna->checkShadowModelDraw() && !midna->checkNoDrawState() &&
+                       !midna->checkShadowNoDraw() && midna->getShadowModel() != nullptr;
+    if (state.shadowForm) {
+        state.body = true;
+        state.mask = !midna->checkNoMaskDraw() && midna->getShadowMaskModel() != nullptr;
+        state.hand = midna->getShadowHandModel() != nullptr;
+        state.hair = !midna->checkStateFlg1(daMidna_c::FLG1_UNK_40) &&
+                     midna->getShadowHairHandModel() != nullptr;
+        state.glow = midna->getGokouModel() != nullptr;
+        return state;
+    }
+
+    if (!isWolf || link->getMidnaModel() == nullptr) {
+        return state;
+    }
+
+    state.body = !midna->checkNoDrawState() && !playerNoDrawSuppressed &&
+                 !midna->checkNoDraw() && !midna->checkShadowModelDrawDemoForce();
+    state.mask = state.body && !midna->checkNoMaskDraw() && link->getMidnaMaskModel() != nullptr;
+    state.hand = state.body && link->getMidnaHandModel() != nullptr;
+    state.hair = state.body && link->getMidnaHairHandModel() != nullptr &&
+                 !midna->checkStateFlg1(static_cast<daMidna_c::daMidna_FLG1>(
+                     daMidna_c::FLG1_UNK_40 | daMidna_c::FLG1_UNK_10));
+    return state;
+}
+
 bool add_link_matrices(json& state) {
     // Note: deliberately not gated on dComIfGp_event_runCheck() here, unlike
     // the dummy draw path. This only reads already-built matrices off the
@@ -1821,6 +2521,7 @@ bool add_link_matrices(json& state) {
     }
 
     const bool includeHumanParts = !isWolf;
+    const LocalMidnaVisualState midnaVisual = detect_midna_visual_state(link, isWolf);
     J3DModel* arrowModel = nullptr;
     J3DModel* itemActorModel = nullptr;
     J3DModel* rideActorModel = nullptr;
@@ -1887,20 +2588,49 @@ bool add_link_matrices(json& state) {
         {"kantera_glow", model_matrices_to_json_if(includeHumanParts, link->mpKanteraGlowModel)},
         {"item_actor", model_matrices_to_json_if(includeHumanParts, itemActorModel)},
         {"ride_actor", model_matrices_to_json_if(includeHumanParts, rideActorModel)},
-        {"midna", model_matrices_to_json_if(isWolf, link->getMidnaModel())},
-        {"midna_mask", model_matrices_to_json_if(isWolf, link->getMidnaMaskModel())},
-        {"midna_hand", model_matrices_to_json_if(isWolf, link->getMidnaHandModel())},
-        {"midna_hair", model_matrices_to_json_if(isWolf, link->getMidnaHairHandModel())},
-        {"midna_hair_shape", isWolf ? visible_material_shape_index(link->getMidnaHairHandModel(), 3, 0) : 0},
+        {"midna", model_matrices_to_json_if(
+                      midnaVisual.body,
+                      midnaVisual.shadowForm ? daPy_py_c::getMidnaActor()->getShadowModel()
+                                             : link->getMidnaModel())},
+        {"midna_mask", model_matrices_to_json_if(
+                           midnaVisual.mask,
+                           midnaVisual.shadowForm ? daPy_py_c::getMidnaActor()->getShadowMaskModel()
+                                                  : link->getMidnaMaskModel())},
+        {"midna_hand", model_matrices_to_json_if(
+                           midnaVisual.hand,
+                           midnaVisual.shadowForm ? daPy_py_c::getMidnaActor()->getShadowHandModel()
+                                                  : link->getMidnaHandModel())},
+        {"midna_hair", model_matrices_to_json_if(
+                           midnaVisual.hair,
+                           midnaVisual.shadowForm ? daPy_py_c::getMidnaActor()->getShadowHairHandModel()
+                                                  : link->getMidnaHairHandModel())},
+        {"midna_glow", model_matrices_to_json_if(
+                           midnaVisual.shadowForm && midnaVisual.glow,
+                           daPy_py_c::getMidnaActor() != nullptr
+                               ? daPy_py_c::getMidnaActor()->getGokouModel()
+                               : nullptr)},
+        {"midna_hair_shape",
+         (isWolf || midnaVisual.shadowForm)
+             ? visible_material_shape_index(
+                   midnaVisual.shadowForm && daPy_py_c::getMidnaActor() != nullptr
+                       ? daPy_py_c::getMidnaActor()->getShadowHairHandModel()
+                       : link->getMidnaHairHandModel(),
+                   3, 0)
+             : 0},
     };
 
     state["equip_item"] = static_cast<int>(link->mEquipItem);
     state["sword_variant"] = detect_sword_variant(link);
     state["shield_variant"] = detect_shield_variant();
     state["clothes_variant"] = detect_clothes_variant();
-    state["sword_draw"] = !isWolf && static_cast<bool>(link->checkSwordDraw());
-    state["shield_draw"] = !isWolf && static_cast<bool>(link->checkShieldDraw());
+    state["sword_draw"] = static_cast<bool>(link->checkSwordDraw());
+    state["shield_draw"] = static_cast<bool>(link->checkShieldDraw());
     state["sword_out"] = !isWolf && link->mEquipItem == 0x103;
+    state["midna_draw"] = midnaVisual.body;
+    state["midna_mask_draw"] = midnaVisual.mask;
+    state["midna_hand_draw"] = midnaVisual.hand;
+    state["midna_hair_draw"] = midnaVisual.hair;
+    state["midna_shadow_form"] = midnaVisual.shadowForm;
     state["heavy_boots"] = !isWolf && static_cast<bool>(link->checkEquipHeavyBoots());
     state["item_draw"] = !isWolf && static_cast<bool>(link->checkItemDraw());
     state["kantera_draw"] =
@@ -2003,6 +2733,7 @@ RemoteLinkMatrixSnapshot parse_link_matrices(const json& state) {
     snapshot.midnaMask = parse_model_matrices(it->value("midna_mask", json::object()));
     snapshot.midnaHand = parse_model_matrices(it->value("midna_hand", json::object()));
     snapshot.midnaHair = parse_model_matrices(it->value("midna_hair", json::object()));
+    snapshot.midnaGlow = parse_model_matrices(it->value("midna_glow", json::object()));
     snapshot.midnaHairShape = it->value("midna_hair_shape", 0);
     if (snapshot.midnaHairShape < 0 || snapshot.midnaHairShape > 2) {
         snapshot.midnaHairShape = 0;
@@ -2230,6 +2961,14 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                 }
             }
         }
+        for (const json& entry : message.value("light_drop_get_flags", json::array())) {
+            const int area = entry.get<int>();
+            if (area >= 0 && area < 3) {
+                dComIfGs_onLightDropGetFlag(static_cast<u8>(area));
+                dMeter2Info_setLightDropGetFlag(area, 0xFF);
+                DuskLog.info("Multiplayer snapshot light drop get flag area={}", area);
+            }
+        }
         for (const json& idEntry : message.value("key_items", json::array())) {
             const int itemId = idEntry.get<int>();
             if (is_synced_key_item(itemId) && !dComIfGs_isItemFirstBit(static_cast<u8>(itemId))) {
@@ -2300,17 +3039,35 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
     } else if (type == "sync_request") {
         if (dComIfGp_getStageStagInfo() == nullptr || dComIfGp_event_runCheck()) {
             DuskLog.warn("Multiplayer manual sync request ignored while stage/event is not ready");
-        } else if (sender != nullptr) {
-            send_save_snapshot(sender, "", true);
-            DuskLog.info("Multiplayer replied to direct manual sync request peer={}", sender->id);
         } else {
-            const std::string requesterId = routedMessage.value("client_id", "");
-            if (sSession.mode == NetworkMode::RelayHarness && !requesterId.empty()) {
-                send_save_snapshot(nullptr, requesterId, true);
-                DuskLog.info("Multiplayer replied to relay manual sync request peer={}", requesterId);
+            const std::string cueKey = routedMessage.value("cue_key", "");
+            if (!is_local_state_ready_for_cue(cueKey)) {
+                DuskLog.info(
+                    "Multiplayer manual sync request deferred cue={} (local state not ready yet)",
+                    cueKey);
+                PendingSyncReply pending;
+                pending.active = true;
+                pending.cueKey = cueKey;
+                if (sender != nullptr) {
+                    pending.isDirectPeer = true;
+                    pending.peerKey = sender->id;
+                } else {
+                    pending.targetClientId = routedMessage.value("client_id", "");
+                }
+                sPendingSyncReplies.push_back(std::move(pending));
+            } else if (sender != nullptr) {
+                send_save_snapshot(sender, "", true);
+                DuskLog.info("Multiplayer replied to direct manual sync request peer={}", sender->id);
             } else {
-                send_save_snapshot(nullptr, "", true);
-                DuskLog.info("Multiplayer replied to manual sync request");
+                const std::string requesterId = routedMessage.value("client_id", "");
+                if (sSession.mode == NetworkMode::RelayHarness && !requesterId.empty()) {
+                    send_save_snapshot(nullptr, requesterId, true);
+                    DuskLog.info("Multiplayer replied to relay manual sync request peer={}",
+                                 requesterId);
+                } else {
+                    send_save_snapshot(nullptr, "", true);
+                    DuskLog.info("Multiplayer replied to manual sync request");
+                }
             }
         }
     } else if (type == "pose") {
@@ -2342,6 +3099,7 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         pose.procVar2 = state.value("proc_v2", 0);
         pose.procVar3 = state.value("proc_v3", 0);
         pose.procVar5 = state.value("proc_v5", 0);
+        pose.manualSyncReady = state.value("manual_sync_ready", false);
         pose.underFrame = state.value("under_frame", 0.0f);
         pose.underBck0 = state.value("under_bck0", 0);
         pose.underFrame0 = state.value("under_frame0", pose.underFrame);
@@ -2367,6 +3125,11 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         pose.swordDraw = state.value("sword_draw", false);
         pose.shieldDraw = state.value("shield_draw", false);
         pose.swordOut = state.value("sword_out", false);
+        pose.midnaDraw = state.value("midna_draw", false);
+        pose.midnaMaskDraw = state.value("midna_mask_draw", false);
+        pose.midnaHandDraw = state.value("midna_hand_draw", false);
+        pose.midnaHairDraw = state.value("midna_hair_draw", false);
+        pose.midnaShadowForm = state.value("midna_shadow_form", false);
         pose.heavyBoots = state.value("heavy_boots", false);
         pose.itemDraw = state.value("item_draw", false);
         pose.kanteraDraw = state.value("kantera_draw", false);
@@ -2374,6 +3137,26 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         pose.rideActorKind = state.value("ride_actor_kind", REMOTE_RIDE_ACTOR_NONE);
         pose.linkMatrices = parse_link_matrices(state);
         pose.audioEvents = parse_audio_events(state);
+        if (sDummyTraceEnabled) {
+            const bool hadExisting = existing != sSession.peerPoses.end() && existing->second.valid;
+            const uint32_t previousSequence = hadExisting ? existing->second.sequence : 0;
+            const uint32_t sequenceDelta = hadExisting ? sequence - previousSequence : 0;
+            const f32 previousUnderFrame0 = hadExisting ? existing->second.underFrame0 : pose.underFrame0;
+            const f32 previousUpperFrame2 = hadExisting ? existing->second.upperFrame2 : pose.upperFrame2;
+            static uint32_t sDummyTraceRxCount = 0;
+            const bool logGap = hadExisting && sequenceDelta > 1;
+            if (logGap || (sDummyTraceRxCount++ % 30) == 0) {
+                DuskLog.info(
+                    "Multiplayer dummy trace rx peer={} seq={} seq_delta={} prev_age={} "
+                    "stage={} room={} matrix={} proc={} under_bck={} under_frame={} "
+                    "under_delta={} upper_bck={} upper_frame={} upper_delta={}",
+                    peerId, pose.sequence, sequenceDelta,
+                    hadExisting ? existing->second.ageTicks : 0, pose.stage, pose.room,
+                    pose.linkMatrices.valid, pose.procId, pose.underBck0, pose.underFrame0,
+                    pose.underFrame0 - previousUnderFrame0, pose.upperBck2, pose.upperFrame2,
+                    pose.upperFrame2 - previousUpperFrame2);
+            }
+        }
         const bool wasTransforming =
             existing != sSession.peerPoses.end() && existing->second.valid &&
             existing->second.isTransforming;
@@ -2400,12 +3183,22 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                          peerId, pose.isWolf ? "wolf" : "human", pose.stage, pose.room, pose.x,
                          pose.y, pose.z);
         }
+        maybe_show_progression_sync_prompt_for_pose_stage(
+            peerId, pose.stage, state.value("final_ganondorf_ready", false));
     } else if (type == "event_bit") {
         const uint16_t flag = routedMessage.value("flag", 0U);
+        const bool set = routedMessage.value("set", true);
+        if (set) {
+            maybe_show_progression_sync_prompt_for_event_bit(resolve_peer_id(routedMessage), flag);
+        }
         sApplyingRemoteSaveBit = true;
-        dComIfGs_onEventBit(flag);
+        if (set) {
+            dComIfGs_onEventBit(flag);
+        } else {
+            dComIfGs_offEventBit(flag);
+        }
         sApplyingRemoteSaveBit = false;
-        DuskLog.info("Multiplayer applied remote event bit flag={}", flag);
+        DuskLog.info("Multiplayer applied remote event bit flag={} set={}", flag, set);
     } else if (type == "tbox_bit") {
         const int stage = routedMessage.value("stage", -1);
         const int flag = routedMessage.value("flag", -1);
@@ -2463,6 +3256,15 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             sApplyingRemoteSaveBit = false;
             DuskLog.info("Multiplayer applied remote light drop num area={} count={}", area, count);
         }
+    } else if (type == "light_drop_get_flag") {
+        const int area = message.value("area", -1);
+        if (area >= 0 && area < 3) {
+            sApplyingRemoteSaveBit = true;
+            dComIfGs_onLightDropGetFlag(static_cast<u8>(area));
+            dMeter2Info_setLightDropGetFlag(area, 0xFF);
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote light drop get flag area={}", area);
+        }
     } else if (type == "max_life_update") {
         // Monotonic max-merge, not last-write-wins: max life should never
         // decrease from a remote update, so only raise it, never lower it.
@@ -2493,9 +3295,28 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         const int stage = message.value("stage", -1);
         const int flag = message.value("flag", -1);
         const int sourceActor = message.value("source_actor", -1);
+        const int sourceRoom = message.value("source_room", -128);
+        const uint32_t sourceParams = message.value("source_params", 0xFFFFFFFFU);
+        const bool set = message.value("set", true);
         if (stage >= 0 && flag >= 0) {
+            begin_flag_trace_window("remote_rx", "switch", stage, flag, set, sourceActor,
+                                    sourceRoom, sourceParams);
+            if (stage == kProgressionCueSewersStage && (flag == 10 || flag == 17)) {
+                DuskLog.info("Multiplayer received sewers box/progression switch flag={} set={} "
+                             "sourceActor={} sourceRoom={} "
+                             "sourceParams=0x{:08X}",
+                             flag, set, sourceActor, sourceRoom, sourceParams);
+            }
+            if (set) {
+                maybe_show_progression_sync_prompt_for_switch(resolve_peer_id(routedMessage), stage,
+                                                              flag);
+            }
             if (!suppress_remote_switch_from_source_actor(stage, flag, sourceActor)) {
-                apply_remote_switch_bit(stage, flag);
+                if (set) {
+                    apply_remote_switch_bit(stage, flag);
+                } else {
+                    apply_remote_switch_bit_off(stage, flag);
+                }
             }
         }
     } else if (type == "item_bit") {
@@ -2915,10 +3736,14 @@ void send_pose() {
                      audioEvents.front().soundId);
     }
 
+    const LocalMidnaVisualState midnaVisual = detect_midna_visual_state(link, isWolf);
     json state = {
         {"stage", dComIfGp_getStartStageName()},
         {"room", static_cast<int>(fopAcM_GetRoomNo(player))},
         {"layer", static_cast<int>(dComIfGp_getStartStageLayer())},
+        {"final_ganondorf_ready",
+         std::strcmp(dComIfGp_getStartStageName(), "D_MN09B") == 0 &&
+             dComIfGs_isSaveDunSwitch(1)},
         {"x", player->current.pos.x},
         {"y", player->current.pos.y},
         {"z", player->current.pos.z},
@@ -2929,6 +3754,7 @@ void send_pose() {
         {"proc_v2", link != nullptr ? link->mProcVar2.field_0x300c : 0},
         {"proc_v3", link != nullptr ? link->mProcVar3.field_0x300e : 0},
         {"proc_v5", link != nullptr ? link->mProcVar5.field_0x3012 : 0},
+        {"manual_sync_ready", !is_stage_load_unsafe_for_multiplayer()},
         {"under_frame", link != nullptr ? link->mUnderFrameCtrl[0].getFrame() : 0.0f},
         {"under_bck0", link != nullptr ? static_cast<int>(link->mUnderAnmHeap[0].getIdx()) : 0},
         {"under_frame0", link != nullptr ? link->mUnderFrameCtrl[0].getFrame() : 0.0f},
@@ -2951,9 +3777,14 @@ void send_pose() {
         {"sword_variant", detect_sword_variant(link)},
         {"shield_variant", detect_shield_variant()},
         {"clothes_variant", detect_clothes_variant()},
-        {"sword_draw", link != nullptr && !isWolf && static_cast<bool>(link->checkSwordDraw())},
-        {"shield_draw", link != nullptr && !isWolf && static_cast<bool>(link->checkShieldDraw())},
+        {"sword_draw", link != nullptr && static_cast<bool>(link->checkSwordDraw())},
+        {"shield_draw", link != nullptr && static_cast<bool>(link->checkShieldDraw())},
         {"sword_out", link != nullptr && !isWolf && link->mEquipItem == 0x103},
+        {"midna_draw", midnaVisual.body},
+        {"midna_mask_draw", midnaVisual.mask},
+        {"midna_hand_draw", midnaVisual.hand},
+        {"midna_hair_draw", midnaVisual.hair},
+        {"midna_shadow_form", midnaVisual.shadowForm},
         {"heavy_boots",
          link != nullptr && !isWolf && static_cast<bool>(link->checkEquipHeavyBoots())},
         {"item_draw", link != nullptr && !isWolf && static_cast<bool>(link->checkItemDraw())},
@@ -2967,14 +3798,38 @@ void send_pose() {
     };
     if (!isTransforming && isLink && (sDummyModelEnabled || isWolf) && !add_link_matrices(state)) {
         static uint32_t sMatrixPoseDropLogCount = 0;
-        if (sMatrixPoseDropLogCount < 20) {
-            ++sMatrixPoseDropLogCount;
-            DuskLog.info(
-                "Multiplayer transform debug tx_pose_dropped matrix_capture_failed seq_next={} "
-                "is_wolf={} proc={}",
-                sSession.poseSequence + 1, isWolf, link != nullptr ? link->mProcID : 0);
+        ++sMatrixPoseDropLogCount;
+        if (sMatrixPoseDropLogCount < 20 ||
+            (sDummyTraceEnabled && (sMatrixPoseDropLogCount % 15) == 0))
+        {
+            if (sDummyTraceEnabled) {
+                DuskLog.info(
+                    "Multiplayer dummy trace tx_drop reason=matrix_capture_failed seq_next={} "
+                    "drop_count={} is_wolf={} proc={} clothes_wait={} stage={} room={}",
+                    sSession.poseSequence + 1, sMatrixPoseDropLogCount, isWolf,
+                    link != nullptr ? link->mProcID : 0,
+                    link != nullptr ? static_cast<int>(link->mClothesChangeWaitTimer) : 0,
+                    dComIfGp_getStartStageName(), static_cast<int>(fopAcM_GetRoomNo(player)));
+            } else {
+                DuskLog.info(
+                    "Multiplayer transform debug tx_pose_dropped matrix_capture_failed seq_next={} "
+                    "is_wolf={} proc={}",
+                    sSession.poseSequence + 1, isWolf, link != nullptr ? link->mProcID : 0);
+            }
         }
         return;
+    }
+
+    if (sDummyTraceEnabled && (sSession.poseSequence % 30) == 0) {
+        DuskLog.info(
+            "Multiplayer dummy trace tx seq_next={} stage={} room={} matrix={} proc={} "
+            "under_bck={} under_frame={} under_rate={} upper_bck={} upper_frame={} upper_rate={}",
+            sSession.poseSequence + 1, dComIfGp_getStartStageName(),
+            static_cast<int>(fopAcM_GetRoomNo(player)), state.contains("link_matrices"),
+            link != nullptr ? link->mProcID : 0, state.value("under_bck0", 0),
+            state.value("under_frame0", 0.0f), state.value("under_rate0", 1.0f),
+            state.value("upper_bck2", 0), state.value("upper_frame2", 0.0f),
+            state.value("upper_rate2", 1.0f));
     }
 
     send_json({
@@ -3100,6 +3955,10 @@ void update_connected() {
         return;
     }
 
+    update_pending_progression_cue_arrivals();
+    flush_pending_progression_sync();
+    update_pending_sync_replies();
+
     if (!is_stage_load_unsafe_for_multiplayer()) {
         if (sSession.snapshotPending) {
             // The network handshake can complete within milliseconds, well
@@ -3170,6 +4029,7 @@ bool configure_session() {
     sSession.port = env_int("DUSK_MP_PORT", 34197);
     sSession.debugMarker = env_enabled("DUSK_MP_DEBUG_MARKER");
     sDummyModelEnabled = env_enabled("DUSK_MP_DUMMY_MODEL");
+    sDummyTraceEnabled = !env_disabled("DUSK_MP_DUMMY_TRACE");
     sNameLabelsEnabled = !env_enabled("DUSK_MP_HIDE_NAME_LABELS");
     sLayerRiskSyncEnabled = env_enabled("DUSK_MP_LAYER_SYNC");
     sSession.sessionId = make_session_token(9);
@@ -3291,17 +4151,14 @@ void update() {
         return;
     }
 
-    const bool dummyGameplayReady = is_peer_dummy_gameplay_ready();
+    if (sFlagTraceActorWindowTicks > 0) {
+        --sFlagTraceActorWindowTicks;
+    }
+
     for (auto& entry : sSession.peerPoses) {
         if (entry.second.valid) {
             ++entry.second.ageTicks;
         }
-    }
-
-    if (sDummyModelEnabled && dummyGameplayReady) {
-        sync_remote_link_actor_dummies(sSession.peerPoses);
-    } else {
-        destroy_all_remote_link_dummies();
     }
 
     if (sSession.state == ConnectionState::Disconnected) {
@@ -3318,6 +4175,15 @@ void update() {
         update_connecting();
     } else {
         update_connected();
+    }
+
+    const bool dummyGameplayReady = is_peer_dummy_gameplay_ready();
+    if (sDummyModelEnabled && dummyGameplayReady) {
+        // Pump receives before applying remote visuals so poses that arrived
+        // this tick do not wait an extra frame and create repeat/gap cadence.
+        sync_remote_link_actor_dummies(sSession.peerPoses);
+    } else {
+        destroy_all_remote_link_dummies();
     }
 
     // Remote visuals are drawn from the frame hook after Link has calculated
@@ -3344,6 +4210,31 @@ void shutdown() {
 
 bool is_enabled() {
     return sEnabled;
+}
+
+void notify_actor_create_request(int actorName, uint32_t actorParams, int room, float x, float y,
+                                 float z) {
+    if (!is_flag_trace_actor_window_active()) {
+        return;
+    }
+
+    DuskLog.info(
+        "MP_FLAG_TRACE actor create_request actor={} params=0x{:08X} room={} pos=({}, {}, {}) "
+        "currentStage={} currentRoom={} ticksLeft={}",
+        actorName, actorParams, room, x, y, z, current_stage_name(), dComIfGp_roomControl_getStayNo(),
+        sFlagTraceActorWindowTicks);
+}
+
+void notify_actor_delete(int actorName, uint32_t actorParams, int room, float x, float y, float z) {
+    if (!is_flag_trace_actor_window_active()) {
+        return;
+    }
+
+    DuskLog.info(
+        "MP_FLAG_TRACE actor delete actor={} params=0x{:08X} room={} pos=({}, {}, {}) "
+        "currentStage={} currentRoom={} ticksLeft={}",
+        actorName, actorParams, room, x, y, z, current_stage_name(), dComIfGp_roomControl_getStayNo(),
+        sFlagTraceActorWindowTicks);
 }
 
 bool was_switch_recently_remote_set(int stage, int flag, uint32_t* ageTicks) {
@@ -3538,6 +4429,9 @@ bool request_manual_sync(const std::string& peerId, std::string* errorOut) {
         {"type", "sync_request"},
         {"target_client_id", peerId},
     };
+    if (!sAwaitingManualSyncCueKey.empty()) {
+        request["cue_key"] = sAwaitingManualSyncCueKey;
+    }
 
     if (sSession.mode == NetworkMode::DirectHost) {
         auto peerIt = sSession.directPeers.find(peerId);
@@ -3777,10 +4671,240 @@ void draw_debug_peer_marker() {
     }
 }
 
+bool request_progression_sync_now(const std::string& peerId, const std::string& peerName) {
+    std::string error;
+    if (request_manual_sync(peerId, &error)) {
+        push_notification("Sync requested from " + peerName);
+        DuskLog.info("Multiplayer progression sync requested peer={}", peerId);
+        return true;
+    }
+
+    push_notification(error.empty() ? "Sync request failed" : error, 6.0f);
+    DuskLog.warn("Multiplayer progression sync request failed peer={} error={}", peerId, error);
+    return false;
+}
+
+void queue_progression_sync_after_event(const ProgressionSyncPrompt& prompt) {
+    sPendingProgressionSync = {
+        true,
+        prompt.peerId,
+        prompt.peerName,
+        prompt.cueKey,
+        0,
+    };
+    push_notification("Sync queued until cutscene ends", 4.0f);
+    DuskLog.info("Multiplayer progression sync queued during event peer={} cue={}", prompt.peerId,
+                 prompt.cueKey);
+}
+
+void queue_progression_sync_for_peer(const ProgressionSyncPrompt& prompt) {
+    sPendingProgressionSync = {
+        true,
+        prompt.peerId,
+        prompt.peerName,
+        prompt.cueKey,
+        0,
+    };
+    DuskLog.info("Multiplayer progression sync queued for peer readiness peer={} cue={}",
+                 prompt.peerId, prompt.cueKey);
+}
+
+void flush_pending_progression_sync() {
+    if (!sPendingProgressionSync.active || is_stage_load_unsafe_for_multiplayer()) {
+        if (sPendingProgressionSync.active) {
+            sPendingProgressionSync.stableReadyTicks = 0;
+        }
+        return;
+    }
+
+    const auto poseIt = sSession.peerPoses.find(sPendingProgressionSync.peerId);
+    if (poseIt == sSession.peerPoses.end() || !poseIt->second.valid ||
+        poseIt->second.ageTicks > 30 || !poseIt->second.manualSyncReady)
+    {
+        sPendingProgressionSync.stableReadyTicks = 0;
+        static uint32_t sProgressionWaitLogTicks = 0;
+        if ((sProgressionWaitLogTicks++ % 60) == 0) {
+            DuskLog.info(
+                "Multiplayer progression sync waiting for peer readiness peer={} cue={} "
+                "has_pose={} valid={} age={} ready={}",
+                sPendingProgressionSync.peerId, sPendingProgressionSync.cueKey,
+                poseIt != sSession.peerPoses.end(),
+                poseIt != sSession.peerPoses.end() ? poseIt->second.valid : false,
+                poseIt != sSession.peerPoses.end() ? poseIt->second.ageTicks : 0xFFFFFFFF,
+                poseIt != sSession.peerPoses.end() ? poseIt->second.manualSyncReady : false);
+        }
+        return;
+    }
+
+    if (++sPendingProgressionSync.stableReadyTicks < kProgressionSyncStableReadyTicks) {
+        static uint32_t sProgressionStableLogTicks = 0;
+        if ((sProgressionStableLogTicks++ % 60) == 0) {
+            DuskLog.info("Multiplayer progression sync waiting for stable ready peer={} cue={} "
+                         "ticks={}/{}",
+                         sPendingProgressionSync.peerId, sPendingProgressionSync.cueKey,
+                         sPendingProgressionSync.stableReadyTicks,
+                         kProgressionSyncStableReadyTicks);
+        }
+        return;
+    }
+
+    const PendingProgressionSync pending = sPendingProgressionSync;
+    sPendingProgressionSync = {};
+    DuskLog.info("Multiplayer progression sync pending flush peer={} cue={}", pending.peerId,
+                 pending.cueKey);
+    sAwaitingManualSyncCueKey = pending.cueKey;
+    request_progression_sync_now(pending.peerId, pending.peerName);
+    if (sProgressionSyncPrompt.active && sProgressionSyncPrompt.waiting &&
+        sProgressionSyncPrompt.peerId == pending.peerId &&
+        sProgressionSyncPrompt.cueKey == pending.cueKey)
+    {
+        sProgressionSyncPrompt = {};
+    }
+}
+
+void consume_progression_prompt_start_button() {
+    sProgressionPromptExactStartHeld = false;
+    if (!sProgressionSyncPrompt.active) {
+        return;
+    }
+
+    interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
+    sProgressionPromptExactStartHeld = (pad.mButtonFlags & PAD_BUTTON_START) != 0;
+    pad.mButtonFlags &= ~PAD_BUTTON_START;
+    pad.mPressedButtonFlags &= ~PAD_BUTTON_START;
+}
+
+void draw_progression_sync_prompt() {
+    if (!sProgressionSyncPrompt.active) {
+        return;
+    }
+
+    const float dt = ImGui::GetIO().DeltaTime;
+    if (sProgressionSyncPrompt.waiting) {
+        sProgressionSyncPrompt.ageSeconds += dt;
+    }
+    const bool eventRunning = dComIfGp_event_runCheck();
+    if (!eventRunning && !sProgressionSyncPrompt.waiting) {
+        sProgressionSyncPrompt.ageSeconds += dt;
+    }
+
+    if (!sProgressionSyncPrompt.waiting && sProgressionPromptExactStartHeld) {
+        sProgressionSyncPrompt.holdSeconds =
+            std::min(kProgressionSyncHoldDuration, sProgressionSyncPrompt.holdSeconds + dt);
+    } else if (!sProgressionSyncPrompt.waiting) {
+        sProgressionSyncPrompt.holdSeconds = 0.0f;
+    }
+
+    if (!sProgressionSyncPrompt.waiting &&
+        sProgressionSyncPrompt.holdSeconds >= kProgressionSyncHoldDuration)
+    {
+        if (eventRunning) {
+            queue_progression_sync_after_event(sProgressionSyncPrompt);
+        } else {
+            queue_progression_sync_for_peer(sProgressionSyncPrompt);
+        }
+        sProgressionSyncPrompt.title = "Waiting for sync...";
+        sProgressionSyncPrompt.body = "Waiting for peer to be ready";
+        sProgressionSyncPrompt.ageSeconds = 0.0f;
+        sProgressionSyncPrompt.holdSeconds = 0.0f;
+        sProgressionSyncPrompt.waiting = true;
+        return;
+    }
+
+    if (!sProgressionSyncPrompt.waiting && !eventRunning &&
+        sProgressionSyncPrompt.ageSeconds >= kProgressionSyncPromptDuration)
+    {
+        DuskLog.info("Multiplayer progression sync prompt expired peer={} cue={}",
+                     sProgressionSyncPrompt.peerId, sProgressionSyncPrompt.cueKey);
+        sProgressionSyncPrompt = {};
+        return;
+    }
+
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImVec2 workPos = viewport != nullptr ? viewport->WorkPos : ImVec2(0.0f, 0.0f);
+    const ImVec2 workSize = viewport != nullptr ? viewport->WorkSize : ImVec2(1280.0f, 720.0f);
+    const ImVec2 windowSize(360.0f, 112.0f);
+    ImGui::SetNextWindowPos(ImVec2(workPos.x + workSize.x - windowSize.x - 24.0f,
+                                   workPos.y + 72.0f),
+                            ImGuiCond_Always);
+    ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.86f);
+
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration |
+        ImGuiWindowFlags_NoFocusOnAppearing |
+        ImGuiWindowFlags_NoNav |
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoInputs;
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 6.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14.0f, 12.0f));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.04f, 0.05f, 0.06f, 0.86f));
+    if (ImGui::Begin("Multiplayer Progression Sync", nullptr, flags)) {
+        const float remaining =
+            std::max(0.0f, kProgressionSyncPromptDuration - sProgressionSyncPrompt.ageSeconds);
+        const float holdRatio = sProgressionSyncPrompt.holdSeconds / kProgressionSyncHoldDuration;
+        const float countdownRatio = remaining / kProgressionSyncPromptDuration;
+        const bool waiting = sProgressionSyncPrompt.waiting;
+
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        const ImVec2 pos = ImGui::GetWindowPos();
+        const ImVec2 size = ImGui::GetWindowSize();
+        drawList->AddRect(pos, ImVec2(pos.x + size.x, pos.y + size.y), IM_COL32(245, 193, 51, 230),
+                          6.0f, 0, 2.0f);
+
+        ImGui::PushTextWrapPos(pos.x + 276.0f);
+        ImGui::TextUnformatted(sProgressionSyncPrompt.title.c_str());
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.78f, 0.85f, 0.92f, 1.0f));
+        ImGui::TextUnformatted(sProgressionSyncPrompt.body.c_str());
+        if (waiting) {
+            ImGui::TextUnformatted("Please wait");
+        } else {
+            ImGui::Text("%.0fs", std::ceil(remaining));
+        }
+        ImGui::PopStyleColor();
+        ImGui::PopTextWrapPos();
+
+        const ImVec2 ringCenter(pos.x + size.x - 46.0f, pos.y + size.y * 0.5f);
+        constexpr float kPi = 3.14159265358979323846f;
+        const float ringRadius = 20.0f;
+        drawList->AddCircle(ringCenter, ringRadius, IM_COL32(255, 255, 255, 70), 48, 3.0f);
+        drawList->AddCircle(ringCenter, ringRadius - 7.0f, IM_COL32(255, 255, 255, 45), 48, 2.0f);
+        if (waiting) {
+            const float t = std::fmod(sProgressionSyncPrompt.ageSeconds * 1.1f, 1.0f);
+            drawList->PathArcTo(ringCenter, ringRadius, -0.5f * kPi + 2.0f * kPi * t,
+                                -0.5f * kPi + 2.0f * kPi * (t + 0.72f), 48);
+            drawList->PathStroke(IM_COL32(255, 176, 38, 255), 0, 5.0f);
+        } else if (holdRatio > 0.0f) {
+            drawList->PathArcTo(ringCenter, ringRadius, -0.5f * kPi,
+                                -0.5f * kPi + 2.0f * kPi * holdRatio, 48);
+            drawList->PathStroke(IM_COL32(255, 176, 38, 255), 0, 5.0f);
+        }
+        drawList->AddText(ImVec2(ringCenter.x - (waiting ? 5.0f : 4.0f), ringCenter.y - 8.0f),
+                          IM_COL32(255, 255, 255, 245), waiting ? "..." : "S");
+
+        if (!waiting) {
+            const ImVec2 barMin(pos.x, pos.y + size.y - 3.0f);
+            drawList->AddRectFilled(barMin,
+                                    ImVec2(pos.x + size.x * countdownRatio, pos.y + size.y),
+                                    IM_COL32(255, 176, 38, 210), 0.0f);
+        }
+    }
+    ImGui::End();
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(2);
+}
+
 void draw_notifications_overlay() {
     draw_peer_name_labels();
 
-    if (!sEnabled || sNotifications.empty()) {
+    if (!sEnabled) {
+        return;
+    }
+
+    draw_progression_sync_prompt();
+
+    if (sNotifications.empty()) {
         return;
     }
 
@@ -3831,8 +4955,22 @@ void notify_local_event_bit_set(uint16_t flag) {
     send_json({
         {"type", "event_bit"},
         {"flag", flag},
+        {"set", true},
     });
     DuskLog.info("Multiplayer sent local event bit flag={}", flag);
+}
+
+void notify_local_event_bit_cleared(uint16_t flag) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    send_json({
+        {"type", "event_bit"},
+        {"flag", flag},
+        {"set", false},
+    });
+    DuskLog.info("Multiplayer sent local event bit cleared flag={}", flag);
 }
 
 void notify_local_tbox_set(int flag) {
@@ -3904,41 +5042,119 @@ void notify_local_memory_switch_set(int flag) {
         sLocalSwitchActorContext.flag == flag;
 
     if (hasActorContext && is_group2_lifecycle_actor(sLocalSwitchActorContext.actorName)) {
-        DuskLog.info("Multiplayer suppressed local switch bit stage={} flag={} sourceActor={} "
-                     "sourceRoom={} reason={}",
-                     stageNo, flag, sLocalSwitchActorContext.actorName,
-                     sLocalSwitchActorContext.room,
-                     group2_lifecycle_actor_reason(sLocalSwitchActorContext.actorName));
-        return;
+        if (is_sewers_progression_switch(stageNo, flag)) {
+            DuskLog.info("Multiplayer allowed sewers progression switch stage={} flag={} "
+                         "sourceActor={} sourceRoom={} reason={}",
+                         stageNo, flag, sLocalSwitchActorContext.actorName,
+                         sLocalSwitchActorContext.room,
+                         group2_lifecycle_actor_reason(sLocalSwitchActorContext.actorName));
+        } else {
+            DuskLog.info("Multiplayer suppressed local switch bit stage={} flag={} sourceActor={} "
+                         "sourceRoom={} reason={}",
+                         stageNo, flag, sLocalSwitchActorContext.actorName,
+                         sLocalSwitchActorContext.room,
+                         group2_lifecycle_actor_reason(sLocalSwitchActorContext.actorName));
+            return;
+        }
     }
+
+    begin_flag_trace_window("local_send", "switch", stageNo, flag, true,
+                            hasActorContext ? sLocalSwitchActorContext.actorName : -1,
+                            hasActorContext ? sLocalSwitchActorContext.room : -128,
+                            hasActorContext ? sLocalSwitchActorContext.actorParams : 0xFFFFFFFF);
 
     json message = {
         {"type", "switch_bit"},
         {"stage", stageNo},
         {"flag", flag},
+        {"set", true},
     };
 
     if (hasActorContext) {
         message["source_actor"] = sLocalSwitchActorContext.actorName;
         message["source_room"] = sLocalSwitchActorContext.room;
+        message["source_params"] = sLocalSwitchActorContext.actorParams;
     }
 
     send_json(message);
     if (hasActorContext) {
-        DuskLog.info("Multiplayer sent local switch bit stage={} flag={} sourceActor={} sourceRoom={}",
+        DuskLog.info("Multiplayer sent local switch bit stage={} flag={} sourceActor={} "
+                     "sourceRoom={} sourceParams=0x{:08X}",
                      stageNo, flag, sLocalSwitchActorContext.actorName,
-                     sLocalSwitchActorContext.room);
+                     sLocalSwitchActorContext.room, sLocalSwitchActorContext.actorParams);
     } else {
         DuskLog.info("Multiplayer sent local switch bit stage={} flag={}", stageNo, flag);
     }
 }
 
-void begin_local_switch_actor_context(int actorName, int room, int flag) {
+void notify_local_memory_switch_cleared(int flag) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+    if (stagInfo == nullptr) {
+        return;
+    }
+
+    const int stageNo = dStage_stagInfo_GetSaveTbl(stagInfo);
+    const bool hasActorContext = sLocalSwitchActorContext.active &&
+        sLocalSwitchActorContext.flag == flag;
+
+    if (hasActorContext && is_group2_lifecycle_actor(sLocalSwitchActorContext.actorName)) {
+        if (is_sewers_progression_switch(stageNo, flag)) {
+            DuskLog.info("Multiplayer allowed sewers progression switch clear stage={} flag={} "
+                         "sourceActor={} sourceRoom={} reason={}",
+                         stageNo, flag, sLocalSwitchActorContext.actorName,
+                         sLocalSwitchActorContext.room,
+                         group2_lifecycle_actor_reason(sLocalSwitchActorContext.actorName));
+        } else {
+            DuskLog.info("Multiplayer suppressed local switch bit clear stage={} flag={} "
+                         "sourceActor={} sourceRoom={} reason={}",
+                         stageNo, flag, sLocalSwitchActorContext.actorName,
+                         sLocalSwitchActorContext.room,
+                         group2_lifecycle_actor_reason(sLocalSwitchActorContext.actorName));
+            return;
+        }
+    }
+
+    begin_flag_trace_window("local_send", "switch", stageNo, flag, false,
+                            hasActorContext ? sLocalSwitchActorContext.actorName : -1,
+                            hasActorContext ? sLocalSwitchActorContext.room : -128,
+                            hasActorContext ? sLocalSwitchActorContext.actorParams : 0xFFFFFFFF);
+
+    json message = {
+        {"type", "switch_bit"},
+        {"stage", stageNo},
+        {"flag", flag},
+        {"set", false},
+    };
+
+    if (hasActorContext) {
+        message["source_actor"] = sLocalSwitchActorContext.actorName;
+        message["source_room"] = sLocalSwitchActorContext.room;
+        message["source_params"] = sLocalSwitchActorContext.actorParams;
+    }
+
+    send_json(message);
+    if (hasActorContext) {
+        DuskLog.info(
+            "Multiplayer sent local switch bit cleared stage={} flag={} sourceActor={} "
+            "sourceRoom={} sourceParams=0x{:08X}",
+            stageNo, flag, sLocalSwitchActorContext.actorName, sLocalSwitchActorContext.room,
+            sLocalSwitchActorContext.actorParams);
+    } else {
+        DuskLog.info("Multiplayer sent local switch bit cleared stage={} flag={}", stageNo, flag);
+    }
+}
+
+void begin_local_switch_actor_context(int actorName, int room, int flag, uint32_t actorParams) {
     if (sLocalSwitchActorContext.depth++ == 0) {
         sLocalSwitchActorContext.active = true;
         sLocalSwitchActorContext.actorName = actorName;
         sLocalSwitchActorContext.room = room;
         sLocalSwitchActorContext.flag = flag;
+        sLocalSwitchActorContext.actorParams = actorParams;
     }
 }
 
@@ -3946,6 +5162,10 @@ void end_local_switch_actor_context() {
     if (sLocalSwitchActorContext.depth <= 0) {
         sLocalSwitchActorContext.depth = 0;
         sLocalSwitchActorContext.active = false;
+        sLocalSwitchActorContext.actorName = -1;
+        sLocalSwitchActorContext.room = -128;
+        sLocalSwitchActorContext.flag = -1;
+        sLocalSwitchActorContext.actorParams = 0xFFFFFFFF;
         return;
     }
 
@@ -3954,6 +5174,7 @@ void end_local_switch_actor_context() {
         sLocalSwitchActorContext.actorName = -1;
         sLocalSwitchActorContext.room = -128;
         sLocalSwitchActorContext.flag = -1;
+        sLocalSwitchActorContext.actorParams = 0xFFFFFFFF;
     }
 }
 
@@ -4139,6 +5360,18 @@ void notify_local_light_drop_num_set(uint8_t area, uint8_t num) {
         {"count", num},
     });
     DuskLog.info("Multiplayer sent local light drop num area={} count={}", area, num);
+}
+
+void notify_local_light_drop_get_flag_set(uint8_t area) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit || area >= 3) {
+        return;
+    }
+
+    send_json({
+        {"type", "light_drop_get_flag"},
+        {"area", area},
+    });
+    DuskLog.info("Multiplayer sent local light drop get flag area={}", area);
 }
 
 // Heart pieces/containers share one item ID each across many pickups, so

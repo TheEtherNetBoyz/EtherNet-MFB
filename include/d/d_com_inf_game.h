@@ -1832,6 +1832,9 @@ inline u8 dComIfGs_getLightDropNum(u8 i_nowLevel) {
 
 inline void dComIfGs_onLightDropGetFlag(u8 i_nowLevel) {
     g_dComIfG_gameInfo.info.getPlayer().getLightDrop().onLightDropGetFlag(i_nowLevel);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_light_drop_get_flag_set(i_nowLevel);
+#endif
 }
 
 inline void dComIfGs_offLightDropGetFlag(u8 i_level) {
@@ -2023,6 +2026,9 @@ inline void dComIfGs_onEventBit(const u16 i_flag) {
 
 inline void dComIfGs_offEventBit(const u16 i_flag) {
     g_dComIfG_gameInfo.info.getEvent().offEventBit(i_flag);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_event_bit_cleared(i_flag);
+#endif
 }
 
 inline BOOL dComIfGs_isEventBit(const u16 i_flag) {
@@ -2208,11 +2214,25 @@ inline BOOL dComIfGs_isTbox(int i_no) {
 }
 
 inline void dComIfGs_onSaveSwitch(int i_no) {
+    const BOOL isMemorySwitch = i_no >= 0 && i_no < dSv_info_c::MEMORY_SWITCH;
+    const BOOL wasSet = isMemorySwitch && g_dComIfG_gameInfo.info.getMemory().getBit().isSwitch(i_no);
     g_dComIfG_gameInfo.info.getMemory().getBit().onSwitch(i_no);
+#if TARGET_PC
+    if (isMemorySwitch && !wasSet) {
+        dusk::multiplayer::notify_local_memory_switch_set(i_no);
+    }
+#endif
 }
 
 inline void dComIfGs_offSaveSwitch(int i_no) {
+    const BOOL isMemorySwitch = i_no >= 0 && i_no < dSv_info_c::MEMORY_SWITCH;
+    const BOOL wasSet = isMemorySwitch && g_dComIfG_gameInfo.info.getMemory().getBit().isSwitch(i_no);
     g_dComIfG_gameInfo.info.getMemory().getBit().offSwitch(i_no);
+#if TARGET_PC
+    if (isMemorySwitch && wasSet) {
+        dusk::multiplayer::notify_local_memory_switch_cleared(i_no);
+    }
+#endif
 }
 
 inline BOOL dComIfGs_isSaveSwitch(int i_no) {
@@ -2456,16 +2476,25 @@ inline int dComIfGs_createZone(int roomNo) {
 }
 
 inline void dComIfGs_onSwitch(int i_no, int i_roomNo) {
+    const BOOL isMemorySwitch = i_no >= 0 && i_no < dSv_info_c::MEMORY_SWITCH;
+    const BOOL wasSet = isMemorySwitch && g_dComIfG_gameInfo.info.isSwitch(i_no, i_roomNo);
     g_dComIfG_gameInfo.info.onSwitch(i_no, i_roomNo);
 #if TARGET_PC
-    if (i_no >= 0 && i_no < dSv_info_c::MEMORY_SWITCH) {
+    if (isMemorySwitch && !wasSet) {
         dusk::multiplayer::notify_local_memory_switch_set(i_no);
     }
 #endif
 }
 
 inline void dComIfGs_offSwitch(int i_no, int i_roomNo) {
+    const BOOL isMemorySwitch = i_no >= 0 && i_no < dSv_info_c::MEMORY_SWITCH;
+    const BOOL wasSet = isMemorySwitch && g_dComIfG_gameInfo.info.isSwitch(i_no, i_roomNo);
     g_dComIfG_gameInfo.info.offSwitch(i_no, i_roomNo);
+#if TARGET_PC
+    if (isMemorySwitch && wasSet) {
+        dusk::multiplayer::notify_local_memory_switch_cleared(i_no);
+    }
+#endif
 }
 
 inline BOOL dComIfGs_isSwitch(int i_no, int i_roomNo) {

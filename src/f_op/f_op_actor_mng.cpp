@@ -237,6 +237,13 @@ void fopAcM_Log(fopAc_ac_c const* i_actor, char const* i_message) {
 s32 fopAcM_delete(fopAc_ac_c* i_actor) {
     // "Deleting Actor"
     fopAcM_Log(i_actor, "アクターの削除");
+#if TARGET_PC
+    if (i_actor != NULL) {
+        dusk::multiplayer::notify_actor_delete(fopAcM_GetName(i_actor), fopAcM_GetParam(i_actor),
+                                               fopAcM_GetRoomNo(i_actor), i_actor->current.pos.x,
+                                               i_actor->current.pos.y, i_actor->current.pos.z);
+    }
+#endif
     return fpcM_Delete(i_actor);
 }
 
@@ -246,6 +253,12 @@ s32 fopAcM_delete(fpc_ProcID i_actorID) {
     if (actor != NULL) {
         // "Deleting Actor"
         fopAcM_Log((fopAc_ac_c*)actor, "アクターの削除");
+#if TARGET_PC
+        auto* ac = static_cast<fopAc_ac_c*>(actor);
+        dusk::multiplayer::notify_actor_delete(fopAcM_GetName(ac), fopAcM_GetParam(ac),
+                                               fopAcM_GetRoomNo(ac), ac->current.pos.x,
+                                               ac->current.pos.y, ac->current.pos.z);
+#endif
         return fpcM_Delete(actor);
     } else {
         return 1;
@@ -255,6 +268,11 @@ s32 fopAcM_delete(fpc_ProcID i_actorID) {
 fpc_ProcID fopAcM_create(s16 i_procName, u16 i_setId, u32 i_parameters, const cXyz* i_pos,
                          int i_roomNo, const csXyz* i_angle, const cXyz* i_scale, s8 i_argument,
                          createFunc i_createFunc) {
+#if TARGET_PC
+    const cXyz tracePos = i_pos != NULL ? *i_pos : cXyz::Zero;
+    dusk::multiplayer::notify_actor_create_request(i_procName, i_parameters, i_roomNo, tracePos.x,
+                                                   tracePos.y, tracePos.z);
+#endif
     fopAcM_prm_class* append = createAppend(i_setId, i_parameters, i_pos, i_roomNo, i_angle,
                                             i_scale, i_argument, fpcM_ERROR_PROCESS_ID_e);
     if (append == NULL) {
@@ -273,6 +291,11 @@ fpc_ProcID fopAcM_create(s16 i_procName, u32 i_parameters, const cXyz* i_pos, in
 fopAc_ac_c* fopAcM_fastCreate(s16 i_procName, u32 i_parameters, const cXyz* i_pos, int i_roomNo,
                               const csXyz* i_angle, const cXyz* i_scale, s8 i_argument,
                               createFunc i_createFunc, void* i_createFuncData) {
+#if TARGET_PC
+    const cXyz tracePos = i_pos != NULL ? *i_pos : cXyz::Zero;
+    dusk::multiplayer::notify_actor_create_request(i_procName, i_parameters, i_roomNo, tracePos.x,
+                                                   tracePos.y, tracePos.z);
+#endif
     fopAcM_prm_class* append = createAppend(0xFFFF, i_parameters, i_pos, i_roomNo, i_angle, i_scale,
                                             i_argument, fpcM_ERROR_PROCESS_ID_e);
     if (append == NULL) {
@@ -297,6 +320,11 @@ fopAc_ac_c* fopAcM_fastCreate(const char* i_actorname, u32 i_parameters, const c
 fpc_ProcID fopAcM_createChild(s16 i_procName, fpc_ProcID i_parentID, u32 i_parameters,
                               const cXyz* i_pos, int i_roomNo, const csXyz* i_angle,
                               const cXyz* i_scale, s8 i_argument, createFunc i_createFunc) {
+#if TARGET_PC
+    const cXyz tracePos = i_pos != NULL ? *i_pos : cXyz::Zero;
+    dusk::multiplayer::notify_actor_create_request(i_procName, i_parameters, i_roomNo, tracePos.x,
+                                                   tracePos.y, tracePos.z);
+#endif
     fopAcM_prm_class* append = createAppend(0xFFFF, i_parameters, i_pos, i_roomNo, i_angle, i_scale,
                                             i_argument, i_parentID);
     if (append == NULL) {
@@ -333,6 +361,11 @@ fpc_ProcID fopAcM_createChildFromOffset(s16 i_procName, fpc_ProcID i_parentID, u
     pos.x += offset_pos.z * cM_ssin(parent_angleY) + offset_pos.x * cM_scos(parent_angleY);
     pos.y += offset_pos.y;
     pos.z += offset_pos.z * cM_scos(parent_angleY) - offset_pos.x * cM_ssin(parent_angleY);
+
+#if TARGET_PC
+    dusk::multiplayer::notify_actor_create_request(i_procName, i_parameters, i_roomNo, pos.x,
+                                                   pos.y, pos.z);
+#endif
 
     fopAcM_prm_class* append =
         createAppend(0xFFFF, i_parameters, &pos, i_roomNo, &angle, i_scale, i_argument, i_parentID);

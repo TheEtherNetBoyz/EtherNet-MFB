@@ -6,6 +6,7 @@
 #include "d/d_kankyo.h"
 #include "dusk/multiplayer/multiplayer.hpp"
 #include "f_op/f_op_actor_mng.h"
+#include "m_Do/m_Do_ext.h"
 
 class mDoExt_bckAnm;
 class JKRExpHeap;
@@ -40,7 +41,9 @@ public:
                               u16 i_equipItem, int i_swordVariant, int i_shieldVariant,
                               bool i_swordDraw, bool i_shieldDraw, bool i_swordOut,
                               bool i_heavyBoots, bool i_itemDraw, bool i_kanteraDraw,
-                              int i_itemActorKind, int i_rideActorKind);
+                              bool i_midnaDraw, bool i_midnaMaskDraw, bool i_midnaHandDraw,
+                              bool i_midnaHairDraw, bool i_midnaShadowForm, int i_itemActorKind,
+                              int i_rideActorKind);
     void setRemoteMatrices(const dusk::multiplayer::RemoteLinkMatrixSnapshot& i_matrices);
     void playRemoteSound(u32 i_soundId, bool i_level);
 
@@ -93,6 +96,7 @@ private:
     J3DModel* initModel(J3DModelData* i_modelData, u32 i_diffFlags);
     void setupHumanKokiriModel();
     void setupWolfModel();
+    void setupShadowMidnaModels();
     bool setupMagicArmorBrk();
     void setupEquipmentModels();
     void destroyEquipmentModels();
@@ -135,10 +139,12 @@ private:
     void calcModels();
     void drawModel(J3DModel* i_model);
     void drawLinkedItemActorModel();
+    void drawShadowMidnaModels();
     void hideAllHandShapes();
     void setupDrawHands();
     void setupHeavyBootModels();
     void applyHeavyBootMatrices();
+    void applyWolfEquipmentMatrices();
 
     /* 0x568 */ request_of_phase_process_class mPhase;
     /* 0x570 */ JKRExpHeap* mpArcHeap;
@@ -169,7 +175,16 @@ private:
     /* 0x96C */ J3DModel* mpMidnaMaskModel;
     /* 0x970 */ J3DModel* mpMidnaHandModel;
     /* 0x974 */ J3DModel* mpMidnaHairModel;
-    /* 0x978 */ J3DModel* mpHeavyBootModels[2];
+    /* 0x978 */ J3DModel* mpShadowMidnaModel;
+    /* 0x97C */ J3DModel* mpShadowMidnaMaskModel;
+    /* 0x980 */ J3DModel* mpShadowMidnaHandModel;
+    /* 0x984 */ J3DModel* mpShadowMidnaHairModel;
+    /* 0x988 */ J3DModel* mpMidnaGlowModel;
+    /* 0x98C */ mDoExt_invisibleModel mShadowMidnaInvModel;
+    /* 0x994 */ mDoExt_invisibleModel mShadowMidnaMaskInvModel;
+    /* 0x99C */ mDoExt_invisibleModel mShadowMidnaHandInvModel;
+    /* 0x9A4 */ mDoExt_invisibleModel mShadowMidnaHairInvModel;
+    /* 0x9AC */ J3DModel* mpHeavyBootModels[2];
     /* 0x988 */ J3DAnmTevRegKey* mpHeldItemBrk;
     /* 0x98C */ AramResourceCacheEntry mAramResourceCache[16];
     /* 0xA0C */ J3DAnmTevRegKey* mpMagicArmorBodyBrk;
@@ -204,6 +219,11 @@ private:
     /* 0xBEF */ bool mRemoteShieldDraw;
     /* 0xBF0 */ bool mRemoteSwordOut;
     /* 0xBF1 */ bool mRemoteHeavyBoots;
+    /* 0xBF2 */ bool mRemoteMidnaDraw;
+    /* 0xBF3 */ bool mRemoteMidnaMaskDraw;
+    /* 0xBF4 */ bool mRemoteMidnaHandDraw;
+    /* 0xBF5 */ bool mRemoteMidnaHairDraw;
+    /* 0xBF6 */ bool mRemoteMidnaShadowForm;
     /* 0xBF1 */ bool mHeldItemMatrixValid;
     /* 0xBF2 */ bool mHookTipMatrixValid;
     /* 0xBF3 */ bool mHookSubItemMatrixValid;
@@ -217,6 +237,7 @@ private:
     /* 0xBFB */ bool mMidnaMaskMatrixValid;
     /* 0xBFC */ bool mMidnaHandMatrixValid;
     /* 0xBFD */ bool mMidnaHairMatrixValid;
+    /* 0xBFE */ bool mMidnaGlowMatrixValid;
     /* 0xC04 */ bool mRemoteItemDraw;
     /* 0xC05 */ bool mRemoteKanteraDraw;
     /* 0xC06 */ bool mHasRemotePose;

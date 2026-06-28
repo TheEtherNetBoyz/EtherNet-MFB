@@ -8,6 +8,15 @@ namespace dusk::multiplayer {
 
 void notify_local_event_bit_set(uint16_t flag);
 
+// Some event bits are toggles, not one-way "achievement" flags -- e.g.
+// F_0800 (Midna unreachable on Z after the sewers escape) gets set, then
+// later cleared again once the post-sewers Midna text plays. Without this
+// hook, a peer who receives the "set" broadcast has no way to ever learn
+// the bit was cleared again, since dComIfGs_offEventBit had no multiplayer
+// hook at all -- they'd be stuck with Midna permanently unreachable until a
+// full manual sync. Mirrors notify_local_event_bit_set's guard/shape.
+void notify_local_event_bit_cleared(uint16_t flag);
+
 // Chest-open ("Tbox") bits are per-stage (dSv_memBit_c), so the receiver
 // needs to know which stage's save table the bit belongs to, not just the
 // bit number. The implementation determines the local stage itself.
@@ -29,9 +38,19 @@ void notify_local_item_get(int itemId);
 // switch IDs, which are deliberately ephemeral/room-resetting by design and
 // not synced.
 void notify_local_memory_switch_set(int flag);
-void begin_local_switch_actor_context(int actorName, int room, int flag);
+// Mirrors notify_local_memory_switch_set for the off/clear direction -- e.g.
+// the Darkhammer mini-boss's "fight in progress" switch gets cleared on
+// death (d_a_e_th.cpp), and without this a peer who wasn't present for the
+// fight would have that switch stuck on forever. Subject to the same
+// lifecycle-actor exclusion as the "on" side.
+void notify_local_memory_switch_cleared(int flag);
+void begin_local_switch_actor_context(int actorName, int room, int flag,
+                                      uint32_t actorParams = 0xFFFFFFFF);
 void end_local_switch_actor_context();
 void notify_local_room_scene_initialized(int room);
+void notify_actor_create_request(int actorName, uint32_t actorParams, int room, float x, float y,
+                                 float z);
+void notify_actor_delete(int actorName, uint32_t actorParams, int room, float x, float y, float z);
 
 // Memory-tier "Item" bits only (dSv_memBit_c, per-stage, persistent). `flag`
 // is the already-offset local index (global ID minus MEMORY_ITEM), matching
@@ -84,6 +103,11 @@ void notify_local_key_num_set(uint8_t keyNum);
 // is. The receiver also re-checks the 15-tear threshold event bit after
 // applying the value (idempotent if already set).
 void notify_local_light_drop_num_set(uint8_t area, uint8_t num);
+
+// Vessel-of-light ownership bit, per dark-twilight area
+// (dSv_light_drop_c::mLightDropGetFlag). This is separate from the event flag
+// saying the cutscene was watched and from the tear count itself.
+void notify_local_light_drop_get_flag_set(uint8_t area);
 
 // Max life (dSv_player_status_a_c::mMaxLife). Heart pieces/containers are
 // repeatable pickups sharing one item ID each (dItemNo_KAKERA_HEART_e/

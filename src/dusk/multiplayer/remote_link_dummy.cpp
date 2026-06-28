@@ -1,5 +1,7 @@
 #include "dusk/multiplayer/remote_link_dummy.hpp"
 
+#include <cstdlib>
+#include <cstring>
 #include <cmath>
 #include <map>
 #include <string>
@@ -9,9 +11,12 @@
 #include "d/actor/d_a_remote_link.h"
 #include "d/d_com_inf_game.h"
 #include "dusk/logging.h"
+#include "f_op/f_op_overlap_mng.h"
 #include "f_op/f_op_actor_mng.h"
+#include "f_pc/f_pc_layer.h"
 #include "f_pc/f_pc_manager.h"
 #include "f_pc/f_pc_name.h"
+#include "f_pc/f_pc_node.h"
 
 namespace dusk::multiplayer {
 namespace {
@@ -19,6 +24,8 @@ namespace {
 struct RemoteLinkActorDummy {
     fpc_ProcID actorId = fpcM_ERROR_PROCESS_ID_e;
     uint32_t logCount = 0;
+    uint32_t traceApplyTicks = 0;
+    uint32_t lastTraceSequence = 0;
     int clothesVariant = -1;
     int pendingClothesVariant = -1;
     bool isWolf = false;
@@ -27,7 +34,14 @@ struct RemoteLinkActorDummy {
     cXyz transformAnchorPos;
     uint32_t lastAudioEventSequence = 0;
     uint8_t recreateDelayTicks = 0;
+    uint8_t visibleStableTicks = 0;
     bool recreatePending = false;
+    uint32_t traceSeqGapCount = 0;
+    uint32_t traceMatrixFalseCount = 0;
+    uint32_t traceAgeSpikeCount = 0;
+    uint32_t traceRepeatCount = 0;
+    uint32_t traceMaxSeqDelta = 0;
+    uint32_t traceMaxAge = 0;
 };
 
 struct RemoteBodyCollision {
@@ -44,6 +58,15 @@ constexpr f32 kRemoteWolfBodyRadius = 35.0f;
 constexpr f32 kRemoteWolfBodyHeight = 95.0f;
 constexpr f32 kRemoteWolfBodyHalfLength = 45.0f;
 constexpr f32 kLocalLinkBodyRadius = 35.0f;
+constexpr uint8_t kRemoteSpawnVisibleWarmupTicks = 3;
+
+bool dummy_trace_enabled() {
+    const char* value = std::getenv("DUSK_MP_DUMMY_TRACE");
+    return value == nullptr ||
+           !(std::strcmp(value, "0") == 0 || std::strcmp(value, "false") == 0 ||
+             std::strcmp(value, "FALSE") == 0 || std::strcmp(value, "off") == 0 ||
+             std::strcmp(value, "OFF") == 0);
+}
 
 f32 clamp_f32(f32 value, f32 min, f32 max) {
     if (value < min) {
@@ -227,11 +250,28 @@ void destroy_remote_link_actor_dummy(const std::string& peerId) {
     sBodyCollision.erase(peerId);
 }
 
+fpc_ProcID create_remote_link_actor(u32 actorParams, cXyz* pos, s8 room, csXyz* angle,
+                                    cXyz* scale) {
+    layer_class* savedLayer = fpcLy_CurrentLayer();
+    base_process_class* playScene = fpcM_SearchByName(fpcNm_PLAY_SCENE_e);
+    if (playScene != nullptr) {
+        fpcLy_SetCurrentLayer(&reinterpret_cast<process_node_class*>(playScene)->layer);
+    }
+
+    fpc_ProcID id =
+        fopAcM_create(fpcNm_REMOTE_LINK_e, actorParams, pos, room, angle, scale, -1);
+
+    fpcLy_SetCurrentLayer(savedLayer);
+    return id;
+}
+
 }  // namespace
 
 void sync_remote_link_actor_dummies(const std::map<std::string, PeerPoseSnapshot>& poses) {
     const char* localStage = dComIfGp_getStartStageName();
-    if (localStage == nullptr) {
+    if (localStage == nullptr || dComIfGp_isEnableNextStage() || fopOvlpM_IsPeek() ||
+        fopOvlpM_IsDoingReq())
+    {
         destroy_all_remote_link_dummies();
         return;
     }
@@ -263,6 +303,9 @@ void sync_remote_link_actor_dummies(const std::map<std::string, PeerPoseSnapshot
         }
 
         RemoteLinkActorDummy& dummy = sActorDummies[peerId];
+        if (dummy.visibleStableTicks < kRemoteSpawnVisibleWarmupTicks) {
+            ++dummy.visibleStableTicks;
+        }
         daRemoteLink_c* actor = find_remote_link_actor(dummy);
         const bool anchorWolfToHumanTransform =
             pose.isTransforming && pose.transformFromWolf && !pose.transformToWolf;
@@ -335,8 +378,21 @@ void sync_remote_link_actor_dummies(const std::map<std::string, PeerPoseSnapshot
             const u32 actorParams =
                 static_cast<u32>(pose.clothesVariant & 0xFF) | (pose.isWolf ? 0x100 : 0);
             cXyz spawnPos = actorPos;
-            dummy.actorId = fopAcM_create(fpcNm_REMOTE_LINK_e, actorParams, &spawnPos, pose.room,
-                                          &angle, &scale, -1);
+            if (dummy.visibleStableTicks < kRemoteSpawnVisibleWarmupTicks) {
+                if (sActorSyncLogCount < 20) {
+                    ++sActorSyncLogCount;
+                    DuskLog.info("Multiplayer remote Link actor: spawn warming peer={} "
+                                 "ticks={}/{} stage={} room={} seq={}",
+                                 peerId, dummy.visibleStableTicks,
+                                 kRemoteSpawnVisibleWarmupTicks, pose.stage, pose.room,
+                                 pose.sequence);
+                }
+                update_actor_dummy_collision(peerId, pose);
+                continue;
+            }
+            dummy.actorId = create_remote_link_actor(actorParams, &spawnPos,
+                                                     static_cast<s8>(pose.room), &angle,
+                                                     &scale);
             if (sActorSyncLogCount < 20) {
                 ++sActorSyncLogCount;
                 DuskLog.info(
@@ -357,9 +413,48 @@ void sync_remote_link_actor_dummies(const std::map<std::string, PeerPoseSnapshot
                                     pose.upperFrame2, pose.upperRate2, pose.equipItem,
                                     pose.swordVariant, pose.shieldVariant, pose.swordDraw,
                                     pose.shieldDraw, pose.swordOut, pose.heavyBoots,
-                                    pose.itemDraw, pose.kanteraDraw, pose.itemActorKind,
+                                    pose.itemDraw, pose.kanteraDraw, pose.midnaDraw,
+                                    pose.midnaMaskDraw, pose.midnaHandDraw, pose.midnaHairDraw,
+                                    pose.midnaShadowForm, pose.itemActorKind,
                                     pose.rideActorKind);
         actor->setRemoteMatrices(pose.linkMatrices);
+        if (dummy_trace_enabled()) {
+            const uint32_t sequenceDelta =
+                dummy.lastTraceSequence != 0 ? pose.sequence - dummy.lastTraceSequence : 0;
+            dummy.lastTraceSequence = pose.sequence;
+            if (sequenceDelta > 1) {
+                ++dummy.traceSeqGapCount;
+                if (sequenceDelta > dummy.traceMaxSeqDelta) {
+                    dummy.traceMaxSeqDelta = sequenceDelta;
+                }
+            } else if (sequenceDelta == 0) {
+                ++dummy.traceRepeatCount;
+            }
+            if (!pose.linkMatrices.valid) {
+                ++dummy.traceMatrixFalseCount;
+            }
+            if (pose.ageTicks > 1) {
+                ++dummy.traceAgeSpikeCount;
+                if (pose.ageTicks > dummy.traceMaxAge) {
+                    dummy.traceMaxAge = pose.ageTicks;
+                }
+            }
+
+            ++dummy.traceApplyTicks;
+            if ((dummy.traceApplyTicks % 60) == 1) {
+                DuskLog.info(
+                    "Multiplayer dummy trace summary peer={} id={} applies={} seq={} "
+                    "last_delta={} gaps={} max_gap={} repeats={} age={} age_spikes={} "
+                    "max_age={} matrix={} matrix_false={} pos=({}, {}, {}) room={} proc={} "
+                    "under_bck={} under_frame={} upper_bck={} upper_frame={}",
+                    peerId, dummy.actorId, dummy.traceApplyTicks, pose.sequence, sequenceDelta,
+                    dummy.traceSeqGapCount, dummy.traceMaxSeqDelta, dummy.traceRepeatCount,
+                    pose.ageTicks, dummy.traceAgeSpikeCount, dummy.traceMaxAge,
+                    pose.linkMatrices.valid, dummy.traceMatrixFalseCount, pose.x, pose.y, pose.z,
+                    pose.room, pose.procId, pose.underBck0, pose.underFrame0, pose.upperBck2,
+                    pose.upperFrame2);
+            }
+        }
         for (const RemoteAudioEvent& event : pose.audioEvents) {
             if (event.sequence > dummy.lastAudioEventSequence) {
                 actor->playRemoteSound(event.soundId, event.level);

@@ -450,7 +450,8 @@ inline void fopAcM_onSwitch(const fopAc_ac_c* i_actor, int sw) {
 #if TARGET_PC
     dusk::multiplayer::begin_local_switch_actor_context(
                                                         ((const base_process_class*)i_actor)->profname,
-                                                        fopAcM_GetHomeRoomNo(i_actor), sw);
+                                                        fopAcM_GetHomeRoomNo(i_actor), sw,
+                                                        fopAcM_GetParam(i_actor));
 #endif
     dComIfGs_onSwitch(sw, fopAcM_GetHomeRoomNo(i_actor));
 #if TARGET_PC
@@ -459,7 +460,16 @@ inline void fopAcM_onSwitch(const fopAc_ac_c* i_actor, int sw) {
 }
 
 inline void fopAcM_offSwitch(const fopAc_ac_c* i_actor, int sw) {
-    return dComIfGs_offSwitch(sw, fopAcM_GetHomeRoomNo(i_actor));
+#if TARGET_PC
+    dusk::multiplayer::begin_local_switch_actor_context(
+                                                        ((const base_process_class*)i_actor)->profname,
+                                                        fopAcM_GetHomeRoomNo(i_actor), sw,
+                                                        fopAcM_GetParam(i_actor));
+#endif
+    dComIfGs_offSwitch(sw, fopAcM_GetHomeRoomNo(i_actor));
+#if TARGET_PC
+    dusk::multiplayer::end_local_switch_actor_context();
+#endif
 }
 
 inline void fopAcM_revSwitch(const fopAc_ac_c* i_actor, int sw) {
