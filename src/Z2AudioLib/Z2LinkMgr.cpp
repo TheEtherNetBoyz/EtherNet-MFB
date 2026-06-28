@@ -14,8 +14,9 @@
 #if TARGET_PC
 namespace {
 
-void log_link_audio_event(const char* source, u32 soundID, u32 mapinfo, s8 reverb,
-                          bool level) {
+void log_link_audio_event(const char* source, dusk::multiplayer::RemoteAudioSourceKind sourceKind,
+                          u32 soundID, u32 mapinfo, s8 reverb, bool level) {
+    UNUSED(sourceKind);
     daAlink_c* link = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
     if (link == NULL) {
         DuskLog.info("LinkAudio: source={} sound={:#x} mapinfo={} reverb={} level={}",
@@ -102,7 +103,18 @@ void log_link_audio_event(const char* source, u32 soundID, u32 mapinfo, s8 rever
         static_cast<unsigned int>(equipItem), static_cast<bool>(link->checkSwordDraw()),
         static_cast<bool>(link->checkShieldDraw()), static_cast<bool>(link->checkItemDraw()),
         link->current.pos.x, link->current.pos.y, link->current.pos.z);
-    dusk::multiplayer::record_local_link_audio_event(soundID, level);
+}
+
+dusk::multiplayer::RemoteAudioSourceKind classify_link_audio_source(JAISoundID soundID) {
+    switch (soundID.id_.info.type.parts.groupID) {
+    case 1:
+        return dusk::multiplayer::REMOTE_AUDIO_SOURCE_LINK_VOICE;
+    case 3:
+    case 4:
+        return dusk::multiplayer::REMOTE_AUDIO_SOURCE_LINK_COLLISION;
+    default:
+        return dusk::multiplayer::REMOTE_AUDIO_SOURCE_LINK_SOUND;
+    }
 }
 
 }  // namespace
@@ -326,7 +338,8 @@ void Z2CreatureLink::setWolfEyeOpen(bool wolfEyeOpen) {
 
 Z2SoundHandlePool* Z2CreatureLink::startLinkSound(JAISoundID soundID, u32 mapinfo, s8 reverb) {
     #if TARGET_PC
-    log_link_audio_event("link_sound", soundID, mapinfo, reverb, false);
+    log_link_audio_event("link_sound", dusk::multiplayer::REMOTE_AUDIO_SOURCE_LINK_SOUND,
+                         soundID, mapinfo, reverb, false);
     #endif
 
     Z2SoundHandlePool* handle = startCreatureSound(soundID, mapinfo, reverb);
@@ -391,7 +404,9 @@ JAISoundHandle* Z2CreatureLink::startLinkSoundLevel(JAISoundID soundID, u32 mapi
     }
 
     #if TARGET_PC
-    log_link_audio_event("link_sound_level", soundID, mapinfo, reverb, true);
+    log_link_audio_event("link_sound_level",
+                         dusk::multiplayer::REMOTE_AUDIO_SOURCE_LINK_SOUND_LEVEL, soundID,
+                         mapinfo, reverb, true);
     #endif
 
     Z2SoundHandlePool* handle = startCreatureSoundLevel((u32)soundID, mapinfo, reverb);
@@ -530,7 +545,8 @@ Z2SoundHandlePool* Z2CreatureLink::startLinkVoice(JAISoundID soundID, s8 reverb)
 
     #if TARGET_PC
     log_link_audio_event(originalSoundID == soundID ? "link_voice" : "link_voice_remap",
-                         soundID, 0, reverb, false);
+                         dusk::multiplayer::REMOTE_AUDIO_SOURCE_LINK_VOICE, soundID, 0,
+                         reverb, false);
     #endif
 
     return startCreatureVoice(soundID, reverb);
@@ -567,14 +583,18 @@ Z2SoundHandlePool* Z2CreatureLink::startLinkVoiceLevel(JAISoundID soundID, s8 re
                 Z2GetSoundStarter()->setPortData(handle, 8, port_data, -1);
             }
             #if TARGET_PC
-            log_link_audio_event("link_voice_level", Z2SE_WL_V_ROAR, 0, reverb, true);
+            log_link_audio_event("link_voice_level",
+                                 dusk::multiplayer::REMOTE_AUDIO_SOURCE_LINK_VOICE_LEVEL,
+                                 Z2SE_WL_V_ROAR, 0, reverb, true);
             #endif
             return handle;
         }
     }
     
     #if TARGET_PC
-    log_link_audio_event("link_voice_level", soundID, 0, reverb, true);
+    log_link_audio_event("link_voice_level",
+                         dusk::multiplayer::REMOTE_AUDIO_SOURCE_LINK_VOICE_LEVEL, soundID, 0,
+                         reverb, true);
     #endif
 
     return startCreatureVoiceLevel(soundID, reverb);
@@ -582,7 +602,8 @@ Z2SoundHandlePool* Z2CreatureLink::startLinkVoiceLevel(JAISoundID soundID, s8 re
 
 void Z2CreatureLink::startLinkSwordSound(JAISoundID soundID, u32 mapinfo, s8 reverb) {
     #if TARGET_PC
-    log_link_audio_event("link_sword", soundID, mapinfo, reverb, false);
+    log_link_audio_event("link_sword", dusk::multiplayer::REMOTE_AUDIO_SOURCE_LINK_SWORD,
+                         soundID, mapinfo, reverb, false);
     #endif
 
     u32 sound_ID = soundID;  // fakematch
@@ -612,7 +633,9 @@ void Z2CreatureLink::startLinkSwordSound(JAISoundID soundID, u32 mapinfo, s8 rev
 
 Z2SoundHandlePool* Z2CreatureLink::startCollisionSE(u32 hitID, u32 mapinfo) {
     #if TARGET_PC
-    log_link_audio_event("link_collision", hitID, mapinfo, -1, false);
+    log_link_audio_event("link_collision",
+                         dusk::multiplayer::REMOTE_AUDIO_SOURCE_LINK_COLLISION, hitID,
+                         mapinfo, -1, false);
     #endif
 
     switch (mapinfo) {
@@ -633,7 +656,8 @@ Z2SoundHandlePool* Z2CreatureLink::startCollisionSE(u32 hitID, u32 mapinfo) {
 
 Z2SoundHandlePool* Z2CreatureLink::startHitItemSE(u32 soundID, u32 mapinfo, Z2SoundObjBase* other, f32 speed) {
     #if TARGET_PC
-    log_link_audio_event("link_hit_item", soundID, mapinfo, -1, false);
+    log_link_audio_event("link_hit_item", dusk::multiplayer::REMOTE_AUDIO_SOURCE_LINK_HIT_ITEM,
+                         soundID, mapinfo, -1, false);
     #endif
 
     if (other == NULL) {
@@ -782,6 +806,18 @@ bool Z2LinkSoundStarter::startSound(JAISoundID soundID, JAISoundHandle* handle,
 
     bool ret = Z2SoundStarter::startSound(soundID, handle, posPtr, mapinfo, fxMix, pitch,
                                           volume, pan, dolby, moveSteps);
+    #if TARGET_PC
+    if (ret && !Z2GetSeMgr()->isLevelSe(soundID)) {
+        int reverb = static_cast<int>(fxMix * 127.0f);
+        if (reverb < 0) {
+            reverb = 0;
+        } else if (reverb > 127) {
+            reverb = 127;
+        }
+        dusk::multiplayer::record_local_link_audio_event(
+            soundID, false, mapinfo, reverb, classify_link_audio_source(soundID));
+    }
+    #endif
 
     if (bVar2 && Z2GetSceneMgr()->getDemoSeWaveNum() != 114) {
         if (Z2GetLink()->mFlag5) {

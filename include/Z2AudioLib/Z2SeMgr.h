@@ -63,6 +63,8 @@ public:
     void decrCrowdSize();
     bool seStart(JAISoundID soundID, const Vec* posPtr, u32, s8 reverb,
                                 f32 pitch, f32 volume, f32 pan, f32 dolby, u8);
+    bool seStartNoCull(JAISoundID soundID, u32, s8 reverb, f32 pitch, f32 volume, f32 pan,
+                       f32 dolby);
     bool seStartLevel(JAISoundID soundID, const Vec* posPtr, u32, s8 reverb,
                                      f32 pitch, f32 volume, f32 pan, f32 dolby, u8);
     void seStop(JAISoundID soundID, u32 fadeTime);

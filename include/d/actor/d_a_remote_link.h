@@ -45,7 +45,7 @@ public:
                               bool i_midnaHairDraw, bool i_midnaShadowForm, int i_itemActorKind,
                               int i_rideActorKind);
     void setRemoteMatrices(const dusk::multiplayer::RemoteLinkMatrixSnapshot& i_matrices);
-    void playRemoteSound(u32 i_soundId, bool i_level);
+    void playRemoteSound(const dusk::multiplayer::RemoteAudioEvent& i_event);
 
     static int createHeapCallBack(fopAc_ac_c* i_this);
 

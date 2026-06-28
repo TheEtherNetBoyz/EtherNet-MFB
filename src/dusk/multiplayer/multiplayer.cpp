@@ -215,6 +215,9 @@ json audio_events_to_json(const std::vector<RemoteAudioEvent>& events) {
         out.push_back({
             {"seq", event.sequence},
             {"sound_id", event.soundId},
+            {"mapinfo", event.mapInfo},
+            {"reverb", static_cast<int>(event.reverb)},
+            {"source", static_cast<int>(event.sourceKind)},
             {"level", event.level},
         });
     }
@@ -232,6 +235,9 @@ std::vector<RemoteAudioEvent> parse_audio_events(const json& state) {
         RemoteAudioEvent event;
         event.sequence = entry.value("seq", 0U);
         event.soundId = entry.value("sound_id", 0U);
+        event.mapInfo = entry.value("mapinfo", 0U);
+        event.reverb = static_cast<int8_t>(entry.value("reverb", -1));
+        event.sourceKind = static_cast<uint8_t>(entry.value("source", 0));
         event.level = entry.value("level", false);
         if (event.sequence != 0 && event.soundId != 0) {
             events.push_back(event);
@@ -4097,7 +4103,8 @@ const char* state_name(ConnectionState state) {
 
 }  // namespace
 
-void record_local_link_audio_event(uint32_t soundId, bool level) {
+void record_local_link_audio_event(uint32_t soundId, bool level, uint32_t mapInfo, int reverb,
+                                   uint8_t sourceKind) {
     if (!sEnabled || !sSession.welcomed || soundId == 0) {
         return;
     }
@@ -4116,8 +4123,14 @@ void record_local_link_audio_event(uint32_t soundId, bool level) {
     RemoteAudioEvent event;
     event.sequence = ++sLocalAudioEventSequence;
     event.soundId = soundId;
+    event.mapInfo = mapInfo;
+    event.reverb = static_cast<int8_t>(std::clamp(reverb, -1, 127));
+    event.sourceKind = sourceKind;
     event.level = false;
     sPendingLocalAudioEvents.push_back(event);
+    DuskLog.info("Multiplayer audio enqueue seq={} sound={:#x} mapinfo={} reverb={} source={}",
+                 event.sequence, event.soundId, event.mapInfo, static_cast<int>(event.reverb),
+                 static_cast<int>(event.sourceKind));
 }
 
 void initialize() {

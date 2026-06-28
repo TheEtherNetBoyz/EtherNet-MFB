@@ -457,13 +457,16 @@ void sync_remote_link_actor_dummies(const std::map<std::string, PeerPoseSnapshot
         }
         for (const RemoteAudioEvent& event : pose.audioEvents) {
             if (event.sequence > dummy.lastAudioEventSequence) {
-                actor->playRemoteSound(event.soundId, event.level);
+                actor->playRemoteSound(event);
                 dummy.lastAudioEventSequence = event.sequence;
                 static uint32_t sAudioRxLogCount = 0;
                 if (sAudioRxLogCount < 20) {
                     ++sAudioRxLogCount;
-                    DuskLog.info("Multiplayer audio rx peer={} seq={} sound={:#x} level={}",
-                                 peerId, event.sequence, event.soundId, event.level);
+                    DuskLog.info("Multiplayer audio rx peer={} seq={} sound={:#x} mapinfo={} "
+                                 "reverb={} source={} level={}",
+                                 peerId, event.sequence, event.soundId, event.mapInfo,
+                                 static_cast<int>(event.reverb),
+                                 static_cast<int>(event.sourceKind), event.level);
                 }
             }
         }

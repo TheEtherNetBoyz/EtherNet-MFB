@@ -4,6 +4,7 @@
  * Remote Link visual actor.
  */
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -31,6 +32,8 @@
 #include "res/Object/Always.h"
 #include "res/Object/Wmdl.h"
 #include "Z2AudioLib/Z2AudioMgr.h"
+#include "Z2AudioLib/Z2Audience.h"
+#include "Z2AudioLib/Z2SoundInfo.h"
 #include "dusk/logging.h"
 #include <dvd.h>
 
@@ -50,6 +53,7 @@ static int sDrawLogCount;
 static int sCalcLogCount;
 static int sItemActorRejectLogCount;
 static int sLiveRemoteLinkActors;
+static f32 const l_remoteMotionAudioVolumeScale = 0.75f;
 
 static bool isValidRemoteBck(u16 i_resId) {
     return i_resId != 0 && i_resId != 0xFFFF;
@@ -71,6 +75,83 @@ static bool isRemoteTransformProc(int i_procId) {
 static bool isRemoteLinkSceneUnsafe() {
     return dComIfGp_isEnableNextStage() || fopOvlpM_IsPeek() || fopOvlpM_IsDoingReq() ||
            dComIfGp_event_runCheck();
+}
+
+static bool isRemoteLinkMotionAudio(const dusk::multiplayer::RemoteAudioEvent& i_event) {
+    switch (i_event.sourceKind) {
+    case dusk::multiplayer::REMOTE_AUDIO_SOURCE_LINK_SOUND:
+    case dusk::multiplayer::REMOTE_AUDIO_SOURCE_LINK_SWORD:
+    case dusk::multiplayer::REMOTE_AUDIO_SOURCE_LINK_COLLISION:
+    case dusk::multiplayer::REMOTE_AUDIO_SOURCE_LINK_HIT_ITEM:
+        return true;
+    default:
+        break;
+    }
+
+    switch (i_event.soundId) {
+    case Z2SE_AL_KAITENGIRI:
+    case Z2SE_AL_KAITEN_L_SLASH:
+    case Z2SE_AL_LTN_KAITENGIRI:
+    case Z2SE_FN_WALK_DUMMY:
+    case Z2SE_FN_JUMP_DUMMY:
+    case Z2SE_FN_BOUND_DUMMY:
+    case Z2SE_FN_HAND_DUMMY:
+    case Z2SE_WL_WALK_L_DUMMY:
+    case Z2SE_WL_WALK_R_DUMMY:
+    case Z2SE_WL_RUN_L_DUMMY:
+    case Z2SE_WL_RUN_R_DUMMY:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static u32 getSoundDistVolBit(JAISoundID i_soundId) {
+    const JAUAudibleParam params = Z2GetSoundInfo()->getAudibleSwFull(i_soundId);
+    const u16 distFlags = params.field_0x0.half.f1;
+    if (distFlags != 0) {
+        if ((distFlags & 0x7) != 0) {
+            return distFlags & 0x7;
+        }
+        if ((distFlags & 0x70) != 0) {
+            return ((distFlags & 0x70) >> 4) + 7;
+        }
+    }
+
+    return 0;
+}
+
+static f32 calcRemoteLinkVoiceMatchedVolume(Z2Audience* i_audience, const Vec& i_relPos) {
+    Vec volumePos = i_relPos;
+    volumePos.z += i_audience->getAudioCamera(0)->getVolCenterZ();
+
+    const u32 voiceDistVolBit = getSoundDistVolBit(Z2SE_AL_V_ATTACK_S);
+    const f32 distance = sqrtf(volumePos.x * volumePos.x + volumePos.y * volumePos.y +
+                               volumePos.z * volumePos.z);
+    return i_audience->calcVolume_(distance, voiceDistVolBit);
+}
+
+static void calcRemoteLinkAudioMix(const cXyz& i_pos,
+                                   const dusk::multiplayer::RemoteAudioEvent& i_event,
+                                   f32* o_volume, f32* o_pan, f32* o_dolby) {
+    *o_volume = 1.0f;
+    *o_pan = -1.0f;
+    *o_dolby = -1.0f;
+
+    Z2Audience* audience = Z2GetAudience();
+    if (audience == NULL || !isRemoteLinkMotionAudio(i_event)) {
+        return;
+    }
+
+    Vec absPos = i_pos;
+    Vec relPos;
+    audience->convertAbsToRel(absPos, &relPos, 0);
+
+    *o_volume = std::clamp(calcRemoteLinkVoiceMatchedVolume(audience, relPos) *
+                               l_remoteMotionAudioVolumeScale,
+                           0.0f, 1.0f);
+    *o_pan = audience->calcRelPosPan(relPos, 0);
+    *o_dolby = audience->calcRelPosDolby(relPos, 0);
 }
 
 static J3DShape* getMaterialShape(J3DModelData* i_modelData, u16 i_materialNo) {
@@ -2364,16 +2445,28 @@ void daRemoteLink_c::drawShadowMidnaModels() {
     }
 }
 
-void daRemoteLink_c::playRemoteSound(u32 i_soundId, bool i_level) {
+void daRemoteLink_c::playRemoteSound(const dusk::multiplayer::RemoteAudioEvent& i_event) {
     Z2AudioMgr* audioMgr = Z2GetAudioMgr();
-    if (audioMgr == NULL || i_soundId == 0) {
+    if (audioMgr == NULL || i_event.soundId == 0) {
         return;
     }
 
-    if (i_level) {
-        audioMgr->seStartLevel(i_soundId, &current.pos, 0, -1, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    const bool motionAudio = isRemoteLinkMotionAudio(i_event);
+    f32 volume;
+    f32 pan;
+    f32 dolby;
+    calcRemoteLinkAudioMix(current.pos, i_event, &volume, &pan, &dolby);
+
+    const s8 reverb = i_event.reverb < 0 ? 0 : i_event.reverb;
+    if (motionAudio && !i_event.level) {
+        audioMgr->seStartNoCull(i_event.soundId, i_event.mapInfo, reverb, 1.0f, volume, pan,
+                                dolby);
+    } else if (i_event.level) {
+        audioMgr->seStartLevel(i_event.soundId, &current.pos, i_event.mapInfo, reverb, 1.0f,
+                               volume, pan, dolby, 0);
     } else {
-        audioMgr->seStart(i_soundId, &current.pos, 0, -1, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        audioMgr->seStart(i_event.soundId, &current.pos, i_event.mapInfo, reverb, 1.0f, volume,
+                          pan, dolby, 0);
     }
 }
 

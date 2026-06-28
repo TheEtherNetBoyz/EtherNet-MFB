@@ -8,6 +8,7 @@
 #include "Z2AudioLib/Z2StatusMgr.h"
 #include "Z2AudioLib/Z2Param.h"
 #include "Z2AudioLib/Z2SeqMgr.h"
+#include "Z2AudioLib/Z2SoundStarter.h"
 #include "JSystem/J3DU/J3DUD.h"
 
 Z2SeMgr::Z2SeMgr() : JASGlobalInstance(true), mSoundHandles(mSoundHandle, 24) {
@@ -344,6 +345,21 @@ bool Z2SeMgr::seStart(JAISoundID soundID, const Vec* posPtr, u32 param_2, s8 rev
 
     return Z2GetSoundStarter()->startSound(soundID, handle, (JGeometry::TVec3<f32>*)posPtr,
                                            param_2, reverb / 127.0f,
+                                           pitch, volume, pan, dolby, 0);
+}
+
+bool Z2SeMgr::seStartNoCull(JAISoundID soundID, u32 param_2, s8 reverb, f32 pitch,
+                            f32 volume, f32 pan, f32 dolby) {
+    if (soundID == 0xFFFFFFFF || isLevelSe(soundID)) {
+        return false;
+    }
+
+    JAISoundHandle* handle = mSoundHandles.getFreeHandle();
+    if (handle == NULL) {
+        return false;
+    }
+
+    return Z2GetSoundStarter()->startSound(soundID, handle, NULL, param_2, reverb / 127.0f,
                                            pitch, volume, pan, dolby, 0);
 }
 

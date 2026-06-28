@@ -45,7 +45,21 @@ struct RemoteLinkMatrixSnapshot {
 struct RemoteAudioEvent {
     uint32_t sequence = 0;
     uint32_t soundId = 0;
+    uint32_t mapInfo = 0;
+    int8_t reverb = -1;
+    uint8_t sourceKind = 0;
     bool level = false;
+};
+
+enum RemoteAudioSourceKind : uint8_t {
+    REMOTE_AUDIO_SOURCE_GENERIC = 0,
+    REMOTE_AUDIO_SOURCE_LINK_SOUND = 1,
+    REMOTE_AUDIO_SOURCE_LINK_SOUND_LEVEL = 2,
+    REMOTE_AUDIO_SOURCE_LINK_VOICE = 3,
+    REMOTE_AUDIO_SOURCE_LINK_VOICE_LEVEL = 4,
+    REMOTE_AUDIO_SOURCE_LINK_SWORD = 5,
+    REMOTE_AUDIO_SOURCE_LINK_COLLISION = 6,
+    REMOTE_AUDIO_SOURCE_LINK_HIT_ITEM = 7,
 };
 
 struct PeerPoseSnapshot {
@@ -174,7 +188,8 @@ void update();
 void consume_progression_prompt_start_button();
 void shutdown();
 bool is_enabled();
-void record_local_link_audio_event(uint32_t soundId, bool level);
+void record_local_link_audio_event(uint32_t soundId, bool level, uint32_t mapInfo = 0,
+                                   int reverb = -1, uint8_t sourceKind = 0);
 bool host_direct(const DirectHostOptions& options, std::string* errorOut = nullptr);
 bool join_direct(const DirectJoinOptions& options, std::string* errorOut = nullptr);
 bool join_relay(const RelayJoinOptions& options, std::string* errorOut = nullptr);
