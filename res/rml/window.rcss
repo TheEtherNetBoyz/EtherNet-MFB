@@ -532,3 +532,15 @@ progress.verification-progress-bar {
     flex: 0 0 auto;
     padding-top: 4dp;
 }
+
+.current-option-text {
+    padding-left: 5dp;
+    border: 2dp #C2A42D;
+    border-radius: 14dp;
+}
+
+.not-current-option-text {
+    padding-left: 5dp;
+    margin: 2dp; /*Used to mimic border*/
+    opacity: 0.5;
+}
