@@ -123,6 +123,37 @@ struct ManualSyncStatePacket {
 constexpr size_t kManualSyncStatePacketSize =
     sizeof(ManualSyncStatePacket) + sizeof(dSv_info_c);
 
+constexpr size_t kUdpPoseChunkPayloadBytes = 1100;
+constexpr size_t kUdpPoseSenderIdBytes = 32;
+constexpr size_t kUdpPoseMaxCompressedBytes = 256 * 1024;
+constexpr size_t kUdpPoseMaxUncompressedBytes = 512 * 1024;
+
+#pragma pack(push, 1)
+struct UdpPoseChunkHeader {
+    char magic[4];
+    uint8_t version;
+    uint8_t type;
+    uint16_t headerSize;
+    uint32_t sequence;
+    uint16_t chunkIndex;
+    uint16_t chunkCount;
+    uint32_t uncompressedSize;
+    uint32_t compressedSize;
+    uint16_t payloadSize;
+    char senderId[kUdpPoseSenderIdBytes];
+};
+#pragma pack(pop)
+
+struct UdpPoseReassembly {
+    uint32_t sequence = 0;
+    uint16_t chunkCount = 0;
+    uint32_t uncompressedSize = 0;
+    uint32_t compressedSize = 0;
+    uint16_t receivedCount = 0;
+    std::vector<uint8_t> compressed;
+    std::vector<uint8_t> received;
+};
+
 enum class NetworkMode {
     Disabled,
     RelayHarness,
@@ -248,11 +279,13 @@ std::vector<RemoteAudioEvent> parse_audio_events(const json& state) {
 
 struct DirectPeer {
     socket_t sock = INVALID_SOCKET;
+    sockaddr_in udpAddr{};
     std::string id;
     std::string name = "Peer";
     std::string rxBuffer;
     bool welcomed = false;
     bool snapshotPending = false;
+    bool udpAddrKnown = false;
 };
 
 int detect_clothes_variant() {
@@ -273,6 +306,8 @@ struct Session {
     ConnectionState state = ConnectionState::Disconnected;
     socket_t sock = INVALID_SOCKET;
     socket_t listenSock = INVALID_SOCKET;
+    socket_t udpSock = INVALID_SOCKET;
+    sockaddr_in udpRemoteAddr{};
     std::string host = "127.0.0.1";
     std::string bindHost = "0.0.0.0";
     std::string publicHost = "127.0.0.1";
@@ -300,6 +335,8 @@ struct Session {
     uint32_t repairSweepTicks = 0;
     uint32_t nextDirectPeerId = 1;
     std::map<std::string, DirectPeer> directPeers;
+    std::map<std::string, UdpPoseReassembly> udpPoseReassembly;
+    bool udpRemoteAddrKnown = false;
 };
 
 bool sInitialized = false;
@@ -1788,6 +1825,7 @@ void draw_peer_name_labels() {
 void reset_connection_state() {
     close_socket(sSession.sock);
     close_socket(sSession.listenSock);
+    close_socket(sSession.udpSock);
     for (auto& entry : sSession.directPeers) {
         close_socket(entry.second.sock);
     }
@@ -1820,6 +1858,8 @@ void reset_connection_state() {
     sSession.poseSequence = 0;
     sSession.peerPoseLogTicks = 0;
     sSession.peerPoses.clear();
+    sSession.udpPoseReassembly.clear();
+    sSession.udpRemoteAddrKnown = false;
     sPendingLocalAudioEvents.clear();
     sPeerNames.clear();
     clear_player_color_slots();
@@ -3597,6 +3637,330 @@ bool fill_ipv4(sockaddr_in& addr, const std::string& host, int port) {
     return inet_pton(AF_INET, host.c_str(), &addr.sin_addr) == 1;
 }
 
+std::string sender_id_from_udp_header(const UdpPoseChunkHeader& header) {
+    size_t len = 0;
+    while (len < sizeof(header.senderId) && header.senderId[len] != '\0') {
+        ++len;
+    }
+    return std::string(header.senderId, len);
+}
+
+void set_udp_header_sender(UdpPoseChunkHeader& header, const std::string& senderId) {
+    std::memset(header.senderId, 0, sizeof(header.senderId));
+    std::memcpy(header.senderId, senderId.data(),
+                std::min(senderId.size(), sizeof(header.senderId) - 1));
+}
+
+std::string local_udp_pose_sender_id() {
+    if (sSession.mode == NetworkMode::DirectJoin && !sSession.clientId.empty()) {
+        return sSession.clientId;
+    }
+    return kDirectPeerId;
+}
+
+bool open_udp_socket(const std::string& bindHost, int bindPort) {
+    close_socket(sSession.udpSock);
+    sSession.udpRemoteAddrKnown = false;
+    sSession.udpPoseReassembly.clear();
+
+    sSession.udpSock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sSession.udpSock == INVALID_SOCKET) {
+        DuskLog.warn("Multiplayer direct UDP disabled: socket failed");
+        return false;
+    }
+
+    if (!set_nonblocking(sSession.udpSock)) {
+        DuskLog.warn("Multiplayer direct UDP disabled: nonblocking failed");
+        close_socket(sSession.udpSock);
+        return false;
+    }
+
+    sockaddr_in addr{};
+    if (!fill_ipv4(addr, bindHost, bindPort)) {
+        DuskLog.warn("Multiplayer direct UDP disabled: invalid bind host {}", bindHost);
+        close_socket(sSession.udpSock);
+        return false;
+    }
+
+    if (bind(sSession.udpSock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+        DuskLog.warn("Multiplayer direct UDP disabled: bind failed {}:{}", bindHost, bindPort);
+        close_socket(sSession.udpSock);
+        return false;
+    }
+
+    DuskLog.info("Multiplayer direct UDP pose socket bound on {}:{}", bindHost, bindPort);
+    return true;
+}
+
+void setup_direct_host_udp() {
+    open_udp_socket(sSession.bindHost, sSession.port);
+}
+
+void setup_direct_join_udp() {
+    if (!open_udp_socket("0.0.0.0", 0)) {
+        return;
+    }
+
+    if (!fill_ipv4(sSession.udpRemoteAddr, sSession.host, sSession.port)) {
+        DuskLog.warn("Multiplayer direct UDP disabled: invalid remote host {}", sSession.host);
+        close_socket(sSession.udpSock);
+        return;
+    }
+    sSession.udpRemoteAddrKnown = true;
+    DuskLog.info("Multiplayer direct UDP pose remote set to {}:{}", sSession.host, sSession.port);
+}
+
+bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
+                           const std::string& senderId) {
+    if (sSession.udpSock == INVALID_SOCKET) {
+        return false;
+    }
+
+    const std::string raw = message.dump();
+    const size_t bound = ZSTD_compressBound(raw.size());
+    std::vector<uint8_t> compressed(bound);
+    const size_t compressedSize =
+        ZSTD_compress(compressed.data(), compressed.size(), raw.data(), raw.size(), 1);
+    if (ZSTD_isError(compressedSize)) {
+        DuskLog.warn("Multiplayer direct UDP pose compression failed: {}",
+                     ZSTD_getErrorName(compressedSize));
+        return false;
+    }
+    if (compressedSize == 0 || compressedSize > kUdpPoseMaxCompressedBytes ||
+        raw.size() > kUdpPoseMaxUncompressedBytes)
+    {
+        DuskLog.warn("Multiplayer direct UDP pose too large raw={} compressed={}", raw.size(),
+                     compressedSize);
+        return false;
+    }
+    compressed.resize(compressedSize);
+
+    const uint16_t chunkCount =
+        static_cast<uint16_t>((compressed.size() + kUdpPoseChunkPayloadBytes - 1) /
+                              kUdpPoseChunkPayloadBytes);
+    if (chunkCount == 0) {
+        return false;
+    }
+
+    const uint32_t sequence = message.value("sequence", 0U);
+    std::array<uint8_t, sizeof(UdpPoseChunkHeader) + kUdpPoseChunkPayloadBytes> packet{};
+    for (uint16_t chunkIndex = 0; chunkIndex < chunkCount; ++chunkIndex) {
+        const size_t offset = static_cast<size_t>(chunkIndex) * kUdpPoseChunkPayloadBytes;
+        const size_t payloadSize =
+            std::min(kUdpPoseChunkPayloadBytes, compressed.size() - offset);
+
+        UdpPoseChunkHeader header{};
+        header.magic[0] = 'D';
+        header.magic[1] = 'M';
+        header.magic[2] = 'P';
+        header.magic[3] = 'U';
+        header.version = 1;
+        header.type = 1;
+        header.headerSize = sizeof(UdpPoseChunkHeader);
+        header.sequence = sequence;
+        header.chunkIndex = chunkIndex;
+        header.chunkCount = chunkCount;
+        header.uncompressedSize = static_cast<uint32_t>(raw.size());
+        header.compressedSize = static_cast<uint32_t>(compressed.size());
+        header.payloadSize = static_cast<uint16_t>(payloadSize);
+        set_udp_header_sender(header, senderId);
+
+        std::memcpy(packet.data(), &header, sizeof(header));
+        std::memcpy(packet.data() + sizeof(header), compressed.data() + offset, payloadSize);
+        const int sent =
+            sendto(sSession.udpSock, reinterpret_cast<const char*>(packet.data()),
+                   static_cast<int>(sizeof(header) + payloadSize), 0,
+                   reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+        if (sent < 0 && !would_block()) {
+            return false;
+        }
+    }
+
+    static uint32_t sUdpPoseTxLogTicks = 0;
+    if ((sUdpPoseTxLogTicks++ % 150) == 0) {
+        DuskLog.info("Multiplayer direct UDP pose tx seq={} sender={} raw={} compressed={} chunks={}",
+                     sequence, senderId, raw.size(), compressed.size(), chunkCount);
+    }
+    return true;
+}
+
+bool send_udp_pose_to_peer(DirectPeer& peer, const json& message, const std::string& senderId) {
+    if (!peer.welcomed || !peer.udpAddrKnown) {
+        return false;
+    }
+    return send_udp_pose_to_addr(peer.udpAddr, message, senderId);
+}
+
+bool broadcast_udp_pose_to_direct_peers(const json& message, const std::string& senderId,
+                                        const std::string& excludePeerId = "") {
+    bool sentAny = false;
+    for (auto& entry : sSession.directPeers) {
+        DirectPeer& peer = entry.second;
+        if (peer.id == excludePeerId) {
+            continue;
+        }
+        sentAny = send_udp_pose_to_peer(peer, message, senderId) || sentAny;
+    }
+    return sentAny || sSession.directPeers.empty();
+}
+
+bool send_direct_pose_udp(const json& message) {
+    if (sSession.mode == NetworkMode::DirectHost) {
+        return broadcast_udp_pose_to_direct_peers(message, local_udp_pose_sender_id());
+    }
+
+    if (sSession.mode == NetworkMode::DirectJoin && sSession.udpRemoteAddrKnown &&
+        !sSession.clientId.empty())
+    {
+        return send_udp_pose_to_addr(sSession.udpRemoteAddr, message, local_udp_pose_sender_id());
+    }
+
+    return false;
+}
+
+bool send_pose_message(const json& message) {
+    if ((sSession.mode == NetworkMode::DirectHost || sSession.mode == NetworkMode::DirectJoin) &&
+        send_direct_pose_udp(message))
+    {
+        return true;
+    }
+    return send_json(message);
+}
+
+void process_udp_pose_message(json message, const std::string& senderId) {
+    std::string routedSender = senderId.empty() ? kDirectPeerId : senderId;
+    if (routedSender != kDirectPeerId) {
+        message["client_id"] = routedSender;
+    }
+
+    if (sSession.mode == NetworkMode::DirectHost) {
+        if (routedSender == kDirectPeerId || sSession.directPeers.find(routedSender) == sSession.directPeers.end()) {
+            return;
+        }
+        handle_message(message);
+        broadcast_udp_pose_to_direct_peers(message, routedSender, routedSender);
+        return;
+    }
+
+    handle_message(message);
+}
+
+void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payload,
+                           const sockaddr_in& fromAddr) {
+    if (std::memcmp(header.magic, "DMPU", 4) != 0 || header.version != 1 || header.type != 1 ||
+        header.headerSize != sizeof(UdpPoseChunkHeader) || header.payloadSize == 0 ||
+        header.chunkCount == 0 || header.chunkIndex >= header.chunkCount ||
+        header.compressedSize == 0 || header.compressedSize > kUdpPoseMaxCompressedBytes ||
+        header.uncompressedSize == 0 || header.uncompressedSize > kUdpPoseMaxUncompressedBytes)
+    {
+        return;
+    }
+
+    std::string senderId = sender_id_from_udp_header(header);
+    if (senderId.empty()) {
+        senderId = kDirectPeerId;
+    }
+
+    if (sSession.mode == NetworkMode::DirectHost) {
+        auto peerIt = sSession.directPeers.find(senderId);
+        if (peerIt == sSession.directPeers.end()) {
+            return;
+        }
+        peerIt->second.udpAddr = fromAddr;
+        peerIt->second.udpAddrKnown = true;
+    } else if (senderId == local_udp_pose_sender_id()) {
+        return;
+    }
+
+    UdpPoseReassembly& reassembly = sSession.udpPoseReassembly[senderId];
+    if (header.sequence < reassembly.sequence) {
+        return;
+    }
+    if (header.sequence != reassembly.sequence ||
+        header.chunkCount != reassembly.chunkCount ||
+        header.compressedSize != reassembly.compressedSize ||
+        header.uncompressedSize != reassembly.uncompressedSize)
+    {
+        reassembly = {};
+        reassembly.sequence = header.sequence;
+        reassembly.chunkCount = header.chunkCount;
+        reassembly.uncompressedSize = header.uncompressedSize;
+        reassembly.compressedSize = header.compressedSize;
+        reassembly.compressed.assign(header.compressedSize, 0);
+        reassembly.received.assign(header.chunkCount, 0);
+    }
+
+    const size_t offset = static_cast<size_t>(header.chunkIndex) * kUdpPoseChunkPayloadBytes;
+    if (offset + header.payloadSize > reassembly.compressed.size()) {
+        return;
+    }
+
+    if (!reassembly.received[header.chunkIndex]) {
+        reassembly.received[header.chunkIndex] = 1;
+        ++reassembly.receivedCount;
+    }
+    std::memcpy(reassembly.compressed.data() + offset, payload, header.payloadSize);
+
+    if (reassembly.receivedCount != reassembly.chunkCount) {
+        return;
+    }
+
+    std::string raw(header.uncompressedSize, '\0');
+    const size_t decompressedSize =
+        ZSTD_decompress(raw.data(), raw.size(), reassembly.compressed.data(),
+                        reassembly.compressed.size());
+    if (ZSTD_isError(decompressedSize) || decompressedSize != raw.size()) {
+        DuskLog.warn("Multiplayer direct UDP pose decompression failed sender={} seq={} err={}",
+                     senderId, header.sequence,
+                     ZSTD_isError(decompressedSize) ? ZSTD_getErrorName(decompressedSize)
+                                                    : "size mismatch");
+        return;
+    }
+
+    try {
+        process_udp_pose_message(json::parse(raw), senderId);
+    } catch (const json::exception& e) {
+        DuskLog.warn("Multiplayer direct UDP pose JSON failed sender={} seq={} err={}", senderId,
+                     header.sequence, e.what());
+    }
+}
+
+void pump_udp_pose_receives() {
+    if (sSession.udpSock == INVALID_SOCKET) {
+        return;
+    }
+
+    std::array<uint8_t, sizeof(UdpPoseChunkHeader) + kUdpPoseChunkPayloadBytes> packet{};
+    while (true) {
+        sockaddr_in fromAddr{};
+#if _WIN32
+        int fromLen = sizeof(fromAddr);
+#else
+        socklen_t fromLen = sizeof(fromAddr);
+#endif
+        const int read =
+            recvfrom(sSession.udpSock, reinterpret_cast<char*>(packet.data()),
+                     static_cast<int>(packet.size()), 0, reinterpret_cast<sockaddr*>(&fromAddr),
+                     &fromLen);
+        if (read < 0) {
+            if (!would_block()) {
+                DuskLog.warn("Multiplayer direct UDP recv failed");
+            }
+            return;
+        }
+        if (static_cast<size_t>(read) < sizeof(UdpPoseChunkHeader)) {
+            continue;
+        }
+
+        UdpPoseChunkHeader header{};
+        std::memcpy(&header, packet.data(), sizeof(header));
+        if (sizeof(header) + header.payloadSize > static_cast<size_t>(read)) {
+            continue;
+        }
+        accept_udp_pose_chunk(header, packet.data() + sizeof(header), fromAddr);
+    }
+}
+
 void begin_connect() {
     close_socket(sSession.sock);
     sSession.sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -3613,6 +3977,10 @@ void begin_connect() {
     if (!fill_ipv4(addr, sSession.host, sSession.port)) {
         disconnect("invalid host");
         return;
+    }
+
+    if (sSession.mode == NetworkMode::DirectJoin) {
+        setup_direct_join_udp();
     }
 
     const int result = connect(sSession.sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
@@ -3662,6 +4030,7 @@ void begin_host() {
     sSession.state = ConnectionState::Listening;
     DuskLog.info("Multiplayer direct host listening on {}:{}", sSession.bindHost, sSession.port);
     DuskLog.info("Multiplayer invite code: {}", sSession.inviteCode);
+    setup_direct_host_udp();
 }
 
 void update_connecting() {
@@ -3906,7 +4275,7 @@ void send_pose() {
             state.value("upper_rate2", 1.0f));
     }
 
-    send_json({
+    send_pose_message({
         {"type", "pose"},
         {"sequence", ++sSession.poseSequence},
         {"state", state},
@@ -4023,6 +4392,9 @@ void update_connected() {
         pump_direct_peer_receives();
     } else {
         pump_receive();
+    }
+    if (sSession.mode == NetworkMode::DirectHost || sSession.mode == NetworkMode::DirectJoin) {
+        pump_udp_pose_receives();
     }
 
     if (sSession.state != ConnectionState::Connected) {
