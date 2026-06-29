@@ -106,6 +106,9 @@ using json = nlohmann::json;
 // placeholder key.
 const char* const kDirectPeerId = "direct";
 constexpr size_t kMaxDirectPeers = 7;
+size_t sLastPoseMatrixPackedBytes = 0;
+size_t sLastPoseMatrixBase64Bytes = 0;
+size_t sLastPoseMatrixPresentSlots = 0;
 
 std::string resolve_peer_id(const json& message) {
     return message.value("client_id", kDirectPeerId);
@@ -127,6 +130,19 @@ constexpr size_t kUdpPoseChunkPayloadBytes = 1100;
 constexpr size_t kUdpPoseSenderIdBytes = 32;
 constexpr size_t kUdpPoseMaxCompressedBytes = 256 * 1024;
 constexpr size_t kUdpPoseMaxUncompressedBytes = 512 * 1024;
+
+bool pose_float_is_finite(const char* name, f32 value) {
+    if (std::isfinite(value)) {
+        return true;
+    }
+
+    static uint32_t sBadPoseFloatLogCount = 0;
+    if (sBadPoseFloatLogCount < 20) {
+        ++sBadPoseFloatLogCount;
+        DuskLog.warn("Multiplayer pose tx dropped: non-finite {}={}", name, value);
+    }
+    return false;
+}
 
 #pragma pack(push, 1)
 struct UdpPoseChunkHeader {
@@ -2478,6 +2494,74 @@ json model_matrices_to_json_if(bool enabled, J3DModel* model) {
     return enabled ? model_matrices_to_json(model) : json(nullptr);
 }
 
+void append_pack_bytes(std::string& out, const void* data, size_t size) {
+    out.append(reinterpret_cast<const char*>(data), size);
+}
+
+void append_pack_u8(std::string& out, uint8_t value) {
+    append_pack_bytes(out, &value, sizeof(value));
+}
+
+void append_pack_u16(std::string& out, uint16_t value) {
+    append_pack_bytes(out, &value, sizeof(value));
+}
+
+void append_pack_matrix(std::string& out, CMtxP matrix) {
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 4; ++col) {
+            const float value = matrix[row][col];
+            append_pack_bytes(out, &value, sizeof(value));
+        }
+    }
+}
+
+void append_pack_model(std::string& out, J3DModel* model) {
+    if (model == nullptr || model->getModelData() == nullptr) {
+        append_pack_u8(out, 0);
+        return;
+    }
+
+    J3DModelData* data = model->getModelData();
+    const u16 jointCount = data->getJointNum();
+    const u16 weightCount = data->getWEvlpMtxNum();
+
+    append_pack_u8(out, 1);
+    append_pack_u16(out, jointCount);
+    append_pack_u16(out, weightCount);
+    append_pack_matrix(out, model->getBaseTRMtx());
+    for (u16 i = 0; i < jointCount; ++i) {
+        append_pack_matrix(out, model->getAnmMtx(i));
+    }
+    for (u16 i = 0; i < weightCount; ++i) {
+        append_pack_matrix(out, model->getWeightAnmMtx(i));
+    }
+}
+
+json link_matrix_pack_to_json(std::initializer_list<J3DModel*> models, int midnaHairShape) {
+    std::string packed;
+    packed.reserve(32 * 1024);
+    packed.append("DMPM", 4);
+    append_pack_u8(packed, 1);
+    append_pack_u8(packed, static_cast<uint8_t>(models.size()));
+    size_t presentSlots = 0;
+    for (J3DModel* model : models) {
+        if (model != nullptr && model->getModelData() != nullptr) {
+            ++presentSlots;
+        }
+        append_pack_model(packed, model);
+    }
+    const std::string encoded = absl::Base64Escape(packed);
+    sLastPoseMatrixPackedBytes = packed.size();
+    sLastPoseMatrixBase64Bytes = encoded.size();
+    sLastPoseMatrixPresentSlots = presentSlots;
+
+    return {
+        {"format", "f32_pack_v1"},
+        {"data", encoded},
+        {"midna_hair_shape", midnaHairShape},
+    };
+}
+
 int visible_material_shape_index(J3DModel* model, int count, int fallback) {
     if (model == nullptr || model->getModelData() == nullptr) {
         return fallback;
@@ -2648,53 +2732,53 @@ bool add_link_matrices(json& state) {
         }
     }
 
-    state["link_matrices"] = {
-        {"body", model_matrices_to_json(link->mpLinkModel)},
-        {"hat", model_matrices_to_json_if(includeHumanParts, link->mpLinkHatModel)},
-        {"face", model_matrices_to_json_if(includeHumanParts, link->mpLinkFaceModel)},
-        {"hand", model_matrices_to_json_if(includeHumanParts, link->mpLinkHandModel)},
-        {"sword", model_matrices_to_json_if(includeHumanParts, link->mSwordModel)},
-        {"sheath", model_matrices_to_json_if(includeHumanParts, link->mSheathModel)},
-        {"shield", model_matrices_to_json_if(includeHumanParts, link->mShieldModel)},
-        {"held_item", model_matrices_to_json_if(includeHumanParts, link->mHeldItemModel)},
-        {"hook_tip", model_matrices_to_json_if(includeHumanParts, link->mpHookTipModel)},
-        {"hook_sub_item", model_matrices_to_json_if(includeHumanParts, link->field_0x0710)},
-        {"hook_sub_tip", model_matrices_to_json_if(includeHumanParts, link->field_0x0714)},
-        {"arrow", model_matrices_to_json_if(includeHumanParts, arrowModel)},
-        {"kantera", model_matrices_to_json_if(includeHumanParts, link->mpKanteraModel)},
-        {"kantera_glow", model_matrices_to_json_if(includeHumanParts, link->mpKanteraGlowModel)},
-        {"item_actor", model_matrices_to_json_if(includeHumanParts, itemActorModel)},
-        {"ride_actor", model_matrices_to_json_if(includeHumanParts, rideActorModel)},
-        {"midna", model_matrices_to_json_if(
-                      midnaVisual.body,
-                      midnaVisual.shadowForm ? daPy_py_c::getMidnaActor()->getShadowModel()
-                                             : link->getMidnaModel())},
-        {"midna_mask", model_matrices_to_json_if(
-                           midnaVisual.mask,
-                           midnaVisual.shadowForm ? daPy_py_c::getMidnaActor()->getShadowMaskModel()
-                                                  : link->getMidnaMaskModel())},
-        {"midna_hand", model_matrices_to_json_if(
-                           midnaVisual.hand,
-                           midnaVisual.shadowForm ? daPy_py_c::getMidnaActor()->getShadowHandModel()
-                                                  : link->getMidnaHandModel())},
-        {"midna_hair", model_matrices_to_json_if(
-                           midnaVisual.hair,
-                           midnaVisual.shadowForm ? daPy_py_c::getMidnaActor()->getShadowHairHandModel()
-                                                  : link->getMidnaHairHandModel())},
-        {"midna_glow", model_matrices_to_json_if(
-                           midnaVisual.shadowForm && midnaVisual.glow,
-                           daPy_py_c::getMidnaActor() != nullptr
-                               ? daPy_py_c::getMidnaActor()->getGokouModel()
-                               : nullptr)},
-        {"midna_hair_shape",
-         (isWolf || midnaVisual.shadowForm)
-             ? visible_material_shape_index(
-                   midnaVisual.shadowForm && daPy_py_c::getMidnaActor() != nullptr
-                       ? daPy_py_c::getMidnaActor()->getShadowHairHandModel()
-                       : link->getMidnaHairHandModel(),
-                   3, 0)
-             : 0},
-    };
+    daMidna_c* midnaActor = daPy_py_c::getMidnaActor();
+    J3DModel* midnaModel = nullptr;
+    J3DModel* midnaMaskModel = nullptr;
+    J3DModel* midnaHandModel = nullptr;
+    J3DModel* midnaHairModel = nullptr;
+    J3DModel* midnaGlowModel = nullptr;
+    if (midnaVisual.shadowForm && midnaActor != nullptr) {
+        midnaModel = midnaVisual.body ? midnaActor->getShadowModel() : nullptr;
+        midnaMaskModel = midnaVisual.mask ? midnaActor->getShadowMaskModel() : nullptr;
+        midnaHandModel = midnaVisual.hand ? midnaActor->getShadowHandModel() : nullptr;
+        midnaHairModel = midnaVisual.hair ? midnaActor->getShadowHairHandModel() : nullptr;
+        midnaGlowModel = midnaVisual.glow ? midnaActor->getGokouModel() : nullptr;
+    } else {
+        midnaModel = midnaVisual.body ? link->getMidnaModel() : nullptr;
+        midnaMaskModel = midnaVisual.mask ? link->getMidnaMaskModel() : nullptr;
+        midnaHandModel = midnaVisual.hand ? link->getMidnaHandModel() : nullptr;
+        midnaHairModel = midnaVisual.hair ? link->getMidnaHairHandModel() : nullptr;
+    }
+
+    const int midnaHairShape =
+        (isWolf || midnaVisual.shadowForm) ? visible_material_shape_index(midnaHairModel, 3, 0) : 0;
+
+    state["link_matrices"] = link_matrix_pack_to_json(
+        {
+            link->mpLinkModel,
+            includeHumanParts ? link->mpLinkHatModel : nullptr,
+            includeHumanParts ? link->mpLinkFaceModel : nullptr,
+            includeHumanParts ? link->mpLinkHandModel : nullptr,
+            includeHumanParts ? link->mSwordModel : nullptr,
+            includeHumanParts ? link->mSheathModel : nullptr,
+            includeHumanParts ? link->mShieldModel : nullptr,
+            includeHumanParts ? link->mHeldItemModel : nullptr,
+            includeHumanParts ? link->mpHookTipModel : nullptr,
+            includeHumanParts ? link->field_0x0710 : nullptr,
+            includeHumanParts ? link->field_0x0714 : nullptr,
+            includeHumanParts ? arrowModel : nullptr,
+            includeHumanParts ? link->mpKanteraModel : nullptr,
+            includeHumanParts ? link->mpKanteraGlowModel : nullptr,
+            includeHumanParts ? itemActorModel : nullptr,
+            includeHumanParts ? rideActorModel : nullptr,
+            midnaModel,
+            midnaMaskModel,
+            midnaHandModel,
+            midnaHairModel,
+            midnaGlowModel,
+        },
+        midnaHairShape);
 
     state["equip_item"] = static_cast<int>(link->mEquipItem);
     state["sword_variant"] = detect_sword_variant(link);
@@ -2751,6 +2835,152 @@ bool read_matrix_block(const json& source, uint16_t matrixCount, std::vector<flo
     return true;
 }
 
+bool read_pack_bytes(const std::string& source, size_t& cursor, void* out, size_t size) {
+    if (cursor > source.size() || size > source.size() - cursor) {
+        return false;
+    }
+
+    std::memcpy(out, source.data() + cursor, size);
+    cursor += size;
+    return true;
+}
+
+bool read_pack_u8(const std::string& source, size_t& cursor, uint8_t& out) {
+    return read_pack_bytes(source, cursor, &out, sizeof(out));
+}
+
+bool read_pack_u16(const std::string& source, size_t& cursor, uint16_t& out) {
+    return read_pack_bytes(source, cursor, &out, sizeof(out));
+}
+
+bool read_pack_float_array(const std::string& source, size_t& cursor,
+                           std::array<float, 12>& out) {
+    return read_pack_bytes(source, cursor, out.data(), out.size() * sizeof(float));
+}
+
+bool read_pack_float_vector(const std::string& source, size_t& cursor, size_t count,
+                            std::vector<float>& out) {
+    if (count > 64 * 1024) {
+        return false;
+    }
+
+    out.resize(count);
+    if (count == 0) {
+        return true;
+    }
+
+    if (!read_pack_bytes(source, cursor, out.data(), count * sizeof(float))) {
+        out.clear();
+        return false;
+    }
+    return true;
+}
+
+bool parse_packed_model_matrices(const std::string& packed, size_t& cursor,
+                                 RemoteModelMatrixSnapshot& snapshot) {
+    snapshot = {};
+
+    uint8_t present = 0;
+    if (!read_pack_u8(packed, cursor, present)) {
+        return false;
+    }
+    if (present == 0) {
+        return true;
+    }
+    if (present != 1) {
+        return false;
+    }
+
+    uint16_t jointCount = 0;
+    uint16_t weightCount = 0;
+    if (!read_pack_u16(packed, cursor, jointCount) ||
+        !read_pack_u16(packed, cursor, weightCount))
+    {
+        return false;
+    }
+
+    snapshot.jointCount = jointCount;
+    snapshot.weightCount = weightCount;
+    if (!read_pack_float_array(packed, cursor, snapshot.base) ||
+        !read_pack_float_vector(packed, cursor, static_cast<size_t>(jointCount) * 12,
+                                snapshot.joints) ||
+        !read_pack_float_vector(packed, cursor, static_cast<size_t>(weightCount) * 12,
+                                snapshot.weights))
+    {
+        snapshot = {};
+        return false;
+    }
+
+    snapshot.valid = true;
+    return true;
+}
+
+RemoteLinkMatrixSnapshot parse_packed_link_matrices(const json& source) {
+    RemoteLinkMatrixSnapshot snapshot;
+    if (!source.is_object() || source.value("format", "") != "f32_pack_v1") {
+        return snapshot;
+    }
+
+    const std::string encoded = source.value("data", "");
+    std::string packed;
+    if (encoded.empty() || !absl::Base64Unescape(encoded, &packed)) {
+        return snapshot;
+    }
+
+    size_t cursor = 0;
+    char magic[4]{};
+    uint8_t version = 0;
+    uint8_t slotCount = 0;
+    if (!read_pack_bytes(packed, cursor, magic, sizeof(magic)) ||
+        std::memcmp(magic, "DMPM", 4) != 0 ||
+        !read_pack_u8(packed, cursor, version) ||
+        !read_pack_u8(packed, cursor, slotCount) ||
+        version != 1 || slotCount != 21)
+    {
+        return {};
+    }
+
+    RemoteModelMatrixSnapshot* slots[] = {
+        &snapshot.body,
+        &snapshot.hat,
+        &snapshot.face,
+        &snapshot.hand,
+        &snapshot.sword,
+        &snapshot.sheath,
+        &snapshot.shield,
+        &snapshot.heldItem,
+        &snapshot.hookTip,
+        &snapshot.hookSubItem,
+        &snapshot.hookSubTip,
+        &snapshot.arrow,
+        &snapshot.kantera,
+        &snapshot.kanteraGlow,
+        &snapshot.itemActor,
+        &snapshot.rideActor,
+        &snapshot.midna,
+        &snapshot.midnaMask,
+        &snapshot.midnaHand,
+        &snapshot.midnaHair,
+        &snapshot.midnaGlow,
+    };
+
+    for (RemoteModelMatrixSnapshot* slot : slots) {
+        if (!parse_packed_model_matrices(packed, cursor, *slot)) {
+            return {};
+        }
+    }
+    if (cursor != packed.size()) {
+        return {};
+    }
+
+    snapshot.midnaHairShape = source.value("midna_hair_shape", 0);
+    if (snapshot.midnaHairShape < 0 || snapshot.midnaHairShape > 2) {
+        snapshot.midnaHairShape = 0;
+    }
+    snapshot.valid = snapshot.body.valid;
+    return snapshot;
+}
+
 RemoteModelMatrixSnapshot parse_model_matrices(const json& source) {
     RemoteModelMatrixSnapshot snapshot;
     if (!source.is_object()) {
@@ -2787,6 +3017,11 @@ RemoteLinkMatrixSnapshot parse_link_matrices(const json& state) {
     RemoteLinkMatrixSnapshot snapshot;
     const auto it = state.find("link_matrices");
     if (it == state.end() || !it->is_object()) {
+        return snapshot;
+    }
+
+    snapshot = parse_packed_link_matrices(*it);
+    if (snapshot.valid) {
         return snapshot;
     }
 
@@ -3658,6 +3893,52 @@ std::string local_udp_pose_sender_id() {
     return kDirectPeerId;
 }
 
+size_t compressed_size_for_diagnostics(const void* data, size_t size) {
+    const size_t bound = ZSTD_compressBound(size);
+    std::vector<uint8_t> compressed(bound);
+    const size_t compressedSize = ZSTD_compress(compressed.data(), compressed.size(), data, size, 1);
+    return ZSTD_isError(compressedSize) ? 0 : compressedSize;
+}
+
+size_t msgpack_size_for_diagnostics(const json& value) {
+    return json::to_msgpack(value).size();
+}
+
+void erase_state_keys_for_diagnostics(json& message, const char* const* keys, size_t keyCount) {
+    auto stateIt = message.find("state");
+    if (stateIt == message.end() || !stateIt->is_object()) {
+        return;
+    }
+
+    for (size_t i = 0; i < keyCount; ++i) {
+        stateIt->erase(keys[i]);
+    }
+}
+
+size_t compressed_without_state_keys_for_diagnostics(const json& message,
+                                                     const char* const* keys, size_t keyCount) {
+    json copy = message;
+    erase_state_keys_for_diagnostics(copy, keys, keyCount);
+    const std::vector<uint8_t> packed = json::to_msgpack(copy);
+    return compressed_size_for_diagnostics(packed.data(), packed.size());
+}
+
+size_t raw_state_group_size_for_diagnostics(const json* state, const char* const* keys,
+                                            size_t keyCount) {
+    if (state == nullptr || !state->is_object()) {
+        return 0;
+    }
+
+    json group = json::object();
+    for (size_t i = 0; i < keyCount; ++i) {
+        const auto it = state->find(keys[i]);
+        if (it != state->end()) {
+            group[keys[i]] = *it;
+        }
+    }
+    return msgpack_size_for_diagnostics(group);
+}
+
 bool open_udp_socket(const std::string& bindHost, int bindPort) {
     close_socket(sSession.udpSock);
     sSession.udpRemoteAddrKnown = false;
@@ -3716,7 +3997,7 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
         return false;
     }
 
-    const std::string raw = message.dump();
+    const std::vector<uint8_t> raw = json::to_msgpack(message);
     const size_t bound = ZSTD_compressBound(raw.size());
     std::vector<uint8_t> compressed(bound);
     const size_t compressedSize =
@@ -3755,7 +4036,7 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
         header.magic[2] = 'P';
         header.magic[3] = 'U';
         header.version = 1;
-        header.type = 1;
+        header.type = 2;
         header.headerSize = sizeof(UdpPoseChunkHeader);
         header.sequence = sequence;
         header.chunkIndex = chunkIndex;
@@ -3778,8 +4059,75 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
 
     static uint32_t sUdpPoseTxLogTicks = 0;
     if ((sUdpPoseTxLogTicks++ % 150) == 0) {
-        DuskLog.info("Multiplayer direct UDP pose tx seq={} sender={} raw={} compressed={} chunks={}",
-                     sequence, senderId, raw.size(), compressed.size(), chunkCount);
+        const json* state = message.find("state") != message.end() ? &message["state"] : nullptr;
+        static const char* const matrixKeys[] = {"link_matrices"};
+        static const char* const audioKeys[] = {"audio_events"};
+        static const char* const worldKeys[] = {
+            "stage", "room", "layer", "final_ganondorf_ready", "x", "y", "z", "angle_y",
+            "manual_sync_ready",
+        };
+        static const char* const animKeys[] = {
+            "proc_id", "proc_v0", "proc_v1", "proc_v2", "proc_v3", "proc_v5",
+            "under_frame", "under_bck0", "under_frame0", "under_rate0", "upper_bck2",
+            "upper_frame2", "upper_rate2",
+        };
+        static const char* const transformKeys[] = {
+            "is_wolf", "is_transforming", "transform_from_wolf", "transform_to_wolf",
+            "transform_proc_v0", "transform_proc_v5", "transform_clothes_wait",
+            "transform_frame", "transform_proc_v2", "transform_proc_v3", "transform_shape_x",
+        };
+        static const char* const visualKeys[] = {
+            "equip_item", "sword_variant", "shield_variant", "clothes_variant", "sword_draw",
+            "shield_draw", "sword_out", "midna_draw", "midna_mask_draw", "midna_hand_draw",
+            "midna_hair_draw", "midna_shadow_form", "heavy_boots", "item_draw",
+            "kantera_draw", "item_actor_kind", "ride_actor_kind",
+        };
+
+        auto groupRaw = [state](const char* const* keys, size_t keyCount) {
+            return raw_state_group_size_for_diagnostics(state, keys, keyCount);
+        };
+        auto groupDelta = [&message, compressedSize](const char* const* keys, size_t keyCount) {
+            const size_t without =
+                compressed_without_state_keys_for_diagnostics(message, keys, keyCount);
+            return static_cast<int64_t>(compressedSize) - static_cast<int64_t>(without);
+        };
+
+        size_t matrixB64Compressed = 0;
+        if (state != nullptr && state->is_object()) {
+            const auto matrixIt = state->find("link_matrices");
+            const json* matrices = matrixIt != state->end() ? &(*matrixIt) : nullptr;
+            if (matrices != nullptr && matrices->is_object()) {
+            const std::string matrixData = matrices->value("data", "");
+                if (!matrixData.empty()) {
+                    matrixB64Compressed =
+                        compressed_size_for_diagnostics(matrixData.data(), matrixData.size());
+                }
+            }
+        }
+
+        DuskLog.info(
+            "Multiplayer direct UDP pose tx seq={} sender={} raw={} compressed={} chunks={} "
+            "matrix_packed={} matrix_b64={} matrix_b64_zstd={} matrix_slots={}",
+            sequence, senderId, raw.size(), compressed.size(), chunkCount,
+            sLastPoseMatrixPackedBytes, sLastPoseMatrixBase64Bytes, matrixB64Compressed,
+            sLastPoseMatrixPresentSlots);
+        DuskLog.info(
+            "Multiplayer direct UDP pose tx breakdown seq={} raw_matrix={} raw_audio={} "
+            "raw_world={} raw_anim={} raw_transform={} raw_visual={} zdelta_matrix={} "
+            "zdelta_audio={} zdelta_world={} zdelta_anim={} zdelta_transform={} zdelta_visual={}",
+            sequence,
+            groupRaw(matrixKeys, std::size(matrixKeys)),
+            groupRaw(audioKeys, std::size(audioKeys)),
+            groupRaw(worldKeys, std::size(worldKeys)),
+            groupRaw(animKeys, std::size(animKeys)),
+            groupRaw(transformKeys, std::size(transformKeys)),
+            groupRaw(visualKeys, std::size(visualKeys)),
+            groupDelta(matrixKeys, std::size(matrixKeys)),
+            groupDelta(audioKeys, std::size(audioKeys)),
+            groupDelta(worldKeys, std::size(worldKeys)),
+            groupDelta(animKeys, std::size(animKeys)),
+            groupDelta(transformKeys, std::size(transformKeys)),
+            groupDelta(visualKeys, std::size(visualKeys)));
     }
     return true;
 }
@@ -3847,7 +4195,8 @@ void process_udp_pose_message(json message, const std::string& senderId) {
 
 void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payload,
                            const sockaddr_in& fromAddr) {
-    if (std::memcmp(header.magic, "DMPU", 4) != 0 || header.version != 1 || header.type != 1 ||
+    if (std::memcmp(header.magic, "DMPU", 4) != 0 || header.version != 1 ||
+        (header.type != 1 && header.type != 2) ||
         header.headerSize != sizeof(UdpPoseChunkHeader) || header.payloadSize == 0 ||
         header.chunkCount == 0 || header.chunkIndex >= header.chunkCount ||
         header.compressedSize == 0 || header.compressedSize > kUdpPoseMaxCompressedBytes ||
@@ -3905,7 +4254,7 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
         return;
     }
 
-    std::string raw(header.uncompressedSize, '\0');
+    std::vector<uint8_t> raw(header.uncompressedSize);
     const size_t decompressedSize =
         ZSTD_decompress(raw.data(), raw.size(), reassembly.compressed.data(),
                         reassembly.compressed.size());
@@ -3918,10 +4267,14 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
     }
 
     try {
-        process_udp_pose_message(json::parse(raw), senderId);
+        json message = header.type == 2
+                           ? json::from_msgpack(raw)
+                           : json::parse(std::string(reinterpret_cast<const char*>(raw.data()),
+                                                     raw.size()));
+        process_udp_pose_message(std::move(message), senderId);
     } catch (const json::exception& e) {
-        DuskLog.warn("Multiplayer direct UDP pose JSON failed sender={} seq={} err={}", senderId,
-                     header.sequence, e.what());
+        DuskLog.warn("Multiplayer direct UDP pose decode failed sender={} seq={} type={} err={}",
+                     senderId, header.sequence, header.type, e.what());
     }
 }
 
@@ -4180,6 +4533,23 @@ void send_pose() {
     }
 
     const LocalMidnaVisualState midnaVisual = detect_midna_visual_state(link, isWolf);
+    const f32 poseX = player->current.pos.x;
+    const f32 poseY = player->current.pos.y;
+    const f32 poseZ = player->current.pos.z;
+    const f32 underFrame0 = link != nullptr ? link->mUnderFrameCtrl[0].getFrame() : 0.0f;
+    const f32 underRate0 = link != nullptr ? link->mUnderFrameCtrl[0].getRate() : 1.0f;
+    const f32 upperFrame2 = link != nullptr ? link->mUpperFrameCtrl[2].getFrame() : 0.0f;
+    const f32 upperRate2 = link != nullptr ? link->mUpperFrameCtrl[2].getRate() : 1.0f;
+    if (!pose_float_is_finite("x", poseX) || !pose_float_is_finite("y", poseY) ||
+        !pose_float_is_finite("z", poseZ) ||
+        !pose_float_is_finite("under_frame0", underFrame0) ||
+        !pose_float_is_finite("under_rate0", underRate0) ||
+        !pose_float_is_finite("upper_frame2", upperFrame2) ||
+        !pose_float_is_finite("upper_rate2", upperRate2))
+    {
+        return;
+    }
+
     json state = {
         {"stage", dComIfGp_getStartStageName()},
         {"room", static_cast<int>(fopAcM_GetRoomNo(player))},
@@ -4187,9 +4557,9 @@ void send_pose() {
         {"final_ganondorf_ready",
          std::strcmp(dComIfGp_getStartStageName(), "D_MN09B") == 0 &&
              dComIfGs_isSaveDunSwitch(1)},
-        {"x", player->current.pos.x},
-        {"y", player->current.pos.y},
-        {"z", player->current.pos.z},
+        {"x", poseX},
+        {"y", poseY},
+        {"z", poseZ},
         {"angle_y", static_cast<int>(player->shape_angle.y)},
         {"proc_id", link != nullptr ? static_cast<int>(link->mProcID) : 0},
         {"proc_v0", link != nullptr ? link->mProcVar0.field_0x3008 : 0},
@@ -4198,13 +4568,13 @@ void send_pose() {
         {"proc_v3", link != nullptr ? link->mProcVar3.field_0x300e : 0},
         {"proc_v5", link != nullptr ? link->mProcVar5.field_0x3012 : 0},
         {"manual_sync_ready", !is_stage_load_unsafe_for_multiplayer()},
-        {"under_frame", link != nullptr ? link->mUnderFrameCtrl[0].getFrame() : 0.0f},
+        {"under_frame", underFrame0},
         {"under_bck0", link != nullptr ? static_cast<int>(link->mUnderAnmHeap[0].getIdx()) : 0},
-        {"under_frame0", link != nullptr ? link->mUnderFrameCtrl[0].getFrame() : 0.0f},
-        {"under_rate0", link != nullptr ? link->mUnderFrameCtrl[0].getRate() : 1.0f},
+        {"under_frame0", underFrame0},
+        {"under_rate0", underRate0},
         {"upper_bck2", link != nullptr ? static_cast<int>(link->mUpperAnmHeap[2].getIdx()) : 0},
-        {"upper_frame2", link != nullptr ? link->mUpperFrameCtrl[2].getFrame() : 0.0f},
-        {"upper_rate2", link != nullptr ? link->mUpperFrameCtrl[2].getRate() : 1.0f},
+        {"upper_frame2", upperFrame2},
+        {"upper_rate2", upperRate2},
         {"is_wolf", isWolf},
         {"is_transforming", isTransforming},
         {"transform_from_wolf", transformFromWolf},
@@ -4212,7 +4582,7 @@ void send_pose() {
         {"transform_proc_v0", link != nullptr ? link->mProcVar0.field_0x3008 : 0},
         {"transform_proc_v5", link != nullptr ? link->mProcVar5.field_0x3012 : 0},
         {"transform_clothes_wait", link != nullptr ? static_cast<int>(link->mClothesChangeWaitTimer) : 0},
-        {"transform_frame", link != nullptr ? link->mUnderFrameCtrl[0].getFrame() : 0.0f},
+        {"transform_frame", underFrame0},
         {"transform_proc_v2", link != nullptr ? link->mProcVar2.field_0x300c : 0},
         {"transform_proc_v3", link != nullptr ? link->mProcVar3.field_0x300e : 0},
         {"transform_shape_x", link != nullptr ? static_cast<int>(link->shape_angle.x) : 0},
