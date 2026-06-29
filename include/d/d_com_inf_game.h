@@ -1312,6 +1312,9 @@ inline u16 dComIfGs_getRupee() {
 
 inline void dComIfGs_setRupee(u16 i_rupees) {
     g_dComIfG_gameInfo.info.getPlayer().getPlayerStatusA().setRupee(i_rupees);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_rupee_count_set(i_rupees);
+#endif
 }
 
 inline u16 dComIfGs_getMaxOil() {

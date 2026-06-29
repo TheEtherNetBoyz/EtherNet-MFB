@@ -133,4 +133,9 @@ void notify_local_max_life_set(uint8_t maxLife);
 // slot) -- that stays local/volatile per the existing consumables rule.
 void notify_local_bottle_slot_count_set(uint8_t count);
 
+// Current wallet rupee total. Freestanding/hidden rupees use ordinary
+// memory-item flags for "collected", so the wallet value needs an absolute
+// companion lane or peers can lose the money while still losing the pickup.
+void notify_local_rupee_count_set(uint16_t rupees);
+
 }  // namespace dusk::multiplayer

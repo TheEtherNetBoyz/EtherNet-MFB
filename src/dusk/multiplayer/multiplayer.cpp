@@ -411,6 +411,15 @@ constexpr int kProgressionCueSewersStage = dStage_SaveTbl_PRISON;
 constexpr int kProgressionCueWakeUpInJailSwitch = 27; // ImGui flag 08:08 / "wake up in jail cs".
 constexpr uint16_t kProgressionCueSewersCompleteEventBit = 0x6140; // offset 0x61 bit 64 - "remove midna from z (temporary flag after sewers)".
 constexpr uint16_t kProgressionCueFaronTwilightEventBit = 0x0640; // offset 0x06 bit 64 - "watched faron twilight intro cutscene".
+constexpr int kUnsyncedSwitchOrdonStage = dStage_SaveTbl_ORDON;
+constexpr int kUnsyncedSwitchOrdonKingBulblinCs = 0x68; // Ordon area flag 16:01 - "King Bulblin cs".
+constexpr int kUnsyncedSwitchSewersStage = dStage_SaveTbl_PRISON;
+constexpr int kUnsyncedSwitchSewersTwilightFinalCs = 0x1F; // Sewers area flag 08:80 - "twilight final cs".
+constexpr int kUnsyncedSwitchLanayruStage = dStage_SaveTbl_LANAYRU;
+constexpr int kUnsyncedSwitchLanayruLakeHyliaIntroTwilightCs = 0x1E; // Lanayru area flag 08:40 - "Lake hylia intro cs twilight".
+constexpr uint16_t kUnsyncedEventBitOrdonSpringMonsterAttack = 0x0580;
+constexpr uint16_t kUnsyncedEventBitFaronCaptureWolfCutscene = 0x4D08;
+constexpr uint16_t kUnsyncedEventBitSewersWarpedFromCastleByMidna = 0x0502;
 constexpr int kProgressionCueHyruleFieldStage = dStage_SaveTbl_FIELD;
 constexpr int kProgressionCueEldinTwilightSwitch = 0x0C; // Hyrule Field area flag 0A:10 - "entered Eldin twilight cs".
 constexpr int kProgressionCueLanayruTwilightSwitch = 0x0D; // Hyrule Field area flag 0A:20 - "entered Lanayru twilight cs".
@@ -449,6 +458,26 @@ constexpr uint32_t kPendingSyncReplyTimeoutTicks = 1800;
 // pickup in the catch-up snapshot even if vanilla has not committed the
 // current stage memory back into the savedata table yet.
 std::map<int, std::set<int>> sObservedMemoryItems;
+
+bool is_unsynced_event_bit(uint16_t flag) {
+    switch (flag) {
+    case kUnsyncedEventBitOrdonSpringMonsterAttack:
+    case kUnsyncedEventBitFaronCaptureWolfCutscene:
+    case kUnsyncedEventBitSewersWarpedFromCastleByMidna:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool is_unsynced_switch_bit(int stage, int flag) {
+    return (stage == kUnsyncedSwitchOrdonStage &&
+            flag == kUnsyncedSwitchOrdonKingBulblinCs) ||
+           (stage == kUnsyncedSwitchSewersStage &&
+            flag == kUnsyncedSwitchSewersTwilightFinalCs) ||
+           (stage == kUnsyncedSwitchLanayruStage &&
+            flag == kUnsyncedSwitchLanayruLakeHyliaIntroTwilightCs);
+}
 
 // Incoming messages that touch per-stage save state (everything except
 // event bits) need dComIfGp_getStageStagInfo() to be non-null -- every
@@ -575,7 +604,7 @@ bool is_stage_dependent_message_type(const std::string& type) {
     // event_bit.
     return type == "save_snapshot" || type == "tbox_bit" || type == "switch_bit" ||
            type == "item_bit" || type == "dungeon_item_bit" || type == "key_num" ||
-           type == "visited_room";
+           type == "visited_room" || type == "rupee_count";
 }
 
 bool is_stage_load_unsafe_for_multiplayer() {
@@ -2094,7 +2123,8 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
                         bool manualSync = false) {
     json eventFlags = json::array();
     for (int i = 0; i < 256 * 8; ++i) {
-        if (dComIfGs_isEventBit(static_cast<u16>(i))) {
+        const uint16_t flag = static_cast<uint16_t>(i);
+        if (!is_unsynced_event_bit(flag) && dComIfGs_isEventBit(flag)) {
             eventFlags.push_back(i);
         }
     }
@@ -2118,7 +2148,7 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
 
         json switches = json::array();
         for (int i = 0; i < dSv_info_c::MEMORY_SWITCH; ++i) {
-            if (dComIfGs_isStageSwitch(s, i)) {
+            if (!is_unsynced_switch_bit(s, i) && dComIfGs_isStageSwitch(s, i)) {
                 switches.push_back(i);
             }
         }
@@ -2241,6 +2271,7 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
         {"letter_get_flags", letterGetFlags},
         {"max_life", dComIfGs_getMaxLife()},
         {"bottle_slots", dComIfGs_getBottleSlotCount()},
+        {"rupees", dComIfGs_getRupee()},
     };
     if (!targetClientId.empty()) {
         snapshot["target_client_id"] = targetClientId;
@@ -2889,7 +2920,13 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
 
         sApplyingRemoteSaveBit = true;
         for (const json& flag : message.value("event_flags", json::array())) {
-            dComIfGs_onEventBit(static_cast<uint16_t>(flag.get<int>()));
+            const uint16_t flagValue = static_cast<uint16_t>(flag.get<int>());
+            if (is_unsynced_event_bit(flagValue)) {
+                DuskLog.info("Multiplayer snapshot skipped unsynced event bit flag={}",
+                             flagValue);
+                continue;
+            }
+            dComIfGs_onEventBit(flagValue);
         }
         for (const json& entry : message.value("chests", json::array())) {
             const int stage = entry.value("stage", -1);
@@ -2902,7 +2939,13 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         for (const json& entry : message.value("switches", json::array())) {
             const int stage = entry.value("stage", -1);
             for (const json& flag : entry.value("flags", json::array())) {
-                apply_remote_switch_bit(stage, flag.get<int>());
+                const int flagValue = flag.get<int>();
+                if (is_unsynced_switch_bit(stage, flagValue)) {
+                    DuskLog.info("Multiplayer snapshot skipped unsynced switch bit stage={} flag={}",
+                                 stage, flagValue);
+                    continue;
+                }
+                apply_remote_switch_bit(stage, flagValue);
             }
         }
         for (const json& entry : message.value("items", json::array())) {
@@ -3036,6 +3079,13 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                 dComIfGs_setEmptyBottle();
             }
             DuskLog.info("Multiplayer snapshot bottle slots set to {}", remoteBottleSlots);
+        }
+        const int remoteRupees = message.value("rupees", -1);
+        if (remoteRupees >= 0 && remoteRupees <= dComIfGs_getRupeeMax()) {
+            sApplyingRemoteSaveBit = true;
+            dComIfGs_setRupee(static_cast<u16>(remoteRupees));
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer snapshot rupees set to {}", remoteRupees);
         }
         if (message.value("manual_sync", false)) {
             sManualSyncReloadPending = true;
@@ -3194,6 +3244,11 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
     } else if (type == "event_bit") {
         const uint16_t flag = routedMessage.value("flag", 0U);
         const bool set = routedMessage.value("set", true);
+        if (is_unsynced_event_bit(flag)) {
+            DuskLog.info("Multiplayer ignored unsynced remote event bit flag={} set={}", flag,
+                         set);
+            return;
+        }
         if (set) {
             maybe_show_progression_sync_prompt_for_event_bit(resolve_peer_id(routedMessage), flag);
         }
@@ -3297,6 +3352,14 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                 DuskLog.info("Multiplayer applied remote bottle slots count={}", count);
             }
         }
+    } else if (type == "rupee_count") {
+        const int value = message.value("value", -1);
+        if (value >= 0 && value <= dComIfGs_getRupeeMax()) {
+            sApplyingRemoteSaveBit = true;
+            dComIfGs_setRupee(static_cast<u16>(value));
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote rupee count value={}", value);
+        }
     } else if (type == "switch_bit") {
         const int stage = message.value("stage", -1);
         const int flag = message.value("flag", -1);
@@ -3305,6 +3368,11 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         const uint32_t sourceParams = message.value("source_params", 0xFFFFFFFFU);
         const bool set = message.value("set", true);
         if (stage >= 0 && flag >= 0) {
+            if (is_unsynced_switch_bit(stage, flag)) {
+                DuskLog.info("Multiplayer ignored unsynced remote switch bit stage={} flag={} set={}",
+                             stage, flag, set);
+                return;
+            }
             begin_flag_trace_window("remote_rx", "switch", stage, flag, set, sourceActor,
                                     sourceRoom, sourceParams);
             if (stage == kProgressionCueSewersStage && (flag == 10 || flag == 17)) {
@@ -4964,6 +5032,10 @@ void notify_local_event_bit_set(uint16_t flag) {
     if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
+    if (is_unsynced_event_bit(flag)) {
+        DuskLog.info("Multiplayer skipped unsynced local event bit flag={}", flag);
+        return;
+    }
 
     send_json({
         {"type", "event_bit"},
@@ -4975,6 +5047,10 @@ void notify_local_event_bit_set(uint16_t flag) {
 
 void notify_local_event_bit_cleared(uint16_t flag) {
     if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+    if (is_unsynced_event_bit(flag)) {
+        DuskLog.info("Multiplayer skipped unsynced local event bit cleared flag={}", flag);
         return;
     }
 
@@ -5054,6 +5130,12 @@ void notify_local_memory_switch_set(int flag) {
     const bool hasActorContext = sLocalSwitchActorContext.active &&
         sLocalSwitchActorContext.flag == flag;
 
+    if (is_unsynced_switch_bit(stageNo, flag)) {
+        DuskLog.info("Multiplayer skipped unsynced local switch bit stage={} flag={}", stageNo,
+                     flag);
+        return;
+    }
+
     if (hasActorContext && is_group2_lifecycle_actor(sLocalSwitchActorContext.actorName)) {
         if (is_sewers_progression_switch(stageNo, flag)) {
             DuskLog.info("Multiplayer allowed sewers progression switch stage={} flag={} "
@@ -5113,6 +5195,12 @@ void notify_local_memory_switch_cleared(int flag) {
     const int stageNo = dStage_stagInfo_GetSaveTbl(stagInfo);
     const bool hasActorContext = sLocalSwitchActorContext.active &&
         sLocalSwitchActorContext.flag == flag;
+
+    if (is_unsynced_switch_bit(stageNo, flag)) {
+        DuskLog.info("Multiplayer skipped unsynced local switch bit clear stage={} flag={}",
+                     stageNo, flag);
+        return;
+    }
 
     if (hasActorContext && is_group2_lifecycle_actor(sLocalSwitchActorContext.actorName)) {
         if (is_sewers_progression_switch(stageNo, flag)) {
@@ -5418,6 +5506,18 @@ void notify_local_bottle_slot_count_set(uint8_t count) {
         {"count", count},
     });
     DuskLog.info("Multiplayer sent local bottle slot count={}", count);
+}
+
+void notify_local_rupee_count_set(uint16_t rupees) {
+    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    send_json({
+        {"type", "rupee_count"},
+        {"value", rupees},
+    });
+    DuskLog.info("Multiplayer sent local rupee count value={}", rupees);
 }
 
 }  // namespace dusk::multiplayer

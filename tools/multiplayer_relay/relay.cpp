@@ -62,6 +62,7 @@ const std::set<std::string> kStateBroadcastTypes = {
     "light_drop_num",
     "max_life_update",
     "bottle_slots",
+    "rupee_count",
     "item_get",
     "collect_crystal",
     "collect_mirror",

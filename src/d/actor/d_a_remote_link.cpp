@@ -77,6 +77,13 @@ static bool isRemoteLinkSceneUnsafe() {
            dComIfGp_event_runCheck();
 }
 
+static void zeroColor(GXColorS10* o_color) {
+    o_color->r = 0;
+    o_color->g = 0;
+    o_color->b = 0;
+    o_color->a = 0;
+}
+
 static bool isRemoteLinkMotionAudio(const dusk::multiplayer::RemoteAudioEvent& i_event) {
     switch (i_event.sourceKind) {
     case dusk::multiplayer::REMOTE_AUDIO_SOURCE_LINK_SOUND:
@@ -2482,13 +2489,30 @@ int daRemoteLink_c::Draw() {
         sDrawLogCount++;
     }
 
+    tevStr.mLightInf.a = 0;
+    zeroColor(&tevStr.TevColor);
+    tevStr.TevKColor.r = 0;
+    tevStr.TevKColor.g = 0;
+    tevStr.TevKColor.b = 0;
+    tevStr.TevKColor.a = 0;
+
+    const u8 savedLightInitTimer = g_env_light.light_init_timer;
+    const bool forceRemoteLightInit = tevStr.mInitTimer != 0;
+    if (forceRemoteLightInit) {
+        g_env_light.light_init_timer = 1;
+    }
+
     if (mVisualState.form == FORM_WOLF) {
+        g_env_light.settingTevStruct(9, &current.pos, &tevStr);
         dComIfGd_setListDark();
     } else {
+        g_env_light.settingTevStruct(10, &current.pos, &tevStr);
         dComIfGd_setList();
     }
-    g_env_light.settingTevStruct(mVisualState.form == FORM_WOLF ? 9 : 10, &current.pos,
-                                 &tevStr);
+
+    if (forceRemoteLightInit) {
+        g_env_light.light_init_timer = savedLightInitTimer;
+    }
     drawModel(mpBodyModel);
     if (mRemoteMidnaShadowForm) {
         if (mVisualState.form != FORM_WOLF) {
