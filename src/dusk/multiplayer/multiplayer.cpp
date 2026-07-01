@@ -160,6 +160,8 @@ constexpr size_t kUdpPoseChunkPayloadBytes = 1100;
 constexpr size_t kUdpPoseSenderIdBytes = 32;
 constexpr size_t kUdpPoseMaxCompressedBytes = 256 * 1024;
 constexpr size_t kUdpPoseMaxUncompressedBytes = 512 * 1024;
+constexpr size_t kUdpPoseMaxInflightSequences = 8;
+constexpr int kUdpPoseSocketBufferBytes = 1024 * 1024;
 
 bool pose_float_is_finite(const char* name, f32 value) {
     if (std::isfinite(value)) {
@@ -381,7 +383,8 @@ struct Session {
     uint32_t repairSweepTicks = 0;
     uint32_t nextDirectPeerId = 1;
     std::map<std::string, DirectPeer> directPeers;
-    std::map<std::string, UdpPoseReassembly> udpPoseReassembly;
+    std::map<std::string, std::map<uint32_t, UdpPoseReassembly>> udpPoseReassembly;
+    std::map<std::string, uint32_t> udpPoseLastProcessedSequence;
     bool udpRemoteAddrKnown = false;
 };
 
@@ -1358,6 +1361,14 @@ bool set_nonblocking(socket_t sock) {
 #endif
 }
 
+void configure_udp_socket_buffers(socket_t sock) {
+    int bufferBytes = kUdpPoseSocketBufferBytes;
+    setsockopt(sock, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&bufferBytes),
+               sizeof(bufferBytes));
+    setsockopt(sock, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&bufferBytes),
+               sizeof(bufferBytes));
+}
+
 void push_notification(std::string text, float durationSeconds = 5.0f) {
     if (text.empty()) {
         return;
@@ -1905,6 +1916,7 @@ void reset_connection_state() {
     sSession.peerPoseLogTicks = 0;
     sSession.peerPoses.clear();
     sSession.udpPoseReassembly.clear();
+    sSession.udpPoseLastProcessedSequence.clear();
     sSession.udpRemoteAddrKnown = false;
     sPendingLocalAudioEvents.clear();
     sPeerNames.clear();
@@ -2071,15 +2083,78 @@ void trace_udp_pose_packet_tx(const json& message, size_t rawBytes, size_t compr
     const double avgDatagramBytes =
         static_cast<double>(totalDatagramBytes) / static_cast<double>(chunkCount);
 
+    struct UdpPoseTraceSummary {
+        uint32_t count = 0;
+        uint32_t firstSequence = 0;
+        uint32_t lastSequence = 0;
+        size_t bytesTotal = 0;
+        size_t rawTotal = 0;
+        size_t compressedTotal = 0;
+        uint32_t chunksTotal = 0;
+        uint16_t minChunks = std::numeric_limits<uint16_t>::max();
+        uint16_t maxChunks = 0;
+        size_t minBytes = std::numeric_limits<size_t>::max();
+        size_t maxBytes = 0;
+        size_t minDatagram = std::numeric_limits<size_t>::max();
+        size_t maxDatagram = 0;
+        size_t lastBaseState = 0;
+        size_t lastLinkMatrices = 0;
+        size_t lastAudioEvents = 0;
+        size_t lastMatrixPacked = 0;
+        size_t lastMatrixB64 = 0;
+        size_t lastMatrixSlots = 0;
+    };
+
+    static UdpPoseTraceSummary sUdpPoseTraceSummary;
+    if (sUdpPoseTraceSummary.count == 0) {
+        sUdpPoseTraceSummary.firstSequence = sequence;
+    }
+    sUdpPoseTraceSummary.lastSequence = sequence;
+    ++sUdpPoseTraceSummary.count;
+    sUdpPoseTraceSummary.bytesTotal += totalDatagramBytes;
+    sUdpPoseTraceSummary.rawTotal += rawBytes;
+    sUdpPoseTraceSummary.compressedTotal += compressedBytes;
+    sUdpPoseTraceSummary.chunksTotal += chunkCount;
+    sUdpPoseTraceSummary.minChunks = std::min(sUdpPoseTraceSummary.minChunks, chunkCount);
+    sUdpPoseTraceSummary.maxChunks = std::max(sUdpPoseTraceSummary.maxChunks, chunkCount);
+    sUdpPoseTraceSummary.minBytes = std::min(sUdpPoseTraceSummary.minBytes, totalDatagramBytes);
+    sUdpPoseTraceSummary.maxBytes = std::max(sUdpPoseTraceSummary.maxBytes, totalDatagramBytes);
+    sUdpPoseTraceSummary.minDatagram =
+        std::min(sUdpPoseTraceSummary.minDatagram, minDatagramBytes);
+    sUdpPoseTraceSummary.maxDatagram =
+        std::max(sUdpPoseTraceSummary.maxDatagram, maxDatagramBytes);
+    sUdpPoseTraceSummary.lastBaseState = pose_base_state_bytes(state);
+    sUdpPoseTraceSummary.lastLinkMatrices = json_field_msgpack_bytes(state, "link_matrices");
+    sUdpPoseTraceSummary.lastAudioEvents = json_field_msgpack_bytes(state, "audio_events");
+    sUdpPoseTraceSummary.lastMatrixPacked = sLastPoseMatrixPackedBytes;
+    sUdpPoseTraceSummary.lastMatrixB64 = sLastPoseMatrixBase64Bytes;
+    sUdpPoseTraceSummary.lastMatrixSlots = sLastPoseMatrixPresentSlots;
+
+    constexpr uint32_t kUdpPoseTraceSummaryInterval = 150;
+    if ((sUdpPoseTraceSummary.count % kUdpPoseTraceSummaryInterval) != 0) {
+        return;
+    }
+
+    const double count = static_cast<double>(sUdpPoseTraceSummary.count);
     DuskLog.info(
-        "MP_PACKET_TX category=pose_udp type=pose bytes={} sequence={} raw_msgpack={} "
-        "compressed={} chunks={} datagram_avg={} datagram_min={} datagram_max={} "
-        "base_state={} link_matrices={} audio_events={} matrix_packed={} matrix_b64={} "
-        "matrix_slots={}",
-        totalDatagramBytes, sequence, rawBytes, compressedBytes, chunkCount, avgDatagramBytes,
-        minDatagramBytes, maxDatagramBytes, pose_base_state_bytes(state),
-        json_field_msgpack_bytes(state, "link_matrices"), json_field_msgpack_bytes(state, "audio_events"),
-        sLastPoseMatrixPackedBytes, sLastPoseMatrixBase64Bytes, sLastPoseMatrixPresentSlots);
+        "MP_PACKET_TX_SUMMARY category=pose_udp type=pose samples={} seq_first={} "
+        "seq_last={} avg_bytes={} min_bytes={} max_bytes={} avg_raw_msgpack={} "
+        "avg_compressed={} avg_chunks={} min_chunks={} max_chunks={} datagram_min={} "
+        "datagram_max={} last_base_state={} last_link_matrices={} last_audio_events={} "
+        "last_matrix_packed={} last_matrix_b64={} last_matrix_slots={}",
+        sUdpPoseTraceSummary.count, sUdpPoseTraceSummary.firstSequence,
+        sUdpPoseTraceSummary.lastSequence,
+        static_cast<double>(sUdpPoseTraceSummary.bytesTotal) / count,
+        sUdpPoseTraceSummary.minBytes, sUdpPoseTraceSummary.maxBytes,
+        static_cast<double>(sUdpPoseTraceSummary.rawTotal) / count,
+        static_cast<double>(sUdpPoseTraceSummary.compressedTotal) / count,
+        static_cast<double>(sUdpPoseTraceSummary.chunksTotal) / count,
+        sUdpPoseTraceSummary.minChunks, sUdpPoseTraceSummary.maxChunks,
+        sUdpPoseTraceSummary.minDatagram, sUdpPoseTraceSummary.maxDatagram,
+        sUdpPoseTraceSummary.lastBaseState, sUdpPoseTraceSummary.lastLinkMatrices,
+        sUdpPoseTraceSummary.lastAudioEvents, sUdpPoseTraceSummary.lastMatrixPacked,
+        sUdpPoseTraceSummary.lastMatrixB64, sUdpPoseTraceSummary.lastMatrixSlots);
+    sUdpPoseTraceSummary = UdpPoseTraceSummary{};
 }
 
 bool send_bytes(socket_t sock, const std::string& bytes) {
@@ -2671,8 +2746,8 @@ void append_pack_i16(std::string& out, int16_t value) {
     append_pack_bytes(out, &value, sizeof(value));
 }
 
-constexpr float kPackedMatrixBasisRange = 8.0f;
-constexpr bool kUseQuantizedMatrixWire = false;
+constexpr float kPackedMatrixBasisRange = 1.0f;
+constexpr bool kUseQuantizedMatrixWire = true;
 constexpr bool kUseBinaryMatrixUdpWire = true;
 constexpr uint8_t kPackedMatrixModeFloat32 = 0;
 constexpr uint8_t kPackedMatrixModeQuantizedBasis = 1;
@@ -2760,26 +2835,11 @@ void append_pack_matrix(std::string& out, CMtxP matrix, MatrixPackSlotMetrics* m
         return;
     }
 
-    float basisMaxAbs = 0.0f;
-    const bool quantizeBasis = matrix_basis_can_quantize(matrix, &basisMaxAbs);
     if (metrics != nullptr) {
+        float basisMaxAbs = 0.0f;
+        matrix_basis_can_quantize(matrix, &basisMaxAbs);
         metrics->basisMaxAbs = std::max(metrics->basisMaxAbs, basisMaxAbs);
-        if (quantizeBasis) {
-            ++metrics->basisQuantizedMatrices;
-        } else {
-            ++metrics->basisFloatMatrices;
-        }
-    }
-
-    append_pack_u8(out, quantizeBasis ? kPackedMatrixModeQuantizedBasis : kPackedMatrixModeFloat32);
-    if (!quantizeBasis) {
-        for (int row = 0; row < 3; ++row) {
-            for (int col = 0; col < 4; ++col) {
-                const float value = matrix[row][col];
-                append_pack_bytes(out, &value, sizeof(value));
-            }
-        }
-        return;
+        ++metrics->basisQuantizedMatrices;
     }
 
     for (int row = 0; row < 3; ++row) {
@@ -2869,7 +2929,7 @@ json link_matrix_pack_to_json(std::initializer_list<MatrixPackSlotInput> models,
         DuskLog.info(
             "MP_MATRIX_PACK total_packed={} total_b64={} slots={} present={} format={}",
             sLastPoseMatrixPackedBytes, sLastPoseMatrixBase64Bytes, models.size(),
-            presentSlots, kUseQuantizedMatrixWire ? "qbasis16_trans32_safe_v1" : "f32_pack_v1");
+            presentSlots, kUseQuantizedMatrixWire ? "qrot16_trans32_v1" : "f32_pack_v1");
         for (const MatrixPackSlotMetrics& metrics : sLastPoseMatrixSlotMetrics) {
             if (!metrics.present) {
                 continue;
@@ -2887,7 +2947,7 @@ json link_matrix_pack_to_json(std::initializer_list<MatrixPackSlotInput> models,
     }
 
     return {
-        {"format", kUseQuantizedMatrixWire ? "qbasis16_trans32_safe_v1" : "f32_pack_v1"},
+        {"format", kUseQuantizedMatrixWire ? "qrot16_trans32_v1" : "f32_pack_v1"},
         {"data", encoded},
         {"midna_hair_shape", midnaHairShape},
     };
@@ -3195,19 +3255,19 @@ bool read_pack_float_array(const std::string& source, size_t& cursor,
 
 bool read_pack_quantized_matrix(const std::string& source, size_t& cursor, float* out) {
     for (int row = 0; row < 3; ++row) {
-        for (int col = 0; col < 4; ++col) {
+        for (int col = 0; col < 3; ++col) {
             const size_t index = static_cast<size_t>(row * 4 + col);
-            if (col == 3) {
-                if (!read_pack_bytes(source, cursor, &out[index], sizeof(float))) {
-                    return false;
-                }
-            } else {
-                int16_t value = 0;
-                if (!read_pack_i16(source, cursor, value)) {
-                    return false;
-                }
-                out[index] = dequantize_matrix_basis(value);
+            int16_t value = 0;
+            if (!read_pack_i16(source, cursor, value)) {
+                return false;
             }
+            out[index] = dequantize_matrix_basis(value);
+        }
+    }
+    for (int row = 0; row < 3; ++row) {
+        const size_t index = static_cast<size_t>(row * 4 + 3);
+        if (!read_pack_bytes(source, cursor, &out[index], sizeof(float))) {
+            return false;
         }
     }
     return true;
@@ -4391,7 +4451,7 @@ size_t raw_state_group_size_for_diagnostics(const json* state, const char* const
 }
 
 json udp_pose_message_for_wire(const json& message) {
-    if (!kUseQuantizedMatrixWire && !kUseBinaryMatrixUdpWire) {
+    if (!kUseBinaryMatrixUdpWire) {
         return message;
     }
 
@@ -4447,6 +4507,7 @@ bool open_udp_socket(const std::string& bindHost, int bindPort) {
     close_socket(sSession.udpSock);
     sSession.udpRemoteAddrKnown = false;
     sSession.udpPoseReassembly.clear();
+    sSession.udpPoseLastProcessedSequence.clear();
 
     sSession.udpSock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sSession.udpSock == INVALID_SOCKET) {
@@ -4459,6 +4520,7 @@ bool open_udp_socket(const std::string& bindHost, int bindPort) {
         close_socket(sSession.udpSock);
         return false;
     }
+    configure_udp_socket_buffers(sSession.udpSock);
 
     sockaddr_in addr{};
     if (!fill_ipv4(addr, bindHost, bindPort)) {
@@ -4554,11 +4616,27 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
 
         std::memcpy(packet.data(), &header, sizeof(header));
         std::memcpy(packet.data() + sizeof(header), compressed.data() + offset, payloadSize);
+        const int packetSize = static_cast<int>(sizeof(header) + payloadSize);
         const int sent =
             sendto(sSession.udpSock, reinterpret_cast<const char*>(packet.data()),
-                   static_cast<int>(sizeof(header) + payloadSize), 0,
-                   reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
-        if (sent < 0 && !would_block()) {
+                   packetSize, 0, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+        if (sent < 0) {
+            static uint32_t sUdpPoseSendWouldBlockLogCount = 0;
+            if (would_block()) {
+                if (sUdpPoseSendWouldBlockLogCount < 20 ||
+                    (sUdpPoseSendWouldBlockLogCount % 120) == 0)
+                {
+                    DuskLog.warn("Multiplayer direct UDP pose send would block seq={} chunk={}/{}",
+                                 sequence, chunkIndex + 1, chunkCount);
+                }
+                ++sUdpPoseSendWouldBlockLogCount;
+            }
+            return false;
+        }
+        if (sent != packetSize) {
+            DuskLog.warn("Multiplayer direct UDP pose partial datagram send seq={} chunk={}/{} "
+                         "sent={} expected={}",
+                         sequence, chunkIndex + 1, chunkCount, sent, packetSize);
             return false;
         }
     }
@@ -4735,22 +4813,36 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
         return;
     }
 
-    UdpPoseReassembly& reassembly = sSession.udpPoseReassembly[senderId];
-    if (header.sequence < reassembly.sequence) {
+    auto lastProcessedIt = sSession.udpPoseLastProcessedSequence.find(senderId);
+    if (lastProcessedIt != sSession.udpPoseLastProcessedSequence.end() &&
+        header.sequence <= lastProcessedIt->second)
+    {
         return;
     }
-    if (header.sequence != reassembly.sequence ||
-        header.chunkCount != reassembly.chunkCount ||
-        header.compressedSize != reassembly.compressedSize ||
-        header.uncompressedSize != reassembly.uncompressedSize)
-    {
-        reassembly = {};
+
+    auto& reassemblies = sSession.udpPoseReassembly[senderId];
+    auto reassemblyIt = reassemblies.find(header.sequence);
+    if (reassemblyIt == reassemblies.end()) {
+        while (reassemblies.size() >= kUdpPoseMaxInflightSequences) {
+            reassemblies.erase(reassemblies.begin());
+        }
+        reassemblyIt = reassemblies.emplace(header.sequence, UdpPoseReassembly{}).first;
+        UdpPoseReassembly& reassembly = reassemblyIt->second;
         reassembly.sequence = header.sequence;
         reassembly.chunkCount = header.chunkCount;
         reassembly.uncompressedSize = header.uncompressedSize;
         reassembly.compressedSize = header.compressedSize;
         reassembly.compressed.assign(header.compressedSize, 0);
         reassembly.received.assign(header.chunkCount, 0);
+    }
+
+    UdpPoseReassembly& reassembly = reassemblyIt->second;
+    if (header.chunkCount != reassembly.chunkCount ||
+        header.compressedSize != reassembly.compressedSize ||
+        header.uncompressedSize != reassembly.uncompressedSize)
+    {
+        reassemblies.erase(reassemblyIt);
+        return;
     }
 
     const size_t offset = static_cast<size_t>(header.chunkIndex) * kUdpPoseChunkPayloadBytes;
@@ -4786,6 +4878,11 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
                            : json::parse(std::string(reinterpret_cast<const char*>(raw.data()),
                                                      raw.size()));
         process_udp_pose_message(std::move(message), senderId);
+        sSession.udpPoseLastProcessedSequence[senderId] = header.sequence;
+        reassemblies.erase(header.sequence);
+        while (!reassemblies.empty() && reassemblies.begin()->first <= header.sequence) {
+            reassemblies.erase(reassemblies.begin());
+        }
     } catch (const json::exception& e) {
         DuskLog.warn("Multiplayer direct UDP pose decode failed sender={} seq={} type={} err={}",
                      senderId, header.sequence, header.type, e.what());
