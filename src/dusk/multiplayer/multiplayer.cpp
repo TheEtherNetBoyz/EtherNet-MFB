@@ -110,6 +110,36 @@ size_t sLastPoseMatrixPackedBytes = 0;
 size_t sLastPoseMatrixBase64Bytes = 0;
 size_t sLastPoseMatrixPresentSlots = 0;
 
+struct MatrixPackSlotInput {
+    const char* name;
+    J3DModel* model;
+};
+
+struct MatrixPackSlotMetrics {
+    const char* name = "";
+    bool present = false;
+    uint16_t jointCount = 0;
+    uint16_t weightCount = 0;
+    size_t bytes = 0;
+    uint32_t basisQuantizedMatrices = 0;
+    uint32_t basisFloatMatrices = 0;
+    float basisMaxAbs = 0.0f;
+    uint64_t weightHash = 0;
+    bool weightChanged = false;
+    uint32_t weightStableFrames = 0;
+};
+
+struct MatrixWeightTraceState {
+    uint16_t jointCount = 0;
+    uint16_t weightCount = 0;
+    uint64_t weightHash = 0;
+    uint32_t stableFrames = 0;
+    bool initialized = false;
+};
+
+std::vector<MatrixPackSlotMetrics> sLastPoseMatrixSlotMetrics;
+std::map<std::string, MatrixWeightTraceState> sMatrixWeightTraceBySlot;
+
 std::string resolve_peer_id(const json& message) {
     return message.value("client_id", kDirectPeerId);
 }
@@ -1923,6 +1953,135 @@ std::string serialize_json_line(const json& message) {
     return bytes;
 }
 
+const char* packet_category(const std::string& type) {
+    if (type == "pose") {
+        return "pose";
+    }
+    if (type == "hello" || type == "welcome" || type == "peer_joined" ||
+        type == "peer_left" || type == "name_labels")
+    {
+        return "session";
+    }
+    if (type == "ping" || type == "pong" || type == "error" || type == "ack") {
+        return "control";
+    }
+    if (type == "sync_request") {
+        return "manual_sync_request";
+    }
+    if (type == "save_snapshot") {
+        return "save_snapshot";
+    }
+    if (type == "event_bit" || type == "tbox_bit" || type == "switch_bit" ||
+        type == "item_bit" || type == "dungeon_item_bit")
+    {
+        return "world_state";
+    }
+    if (type == "item_get" || type == "collect_crystal" || type == "collect_mirror" ||
+        type == "dark_clear_lv" || type == "transform_lv" || type == "region_bit" ||
+        type == "collect" || type == "visited_room" || type == "letter_get")
+    {
+        return "inventory_progress";
+    }
+    if (type == "key_num" || type == "light_drop_num" || type == "light_drop_get_flag" ||
+        type == "max_life_update" || type == "bottle_slots" || type == "rupee_count")
+    {
+        return "counters";
+    }
+    if (type == "reliable") {
+        return "reliable_envelope";
+    }
+    return "other";
+}
+
+bool packet_trace_enabled() {
+    static const bool enabled = !env_disabled("DUSK_MP_PACKET_TRACE");
+    return enabled;
+}
+
+size_t json_field_bytes(const json& object, const char* key) {
+    const auto it = object.find(key);
+    return it == object.end() ? 0 : it->dump().size();
+}
+
+size_t json_field_msgpack_bytes(const json& object, const char* key) {
+    const auto it = object.find(key);
+    return it == object.end() ? 0 : json::to_msgpack(*it).size();
+}
+
+size_t pose_base_state_bytes(const json& state) {
+    if (!state.is_object()) {
+        return 0;
+    }
+
+    json base = state;
+    base.erase("link_matrices");
+    base.erase("audio_events");
+    return base.dump().size();
+}
+
+void trace_packet_tx(const json& message, size_t bytes) {
+    if (!packet_trace_enabled()) {
+        return;
+    }
+
+    const std::string type = message.value("type", "");
+    const char* category = packet_category(type);
+    if (type == "pose") {
+        const json state = message.value("state", json::object());
+        DuskLog.info(
+            "MP_PACKET_TX category={} type={} bytes={} sequence={} base_state={} "
+            "link_matrices={} audio_events={}",
+            category, type, bytes, message.value("sequence", 0U), pose_base_state_bytes(state),
+            json_field_bytes(state, "link_matrices"), json_field_bytes(state, "audio_events"));
+        return;
+    }
+
+    if (type == "save_snapshot") {
+        DuskLog.info(
+            "MP_PACKET_TX category={} type={} bytes={} manual_sync={} full_state={} "
+            "event_flags={} chests={} switches={} items={} dungeon_items={}",
+            category, type, bytes, message.value("manual_sync", false),
+            json_field_bytes(message, "full_state"),
+            json_field_bytes(message, "event_flags"), json_field_bytes(message, "chests"),
+            json_field_bytes(message, "switches"), json_field_bytes(message, "items"),
+            json_field_bytes(message, "dungeon_items"));
+        return;
+    }
+
+    DuskLog.info("MP_PACKET_TX category={} type={} bytes={}", category, type, bytes);
+}
+
+void trace_udp_pose_packet_tx(const json& message, size_t rawBytes, size_t compressedBytes,
+                              uint16_t chunkCount) {
+    if (!packet_trace_enabled()) {
+        return;
+    }
+    if (chunkCount == 0) {
+        return;
+    }
+
+    const uint32_t sequence = message.value("sequence", 0U);
+    const json state = message.value("state", json::object());
+    const size_t totalDatagramBytes = compressedBytes + sizeof(UdpPoseChunkHeader) * chunkCount;
+    const size_t lastPayload =
+        compressedBytes - static_cast<size_t>(chunkCount - 1) * kUdpPoseChunkPayloadBytes;
+    const size_t minDatagramBytes = sizeof(UdpPoseChunkHeader) + lastPayload;
+    const size_t maxDatagramBytes =
+        sizeof(UdpPoseChunkHeader) + std::min(compressedBytes, kUdpPoseChunkPayloadBytes);
+    const double avgDatagramBytes =
+        static_cast<double>(totalDatagramBytes) / static_cast<double>(chunkCount);
+
+    DuskLog.info(
+        "MP_PACKET_TX category=pose_udp type=pose bytes={} sequence={} raw_msgpack={} "
+        "compressed={} chunks={} datagram_avg={} datagram_min={} datagram_max={} "
+        "base_state={} link_matrices={} audio_events={} matrix_packed={} matrix_b64={} "
+        "matrix_slots={}",
+        totalDatagramBytes, sequence, rawBytes, compressedBytes, chunkCount, avgDatagramBytes,
+        minDatagramBytes, maxDatagramBytes, pose_base_state_bytes(state),
+        json_field_msgpack_bytes(state, "link_matrices"), json_field_msgpack_bytes(state, "audio_events"),
+        sLastPoseMatrixPackedBytes, sLastPoseMatrixBase64Bytes, sLastPoseMatrixPresentSlots);
+}
+
 bool send_bytes(socket_t sock, const std::string& bytes) {
     if (sock == INVALID_SOCKET) {
         return false;
@@ -1950,7 +2109,9 @@ bool send_bytes(socket_t sock, const std::string& bytes) {
 }
 
 bool send_json_to_socket(socket_t sock, const json& message) {
-    return send_bytes(sock, serialize_json_line(message));
+    const std::string bytes = serialize_json_line(message);
+    trace_packet_tx(message, bytes.size());
+    return send_bytes(sock, bytes);
 }
 
 bool send_json_to_peer(DirectPeer& peer, const json& message) {
@@ -2506,57 +2667,227 @@ void append_pack_u16(std::string& out, uint16_t value) {
     append_pack_bytes(out, &value, sizeof(value));
 }
 
-void append_pack_matrix(std::string& out, CMtxP matrix) {
+void append_pack_i16(std::string& out, int16_t value) {
+    append_pack_bytes(out, &value, sizeof(value));
+}
+
+constexpr float kPackedMatrixBasisRange = 8.0f;
+constexpr bool kUseQuantizedMatrixWire = false;
+constexpr bool kUseBinaryMatrixUdpWire = true;
+constexpr uint8_t kPackedMatrixModeFloat32 = 0;
+constexpr uint8_t kPackedMatrixModeQuantizedBasis = 1;
+constexpr uint64_t kFnv1a64Offset = 14695981039346656037ull;
+constexpr uint64_t kFnv1a64Prime = 1099511628211ull;
+
+uint64_t hash_pack_bytes(uint64_t hash, const void* data, size_t size) {
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    for (size_t i = 0; i < size; ++i) {
+        hash ^= bytes[i];
+        hash *= kFnv1a64Prime;
+    }
+    return hash;
+}
+
+int16_t quantize_matrix_basis(float value) {
+    const float clamped =
+        std::clamp(value, -kPackedMatrixBasisRange, kPackedMatrixBasisRange);
+    const float normalized = clamped / kPackedMatrixBasisRange;
+    return static_cast<int16_t>(std::lround(normalized * 32767.0f));
+}
+
+float dequantize_matrix_basis(int16_t value) {
+    return (static_cast<float>(value) / 32767.0f) * kPackedMatrixBasisRange;
+}
+
+bool matrix_basis_can_quantize(CMtxP matrix, float* maxAbsOut = nullptr) {
+    float maxAbs = 0.0f;
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            const float value = matrix[row][col];
+            if (!std::isfinite(value)) {
+                if (maxAbsOut != nullptr) {
+                    *maxAbsOut = maxAbs;
+                }
+                return false;
+            }
+            maxAbs = std::max(maxAbs, std::abs(value));
+            if (maxAbs > kPackedMatrixBasisRange) {
+                if (maxAbsOut != nullptr) {
+                    *maxAbsOut = maxAbs;
+                }
+                return false;
+            }
+        }
+    }
+    if (maxAbsOut != nullptr) {
+        *maxAbsOut = maxAbs;
+    }
+    return true;
+}
+
+uint64_t hash_pack_matrix(uint64_t hash, CMtxP matrix) {
     for (int row = 0; row < 3; ++row) {
         for (int col = 0; col < 4; ++col) {
-            const float value = matrix[row][col];
-            append_pack_bytes(out, &value, sizeof(value));
+            if (col == 3) {
+                const float value = matrix[row][col];
+                hash = hash_pack_bytes(hash, &value, sizeof(value));
+            } else {
+                const int16_t value = quantize_matrix_basis(matrix[row][col]);
+                hash = hash_pack_bytes(hash, &value, sizeof(value));
+            }
         }
+    }
+    return hash;
+}
+
+uint64_t hash_weight_matrices(J3DModel* model, uint16_t weightCount) {
+    uint64_t hash = kFnv1a64Offset;
+    hash = hash_pack_bytes(hash, &weightCount, sizeof(weightCount));
+    for (u16 i = 0; i < weightCount; ++i) {
+        hash = hash_pack_matrix(hash, model->getWeightAnmMtx(i));
+    }
+    return hash;
+}
+
+void append_pack_matrix(std::string& out, CMtxP matrix, MatrixPackSlotMetrics* metrics = nullptr) {
+    if (!kUseQuantizedMatrixWire) {
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 4; ++col) {
+                const float value = matrix[row][col];
+                append_pack_bytes(out, &value, sizeof(value));
+            }
+        }
+        return;
+    }
+
+    float basisMaxAbs = 0.0f;
+    const bool quantizeBasis = matrix_basis_can_quantize(matrix, &basisMaxAbs);
+    if (metrics != nullptr) {
+        metrics->basisMaxAbs = std::max(metrics->basisMaxAbs, basisMaxAbs);
+        if (quantizeBasis) {
+            ++metrics->basisQuantizedMatrices;
+        } else {
+            ++metrics->basisFloatMatrices;
+        }
+    }
+
+    append_pack_u8(out, quantizeBasis ? kPackedMatrixModeQuantizedBasis : kPackedMatrixModeFloat32);
+    if (!quantizeBasis) {
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 4; ++col) {
+                const float value = matrix[row][col];
+                append_pack_bytes(out, &value, sizeof(value));
+            }
+        }
+        return;
+    }
+
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            append_pack_i16(out, quantize_matrix_basis(matrix[row][col]));
+        }
+    }
+    for (int row = 0; row < 3; ++row) {
+        const float value = matrix[row][3];
+        append_pack_bytes(out, &value, sizeof(value));
     }
 }
 
-void append_pack_model(std::string& out, J3DModel* model) {
+MatrixPackSlotMetrics append_pack_model(std::string& out, const MatrixPackSlotInput& slot) {
+    MatrixPackSlotMetrics metrics{};
+    metrics.name = slot.name;
+    const size_t startBytes = out.size();
+    J3DModel* model = slot.model;
     if (model == nullptr || model->getModelData() == nullptr) {
         append_pack_u8(out, 0);
-        return;
+        metrics.bytes = out.size() - startBytes;
+        return metrics;
     }
 
     J3DModelData* data = model->getModelData();
     const u16 jointCount = data->getJointNum();
     const u16 weightCount = data->getWEvlpMtxNum();
+    metrics.present = true;
+    metrics.jointCount = jointCount;
+    metrics.weightCount = weightCount;
+    if (weightCount > 0) {
+        metrics.weightHash = hash_weight_matrices(model, weightCount);
+        MatrixWeightTraceState& trace = sMatrixWeightTraceBySlot[metrics.name];
+        metrics.weightChanged =
+            !trace.initialized || trace.jointCount != jointCount ||
+            trace.weightCount != weightCount || trace.weightHash != metrics.weightHash;
+        if (metrics.weightChanged) {
+            trace.stableFrames = 0;
+        } else {
+            ++trace.stableFrames;
+        }
+        trace.initialized = true;
+        trace.jointCount = jointCount;
+        trace.weightCount = weightCount;
+        trace.weightHash = metrics.weightHash;
+        metrics.weightStableFrames = trace.stableFrames;
+    }
 
     append_pack_u8(out, 1);
     append_pack_u16(out, jointCount);
     append_pack_u16(out, weightCount);
-    append_pack_matrix(out, model->getBaseTRMtx());
+    append_pack_matrix(out, model->getBaseTRMtx(), &metrics);
     for (u16 i = 0; i < jointCount; ++i) {
-        append_pack_matrix(out, model->getAnmMtx(i));
+        append_pack_matrix(out, model->getAnmMtx(i), &metrics);
     }
     for (u16 i = 0; i < weightCount; ++i) {
-        append_pack_matrix(out, model->getWeightAnmMtx(i));
+        append_pack_matrix(out, model->getWeightAnmMtx(i), &metrics);
     }
+    metrics.bytes = out.size() - startBytes;
+    return metrics;
 }
 
-json link_matrix_pack_to_json(std::initializer_list<J3DModel*> models, int midnaHairShape) {
+json link_matrix_pack_to_json(std::initializer_list<MatrixPackSlotInput> models,
+                              int midnaHairShape) {
     std::string packed;
     packed.reserve(32 * 1024);
     packed.append("DMPM", 4);
     append_pack_u8(packed, 1);
     append_pack_u8(packed, static_cast<uint8_t>(models.size()));
     size_t presentSlots = 0;
-    for (J3DModel* model : models) {
-        if (model != nullptr && model->getModelData() != nullptr) {
+    sLastPoseMatrixSlotMetrics.clear();
+    sLastPoseMatrixSlotMetrics.reserve(models.size());
+    for (const MatrixPackSlotInput& slot : models) {
+        MatrixPackSlotMetrics metrics = append_pack_model(packed, slot);
+        if (metrics.present) {
             ++presentSlots;
         }
-        append_pack_model(packed, model);
+        sLastPoseMatrixSlotMetrics.push_back(metrics);
     }
     const std::string encoded = absl::Base64Escape(packed);
     sLastPoseMatrixPackedBytes = packed.size();
     sLastPoseMatrixBase64Bytes = encoded.size();
     sLastPoseMatrixPresentSlots = presentSlots;
 
+    static uint32_t sMatrixPackTraceTicks = 0;
+    if (packet_trace_enabled() && (sMatrixPackTraceTicks++ % 150) == 0) {
+        DuskLog.info(
+            "MP_MATRIX_PACK total_packed={} total_b64={} slots={} present={} format={}",
+            sLastPoseMatrixPackedBytes, sLastPoseMatrixBase64Bytes, models.size(),
+            presentSlots, kUseQuantizedMatrixWire ? "qbasis16_trans32_safe_v1" : "f32_pack_v1");
+        for (const MatrixPackSlotMetrics& metrics : sLastPoseMatrixSlotMetrics) {
+            if (!metrics.present) {
+                continue;
+            }
+            DuskLog.info(
+                "MP_MATRIX_SLOT name={} bytes={} joints={} weights={} matrices={} "
+                "basis_q={} basis_f32={} basis_max_abs={} weight_hash={} "
+                "weight_changed={} weight_stable={}",
+                metrics.name, metrics.bytes, metrics.jointCount, metrics.weightCount,
+                1 + static_cast<uint32_t>(metrics.jointCount) +
+                    static_cast<uint32_t>(metrics.weightCount),
+                metrics.basisQuantizedMatrices, metrics.basisFloatMatrices, metrics.basisMaxAbs,
+                metrics.weightHash, metrics.weightChanged, metrics.weightStableFrames);
+        }
+    }
+
     return {
-        {"format", "f32_pack_v1"},
+        {"format", kUseQuantizedMatrixWire ? "qbasis16_trans32_safe_v1" : "f32_pack_v1"},
         {"data", encoded},
         {"midna_hair_shape", midnaHairShape},
     };
@@ -2756,27 +3087,27 @@ bool add_link_matrices(json& state) {
 
     state["link_matrices"] = link_matrix_pack_to_json(
         {
-            link->mpLinkModel,
-            includeHumanParts ? link->mpLinkHatModel : nullptr,
-            includeHumanParts ? link->mpLinkFaceModel : nullptr,
-            includeHumanParts ? link->mpLinkHandModel : nullptr,
-            includeHumanParts ? link->mSwordModel : nullptr,
-            includeHumanParts ? link->mSheathModel : nullptr,
-            includeHumanParts ? link->mShieldModel : nullptr,
-            includeHumanParts ? link->mHeldItemModel : nullptr,
-            includeHumanParts ? link->mpHookTipModel : nullptr,
-            includeHumanParts ? link->field_0x0710 : nullptr,
-            includeHumanParts ? link->field_0x0714 : nullptr,
-            includeHumanParts ? arrowModel : nullptr,
-            includeHumanParts ? link->mpKanteraModel : nullptr,
-            includeHumanParts ? link->mpKanteraGlowModel : nullptr,
-            includeHumanParts ? itemActorModel : nullptr,
-            includeHumanParts ? rideActorModel : nullptr,
-            midnaModel,
-            midnaMaskModel,
-            midnaHandModel,
-            midnaHairModel,
-            midnaGlowModel,
+            {"body", link->mpLinkModel},
+            {"hat", includeHumanParts ? link->mpLinkHatModel : nullptr},
+            {"face", includeHumanParts ? link->mpLinkFaceModel : nullptr},
+            {"hand", includeHumanParts ? link->mpLinkHandModel : nullptr},
+            {"sword", includeHumanParts ? link->mSwordModel : nullptr},
+            {"sheath", includeHumanParts ? link->mSheathModel : nullptr},
+            {"shield", includeHumanParts ? link->mShieldModel : nullptr},
+            {"held_item", includeHumanParts ? link->mHeldItemModel : nullptr},
+            {"hook_tip", includeHumanParts ? link->mpHookTipModel : nullptr},
+            {"hook_sub_item", includeHumanParts ? link->field_0x0710 : nullptr},
+            {"hook_sub_tip", includeHumanParts ? link->field_0x0714 : nullptr},
+            {"arrow", includeHumanParts ? arrowModel : nullptr},
+            {"kantera", includeHumanParts ? link->mpKanteraModel : nullptr},
+            {"kantera_glow", includeHumanParts ? link->mpKanteraGlowModel : nullptr},
+            {"item_actor", includeHumanParts ? itemActorModel : nullptr},
+            {"ride_actor", includeHumanParts ? rideActorModel : nullptr},
+            {"midna", midnaModel},
+            {"midna_mask", midnaMaskModel},
+            {"midna_hand", midnaHandModel},
+            {"midna_hair", midnaHairModel},
+            {"midna_glow", midnaGlowModel},
         },
         midnaHairShape);
 
@@ -2853,9 +3184,89 @@ bool read_pack_u16(const std::string& source, size_t& cursor, uint16_t& out) {
     return read_pack_bytes(source, cursor, &out, sizeof(out));
 }
 
+bool read_pack_i16(const std::string& source, size_t& cursor, int16_t& out) {
+    return read_pack_bytes(source, cursor, &out, sizeof(out));
+}
+
 bool read_pack_float_array(const std::string& source, size_t& cursor,
                            std::array<float, 12>& out) {
     return read_pack_bytes(source, cursor, out.data(), out.size() * sizeof(float));
+}
+
+bool read_pack_quantized_matrix(const std::string& source, size_t& cursor, float* out) {
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 4; ++col) {
+            const size_t index = static_cast<size_t>(row * 4 + col);
+            if (col == 3) {
+                if (!read_pack_bytes(source, cursor, &out[index], sizeof(float))) {
+                    return false;
+                }
+            } else {
+                int16_t value = 0;
+                if (!read_pack_i16(source, cursor, value)) {
+                    return false;
+                }
+                out[index] = dequantize_matrix_basis(value);
+            }
+        }
+    }
+    return true;
+}
+
+bool read_pack_safe_quantized_matrix(const std::string& source, size_t& cursor, float* out) {
+    uint8_t mode = 0;
+    if (!read_pack_u8(source, cursor, mode)) {
+        return false;
+    }
+    if (mode == kPackedMatrixModeFloat32) {
+        return read_pack_bytes(source, cursor, out, sizeof(float) * 12);
+    }
+    if (mode != kPackedMatrixModeQuantizedBasis) {
+        return false;
+    }
+    return read_pack_quantized_matrix(source, cursor, out);
+}
+
+bool read_pack_quantized_array(const std::string& source, size_t& cursor,
+                               std::array<float, 12>& out) {
+    return read_pack_quantized_matrix(source, cursor, out.data());
+}
+
+bool read_pack_safe_quantized_array(const std::string& source, size_t& cursor,
+                                    std::array<float, 12>& out) {
+    return read_pack_safe_quantized_matrix(source, cursor, out.data());
+}
+
+bool read_pack_quantized_vector(const std::string& source, size_t& cursor, size_t matrixCount,
+                                std::vector<float>& out) {
+    if (matrixCount > 64 * 1024) {
+        return false;
+    }
+
+    out.resize(matrixCount * 12);
+    for (size_t i = 0; i < matrixCount; ++i) {
+        if (!read_pack_quantized_matrix(source, cursor, out.data() + i * 12)) {
+            out.clear();
+            return false;
+        }
+    }
+    return true;
+}
+
+bool read_pack_safe_quantized_vector(const std::string& source, size_t& cursor,
+                                     size_t matrixCount, std::vector<float>& out) {
+    if (matrixCount > 64 * 1024) {
+        return false;
+    }
+
+    out.resize(matrixCount * 12);
+    for (size_t i = 0; i < matrixCount; ++i) {
+        if (!read_pack_safe_quantized_matrix(source, cursor, out.data() + i * 12)) {
+            out.clear();
+            return false;
+        }
+    }
+    return true;
 }
 
 bool read_pack_float_vector(const std::string& source, size_t& cursor, size_t count,
@@ -2877,7 +3288,8 @@ bool read_pack_float_vector(const std::string& source, size_t& cursor, size_t co
 }
 
 bool parse_packed_model_matrices(const std::string& packed, size_t& cursor,
-                                 RemoteModelMatrixSnapshot& snapshot) {
+                                 RemoteModelMatrixSnapshot& snapshot, bool quantized,
+                                 bool safeQuantized) {
     snapshot = {};
 
     uint8_t present = 0;
@@ -2901,14 +3313,32 @@ bool parse_packed_model_matrices(const std::string& packed, size_t& cursor,
 
     snapshot.jointCount = jointCount;
     snapshot.weightCount = weightCount;
-    if (!read_pack_float_array(packed, cursor, snapshot.base) ||
-        !read_pack_float_vector(packed, cursor, static_cast<size_t>(jointCount) * 12,
-                                snapshot.joints) ||
-        !read_pack_float_vector(packed, cursor, static_cast<size_t>(weightCount) * 12,
-                                snapshot.weights))
-    {
-        snapshot = {};
-        return false;
+    if (safeQuantized) {
+        if (!read_pack_safe_quantized_array(packed, cursor, snapshot.base) ||
+            !read_pack_safe_quantized_vector(packed, cursor, jointCount, snapshot.joints) ||
+            !read_pack_safe_quantized_vector(packed, cursor, weightCount, snapshot.weights))
+        {
+            snapshot = {};
+            return false;
+        }
+    } else if (quantized) {
+        if (!read_pack_quantized_array(packed, cursor, snapshot.base) ||
+            !read_pack_quantized_vector(packed, cursor, jointCount, snapshot.joints) ||
+            !read_pack_quantized_vector(packed, cursor, weightCount, snapshot.weights))
+        {
+            snapshot = {};
+            return false;
+        }
+    } else {
+        if (!read_pack_float_array(packed, cursor, snapshot.base) ||
+            !read_pack_float_vector(packed, cursor, static_cast<size_t>(jointCount) * 12,
+                                    snapshot.joints) ||
+            !read_pack_float_vector(packed, cursor, static_cast<size_t>(weightCount) * 12,
+                                    snapshot.weights))
+        {
+            snapshot = {};
+            return false;
+        }
     }
 
     snapshot.valid = true;
@@ -2917,13 +3347,34 @@ bool parse_packed_model_matrices(const std::string& packed, size_t& cursor,
 
 RemoteLinkMatrixSnapshot parse_packed_link_matrices(const json& source) {
     RemoteLinkMatrixSnapshot snapshot;
-    if (!source.is_object() || source.value("format", "") != "f32_pack_v1") {
+    if (!source.is_object()) {
         return snapshot;
     }
 
-    const std::string encoded = source.value("data", "");
+    const std::string format = source.value("format", "");
+    const bool quantized =
+        format == "qrot16_trans32_v1" || format == "qrot16_trans32_bin_v1";
+    const bool safeQuantized =
+        format == "qbasis16_trans32_safe_v1" || format == "qbasis16_trans32_safe_bin_v1";
+    const bool floatPacked = format == "f32_pack_v1" || format == "f32_pack_bin_v1";
+    if (!safeQuantized && !quantized && !floatPacked) {
+        return snapshot;
+    }
+
     std::string packed;
-    if (encoded.empty() || !absl::Base64Unescape(encoded, &packed)) {
+    const auto dataIt = source.find("data");
+    if (dataIt == source.end()) {
+        return snapshot;
+    }
+    if (dataIt->is_binary()) {
+        const auto& bytes = dataIt->get_binary();
+        packed.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    } else if (dataIt->is_string()) {
+        const std::string encoded = dataIt->get<std::string>();
+        if (encoded.empty() || !absl::Base64Unescape(encoded, &packed)) {
+            return snapshot;
+        }
+    } else {
         return snapshot;
     }
 
@@ -2965,7 +3416,7 @@ RemoteLinkMatrixSnapshot parse_packed_link_matrices(const json& source) {
     };
 
     for (RemoteModelMatrixSnapshot* slot : slots) {
-        if (!parse_packed_model_matrices(packed, cursor, *slot)) {
+        if (!parse_packed_model_matrices(packed, cursor, *slot, quantized, safeQuantized)) {
             return {};
         }
     }
@@ -3939,6 +4390,59 @@ size_t raw_state_group_size_for_diagnostics(const json* state, const char* const
     return msgpack_size_for_diagnostics(group);
 }
 
+json udp_pose_message_for_wire(const json& message) {
+    if (!kUseQuantizedMatrixWire && !kUseBinaryMatrixUdpWire) {
+        return message;
+    }
+
+    json wire = message;
+    auto stateIt = wire.find("state");
+    if (stateIt == wire.end() || !stateIt->is_object()) {
+        return wire;
+    }
+
+    auto matricesIt = stateIt->find("link_matrices");
+    if (matricesIt == stateIt->end() || !matricesIt->is_object()) {
+        return wire;
+    }
+
+    const std::string format = matricesIt->value("format", "");
+    if (format == "f32_pack_bin_v1" || format == "qrot16_trans32_bin_v1" ||
+        format == "qbasis16_trans32_safe_bin_v1")
+    {
+        return wire;
+    }
+    if (format != "f32_pack_v1" && format != "qrot16_trans32_v1" &&
+        format != "qbasis16_trans32_safe_v1")
+    {
+        return wire;
+    }
+    if (format != "f32_pack_v1" && !kUseQuantizedMatrixWire) {
+        return wire;
+    }
+
+    auto dataIt = matricesIt->find("data");
+    if (dataIt == matricesIt->end() || !dataIt->is_string()) {
+        return wire;
+    }
+
+    std::string packed;
+    if (!absl::Base64Unescape(dataIt->get<std::string>(), &packed)) {
+        return wire;
+    }
+
+    std::vector<uint8_t> bytes(packed.begin(), packed.end());
+    if (format == "f32_pack_v1") {
+        (*matricesIt)["format"] = "f32_pack_bin_v1";
+    } else if (format == "qbasis16_trans32_safe_v1") {
+        (*matricesIt)["format"] = "qbasis16_trans32_safe_bin_v1";
+    } else {
+        (*matricesIt)["format"] = "qrot16_trans32_bin_v1";
+    }
+    (*matricesIt)["data"] = json::binary(std::move(bytes));
+    return wire;
+}
+
 bool open_udp_socket(const std::string& bindHost, int bindPort) {
     close_socket(sSession.udpSock);
     sSession.udpRemoteAddrKnown = false;
@@ -3997,7 +4501,8 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
         return false;
     }
 
-    const std::vector<uint8_t> raw = json::to_msgpack(message);
+    const json wireMessage = udp_pose_message_for_wire(message);
+    const std::vector<uint8_t> raw = json::to_msgpack(wireMessage);
     const size_t bound = ZSTD_compressBound(raw.size());
     std::vector<uint8_t> compressed(bound);
     const size_t compressedSize =
@@ -4023,7 +4528,8 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
         return false;
     }
 
-    const uint32_t sequence = message.value("sequence", 0U);
+    const uint32_t sequence = wireMessage.value("sequence", 0U);
+    trace_udp_pose_packet_tx(wireMessage, raw.size(), compressed.size(), chunkCount);
     std::array<uint8_t, sizeof(UdpPoseChunkHeader) + kUdpPoseChunkPayloadBytes> packet{};
     for (uint16_t chunkIndex = 0; chunkIndex < chunkCount; ++chunkIndex) {
         const size_t offset = static_cast<size_t>(chunkIndex) * kUdpPoseChunkPayloadBytes;
@@ -4059,7 +4565,8 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
 
     static uint32_t sUdpPoseTxLogTicks = 0;
     if ((sUdpPoseTxLogTicks++ % 150) == 0) {
-        const json* state = message.find("state") != message.end() ? &message["state"] : nullptr;
+        const json* state =
+            wireMessage.find("state") != wireMessage.end() ? &wireMessage["state"] : nullptr;
         static const char* const matrixKeys[] = {"link_matrices"};
         static const char* const audioKeys[] = {"audio_events"};
         static const char* const worldKeys[] = {
@@ -4097,10 +4604,17 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
             const auto matrixIt = state->find("link_matrices");
             const json* matrices = matrixIt != state->end() ? &(*matrixIt) : nullptr;
             if (matrices != nullptr && matrices->is_object()) {
-            const std::string matrixData = matrices->value("data", "");
-                if (!matrixData.empty()) {
+                const auto dataIt = matrices->find("data");
+                if (dataIt != matrices->end() && dataIt->is_binary()) {
+                    const auto& matrixData = dataIt->get_binary();
                     matrixB64Compressed =
                         compressed_size_for_diagnostics(matrixData.data(), matrixData.size());
+                } else {
+                    const std::string matrixData = matrices->value("data", "");
+                    if (!matrixData.empty()) {
+                        matrixB64Compressed =
+                            compressed_size_for_diagnostics(matrixData.data(), matrixData.size());
+                    }
                 }
             }
         }

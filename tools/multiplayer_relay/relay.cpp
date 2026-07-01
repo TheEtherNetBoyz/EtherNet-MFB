@@ -74,6 +74,118 @@ const std::set<std::string> kStateBroadcastTypes = {
     "letter_get",
 };
 
+bool env_enabled(const char* name) {
+    const char* value = std::getenv(name);
+    return value != nullptr &&
+           (std::strcmp(value, "1") == 0 || std::strcmp(value, "true") == 0 ||
+            std::strcmp(value, "TRUE") == 0 || std::strcmp(value, "on") == 0 ||
+            std::strcmp(value, "ON") == 0);
+}
+
+bool env_disabled(const char* name) {
+    const char* value = std::getenv(name);
+    return value != nullptr &&
+           (std::strcmp(value, "0") == 0 || std::strcmp(value, "false") == 0 ||
+            std::strcmp(value, "FALSE") == 0 || std::strcmp(value, "off") == 0 ||
+            std::strcmp(value, "OFF") == 0);
+}
+
+bool relay_packet_trace_enabled() {
+    static const bool enabled = !env_disabled("DUSK_MP_RELAY_PACKET_TRACE");
+    return enabled;
+}
+
+const char* packet_category(const std::string& type) {
+    if (type == "pose") {
+        return "pose";
+    }
+    if (type == "hello" || type == "welcome" || type == "peer_joined" ||
+        type == "peer_left" || type == "name_labels")
+    {
+        return "session";
+    }
+    if (type == "ping" || type == "pong" || type == "error" || type == "ack") {
+        return "control";
+    }
+    if (type == "sync_request") {
+        return "manual_sync_request";
+    }
+    if (type == "save_snapshot") {
+        return "save_snapshot";
+    }
+    if (type == "event_bit" || type == "tbox_bit" || type == "switch_bit" ||
+        type == "item_bit" || type == "dungeon_item_bit")
+    {
+        return "world_state";
+    }
+    if (type == "item_get" || type == "collect_crystal" || type == "collect_mirror" ||
+        type == "dark_clear_lv" || type == "transform_lv" || type == "region_bit" ||
+        type == "collect" || type == "visited_room" || type == "letter_get")
+    {
+        return "inventory_progress";
+    }
+    if (type == "key_num" || type == "light_drop_num" || type == "light_drop_get_flag" ||
+        type == "max_life_update" || type == "bottle_slots" || type == "rupee_count")
+    {
+        return "counters";
+    }
+    if (type == "reliable") {
+        return "reliable_envelope";
+    }
+    return "other";
+}
+
+size_t json_field_bytes(const json& object, const char* key) {
+    const auto it = object.find(key);
+    return it == object.end() ? 0 : it->dump().size();
+}
+
+size_t pose_base_state_bytes(const json& state) {
+    if (!state.is_object()) {
+        return 0;
+    }
+
+    json base = state;
+    base.erase("link_matrices");
+    base.erase("audio_events");
+    return base.dump().size();
+}
+
+void trace_packet_tx(const std::string& clientId, const json& message, size_t bytes) {
+    if (!relay_packet_trace_enabled()) {
+        return;
+    }
+
+    const std::string type = message.value("type", "");
+    const char* category = packet_category(type);
+    if (type == "pose") {
+        const json state = message.value("state", json::object());
+        std::cout << "MP_RELAY_PACKET_TX client=" << clientId << " category=" << category
+                  << " type=" << type << " bytes=" << bytes
+                  << " sequence=" << message.value("sequence", 0U)
+                  << " base_state=" << pose_base_state_bytes(state)
+                  << " link_matrices=" << json_field_bytes(state, "link_matrices")
+                  << " audio_events=" << json_field_bytes(state, "audio_events") << "\n";
+        return;
+    }
+
+    if (type == "save_snapshot") {
+        std::cout << "MP_RELAY_PACKET_TX client=" << clientId << " category=" << category
+                  << " type=" << type << " bytes=" << bytes
+                  << " manual_sync=" << message.value("manual_sync", false)
+                  << " full_state=" << json_field_bytes(message, "full_state")
+                  << " event_flags=" << json_field_bytes(message, "event_flags")
+                  << " chests=" << json_field_bytes(message, "chests")
+                  << " switches=" << json_field_bytes(message, "switches")
+                  << " items=" << json_field_bytes(message, "items")
+                  << " dungeon_items=" << json_field_bytes(message, "dungeon_items") << "\n";
+        return;
+    }
+
+    std::cout << "MP_RELAY_PACKET_TX client=" << clientId << " category=" << category
+              << " type=" << type << " bytes=" << bytes << "\n";
+}
+
 struct Client {
     socket_t sock = INVALID_SOCKET;
     std::string id;
@@ -472,6 +584,7 @@ private:
     bool send_json(Client& client, const json& message) {
         std::string bytes = message.dump();
         bytes.push_back('\n');
+        trace_packet_tx(client.id, message, bytes.size());
         const char* cursor = bytes.data();
         int remaining = static_cast<int>(bytes.size());
         while (remaining > 0) {
