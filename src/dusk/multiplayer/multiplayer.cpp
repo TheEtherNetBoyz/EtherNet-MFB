@@ -3148,7 +3148,7 @@ bool add_link_matrices(json& state) {
     state["link_matrices"] = link_matrix_pack_to_json(
         {
             {"body", link->mpLinkModel},
-            {"hat", includeHumanParts ? link->mpLinkHatModel : nullptr},
+            {"hat", nullptr},
             {"face", includeHumanParts ? link->mpLinkFaceModel : nullptr},
             {"hand", includeHumanParts ? link->mpLinkHandModel : nullptr},
             {"sword", includeHumanParts ? link->mSwordModel : nullptr},
@@ -3565,6 +3565,20 @@ RemoteLinkMatrixSnapshot parse_link_matrices(const json& state) {
     return snapshot;
 }
 
+template <size_t N>
+void parse_int16_array_field(const json& state, const char* key, std::array<int16_t, N>& out) {
+    const auto it = state.find(key);
+    if (it == state.end() || !it->is_array()) {
+        return;
+    }
+
+    const size_t count = std::min(N, it->size());
+    for (size_t i = 0; i < count; ++i) {
+        const int value = (*it)[i].is_number_integer() ? (*it)[i].get<int>() : 0;
+        out[i] = static_cast<int16_t>(std::clamp(value, -32768, 32767));
+    }
+}
+
 void apply_remote_tbox_bit(int stage, int flag);
 
 void remove_direct_peer(const std::string& peerId, const char* reason) {
@@ -3949,6 +3963,10 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         pose.upperBck2 = state.value("upper_bck2", 0);
         pose.upperFrame2 = state.value("upper_frame2", 0.0f);
         pose.upperRate2 = state.value("upper_rate2", 1.0f);
+        parse_int16_array_field(state, "hat_rot_a", pose.hatRotA);
+        parse_int16_array_field(state, "hat_rot_b", pose.hatRotB);
+        parse_int16_array_field(state, "hat_swing", pose.hatSwing);
+        pose.hatShapeY = state.value("hat_shape_y", 0);
         pose.isWolf = state.value("is_wolf", false);
         pose.isTransforming = state.value("is_transforming", false);
         pose.transformFromWolf = state.value("transform_from_wolf", pose.isWolf);
@@ -5161,6 +5179,21 @@ void send_pose() {
         return;
     }
 
+    auto hatArray10ToJson = [&](const s16* values) {
+        json out = json::array();
+        for (size_t i = 0; i < 10; ++i) {
+            out.push_back(values != nullptr ? static_cast<int>(values[i]) : 0);
+        }
+        return out;
+    };
+    auto hatArray3ToJson = [&](const s16* values) {
+        json out = json::array();
+        for (size_t i = 0; i < 3; ++i) {
+            out.push_back(values != nullptr ? static_cast<int>(values[i]) : 0);
+        }
+        return out;
+    };
+
     json state = {
         {"stage", dComIfGp_getStartStageName()},
         {"room", static_cast<int>(fopAcM_GetRoomNo(player))},
@@ -5186,6 +5219,10 @@ void send_pose() {
         {"upper_bck2", link != nullptr ? static_cast<int>(link->mUpperAnmHeap[2].getIdx()) : 0},
         {"upper_frame2", upperFrame2},
         {"upper_rate2", upperRate2},
+        {"hat_rot_a", hatArray10ToJson(link != nullptr ? link->field_0x302c : nullptr)},
+        {"hat_rot_b", hatArray10ToJson(link != nullptr ? link->field_0x3040 : nullptr)},
+        {"hat_swing", hatArray3ToJson(link != nullptr ? link->field_0x3066 : nullptr)},
+        {"hat_shape_y", link != nullptr ? static_cast<int>(link->field_0x3062) : 0},
         {"is_wolf", isWolf},
         {"is_transforming", isTransforming},
         {"transform_from_wolf", transformFromWolf},

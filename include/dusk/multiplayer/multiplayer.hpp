@@ -93,6 +93,10 @@ struct PeerPoseSnapshot {
     int upperBck2 = 0;
     float upperFrame2 = 0.0f;
     float upperRate2 = 1.0f;
+    std::array<int16_t, 10> hatRotA{};
+    std::array<int16_t, 10> hatRotB{};
+    std::array<int16_t, 3> hatSwing{};
+    int hatShapeY = 0;
     bool isWolf = false;
     bool isTransforming = false;
     bool transformFromWolf = false;

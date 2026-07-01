@@ -417,6 +417,8 @@ void sync_remote_link_actor_dummies(const std::map<std::string, PeerPoseSnapshot
                                     pose.midnaMaskDraw, pose.midnaHandDraw, pose.midnaHairDraw,
                                     pose.midnaShadowForm, pose.itemActorKind,
                                     pose.rideActorKind);
+        actor->setRemoteHatState(pose.hatRotA, pose.hatRotB, pose.hatSwing,
+                                 static_cast<s16>(pose.hatShapeY));
         actor->setRemoteMatrices(pose.linkMatrices);
         if (dummy_trace_enabled()) {
             const uint32_t sequenceDelta =

@@ -13,6 +13,7 @@
 #include "d/actor/d_a_remote_link.h"
 
 #include "JSystem/J3DGraphAnimator/J3DAnimation.h"
+#include "JSystem/J3DGraphAnimator/J3DJoint.h"
 #include "JSystem/J3DGraphBase/J3DMaterial.h"
 #include "JSystem/J3DGraphBase/J3DShape.h"
 #include "JSystem/J3DGraphLoader/J3DAnmLoader.h"
@@ -82,6 +83,32 @@ static void zeroColor(GXColorS10* o_color) {
     o_color->g = 0;
     o_color->b = 0;
     o_color->a = 0;
+}
+
+static void setRemoteMatrixWorldAxisRot(daRemoteLink_c* i_actor, MtxP i_mtx, s16 i_rotX,
+                                        s16 i_rotY, s16 i_rotZ) {
+    cXyz origin;
+    mDoMtx_multVecZero(i_mtx, &origin);
+    mDoMtx_stack_c::transS(origin);
+    mDoMtx_stack_c::YrotM(i_actor->shape_angle.y);
+    mDoMtx_stack_c::ZXYrotM(i_rotX, i_rotY, i_rotZ);
+    mDoMtx_stack_c::YrotM(-i_actor->shape_angle.y);
+    mDoMtx_stack_c::transM(-origin.x, -origin.y, -origin.z);
+    mDoMtx_stack_c::concat(i_mtx);
+    mDoMtx_copy(mDoMtx_stack_c::get(), i_mtx);
+}
+
+static int daRemoteLink_headModelCallBack(J3DJoint* i_joint, int i_after) {
+    if (i_after != 0 || i_joint == NULL) {
+        return 1;
+    }
+
+    daRemoteLink_c* link =
+        reinterpret_cast<daRemoteLink_c*>(j3dSys.getModel()->getUserArea());
+    if (link != NULL) {
+        link->headModelCallBack(i_joint->getJntNo());
+    }
+    return 1;
 }
 
 static bool isRemoteLinkMotionAudio(const dusk::multiplayer::RemoteAudioEvent& i_event) {
@@ -321,6 +348,10 @@ daRemoteLink_c::daRemoteLink_c()
       mRemoteUpperBck2(0),
       mRemoteUpperFrame2(0.0f),
       mRemoteUpperRate2(1.0f),
+      mRemoteHatRotA(),
+      mRemoteHatRotB(),
+      mRemoteHatSwing(),
+      mRemoteHatShapeY(0),
       mRemoteTransformFrame(0.0f),
       mRemoteTransformFrameValid(false),
       mRemoteEquipItem(0xFFFF),
@@ -813,7 +844,11 @@ void daRemoteLink_c::setupHumanKokiriModel() {
     hideAllHandShapes();
 
     mpBodyModel->setUserArea(0);
-    mpHeadModel->setUserArea(0);
+    mpHeadModel->setUserArea((uintptr_t)this);
+    J3DModelData* headData = mpHeadModel->getModelData();
+    for (u16 i = 1; headData != NULL && i < headData->getJointNum(); ++i) {
+        headData->getJointNodePointer(i)->setCallBack(daRemoteLink_headModelCallBack);
+    }
 
     if (mClothesVariant == 3 && !setupMagicArmorBrk()) {
         DuskLog.warn("RemoteLink: Magic Armor BRK setup failed");
@@ -1965,6 +2000,47 @@ void daRemoteLink_c::applyWolfEquipmentMatrices() {
     }
 }
 
+int daRemoteLink_c::headModelCallBack(int i_jointNo) {
+    if (mpHeadModel == NULL || i_jointNo < 0 ||
+        i_jointNo >= static_cast<int>(mRemoteHatRotA.size()))
+    {
+        return 1;
+    }
+
+    if (i_jointNo >= 6) {
+        mDoMtx_stack_c::copy(J3DSys::mCurrentMtx);
+
+        if (i_jointNo == 6) {
+            mDoMtx_stack_c::XYZrotM(0, (mRemoteHatRotB[7] >> 1),
+                                    (mRemoteHatRotA[7] >> 1));
+        } else {
+            const int swingIndex = i_jointNo - 7;
+            if (swingIndex == 0) {
+                mDoMtx_stack_c::XYZrotM(0, (mRemoteHatRotB[7] >> 1),
+                                        (mRemoteHatRotA[7] >> 1) + mRemoteHatSwing[0]);
+            } else if (swingIndex >= 0 &&
+                       swingIndex < static_cast<int>(mRemoteHatSwing.size()))
+            {
+                mDoMtx_stack_c::XYZrotM(0, mRemoteHatRotB[i_jointNo],
+                                        mRemoteHatRotA[i_jointNo] +
+                                            mRemoteHatSwing[swingIndex]);
+            }
+        }
+
+        mpHeadModel->setAnmMtx(i_jointNo, mDoMtx_stack_c::get());
+        mDoMtx_copy(mDoMtx_stack_c::get(), J3DSys::mCurrentMtx);
+    } else {
+        const s16 prevShapeY = shape_angle.y;
+        shape_angle.y = mRemoteHatShapeY;
+        setRemoteMatrixWorldAxisRot(this, mpHeadModel->getAnmMtx(i_jointNo),
+                                    mRemoteHatRotA[i_jointNo], 0,
+                                    mRemoteHatRotB[i_jointNo]);
+        shape_angle.y = prevShapeY;
+    }
+
+    return 1;
+}
+
 void daRemoteLink_c::calcModels() {
     if (mHasRemoteMatrices) {
         return;
@@ -2252,7 +2328,10 @@ void daRemoteLink_c::setRemoteMatrices(
     if (mVisualState.form == FORM_WOLF) {
         applyWolfEquipmentMatrices();
     }
-    copyRemoteModelMatrices(mpHeadModel, i_matrices.hat);
+    if (mpHeadModel != NULL) {
+        mpHeadModel->setBaseTRMtx(mpBodyModel->getAnmMtx(4));
+        mpHeadModel->calc();
+    }
     copyRemoteModelMatrices(mpFaceModel, i_matrices.face);
     copyRemoteModelMatrices(mpHandModel, i_matrices.hand);
     if (mVisualState.form != FORM_WOLF) {
@@ -2332,6 +2411,16 @@ void daRemoteLink_c::setRemoteMatrices(
     mHasRemoteMatrices = true;
 }
 
+void daRemoteLink_c::setRemoteHatState(const std::array<int16_t, 10>& i_rotA,
+                                       const std::array<int16_t, 10>& i_rotB,
+                                       const std::array<int16_t, 3>& i_swing,
+                                       s16 i_shapeY) {
+    mRemoteHatRotA = i_rotA;
+    mRemoteHatRotB = i_rotB;
+    mRemoteHatSwing = i_swing;
+    mRemoteHatShapeY = i_shapeY;
+}
+
 void daRemoteLink_c::drawModel(J3DModel* i_model) {
     if (i_model == NULL) {
         return;
@@ -2400,9 +2489,16 @@ void daRemoteLink_c::drawShadowMidnaModels() {
         return;
     }
 
-    g_env_light.settingTevStruct(1, &current.pos, &tevStr);
+    mRemoteMidnaTevStr = tevStr;
+    zeroColor(&mRemoteMidnaTevStr.TevColor);
+    mRemoteMidnaTevStr.TevKColor.r = 0;
+    mRemoteMidnaTevStr.TevKColor.g = 0;
+    mRemoteMidnaTevStr.TevKColor.b = 0;
+    mRemoteMidnaTevStr.TevKColor.a = 0;
+
+    g_env_light.settingTevStruct(1, &current.pos, &mRemoteMidnaTevStr);
     if (mMidnaGlowMatrixValid) {
-        g_env_light.setLightTevColorType_MAJI(mpMidnaGlowModel, &tevStr);
+        g_env_light.setLightTevColorType_MAJI(mpMidnaGlowModel, &mRemoteMidnaTevStr);
         mDoExt_modelEntryDL(mpMidnaGlowModel);
     }
 
@@ -2415,7 +2511,7 @@ void daRemoteLink_c::drawShadowMidnaModels() {
         MTXMultVec(dComIfGd_getInvViewMtx(), &offsetPos, &offsetPos);
     }
 
-    g_env_light.setLightTevColorType_MAJI(mpShadowMidnaModel, &tevStr);
+    g_env_light.setLightTevColorType_MAJI(mpShadowMidnaModel, &mRemoteMidnaTevStr);
     if (mShadowMidnaInvModel.mModel != NULL) {
         mShadowMidnaInvModel.entryDL(&offsetPos);
     } else {
@@ -2423,7 +2519,7 @@ void daRemoteLink_c::drawShadowMidnaModels() {
     }
 
     if (mMidnaMaskMatrixValid) {
-        g_env_light.setLightTevColorType_MAJI(mpShadowMidnaMaskModel, &tevStr);
+        g_env_light.setLightTevColorType_MAJI(mpShadowMidnaMaskModel, &mRemoteMidnaTevStr);
         if (mShadowMidnaMaskInvModel.mModel != NULL) {
             mShadowMidnaMaskInvModel.entryDL(&offsetPos);
         } else {
@@ -2432,7 +2528,7 @@ void daRemoteLink_c::drawShadowMidnaModels() {
     }
 
     if (mMidnaHandMatrixValid) {
-        g_env_light.setLightTevColorType_MAJI(mpShadowMidnaHandModel, &tevStr);
+        g_env_light.setLightTevColorType_MAJI(mpShadowMidnaHandModel, &mRemoteMidnaTevStr);
         if (mShadowMidnaHandInvModel.mModel != NULL) {
             mShadowMidnaHandInvModel.entryDL(&offsetPos);
         } else {
@@ -2443,7 +2539,7 @@ void daRemoteLink_c::drawShadowMidnaModels() {
     if (mMidnaHairMatrixValid) {
         showOnlyMaterialShape(mpShadowMidnaHairModel->getModelData(),
                               static_cast<u16>(mMidnaHairShape), 3);
-        g_env_light.setLightTevColorType_MAJI(mpShadowMidnaHairModel, &tevStr);
+        g_env_light.setLightTevColorType_MAJI(mpShadowMidnaHairModel, &mRemoteMidnaTevStr);
         if (mShadowMidnaHairInvModel.mModel != NULL) {
             mShadowMidnaHairInvModel.entryDL(&offsetPos);
         } else {
@@ -2513,15 +2609,12 @@ int daRemoteLink_c::Draw() {
     if (forceRemoteLightInit) {
         g_env_light.light_init_timer = savedLightInitTimer;
     }
+    const bool drawHumanShadowMidna =
+        mRemoteMidnaShadowForm && mVisualState.form != FORM_WOLF;
+
     drawModel(mpBodyModel);
-    if (mRemoteMidnaShadowForm) {
-        if (mVisualState.form != FORM_WOLF) {
-            dComIfGd_setListDark();
-        }
+    if (mRemoteMidnaShadowForm && mVisualState.form == FORM_WOLF) {
         drawShadowMidnaModels();
-        if (mVisualState.form != FORM_WOLF) {
-            dComIfGd_setList();
-        }
     } else if (mVisualState.form == FORM_WOLF) {
         applyRideMidnaShapeVisibility(mpMidnaHandModel, mpMidnaHairModel, mMidnaHairShape);
         if (mMidnaMatrixValid) {
@@ -2582,6 +2675,13 @@ int daRemoteLink_c::Draw() {
     drawModel(mpSwordModel);
     drawModel(mpSheathModel);
     drawModel(mpShieldModel);
+
+    if (drawHumanShadowMidna) {
+        dComIfGd_setListDark();
+        drawShadowMidnaModels();
+        dComIfGd_setList();
+    }
+
     if (mVisualState.form == FORM_WOLF) {
         dComIfGd_setList();
     }

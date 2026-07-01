@@ -45,7 +45,11 @@ public:
                               bool i_midnaHairDraw, bool i_midnaShadowForm, int i_itemActorKind,
                               int i_rideActorKind);
     void setRemoteMatrices(const dusk::multiplayer::RemoteLinkMatrixSnapshot& i_matrices);
+    void setRemoteHatState(const std::array<int16_t, 10>& i_rotA,
+                           const std::array<int16_t, 10>& i_rotB,
+                           const std::array<int16_t, 3>& i_swing, s16 i_shapeY);
     void playRemoteSound(const dusk::multiplayer::RemoteAudioEvent& i_event);
+    int headModelCallBack(int i_jointNo);
 
     static int createHeapCallBack(fopAc_ac_c* i_this);
 
@@ -171,6 +175,7 @@ private:
     /* 0x95C */ J3DModel* mpKanteraGlowModel;
     /* 0x960 */ J3DModel* mpItemActorModel;
     /* 0x964 */ J3DModel* mpRideActorModel;
+    dKy_tevstr_c mRemoteMidnaTevStr;
     /* 0x968 */ J3DModel* mpMidnaModel;
     /* 0x96C */ J3DModel* mpMidnaMaskModel;
     /* 0x970 */ J3DModel* mpMidnaHandModel;
@@ -207,6 +212,10 @@ private:
     /* 0xBC4 */ u16 mRemoteUpperBck2;
     /* 0xBC8 */ f32 mRemoteUpperFrame2;
     /* 0xBCC */ f32 mRemoteUpperRate2;
+    std::array<int16_t, 10> mRemoteHatRotA;
+    std::array<int16_t, 10> mRemoteHatRotB;
+    std::array<int16_t, 3> mRemoteHatSwing;
+    s16 mRemoteHatShapeY;
     /* 0xBD0 */ f32 mRemoteTransformFrame;
     /* 0xBD4 */ bool mRemoteTransformFrameValid;
     /* 0xBD8 */ u16 mRemoteEquipItem;
