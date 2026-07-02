@@ -53,6 +53,7 @@ static int sCreateLogCount;
 static int sDrawLogCount;
 static int sCalcLogCount;
 static int sItemActorRejectLogCount;
+static int sRemoteBombFuseLogCount;
 static int sLiveRemoteLinkActors;
 static f32 const l_remoteMotionAudioVolumeScale = 0.75f;
 
@@ -66,6 +67,31 @@ static bool isBottleItem(u16 i_itemNo) {
 
 static bool isRemoteBombActorKind(int i_kind) {
     return i_kind >= 2 && i_kind <= 4;
+}
+
+static f32 remoteBombPulse(int i_exTime, int i_flash, int i_fallbackTicks) {
+    daAlink_c* player = daAlink_getAlinkActorClass();
+    const int explodeTime = player != NULL ? player->getBombExplodeTime() : 0;
+    if (i_exTime >= 0 && explodeTime > 8) {
+        if (i_exTime > explodeTime) {
+            return 1.0f - std::fabs(std::cos(((static_cast<f32>(i_exTime - explodeTime)) * M_PI) /
+                                             static_cast<f32>(std::max(1, explodeTime / 2))));
+        }
+        if (i_exTime > explodeTime / 2) {
+            return 1.0f - std::fabs(std::cos(((static_cast<f32>(i_exTime - explodeTime / 2)) * M_PI) /
+                                             static_cast<f32>(std::max(1, explodeTime / 4))));
+        }
+        if (i_exTime > explodeTime / 4) {
+            return std::fabs(std::sin(((static_cast<f32>(i_exTime - explodeTime / 4)) * M_PI) /
+                                      static_cast<f32>(std::max(1, explodeTime / 7))));
+        }
+        return std::fabs(std::sin(((static_cast<f32>(i_exTime - explodeTime / 7)) * M_PI) /
+                                  static_cast<f32>(std::max(1, explodeTime / 8))));
+    }
+    if (i_flash >= 0) {
+        return static_cast<f32>(std::clamp(i_flash, 0, 15)) / 15.0f;
+    }
+    return std::fabs(std::sin(static_cast<f32>(i_fallbackTicks) * 0.22f));
 }
 
 static bool isRemoteTransformProc(int i_procId) {
@@ -395,6 +421,12 @@ daRemoteLink_c::daRemoteLink_c()
       mLoadedItemActorKind(-1),
       mLoadedRideActorKind(-1),
       mRemoteBombFlashTicks(0),
+      mRemoteBombExTime(-1),
+      mRemoteBombFlash(-1),
+      mRemoteBombLastPosValid(false),
+      mRemoteBombWasWater(false),
+      mRemoteBombExplosionSpawned(false),
+      mRemoteBombLastPos(cXyz::Zero),
       mMidnaHairShape(0),
       mSlotReserved(false) {
     mVisualState.form = FORM_HUMAN_KOKIRI;
@@ -2129,6 +2161,9 @@ int daRemoteLink_c::Execute() {
 
     if (isRemoteBombActorKind(mRemoteItemActorKind) && mItemActorMatrixValid) {
         ++mRemoteBombFlashTicks;
+        if (mRemoteBombExTime > 0) {
+            --mRemoteBombExTime;
+        }
     } else {
         mRemoteBombFlashTicks = 0;
     }
@@ -2171,7 +2206,8 @@ void daRemoteLink_c::setRemoteActionState(int i_procId, int i_procVar0, int i_pr
                                           bool i_midnaDraw, bool i_midnaMaskDraw,
                                           bool i_midnaHandDraw, bool i_midnaHairDraw,
                                           bool i_midnaShadowForm,
-                                          int i_itemActorKind, int i_rideActorKind) {
+                                          int i_itemActorKind, int i_itemActorBombExTime,
+                                          int i_itemActorBombFlash, int i_rideActorKind) {
     mRemoteProcId = i_procId;
     mRemoteProcVar0 = i_procVar0;
     mRemoteProcVar1 = i_procVar1;
@@ -2201,8 +2237,22 @@ void daRemoteLink_c::setRemoteActionState(int i_procId, int i_procVar0, int i_pr
     mRemoteMidnaShadowForm = i_midnaShadowForm;
     if (mRemoteItemActorKind != i_itemActorKind && isRemoteBombActorKind(i_itemActorKind)) {
         mRemoteBombFlashTicks = 0;
+        mRemoteBombExplosionSpawned = false;
     }
+    maybeSpawnRemoteBombExplosion(i_itemActorKind);
     mRemoteItemActorKind = i_itemActorKind;
+    mRemoteBombExTime = i_itemActorBombExTime;
+    mRemoteBombFlash = i_itemActorBombFlash;
+    if (isRemoteBombActorKind(mRemoteItemActorKind) &&
+        (sRemoteBombFuseLogCount < 24 ||
+         (mRemoteBombExTime >= 0 && mRemoteBombExTime <= 20)))
+    {
+        ++sRemoteBombFuseLogCount;
+        DuskLog.info("RemoteLink: bomb fuse rx kind={} ex_time={} flash={} "
+                     "matrix_valid={} last_pos_valid={}",
+                     mRemoteItemActorKind, mRemoteBombExTime, mRemoteBombFlash,
+                     mItemActorMatrixValid, mRemoteBombLastPosValid);
+    }
     mRemoteRideActorKind = i_rideActorKind;
     if (isRemoteTransformProc(mRemoteProcId)) {
         mRemoteSwordDraw = false;
@@ -2226,6 +2276,8 @@ void daRemoteLink_c::setRemoteActionState(int i_procId, int i_procVar0, int i_pr
         mKanteraMatrixValid = false;
         mKanteraGlowMatrixValid = false;
         mItemActorMatrixValid = false;
+        mRemoteBombExTime = -1;
+        mRemoteBombFlash = -1;
         mRideActorMatrixValid = false;
         return;
     }
@@ -2234,6 +2286,44 @@ void daRemoteLink_c::setRemoteActionState(int i_procId, int i_procVar0, int i_pr
     setupEquipmentModels();
     setupHeldItemModel();
     setupLinkedItemModels();
+}
+
+void daRemoteLink_c::maybeSpawnRemoteBombExplosion(int i_nextItemActorKind) {
+    if (!isRemoteBombActorKind(mRemoteItemActorKind) || !mRemoteBombLastPosValid ||
+        mRemoteBombExplosionSpawned)
+    {
+        return;
+    }
+
+    if (mRemoteBombExTime <= 0 ||
+        (!isRemoteBombActorKind(i_nextItemActorKind) && mRemoteBombExTime <= 20))
+     {
+        spawnRemoteBombExplosion();
+        mRemoteBombExplosionSpawned = true;
+    }
+
+    if (!isRemoteBombActorKind(i_nextItemActorKind)) {
+        mRemoteBombLastPosValid = false;
+        mRemoteBombExplosionSpawned = false;
+    }
+}
+
+void daRemoteLink_c::spawnRemoteBombExplosion() {
+    g_env_light.settingTevStruct(0, &mRemoteBombLastPos, &tevStr);
+
+    static const u16 normalNameID[] = {0x161, 0x162, 0x163, 0x164, 0x165,
+                                       0x166, 0x167, 0x168, 0x1EC};
+    static const u16 waterNameID[] = {0xA05, 0xA06, 0xA07, 0xA08, 0xA09, 0xA0A, 0xA0B, 0xA0C};
+
+    const u16* effects = mRemoteBombWasWater ? waterNameID : normalNameID;
+    const int count = mRemoteBombWasWater ? ARRAY_SIZE(waterNameID) : ARRAY_SIZE(normalNameID);
+    csXyz angle;
+    angle.set(0, shape_angle.y, 0);
+    cXyz scale(1.0f, 1.0f, 1.0f);
+    for (int i = 0; i < count; ++i) {
+        dComIfGp_particle_setColor(effects[i], &mRemoteBombLastPos, &tevStr, NULL, NULL, 0.0f,
+                                   0xFF, &angle, &scale, NULL, -1, NULL);
+    }
 }
 
 bool daRemoteLink_c::copyRemoteModelMatrices(
@@ -2356,6 +2446,19 @@ void daRemoteLink_c::setRemoteMatrices(
                                                       i_matrices.kanteraGlow);
     mItemActorMatrixValid = copyRemoteModelMatrices(mpItemActorModel,
                                                     i_matrices.itemActor);
+    if (mItemActorMatrixValid && isRemoteBombActorKind(mRemoteItemActorKind)) {
+        mRemoteBombLastPos.set(i_matrices.itemActor.base[3], i_matrices.itemActor.base[7],
+                               i_matrices.itemActor.base[11]);
+        mRemoteBombLastPosValid = true;
+        mRemoteBombWasWater = mRemoteItemActorKind == 3;
+        if (mRemoteBombExTime <= 0 && !mRemoteBombExplosionSpawned) {
+            spawnRemoteBombExplosion();
+            mRemoteBombExplosionSpawned = true;
+        }
+        if (mRemoteBombExTime <= 0) {
+            mItemActorMatrixValid = false;
+        }
+    }
     mRideActorMatrixValid = copyRemoteModelMatrices(mpRideActorModel,
                                                     i_matrices.rideActor);
     if (mRemoteMidnaShadowForm) {
@@ -2443,25 +2546,28 @@ void daRemoteLink_c::drawLinkedItemActorModel() {
     bombColor.b = 0;
     bombColor.a = 0;
 
-    J3DMaterial* primaryMaterial = NULL;
-    J3DMaterial* secondaryMaterial = NULL;
     const bool bombActor = isRemoteBombActorKind(mRemoteItemActorKind);
-    const bool waterBomb = mRemoteItemActorKind == 3;
+    J3DMaterial* bombPrimaryMaterial = NULL;
+    J3DMaterial* bombSecondaryMaterial = NULL;
     if (bombActor && mpItemActorModel->getModelData() != NULL) {
         J3DModelData* modelData = mpItemActorModel->getModelData();
-        const f32 pulse = std::fabs(std::sin(static_cast<f32>(mRemoteBombFlashTicks) * 0.22f));
+        const bool waterBomb = mRemoteItemActorKind == 3;
+        const f32 pulse =
+            remoteBombPulse(mRemoteBombExTime, mRemoteBombFlash, mRemoteBombFlashTicks);
         bombColor.r = static_cast<s16>(pulse * 15.0f) & 0xFF;
-        primaryMaterial = modelData->getMaterialNum() > 0 ? modelData->getMaterialNodePointer(0) : NULL;
-        secondaryMaterial = modelData->getMaterialNum() > 1 ? modelData->getMaterialNodePointer(1) : NULL;
+        bombPrimaryMaterial =
+            modelData->getMaterialNum() > 0 ? modelData->getMaterialNodePointer(0) : NULL;
+        bombSecondaryMaterial =
+            modelData->getMaterialNum() > 1 ? modelData->getMaterialNodePointer(1) : NULL;
         if (waterBomb) {
-            if (primaryMaterial != NULL) {
-                primaryMaterial->setTevColor(0, &bombColor);
+            if (bombPrimaryMaterial != NULL) {
+                bombPrimaryMaterial->setTevColor(0, &bombColor);
             }
-            if (secondaryMaterial != NULL) {
-                secondaryMaterial->setTevColor(0, &bombColor);
+            if (bombSecondaryMaterial != NULL) {
+                bombSecondaryMaterial->setTevColor(0, &bombColor);
             }
-        } else if (primaryMaterial != NULL) {
-            primaryMaterial->setTevColor(1, &bombColor);
+        } else if (bombPrimaryMaterial != NULL) {
+            bombPrimaryMaterial->setTevColor(1, &bombColor);
         }
     }
 
@@ -2471,15 +2577,15 @@ void daRemoteLink_c::drawLinkedItemActorModel() {
         bombColor.r = 0;
         bombColor.g = 0;
         bombColor.b = 0;
-        if (waterBomb) {
-            if (primaryMaterial != NULL) {
-                primaryMaterial->setTevColor(0, &bombColor);
+        if (mRemoteItemActorKind == 3) {
+            if (bombPrimaryMaterial != NULL) {
+                bombPrimaryMaterial->setTevColor(0, &bombColor);
             }
-            if (secondaryMaterial != NULL) {
-                secondaryMaterial->setTevColor(0, &bombColor);
+            if (bombSecondaryMaterial != NULL) {
+                bombSecondaryMaterial->setTevColor(0, &bombColor);
             }
-        } else if (primaryMaterial != NULL) {
-            primaryMaterial->setTevColor(1, &bombColor);
+        } else if (bombPrimaryMaterial != NULL) {
+            bombPrimaryMaterial->setTevColor(1, &bombColor);
         }
     }
 }

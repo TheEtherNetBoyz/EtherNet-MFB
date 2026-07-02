@@ -43,7 +43,7 @@ public:
                               bool i_heavyBoots, bool i_itemDraw, bool i_kanteraDraw,
                               bool i_midnaDraw, bool i_midnaMaskDraw, bool i_midnaHandDraw,
                               bool i_midnaHairDraw, bool i_midnaShadowForm, int i_itemActorKind,
-                              int i_rideActorKind);
+                              int i_itemActorBombExTime, int i_itemActorBombFlash, int i_rideActorKind);
     void setRemoteMatrices(const dusk::multiplayer::RemoteLinkMatrixSnapshot& i_matrices);
     void setRemoteHatState(const std::array<int16_t, 10>& i_rotA,
                            const std::array<int16_t, 10>& i_rotB,
@@ -144,6 +144,8 @@ private:
     void drawModel(J3DModel* i_model);
     void drawLinkedItemActorModel();
     void drawShadowMidnaModels();
+    void maybeSpawnRemoteBombExplosion(int i_nextItemActorKind);
+    void spawnRemoteBombExplosion();
     void hideAllHandShapes();
     void setupDrawHands();
     void setupHeavyBootModels();
@@ -259,6 +261,12 @@ private:
     /* 0xC18 */ int mLoadedItemActorKind;
     /* 0xC1C */ int mLoadedRideActorKind;
     /* 0xC20 */ int mRemoteBombFlashTicks;
+    int mRemoteBombExTime;
+    int mRemoteBombFlash;
+    bool mRemoteBombLastPosValid;
+    bool mRemoteBombWasWater;
+    bool mRemoteBombExplosionSpawned;
+    cXyz mRemoteBombLastPos;
     /* 0xC24 */ int mMidnaHairShape;
     /* 0xC28 */ bool mSlotReserved;
 };

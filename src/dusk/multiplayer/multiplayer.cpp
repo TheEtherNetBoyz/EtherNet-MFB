@@ -3,6 +3,7 @@
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_e_pz.h"
 #include "d/actor/d_a_midna.h"
+#include "d/actor/d_a_nbomb.h"
 #include "d/actor/d_a_npc_chin.h"
 #include "d/actor/d_a_obj_drop.h"
 #include "d/actor/d_a_obj_cblock.h"
@@ -286,6 +287,35 @@ int detect_ride_actor_kind(fopAc_ac_c* actor) {
     }
 
     return REMOTE_RIDE_ACTOR_NONE;
+}
+
+int calc_remote_bomb_flash(daNbomb_c* bomb, daAlink_c* link) {
+    if (bomb == nullptr || link == nullptr) {
+        return -1;
+    }
+
+    const int exTime = bomb->getExTime();
+    const int explodeTime = link->getBombExplodeTime();
+    if (explodeTime <= 8 || exTime < 0) {
+        return 0;
+    }
+
+    float brightness = 0.0f;
+    if (exTime > explodeTime) {
+        brightness = 1.0f - std::fabs(std::cos(((static_cast<float>(exTime - explodeTime)) * M_PI) /
+                                               static_cast<float>(std::max(1, explodeTime / 2))));
+    } else if (exTime > explodeTime / 2) {
+        brightness = 1.0f - std::fabs(std::cos(((static_cast<float>(exTime - explodeTime / 2)) * M_PI) /
+                                               static_cast<float>(std::max(1, explodeTime / 4))));
+    } else if (exTime > explodeTime / 4) {
+        brightness = std::fabs(std::sin(((static_cast<float>(exTime - explodeTime / 4)) * M_PI) /
+                                        static_cast<float>(std::max(1, explodeTime / 7))));
+    } else {
+        brightness = std::fabs(std::sin(((static_cast<float>(exTime - explodeTime / 7)) * M_PI) /
+                                        static_cast<float>(std::max(1, explodeTime / 8))));
+    }
+
+    return std::clamp(static_cast<int>(brightness * 15.0f), 0, 15);
 }
 
 json audio_events_to_json(const std::vector<RemoteAudioEvent>& events) {
@@ -3053,15 +3083,9 @@ bool add_link_matrices(json& state) {
         // guard below.
         return false;
     }
-    if (link->mProcID == daAlink_c::PROC_METAMORPHOSE || link->mProcID == daAlink_c::PROC_METAMORPHOSE_ONLY) {
-        // Wolf<->human transformation. daAlink_c::changeWolf()/changeLink()
-        // free the old model/arc resources (mpArcHeap->freeAll()) and then
-        // reassign mpLinkModel/mSwordModel/mShieldModel to freshly-allocated
-        // objects partway through this state, not atomically with the state
-        // transition itself -- reading those fields during the window is a
-        // use-after-free risk, not just a stale-data one.
-        return false;
-    }
+    const bool isTransforming =
+        link->mProcID == daAlink_c::PROC_METAMORPHOSE ||
+        link->mProcID == daAlink_c::PROC_METAMORPHOSE_ONLY;
 
     if (link->mpLinkModel == nullptr) {
         return false;
@@ -3072,12 +3096,16 @@ bool add_link_matrices(json& state) {
         return true;
     }
 
-    const bool includeHumanParts = !isWolf;
-    const LocalMidnaVisualState midnaVisual = detect_midna_visual_state(link, isWolf);
+    const bool includeHumanCoreParts = !isWolf;
+    const bool includeHumanParts = includeHumanCoreParts && !isTransforming;
+    const LocalMidnaVisualState midnaVisual =
+        isTransforming ? LocalMidnaVisualState() : detect_midna_visual_state(link, isWolf);
     J3DModel* arrowModel = nullptr;
     J3DModel* itemActorModel = nullptr;
     J3DModel* rideActorModel = nullptr;
     int itemActorKind = REMOTE_ITEM_ACTOR_NONE;
+    int itemActorBombExTime = -1;
+    int itemActorBombFlash = -1;
     int rideActorKind = REMOTE_RIDE_ACTOR_NONE;
     if (includeHumanParts) {
         fopAc_ac_c* itemActor = link->mItemAcKeep.getActor();
@@ -3114,6 +3142,18 @@ bool add_link_matrices(json& state) {
         } else if (itemActor != nullptr) {
             itemActorModel = itemActor->model;
             itemActorKind = detect_item_actor_kind(itemActor);
+            if (fopAcM_GetName(itemActor) == fpcNm_NBOMB_e) {
+                daNbomb_c* bomb = static_cast<daNbomb_c*>(itemActor);
+                itemActorBombExTime = bomb->getExTime();
+                itemActorBombFlash = calc_remote_bomb_flash(bomb, link);
+                static uint32_t sBombFuseTxLogCount = 0;
+                if (sBombFuseTxLogCount < 24 || itemActorBombExTime <= 20) {
+                    ++sBombFuseTxLogCount;
+                    DuskLog.info("Multiplayer bomb fuse tx kind={} ex_time={} flash={} matrix={}",
+                                 itemActorKind, itemActorBombExTime, itemActorBombFlash,
+                                 itemActorModel != nullptr);
+                }
+            }
         }
 
         fopAc_ac_c* rideActor = link->mRideAcKeep.getActor();
@@ -3149,8 +3189,8 @@ bool add_link_matrices(json& state) {
         {
             {"body", link->mpLinkModel},
             {"hat", nullptr},
-            {"face", includeHumanParts ? link->mpLinkFaceModel : nullptr},
-            {"hand", includeHumanParts ? link->mpLinkHandModel : nullptr},
+            {"face", includeHumanCoreParts ? link->mpLinkFaceModel : nullptr},
+            {"hand", includeHumanCoreParts ? link->mpLinkHandModel : nullptr},
             {"sword", includeHumanParts ? link->mSwordModel : nullptr},
             {"sheath", includeHumanParts ? link->mSheathModel : nullptr},
             {"shield", includeHumanParts ? link->mShieldModel : nullptr},
@@ -3189,6 +3229,10 @@ bool add_link_matrices(json& state) {
         !isWolf && (link->checkNoResetFlg2(daPy_py_c::FLG2_UNK_1) ||
                     link->checkNoResetFlg2(daPy_py_c::FLG2_UNK_20000));
     state["item_actor_kind"] = itemActorKind;
+    if (itemActorBombExTime >= 0) {
+        state["item_actor_bomb_ex_time"] = itemActorBombExTime;
+        state["item_actor_bomb_flash"] = itemActorBombFlash;
+    }
     state["ride_actor_kind"] = rideActorKind;
     state["form"] = isWolf ? "wolf" : "human";
     return true;
@@ -3994,6 +4038,8 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         pose.itemDraw = state.value("item_draw", false);
         pose.kanteraDraw = state.value("kantera_draw", false);
         pose.itemActorKind = state.value("item_actor_kind", REMOTE_ITEM_ACTOR_NONE);
+        pose.itemActorBombExTime = state.value("item_actor_bomb_ex_time", -1);
+        pose.itemActorBombFlash = state.value("item_actor_bomb_flash", -1);
         pose.rideActorKind = state.value("ride_actor_kind", REMOTE_RIDE_ACTOR_NONE);
         pose.linkMatrices = parse_link_matrices(state);
         pose.audioEvents = parse_audio_events(state);
@@ -4683,7 +4729,8 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
             "equip_item", "sword_variant", "shield_variant", "clothes_variant", "sword_draw",
             "shield_draw", "sword_out", "midna_draw", "midna_mask_draw", "midna_hand_draw",
             "midna_hair_draw", "midna_shadow_form", "heavy_boots", "item_draw",
-            "kantera_draw", "item_actor_kind", "ride_actor_kind",
+            "kantera_draw", "item_actor_kind", "item_actor_bomb_ex_time",
+            "item_actor_bomb_flash", "ride_actor_kind",
         };
 
         auto groupRaw = [state](const char* const* keys, size_t keyCount) {
@@ -5257,7 +5304,7 @@ void send_pose() {
         {"ride_actor_kind", REMOTE_RIDE_ACTOR_NONE},
         {"audio_events", audio_events_to_json(audioEvents)},
     };
-    if (!isTransforming && isLink && (sDummyModelEnabled || isWolf) && !add_link_matrices(state)) {
+    if (isLink && (sDummyModelEnabled || isWolf || isTransforming) && !add_link_matrices(state)) {
         static uint32_t sMatrixPoseDropLogCount = 0;
         ++sMatrixPoseDropLogCount;
         if (sMatrixPoseDropLogCount < 20 ||

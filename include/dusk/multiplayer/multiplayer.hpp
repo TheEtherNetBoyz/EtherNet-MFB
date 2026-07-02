@@ -124,6 +124,8 @@ struct PeerPoseSnapshot {
     bool itemDraw = false;
     bool kanteraDraw = false;
     int itemActorKind = 0;
+    int itemActorBombExTime = -1;
+    int itemActorBombFlash = -1;
     int rideActorKind = 0;
     RemoteLinkMatrixSnapshot linkMatrices;
     std::vector<RemoteAudioEvent> audioEvents;
