@@ -191,7 +191,9 @@ public:
     f32 getPackPlusZ() { return mPackPlusZ; }
     f32 getPackZ() const { return mPackZ; }
     f32 getTexelPerCm() const { return 1.0f / field_0x58; }
+    f32 getCenterX() const { return mCenterX; }
     u16 getTexSizeY() const { return mTexSizeY; }
+    u16 getTexSizeX() const { return mTexSizeX; }
     f32 getRightEdgePlus() { return mRightEdgePlus; }
     f32 getPackX() const { return mPackX; }
     int getStayRoomNo() const { return mStayRoomNo; }

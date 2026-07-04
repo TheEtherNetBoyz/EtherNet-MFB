@@ -67,6 +67,46 @@ void ImGuiOnline::draw(bool& open) {
             ImGui::TextDisabled("(host controlled)");
         }
 
+        bool dummyModel = status.dummyModel;
+        if (ImGui::Checkbox("Remote Link model##active", &dummyModel)) {
+            multiplayer::set_remote_link_model_enabled(dummyModel);
+            m_dummyModel = dummyModel;
+        }
+        ImGui::SameLine();
+        bool syncWorld = status.syncWorld;
+        // Future preset hook: this is the real-object/world-state lane, kept
+        // separate from visual puppets and progression flags.
+        if (ImGui::Checkbox("Sync world", &syncWorld)) {
+            multiplayer::set_sync_world_enabled(syncWorld);
+            m_syncWorld = syncWorld;
+        }
+        ImGui::SameLine();
+        bool displayMidna = status.displayMidna;
+        // Local display-only toggle for now. A later upload/room policy can
+        // decide whether Midna matrices are streamed at all.
+        if (!status.dummyModel) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Checkbox("Display Midna", &displayMidna)) {
+            multiplayer::set_display_remote_midna_enabled(displayMidna);
+            m_displayMidna = displayMidna;
+        }
+        if (!status.dummyModel) {
+            ImGui::EndDisabled();
+        }
+        ImGui::SameLine();
+        bool remoteCollision = status.remoteCollision;
+        if (!status.dummyModel || status.remoteCollisionHostControlled) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Checkbox("Remote collision", &remoteCollision)) {
+            multiplayer::set_remote_collision_enabled(remoteCollision);
+            m_remoteCollision = remoteCollision;
+        }
+        if (!status.dummyModel || status.remoteCollisionHostControlled) {
+            ImGui::EndDisabled();
+        }
+
         const auto players = multiplayer::get_player_list();
         std::vector<const multiplayer::PlayerListEntry*> syncPeers;
         std::vector<const char*> syncPeerLabels;
@@ -138,6 +178,23 @@ void ImGuiOnline::draw(bool& open) {
                 ImGui::Checkbox("Remote Link model", &m_dummyModel);
                 ImGui::SameLine();
                 ImGui::Checkbox("Name labels", &m_nameLabels);
+                ImGui::Checkbox("Sync world", &m_syncWorld);
+                ImGui::SameLine();
+                if (!m_dummyModel) {
+                    ImGui::BeginDisabled();
+                }
+                ImGui::Checkbox("Display Midna", &m_displayMidna);
+                if (!m_dummyModel) {
+                    ImGui::EndDisabled();
+                }
+                ImGui::SameLine();
+                if (!m_dummyModel) {
+                    ImGui::BeginDisabled();
+                }
+                ImGui::Checkbox("Remote collision", &m_remoteCollision);
+                if (!m_dummyModel) {
+                    ImGui::EndDisabled();
+                }
 
                 if (ImGui::Button("Host Lobby")) {
                     multiplayer::DirectHostOptions options;
@@ -149,6 +206,9 @@ void ImGuiOnline::draw(bool& open) {
                     options.debugMarker = m_debugMarker;
                     options.dummyModel = m_dummyModel;
                     options.nameLabels = m_nameLabels;
+                    options.syncWorld = m_syncWorld;
+                    options.displayMidna = m_displayMidna;
+                    options.remoteCollision = m_remoteCollision;
 
                     std::string error;
                     if (multiplayer::host_direct(options, &error)) {
@@ -170,6 +230,23 @@ void ImGuiOnline::draw(bool& open) {
                 ImGui::Checkbox("Remote Link model##join", &m_dummyModel);
                 ImGui::SameLine();
                 ImGui::Checkbox("Name labels##join", &m_nameLabels);
+                ImGui::Checkbox("Sync world##join", &m_syncWorld);
+                ImGui::SameLine();
+                if (!m_dummyModel) {
+                    ImGui::BeginDisabled();
+                }
+                ImGui::Checkbox("Display Midna##join", &m_displayMidna);
+                if (!m_dummyModel) {
+                    ImGui::EndDisabled();
+                }
+                ImGui::SameLine();
+                if (!m_dummyModel) {
+                    ImGui::BeginDisabled();
+                }
+                ImGui::Checkbox("Remote collision##join", &m_remoteCollision);
+                if (!m_dummyModel) {
+                    ImGui::EndDisabled();
+                }
 
                 if (ImGui::Button("Join Lobby")) {
                     multiplayer::DirectJoinOptions options;
@@ -178,6 +255,9 @@ void ImGuiOnline::draw(bool& open) {
                     options.debugMarker = m_debugMarker;
                     options.dummyModel = m_dummyModel;
                     options.nameLabels = m_nameLabels;
+                    options.syncWorld = m_syncWorld;
+                    options.displayMidna = m_displayMidna;
+                    options.remoteCollision = m_remoteCollision;
 
                     std::string error;
                     if (multiplayer::join_direct(options, &error)) {
@@ -206,6 +286,23 @@ void ImGuiOnline::draw(bool& open) {
             ImGui::Checkbox("Remote Link model##relay", &m_dummyModel);
             ImGui::SameLine();
             ImGui::Checkbox("Name labels##relay", &m_nameLabels);
+            ImGui::Checkbox("Sync world##relay", &m_syncWorld);
+            ImGui::SameLine();
+            if (!m_dummyModel) {
+                ImGui::BeginDisabled();
+            }
+            ImGui::Checkbox("Display Midna##relay", &m_displayMidna);
+            if (!m_dummyModel) {
+                ImGui::EndDisabled();
+            }
+            ImGui::SameLine();
+            if (!m_dummyModel) {
+                ImGui::BeginDisabled();
+            }
+            ImGui::Checkbox("Remote collision##relay", &m_remoteCollision);
+            if (!m_dummyModel) {
+                ImGui::EndDisabled();
+            }
 
             if (ImGui::Button("Join Relay Lobby")) {
                 multiplayer::RelayJoinOptions options;
@@ -217,6 +314,9 @@ void ImGuiOnline::draw(bool& open) {
                 options.debugMarker = m_debugMarker;
                 options.dummyModel = m_dummyModel;
                 options.nameLabels = m_nameLabels;
+                options.syncWorld = m_syncWorld;
+                options.displayMidna = m_displayMidna;
+                options.remoteCollision = m_remoteCollision;
 
                 std::string error;
                 if (multiplayer::join_relay(options, &error)) {

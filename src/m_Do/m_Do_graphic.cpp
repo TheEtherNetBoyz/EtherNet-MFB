@@ -2944,6 +2944,12 @@ int mDoGph_Painter() {
 
                 GX_DEBUG_GROUP(dComIfGd_drawOpaList3Dlast);
 
+#if TARGET_PC
+                dusk::multiplayer::draw_peer_name_labels_native();
+                j3dSys.reinitGX();
+                GXSetClipMode(GX_CLIP_ENABLE);
+#endif
+
                 #if DEBUG
                 // "saturation add filter (Rendering)"
                 fapGm_HIO_c::stopCpuTimer("飽和加算フィルター（レンダリング）");

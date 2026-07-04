@@ -200,6 +200,11 @@ void apply_remote_body_push(const PeerPoseSnapshot& pose, fopAc_ac_c* playerActo
 }
 
 void update_actor_dummy_collision(const std::string& peerId, const PeerPoseSnapshot& pose) {
+    if (!remote_collision_enabled()) {
+        sBodyCollision.erase(peerId);
+        return;
+    }
+
     fopAc_ac_c* playerActor = dComIfGp_getPlayer(0);
     if (playerActor == nullptr) {
         return;
@@ -252,6 +257,15 @@ void destroy_remote_link_actor_dummy(const std::string& peerId) {
 
 fpc_ProcID create_remote_link_actor(u32 actorParams, cXyz* pos, s8 room, csXyz* angle,
                                     cXyz* scale) {
+    if (!daRemoteLink_c::canReserveSlot()) {
+        static uint32_t sRemoteLinkCapWaitLogCount = 0;
+        if (sRemoteLinkCapWaitLogCount < 40) {
+            ++sRemoteLinkCapWaitLogCount;
+            DuskLog.warn("Multiplayer remote Link actor: spawn delayed, live actor cap full");
+        }
+        return fpcM_ERROR_PROCESS_ID_e;
+    }
+
     layer_class* savedLayer = fpcLy_CurrentLayer();
     base_process_class* playScene = fpcM_SearchByName(fpcNm_PLAY_SCENE_e);
     if (playScene != nullptr) {
@@ -406,6 +420,7 @@ void sync_remote_link_actor_dummies(const std::map<std::string, PeerPoseSnapshot
 
         update_actor_dummy_collision(peerId, pose);
         actor->setRemotePose(actorPos, static_cast<s16>(pose.angleY), static_cast<s8>(pose.room));
+        const bool displayMidna = display_remote_midna_enabled();
         actor->setRemoteActionState(pose.procId, pose.procVar0, pose.procVar1, pose.procVar2,
                                     pose.procVar3, pose.procVar5, pose.underFrame,
                                     static_cast<u16>(pose.underBck0), pose.underFrame0,
@@ -413,14 +428,23 @@ void sync_remote_link_actor_dummies(const std::map<std::string, PeerPoseSnapshot
                                     pose.upperFrame2, pose.upperRate2, pose.equipItem,
                                     pose.swordVariant, pose.shieldVariant, pose.swordDraw,
                                     pose.shieldDraw, pose.swordOut, pose.heavyBoots,
-                                    pose.itemDraw, pose.kanteraDraw, pose.midnaDraw,
-                                    pose.midnaMaskDraw, pose.midnaHandDraw, pose.midnaHairDraw,
-                                    pose.midnaShadowForm, pose.itemActorKind,
+                                    pose.itemDraw, pose.kanteraDraw,
+                                    displayMidna && pose.midnaDraw,
+                                    displayMidna && pose.midnaMaskDraw,
+                                    displayMidna && pose.midnaHandDraw,
+                                    displayMidna && pose.midnaHairDraw,
+                                    displayMidna && pose.midnaShadowForm, pose.itemActorKind,
                                     pose.itemActorBombExTime, pose.itemActorBombFlash,
                                     pose.rideActorKind);
         actor->setRemoteHatState(pose.hatRotA, pose.hatRotB, pose.hatSwing,
                                  static_cast<s16>(pose.hatShapeY));
         actor->setRemoteMatrices(pose.linkMatrices);
+        RemoteBombObjectSnapshot bombObject;
+        if (get_remote_bomb_object_for_peer(peerId, &bombObject)) {
+            actor->setRemoteBombObjectState(bombObject);
+        } else {
+            actor->setRemoteBombObjectState(RemoteBombObjectSnapshot{});
+        }
         if (dummy_trace_enabled()) {
             const uint32_t sequenceDelta =
                 dummy.lastTraceSequence != 0 ? pose.sequence - dummy.lastTraceSequence : 0;
@@ -480,6 +504,16 @@ void sync_remote_link_actor_dummies(const std::map<std::string, PeerPoseSnapshot
                          peerId, dummy.actorId, pose.x, pose.y, pose.z, pose.room, pose.angleY);
         }
     }
+}
+
+bool get_remote_link_dummy_label_position(const std::string& peerId, cXyz* outPos) {
+    auto it = sActorDummies.find(peerId);
+    if (it == sActorDummies.end()) {
+        return false;
+    }
+
+    daRemoteLink_c* actor = find_remote_link_actor(it->second);
+    return actor != nullptr && actor->getNameLabelPosition(outPos);
 }
 
 void destroy_remote_link_dummy(const std::string& peerId) {

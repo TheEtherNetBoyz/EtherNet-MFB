@@ -5,7 +5,26 @@
 #include <string>
 #include <vector>
 
+class daNbomb_c;
+
 namespace dusk::multiplayer {
+
+struct PlayerColor {
+    uint8_t r = 255;
+    uint8_t g = 255;
+    uint8_t b = 255;
+    uint8_t a = 255;
+};
+
+struct MinimapPeerMarker {
+    std::string peerId;
+    int room = -1;
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    int angleY = 0;
+    PlayerColor color;
+};
 
 struct RemoteModelMatrixSnapshot {
     bool valid = false;
@@ -51,6 +70,36 @@ struct RemoteAudioEvent {
     bool level = false;
 };
 
+enum RemoteObjectKind : uint8_t {
+    REMOTE_OBJECT_NONE = 0,
+    REMOTE_OBJECT_BOMB = 1,
+};
+
+// Generic future world-sync payload. Visual remote Links still use streamed
+// puppet matrices; this lane is for real remote-side actors/objects that need
+// game logic, collisions, damage, or authoritative world state. Bombs are the
+// first proof-of-concept adapter, not the final scope.
+struct RemoteObjectSnapshot {
+    bool valid = false;
+    std::string peerId;
+    uint8_t objectKind = REMOTE_OBJECT_NONE;
+    int32_t objectId = -1;
+    uint32_t sequence = 0;
+    uint32_t ageTicks = 0;
+    std::string stage;
+    int room = -1;
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    int angleY = 0;
+    int kind = 0;
+    int exTime = -1;
+    bool active = false;
+    bool exploding = false;
+};
+
+using RemoteBombObjectSnapshot = RemoteObjectSnapshot;
+
 enum RemoteAudioSourceKind : uint8_t {
     REMOTE_AUDIO_SOURCE_GENERIC = 0,
     REMOTE_AUDIO_SOURCE_LINK_SOUND = 1,
@@ -79,12 +128,16 @@ struct PeerPoseSnapshot {
     float y = 0.0f;
     float z = 0.0f;
     int angleY = 0;
+    bool finalGanondorfReady = false;
     int procId = 0;
     int procVar0 = 0;
     int procVar1 = 0;
     int procVar2 = 0;
     int procVar3 = 0;
     int procVar5 = 0;
+    int cutType = 0;
+    int cutCount = 0;
+    bool jumpCancelTurn = false;
     bool manualSyncReady = false;
     float underFrame = 0.0f;
     int underBck0 = 0;
@@ -131,6 +184,104 @@ struct PeerPoseSnapshot {
     std::vector<RemoteAudioEvent> audioEvents;
 };
 
+struct GanondorfMpTargetSnapshot {
+    bool valid = false;
+    bool local = false;
+    std::string peerId;
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    float eyeX = 0.0f;
+    float eyeY = 0.0f;
+    float eyeZ = 0.0f;
+    float distXZ = 0.0f;
+    int angleYFromGanon = 0;
+    int shapeAngleY = 0;
+};
+
+struct GanondorfRemoteHitSnapshot {
+    bool valid = false;
+    std::string peerId;
+    uint32_t sequence = 0;
+    uint32_t ageTicks = 0;
+    int procId = 0;
+    int cutType = 0;
+    int cutCount = 0;
+    bool jumpCancelTurn = false;
+    bool confirmedHit = false;
+    float attackFrame = 0.0f;
+    int linkAngleY = 0;
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    float distXZ = 0.0f;
+    int angleYFromGanon = 0;
+};
+
+struct GanondorfRemoteReactionSnapshot {
+    bool valid = false;
+    std::string peerId;
+    uint32_t sequence = 0;
+    uint32_t ageTicks = 0;
+    int actionMode = 0;
+    int moveMode = 0;
+    int damageInvulnerabilityTimer = 0;
+    int downHitTimer = 0;
+    int downHitCount = 0;
+    int downGate = 0;
+    int health = 0;
+    int procId = 0;
+    int cutType = 0;
+    int cutCount = 0;
+    bool jumpCancelTurn = false;
+    int linkAngleY = 0;
+    float linkX = 0.0f;
+    float linkY = 0.0f;
+    float linkZ = 0.0f;
+    float ganonX = 0.0f;
+    float ganonY = 0.0f;
+    float ganonZ = 0.0f;
+    float distXZ = 0.0f;
+    int angleYFromGanon = 0;
+};
+
+struct GanondorfSyncSnapshot {
+    bool valid = false;
+    uint32_t sequence = 0;
+    uint32_t ageTicks = 0;
+    std::string ownerPeerId;
+    std::string stage;
+    int room = -1;
+    int health = 0;
+    int actionMode = 0;
+    int moveMode = 0;
+    bool drawHorse = false;
+    int damageInvulnerabilityTimer = 0;
+    int downHitTimer = 0;
+    int downHitCount = 0;
+    int downGate = 0;
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    float oldX = 0.0f;
+    float oldY = 0.0f;
+    float oldZ = 0.0f;
+    int shapeAngleX = 0;
+    int shapeAngleY = 0;
+    int shapeAngleZ = 0;
+    int currentAngleX = 0;
+    int currentAngleY = 0;
+    int currentAngleZ = 0;
+    float speedX = 0.0f;
+    float speedY = 0.0f;
+    float speedZ = 0.0f;
+    float speedF = 0.0f;
+    int anmId = 0;
+    int anmPlayMode = 0;
+    float anmFrame = 0.0f;
+    float anmRate = 1.0f;
+};
+
 struct DirectHostOptions {
     std::string name = "Host";
     std::string room = "dev";
@@ -140,6 +291,9 @@ struct DirectHostOptions {
     bool debugMarker = true;
     bool dummyModel = true;
     bool nameLabels = true;
+    bool syncWorld = false;
+    bool displayMidna = true;
+    bool remoteCollision = true;
 };
 
 struct DirectJoinOptions {
@@ -148,6 +302,9 @@ struct DirectJoinOptions {
     bool debugMarker = true;
     bool dummyModel = true;
     bool nameLabels = true;
+    bool syncWorld = false;
+    bool displayMidna = true;
+    bool remoteCollision = true;
 };
 
 struct RelayJoinOptions {
@@ -159,6 +316,9 @@ struct RelayJoinOptions {
     bool debugMarker = true;
     bool dummyModel = true;
     bool nameLabels = true;
+    bool syncWorld = false;
+    bool displayMidna = true;
+    bool remoteCollision = true;
 };
 
 struct SessionStatus {
@@ -176,6 +336,10 @@ struct SessionStatus {
     bool dummyModel = false;
     bool nameLabels = false;
     bool nameLabelsHostControlled = false;
+    bool syncWorld = false;
+    bool displayMidna = true;
+    bool remoteCollision = true;
+    bool remoteCollisionHostControlled = false;
     bool hasRecentPeerPose = false;
 };
 
@@ -196,6 +360,12 @@ void shutdown();
 bool is_enabled();
 void record_local_link_audio_event(uint32_t soundId, bool level, uint32_t mapInfo = 0,
                                    int reverb = -1, uint8_t sourceKind = 0);
+void notify_bomb_post_execute(daNbomb_c* bomb);
+void register_remote_bomb_actor(daNbomb_c* bomb);
+void register_remote_bomb_actor_id(int32_t actorId);
+void unregister_remote_bomb_actor_id(int32_t actorId);
+bool get_remote_bomb_object_for_peer(const std::string& peerId,
+                                     RemoteBombObjectSnapshot* out);
 bool host_direct(const DirectHostOptions& options, std::string* errorOut = nullptr);
 bool join_direct(const DirectJoinOptions& options, std::string* errorOut = nullptr);
 bool join_relay(const RelayJoinOptions& options, std::string* errorOut = nullptr);
@@ -204,10 +374,48 @@ bool request_manual_sync(const std::string& peerId, std::string* errorOut = null
 SessionStatus get_session_status();
 std::vector<PlayerListEntry> get_player_list();
 void set_name_labels_enabled(bool enabled);
+void set_sync_world_enabled(bool enabled);
+bool sync_world_enabled();
+void set_remote_link_model_enabled(bool enabled);
+void set_display_remote_midna_enabled(bool enabled);
+bool display_remote_midna_enabled();
+void set_remote_collision_enabled(bool enabled);
+bool remote_collision_enabled();
 bool has_recent_peer_pose(uint32_t maxAgeTicks);
 PeerPoseSnapshot get_latest_peer_pose();
+bool get_ganondorf_final_mp_target(float ganonX, float ganonY, float ganonZ,
+                                   GanondorfMpTargetSnapshot* out);
+void report_ganondorf_final_local_hit(float linkX, float linkY, float linkZ, int cutType,
+                                      int cutCount, bool jumpCancelTurn, int procId,
+                                      float attackFrame, bool confirmedHit = false);
+bool consume_ganondorf_final_remote_hit(float ganonX, float ganonY, float ganonZ,
+                                        GanondorfRemoteHitSnapshot* out);
+bool consume_ganondorf_final_remote_finish(float ganonX, float ganonY, float ganonZ,
+                                           GanondorfRemoteHitSnapshot* out);
+bool ganondorf_final_remote_attack_active(float ganonX, float ganonY, float ganonZ,
+                                          float maxRange,
+                                          GanondorfRemoteHitSnapshot* out = nullptr);
+void report_ganondorf_final_local_reaction(int actionMode, int moveMode,
+                                           int damageInvulnerabilityTimer, int downHitTimer,
+                                           int downHitCount, int downGate, int health,
+                                           float ganonX, float ganonY, float ganonZ,
+                                           float linkX, float linkY, float linkZ,
+                                           int procId, int cutType, int cutCount,
+                                           bool jumpCancelTurn);
+bool consume_ganondorf_final_remote_reaction(float ganonX, float ganonY, float ganonZ,
+                                             GanondorfRemoteReactionSnapshot* out);
+void report_ganondorf_final_remote_player_attack(float attackX, float attackY, float attackZ,
+                                                 float radius, int damageAmount, int attackSpl);
+void note_ganondorf_final_local_player_damage_handled();
+bool ganondorf_final_sync_local_is_owner();
+void send_ganondorf_final_sync_state(const GanondorfSyncSnapshot& snapshot);
+bool get_ganondorf_final_sync_state(GanondorfSyncSnapshot* out);
 void draw_debug_peer_marker();
 void draw_notifications_overlay();
+void draw_peer_name_labels_native();
+uint8_t get_player_color_slot(const std::string& peerId);
+PlayerColor get_player_color(const std::string& peerId);
+std::vector<MinimapPeerMarker> get_minimap_peer_markers(uint32_t maxAgeTicks = 30);
 bool was_switch_recently_remote_set(int stage, int flag, uint32_t* ageTicks = nullptr);
 
 }  // namespace dusk::multiplayer

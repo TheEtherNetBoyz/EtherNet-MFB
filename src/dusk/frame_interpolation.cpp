@@ -258,6 +258,17 @@ void record_final_mtx(Mtx m, const void* key) {
     MTXCopy(m, it);
 }
 
+void override_replacement(const void* key, Mtx m) {
+    if (!s_initialized || !g_interpolating || key == nullptr || m == nullptr ||
+        presentation_sync_active())
+    {
+        return;
+    }
+
+    auto& it = g_replacements[reinterpret_cast<uintptr_t>(key)];
+    MTXCopy(m, it);
+}
+
 void record_final_mtx(Mtx m) {
     record_final_mtx(m, m);
 }

@@ -20,6 +20,8 @@
 #include "m_Do/m_Do_printf.h"
 
 #if TARGET_PC
+#include "d/actor/d_a_nbomb.h"
+#include "dusk/multiplayer/multiplayer.hpp"
 #include "dusk/settings.h"
 #endif
 
@@ -348,6 +350,12 @@ static int fopAc_Execute(void* i_this) {
             #endif
 
             ret = fpcMtd_Execute((process_method_class DUSK_CONST*)actor->sub_method, actor);
+
+#if TARGET_PC
+            if (fopAcM_GetName(actor) == fpcNm_NBOMB_e) {
+                dusk::multiplayer::notify_bomb_post_execute(static_cast<daNbomb_c*>(actor));
+            }
+#endif
 
             #if DEBUG
             }

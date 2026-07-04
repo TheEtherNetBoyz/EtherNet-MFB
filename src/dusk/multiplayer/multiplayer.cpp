@@ -31,19 +31,21 @@
 #include "dusk/multiplayer/remote_link_dummy.hpp"
 #include "dusk/autosave.h"
 #include "f_op/f_op_actor_mng.h"
+#include "f_op/f_op_camera_mng.h"
 #include "f_op/f_op_overlap_mng.h"
 #include "f_pc/f_pc_manager.h"
 #include "f_pc/f_pc_name.h"
 #include "JSystem/J3DGraphBase/J3DMaterial.h"
 #include "JSystem/J3DGraphBase/J3DShape.h"
+#include "dusk/io.hpp"
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_lib.h"
 #include "m_Do/m_Do_mtx.h"
 #include "m_Do/m_Do_controller_pad.h"
-#include "aurora/lib/window.hpp"
 #include "absl/strings/escaping.h"
 #include "imgui.h"
 #include "nlohmann/json.hpp"
+#include <filesystem>
 #include <zstd.h>
 
 #if _WIN32
@@ -110,6 +112,9 @@ constexpr size_t kMaxDirectPeers = 7;
 size_t sLastPoseMatrixPackedBytes = 0;
 size_t sLastPoseMatrixBase64Bytes = 0;
 size_t sLastPoseMatrixPresentSlots = 0;
+size_t sLastMidnaMatrixPackedBytes = 0;
+size_t sLastMidnaMatrixBase64Bytes = 0;
+size_t sLastMidnaMatrixPresentSlots = 0;
 
 struct MatrixPackSlotInput {
     const char* name;
@@ -163,6 +168,79 @@ constexpr size_t kUdpPoseMaxCompressedBytes = 256 * 1024;
 constexpr size_t kUdpPoseMaxUncompressedBytes = 512 * 1024;
 constexpr size_t kUdpPoseMaxInflightSequences = 8;
 constexpr int kUdpPoseSocketBufferBytes = 1024 * 1024;
+constexpr uint32_t kGanondorfTargetMaxAgeTicks = 30;
+constexpr const char* kGanondorfFinalSyncId = "D_MN09B:GANONDORF_FINAL";
+constexpr float kGanondorfRemoteLinkEyeOffsetY = 150.0f;
+constexpr float kGanondorfRemoteHitRange = 430.0f;
+constexpr float kGanondorfRemoteHitHeightRange = 220.0f;
+constexpr float kGanondorfRemoteFinishRange = 650.0f;
+constexpr uint32_t kGanondorfRemoteCombatIntentMaxAgeTicks = 18;
+constexpr uint32_t kGanondorfRemoteAttackActiveMaxAgeTicks = 5;
+constexpr uint32_t kGanondorfRemotePlayerDamageMaxAgeTicks = 20;
+constexpr uint32_t kGanondorfRemoteReactionMaxAgeTicks = 12;
+constexpr float kGanondorfRemoteReactionRange = 700.0f;
+constexpr uint32_t kGanondorfSyncSnapshotMaxAgeTicks = 45;
+
+std::map<std::string, uint32_t> sGanondorfRemoteHitLastSequenceByPeer;
+std::map<std::string, uint32_t> sGanondorfRemoteReactionLastSequenceByPeer;
+std::map<std::string, uint32_t> sGanondorfRemotePlayerDamageLastSequenceByPeer;
+std::map<std::string, uint8_t> sGanondorfRemotePlayerDamageCooldownByPeer;
+std::vector<GanondorfRemoteHitSnapshot> sPendingGanondorfRemoteHitEvents;
+std::vector<GanondorfRemoteReactionSnapshot> sPendingGanondorfRemoteReactionEvents;
+GanondorfSyncSnapshot sLatestGanondorfSyncState;
+std::string sGanondorfFinalSyncOwnerPeerId;
+uint32_t sLocalGanondorfSyncSequence = 0;
+uint32_t sLocalGanondorfHitSequence = 0;
+uint32_t sLocalGanondorfReactionSequence = 0;
+uint32_t sLocalGanondorfRemotePlayerDamageSequence = 0;
+uint32_t sLastGanondorfSyncSendTick = 0;
+uint32_t sLastGanondorfOwnerClaimTick = 0;
+uint32_t sLastGanondorfOwnerBroadcastTick = 0;
+uint8_t sGanondorfLocalPlayerDamageHandledTicks = 0;
+
+struct GanondorfRemotePlayerDamageEvent {
+    bool valid = false;
+    std::string peerId;
+    uint32_t sequence = 0;
+    uint32_t ageTicks = 0;
+    int damageAmount = 0;
+    int attackSpl = 0;
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+};
+
+std::vector<GanondorfRemotePlayerDamageEvent> sPendingGanondorfRemotePlayerDamageEvents;
+
+bool remote_object_sync_enabled();
+std::string local_udp_pose_sender_id();
+bool send_json(const json& message);
+void broadcast_to_direct_peers(const json& message, const std::string& excludePeerId = "");
+int angle_y_from_delta(float dx, float dz);
+
+bool apply_ganondorf_remote_player_damage(const GanondorfRemotePlayerDamageEvent& damage) {
+    daAlink_c* player = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
+    if (player == nullptr) {
+        daPy_py_c::setPlayerDamage(damage.damageAmount, TRUE);
+        return false;
+    }
+
+    const s16 hitAngle =
+        static_cast<s16>(angle_y_from_delta(damage.x - player->current.pos.x,
+                                            damage.z - player->current.pos.z));
+    const bool hugeAttack = player->checkHugeAttack(damage.attackSpl);
+    const bool largeAttack = player->checkLargeAttack(damage.attackSpl) || hugeAttack;
+    const f32 horizontalSpeed = hugeAttack ? 50.0f : 35.0f;
+    const f32 verticalSpeed = hugeAttack ? 30.0f : 22.0f;
+
+    if (largeAttack) {
+        player->setThrowDamage(hitAngle, horizontalSpeed, verticalSpeed, damage.damageAmount, 1, 0);
+        return player->procCoLargeDamageInit(-3, !hugeAttack, 0, 0, nullptr, 0) != 0;
+    }
+
+    daPy_py_c::setPlayerDamage(damage.damageAmount, TRUE);
+    return false;
+}
 
 bool pose_float_is_finite(const char* name, f32 value) {
     if (std::isfinite(value)) {
@@ -192,6 +270,30 @@ struct UdpPoseChunkHeader {
     char senderId[kUdpPoseSenderIdBytes];
 };
 #pragma pack(pop)
+
+#pragma pack(push, 1)
+struct UdpRemoteObjectPacket {
+    char stageName[8];
+    uint32_t sequence;
+    int32_t objectId;
+    float x;
+    float y;
+    float z;
+    int16_t angleY;
+    int16_t exTime;
+    int8_t room;
+    uint8_t objectKind;
+    uint8_t kind;
+    uint8_t flags;
+};
+#pragma pack(pop)
+
+static_assert(sizeof(UdpRemoteObjectPacket) <= 40);
+
+enum UdpObjectFlags : uint8_t {
+    UDP_OBJECT_ACTIVE = 1 << 0,
+    UDP_OBJECT_EXPLODING = 1 << 1,
+};
 
 struct UdpPoseReassembly {
     uint32_t sequence = 0;
@@ -252,6 +354,36 @@ enum RemoteItemActorKind {
     REMOTE_ITEM_ACTOR_BOMB_WATER = 3,
     REMOTE_ITEM_ACTOR_BOMB_INSECT = 4,
 };
+
+struct LocalBombPostExecuteState {
+    fpc_ProcID actorId = fpcM_ERROR_PROCESS_ID_e;
+    int kind = REMOTE_ITEM_ACTOR_NONE;
+    int exTime = -1;
+    int flash = -1;
+    int room = -1;
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    int angleY = 0;
+    uint32_t ageTicks = 0;
+    bool valid = false;
+    bool deleteSent = false;
+};
+
+struct PeerPresence {
+    std::string stage;
+    int room = -1;
+    int layer = -1;
+    uint32_t ageTicks = 0;
+    bool valid = false;
+};
+
+std::map<fpc_ProcID, LocalBombPostExecuteState> sLocalBombPostExecuteStates;
+std::map<std::string, std::map<int32_t, RemoteObjectSnapshot>> sRemoteObjectsByPeer;
+std::map<std::string, PeerPresence> sPeerPresence;
+std::set<fpc_ProcID> sRemoteOwnedObjectActorIds;
+std::set<fpc_ProcID> sLocalBombTerminalSentIds;
+uint32_t sLocalBombObjectSequence = 0;
 
 enum RemoteRideActorKind {
     REMOTE_RIDE_ACTOR_NONE = 0,
@@ -364,6 +496,8 @@ struct DirectPeer {
     bool welcomed = false;
     bool snapshotPending = false;
     bool udpAddrKnown = false;
+    bool wantsPuppet = true;
+    bool wantsMidna = true;
 };
 
 int detect_clothes_variant() {
@@ -401,6 +535,7 @@ struct Session {
     bool debugMarker = false;
     uint32_t reconnectTicks = 0;
     uint32_t pingTicks = 0;
+    uint32_t progressionStateTicks = 0;
     uint32_t poseSequence = 0;
     uint32_t peerPoseLogTicks = 0;
     // Keyed by peer ID (relay client_id, the direct host's placeholder
@@ -415,6 +550,7 @@ struct Session {
     std::map<std::string, DirectPeer> directPeers;
     std::map<std::string, std::map<uint32_t, UdpPoseReassembly>> udpPoseReassembly;
     std::map<std::string, uint32_t> udpPoseLastProcessedSequence;
+    std::map<std::string, std::pair<uint32_t, RemoteLinkMatrixSnapshot>> pendingMidnaMatrices;
     bool udpRemoteAddrKnown = false;
 };
 
@@ -425,7 +561,30 @@ Session sSession;
 bool sDummyModelEnabled = false;
 bool sDummyTraceEnabled = false;
 bool sNameLabelsEnabled = true;
+// Future "world sync" lane: real spawned actors/objects that should run game
+// logic remotely. Bombs are only the first proof of concept; leave this off
+// while the main online model is visual puppets plus progression flags.
+bool sSyncWorldEnabled = false;
+// Local receive/display preference. Direct peers advertise this so the sender
+// can skip the separate Midna-matrix lane for clients that do not want it.
+// Relay still needs relay-side routing support before it can avoid forwarding
+// Midna to only the users who opted out.
+bool sDisplayRemoteMidnaEnabled = true;
+// Receive-side policy for remote-player collision. Today this gates the simple
+// pose-based body push; future engine-backed collision should use the same
+// switch so presets do not need to care which implementation is active.
+bool sRemoteCollisionEnabled = true;
+bool sDirectRemoteWantsPuppet = true;
+bool sDirectRemoteWantsMidna = true;
 fpc_ProcID sLastPlayerBombActorId = fpcM_ERROR_PROCESS_ID_e;
+
+bool wants_remote_puppet_matrices() {
+    return sDummyModelEnabled;
+}
+
+bool wants_remote_midna_matrices() {
+    return wants_remote_puppet_matrices() && sDisplayRemoteMidnaEnabled;
+}
 
 // DarkClearLV/TransformLV (Twilight-clear / wolf-transform region levels)
 // double as room-layer/actor-set selectors in at least Ordon Village and
@@ -495,13 +654,25 @@ struct PendingSyncReply {
     uint32_t waitTicks = 0;
 };
 
+struct PeerProgressionState {
+    bool valid = false;
+    uint32_t ageTicks = 0;
+    std::string stage;
+    int room = -1;
+    int layer = -1;
+    bool manualSyncReady = false;
+    bool finalGanondorfReady = false;
+};
+
 std::vector<Notification> sNotifications;
 ProgressionSyncPrompt sProgressionSyncPrompt;
 PendingProgressionSync sPendingProgressionSync;
 std::vector<PendingProgressionCueArrival> sPendingProgressionCueArrivals;
 std::vector<PendingSyncReply> sPendingSyncReplies;
+std::map<std::string, PeerProgressionState> sPeerProgressionStates;
 bool sProgressionPromptExactStartHeld = false;
 std::set<std::string> sShownPoseProgressionCues;
+std::set<std::string> sHandledProgressionSyncCues;
 std::map<std::string, std::string> sPeerNames;
 std::map<std::string, uint8_t> sPeerColorSlots;
 uint8_t sLocalPlayerColorSlot = 0;
@@ -516,6 +687,7 @@ std::optional<u8> sPendingManualSyncVibration;
 // knows to override the warp target instead of trusting the peer's raw
 // position/layer snapshot (see kProgressionCueDescriptors).
 std::string sAwaitingManualSyncCueKey;
+std::string sAwaitingManualSyncPeerId;
 
 // Set while applying any remote save-state bit (event bit, chest bit, ...),
 // so the dComIfGs_* setter call that applies it doesn't loop back through
@@ -561,6 +733,8 @@ constexpr const char* kProgressionCueFaronTwilightDestStage = "F_SP108"; // Faro
 constexpr float kProgressionSyncPromptDuration = 12.0f;
 constexpr float kProgressionSyncHoldDuration = 1.0f;
 constexpr uint32_t kProgressionSyncStableReadyTicks = 1;
+constexpr uint32_t kProgressionStateSendTicks = 15;
+constexpr uint32_t kProgressionStateReadyMaxAgeTicks = 90;
 constexpr uint32_t kFlagTraceActorWindowTicks = 180;
 // Generous cap on how long a deferred sync_request reply waits for this
 // client's own state to satisfy the cue's readiness condition before giving
@@ -726,6 +900,291 @@ bool is_stage_dependent_message_type(const std::string& type) {
 bool is_stage_load_unsafe_for_multiplayer() {
     return dComIfGp_getStageStagInfo() == nullptr || dComIfGp_event_runCheck() ||
            dComIfGp_isEnableNextStage() || fopOvlpM_IsPeek() || fopOvlpM_IsDoingReq();
+}
+
+bool is_local_final_ganondorf_ready() {
+    const char* stage = dComIfGp_getStartStageName();
+    return stage != nullptr && std::strcmp(stage, "D_MN09B") == 0 && dComIfGs_isSaveDunSwitch(1);
+}
+
+int angle_y_from_delta(float dx, float dz) {
+    constexpr float kAngleScale = 32768.0f / 3.14159265358979323846f;
+    return static_cast<int>(std::atan2(dx, dz) * kAngleScale);
+}
+
+float dist_xz(float ax, float az, float bx, float bz) {
+    const float dx = bx - ax;
+    const float dz = bz - az;
+    return std::sqrt(dx * dx + dz * dz);
+}
+
+bool ganondorf_final_sync_domain_enabled() {
+    return is_enabled() && remote_object_sync_enabled() && is_local_final_ganondorf_ready();
+}
+
+bool ganondorf_final_finish_sync_domain_enabled() {
+    return is_enabled() && is_local_final_ganondorf_ready();
+}
+
+void release_ganondorf_final_sync(const char* reason, const std::string& stage = "") {
+    if (sGanondorfFinalSyncOwnerPeerId.empty() && !sLatestGanondorfSyncState.valid) {
+        return;
+    }
+
+    DuskLog.info("Multiplayer Ganondorf sync released owner={} reason={} stage={} last_seq={} "
+                 "age={}",
+                 sGanondorfFinalSyncOwnerPeerId, reason != nullptr ? reason : "", stage,
+                 sLatestGanondorfSyncState.sequence, sLatestGanondorfSyncState.ageTicks);
+    sLatestGanondorfSyncState = GanondorfSyncSnapshot{};
+    sGanondorfFinalSyncOwnerPeerId.clear();
+    for (auto it = sPendingGanondorfRemoteHitEvents.begin();
+         it != sPendingGanondorfRemoteHitEvents.end();)
+    {
+        if (!it->confirmedHit) {
+            it = sPendingGanondorfRemoteHitEvents.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    sPendingGanondorfRemoteReactionEvents.clear();
+    sPendingGanondorfRemotePlayerDamageEvents.clear();
+    sGanondorfRemoteReactionLastSequenceByPeer.clear();
+    sGanondorfRemotePlayerDamageCooldownByPeer.clear();
+}
+
+void expire_ganondorf_final_sync_if_stale() {
+    if (!sLatestGanondorfSyncState.valid ||
+        sLatestGanondorfSyncState.ageTicks <= kGanondorfSyncSnapshotMaxAgeTicks)
+    {
+        return;
+    }
+
+    release_ganondorf_final_sync("snapshot_stale", sLatestGanondorfSyncState.stage);
+}
+
+void ganondorf_final_sync_reset_if_disabled() {
+    if (is_enabled() && remote_object_sync_enabled()) {
+        return;
+    }
+
+    if (!sGanondorfFinalSyncOwnerPeerId.empty() || sLatestGanondorfSyncState.valid) {
+        DuskLog.info("Multiplayer Ganondorf sync object cleared");
+    }
+    sGanondorfFinalSyncOwnerPeerId.clear();
+    sLatestGanondorfSyncState = GanondorfSyncSnapshot{};
+    for (auto it = sPendingGanondorfRemoteHitEvents.begin();
+         it != sPendingGanondorfRemoteHitEvents.end();)
+    {
+        if (!it->confirmedHit) {
+            it = sPendingGanondorfRemoteHitEvents.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    sPendingGanondorfRemoteReactionEvents.clear();
+    sPendingGanondorfRemotePlayerDamageEvents.clear();
+    sGanondorfRemoteReactionLastSequenceByPeer.clear();
+    sGanondorfRemotePlayerDamageCooldownByPeer.clear();
+    sLocalGanondorfSyncSequence = 0;
+    sLocalGanondorfReactionSequence = 0;
+    sLocalGanondorfRemotePlayerDamageSequence = 0;
+    sLastGanondorfSyncSendTick = 0;
+    sLastGanondorfOwnerClaimTick = 0;
+    sLastGanondorfOwnerBroadcastTick = 0;
+}
+
+void broadcast_ganondorf_final_sync_owner() {
+    if (sGanondorfFinalSyncOwnerPeerId.empty() || !remote_object_sync_enabled()) {
+        return;
+    }
+
+    json message = {
+        {"type", "ganondorf_owner"},
+        {"sync_id", kGanondorfFinalSyncId},
+        {"owner_peer_id", sGanondorfFinalSyncOwnerPeerId},
+    };
+    if (sSession.mode == NetworkMode::DirectHost) {
+        broadcast_to_direct_peers(message);
+    } else {
+        send_json(message);
+    }
+}
+
+void send_ganondorf_final_sync_message(const json& message) {
+    if (!remote_object_sync_enabled()) {
+        return;
+    }
+
+    if (sSession.mode == NetworkMode::DirectHost) {
+        broadcast_to_direct_peers(message);
+    } else {
+        send_json(message);
+    }
+}
+
+void send_ganondorf_final_finish_message(const json& message) {
+    if (!is_enabled()) {
+        return;
+    }
+
+    if (sSession.mode == NetworkMode::DirectHost) {
+        broadcast_to_direct_peers(message);
+    } else {
+        send_json(message);
+    }
+}
+
+void set_ganondorf_final_sync_owner(const std::string& ownerPeerId, const char* reason) {
+    if (ownerPeerId.empty() || !remote_object_sync_enabled()) {
+        return;
+    }
+
+    if (sGanondorfFinalSyncOwnerPeerId == ownerPeerId) {
+        return;
+    }
+
+    DuskLog.info("Multiplayer Ganondorf sync owner_set owner={} previous={} reason={}",
+                 ownerPeerId, sGanondorfFinalSyncOwnerPeerId, reason != nullptr ? reason : "");
+    sGanondorfFinalSyncOwnerPeerId = ownerPeerId;
+    if (sLatestGanondorfSyncState.valid &&
+        sLatestGanondorfSyncState.ownerPeerId != sGanondorfFinalSyncOwnerPeerId)
+    {
+        sLatestGanondorfSyncState = GanondorfSyncSnapshot{};
+    }
+    broadcast_ganondorf_final_sync_owner();
+}
+
+void request_ganondorf_final_sync_owner() {
+    if (!ganondorf_final_sync_domain_enabled() || !sGanondorfFinalSyncOwnerPeerId.empty()) {
+        return;
+    }
+
+    if (++sLastGanondorfOwnerClaimTick < 30) {
+        return;
+    }
+    sLastGanondorfOwnerClaimTick = 0;
+
+    const std::string localPeerId = local_udp_pose_sender_id();
+    if (localPeerId.empty()) {
+        return;
+    }
+
+    if (sSession.mode == NetworkMode::DirectHost) {
+        set_ganondorf_final_sync_owner(localPeerId, "direct_host_local_claim");
+        return;
+    }
+
+    send_json({
+        {"type", "ganondorf_owner_claim"},
+        {"sync_id", kGanondorfFinalSyncId},
+        {"owner_peer_id", localPeerId},
+    });
+    DuskLog.info("Multiplayer Ganondorf sync owner_claim_tx peer={}", localPeerId);
+}
+
+bool ganondorf_final_sync_sender_is_valid_owner(const std::string& peerId,
+                                                const std::string& syncId) {
+    if (syncId != kGanondorfFinalSyncId || peerId.empty() ||
+        peerId == local_udp_pose_sender_id())
+    {
+        static uint32_t sGanondorfOwnerRejectLogTicks = 0;
+        if ((sGanondorfOwnerRejectLogTicks++ % 60) == 0) {
+            DuskLog.info("Multiplayer Ganondorf sync rx_reject reason=bad_sender_or_sync_id "
+                         "peer={} sync_id={} local_peer={} expected_sync_id={}",
+                         peerId, syncId, local_udp_pose_sender_id(), kGanondorfFinalSyncId);
+        }
+        return false;
+    }
+
+    if (sGanondorfFinalSyncOwnerPeerId.empty()) {
+        sGanondorfFinalSyncOwnerPeerId = peerId;
+        DuskLog.info("Multiplayer Ganondorf sync object owner adopted peer={} sync_id={}",
+                     sGanondorfFinalSyncOwnerPeerId, syncId);
+        return true;
+    }
+
+    const bool accepted = sGanondorfFinalSyncOwnerPeerId == peerId;
+    if (!accepted) {
+        static uint32_t sGanondorfWrongOwnerLogTicks = 0;
+        if ((sGanondorfWrongOwnerLogTicks++ % 60) == 0) {
+            DuskLog.info("Multiplayer Ganondorf sync rx_reject reason=wrong_owner peer={} "
+                         "current_owner={} sync_id={}",
+                         peerId, sGanondorfFinalSyncOwnerPeerId, syncId);
+        }
+    }
+    return accepted;
+}
+
+bool ganondorf_final_sync_claim_local_owner() {
+    if (!ganondorf_final_sync_domain_enabled()) {
+        static uint32_t sGanondorfClaimGateLogTicks = 0;
+        if ((sGanondorfClaimGateLogTicks++ % 120) == 0) {
+            const char* stage = dComIfGp_getStartStageName();
+            DuskLog.info("Multiplayer Ganondorf sync owner_claim_skip enabled={} sync_world={} "
+                         "stage={} final_switch={} owner={}",
+                         is_enabled(), remote_object_sync_enabled(),
+                         stage != nullptr ? stage : "", dComIfGs_isSaveDunSwitch(1),
+                         sGanondorfFinalSyncOwnerPeerId);
+        }
+        return false;
+    }
+
+    const std::string localPeerId = local_udp_pose_sender_id();
+    if (localPeerId.empty()) {
+        return false;
+    }
+
+    if (sGanondorfFinalSyncOwnerPeerId.empty()) {
+        request_ganondorf_final_sync_owner();
+    }
+
+    return sGanondorfFinalSyncOwnerPeerId == localPeerId;
+}
+
+bool pose_is_ganondorf_final_candidate(const PeerPoseSnapshot& pose) {
+    return pose.valid && pose.finalGanondorfReady && pose.ageTicks <= kGanondorfTargetMaxAgeTicks &&
+           pose.stage == "D_MN09B" && !pose.isWolf && !pose.isTransforming;
+}
+
+bool pose_is_ganondorf_remote_sword_hit(const PeerPoseSnapshot& pose) {
+    if (!pose_is_ganondorf_final_candidate(pose) || !pose.swordOut) {
+        return false;
+    }
+
+    return pose.procId >= daAlink_c::PROC_CUT_NORMAL &&
+           pose.procId <= daAlink_c::PROC_CUT_LARGE_JUMP;
+}
+
+bool pose_is_ganondorf_remote_finish(const PeerPoseSnapshot& pose) {
+    if (!pose_is_ganondorf_final_candidate(pose) || !pose.swordOut) {
+        return false;
+    }
+
+    return pose.procId == daAlink_c::PROC_GANON_FINISH ||
+           pose.cutType == daPy_py_c::CUT_TYPE_DOWN ||
+           pose.cutType == daPy_py_c::CUT_TYPE_FINISH_STAB;
+}
+
+void fill_ganondorf_remote_hit_from_pose(const std::string& peerId, const PeerPoseSnapshot& pose,
+                                         float ganonX, float ganonZ,
+                                         GanondorfRemoteHitSnapshot* out) {
+    if (out == nullptr) {
+        return;
+    }
+
+    out->valid = true;
+    out->peerId = peerId;
+    out->sequence = pose.sequence;
+    out->procId = pose.procId;
+    out->cutType = pose.cutType;
+    out->cutCount = pose.cutCount;
+    out->jumpCancelTurn = pose.jumpCancelTurn;
+    out->attackFrame = pose.upperFrame2;
+    out->x = pose.x;
+    out->y = pose.y;
+    out->z = pose.z;
+    out->distXZ = dist_xz(ganonX, ganonZ, pose.x, pose.z);
+    out->angleYFromGanon = angle_y_from_delta(pose.x - ganonX, pose.z - ganonZ);
 }
 
 // Key items / progression unlocks that are safe to apply on a remote peer by
@@ -1418,9 +1877,72 @@ std::string display_name_for_peer(const std::string& peerId) {
     return peerId.empty() ? "Peer" : peerId;
 }
 
+std::string progression_cue_guard_key(const std::string& peerId, const std::string& cueKey) {
+    if (peerId.empty() || cueKey.empty()) {
+        return "";
+    }
+    return peerId + ":" + cueKey;
+}
+
+bool progression_sync_cue_handled(const std::string& peerId, const std::string& cueKey) {
+    const std::string guardKey = progression_cue_guard_key(peerId, cueKey);
+    return !guardKey.empty() && sHandledProgressionSyncCues.find(guardKey) != sHandledProgressionSyncCues.end();
+}
+
+void mark_progression_sync_cue_handled(const std::string& peerId, const std::string& cueKey,
+                                       const char* reason) {
+    const std::string guardKey = progression_cue_guard_key(peerId, cueKey);
+    if (guardKey.empty()) {
+        return;
+    }
+
+    const bool inserted = sHandledProgressionSyncCues.insert(guardKey).second;
+    if (inserted) {
+        DuskLog.info("Multiplayer progression sync cue handled peer={} cue={} reason={}",
+                     peerId, cueKey, reason != nullptr ? reason : "");
+    }
+}
+
+void clear_progression_sync_cues_for_peer(const std::string& peerId) {
+    if (peerId.empty()) {
+        return;
+    }
+
+    const std::string prefix = peerId + ":";
+    for (auto it = sShownPoseProgressionCues.begin(); it != sShownPoseProgressionCues.end();) {
+        if (it->rfind(prefix, 0) == 0) {
+            it = sShownPoseProgressionCues.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto it = sHandledProgressionSyncCues.begin(); it != sHandledProgressionSyncCues.end();) {
+        if (it->rfind(prefix, 0) == 0) {
+            it = sHandledProgressionSyncCues.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void clear_progression_sync_cue_for_peer(const std::string& peerId, const std::string& cueKey) {
+    const std::string guardKey = progression_cue_guard_key(peerId, cueKey);
+    if (guardKey.empty()) {
+        return;
+    }
+    sShownPoseProgressionCues.erase(guardKey);
+    sHandledProgressionSyncCues.erase(guardKey);
+}
+
+bool is_peer_progression_ready(const std::string& peerId,
+                               const PeerProgressionState** outState = nullptr);
+
 void show_progression_sync_prompt(const std::string& peerId, std::string cueKey,
                                   std::string title, std::string body) {
     if (peerId.empty()) {
+        return;
+    }
+    if (progression_sync_cue_handled(peerId, cueKey)) {
         return;
     }
 
@@ -1516,6 +2038,9 @@ void queue_progression_cue_arrival(const std::string& peerId, std::string cueKey
     if (peerId.empty()) {
         return;
     }
+    if (progression_sync_cue_handled(peerId, cueKey)) {
+        return;
+    }
 
     if (sProgressionSyncPrompt.active && sProgressionSyncPrompt.peerId == peerId &&
         sProgressionSyncPrompt.cueKey == cueKey)
@@ -1556,17 +2081,16 @@ void update_pending_progression_cue_arrivals() {
     }
 
     for (auto it = sPendingProgressionCueArrivals.begin(); it != sPendingProgressionCueArrivals.end();) {
-        const auto poseIt = sSession.peerPoses.find(it->peerId);
-        if (poseIt == sSession.peerPoses.end() || !poseIt->second.valid ||
-            poseIt->second.ageTicks > 30 || !poseIt->second.manualSyncReady ||
-            (!it->expectedStage.empty() && poseIt->second.stage != it->expectedStage))
+        const PeerProgressionState* state = nullptr;
+        if (!is_peer_progression_ready(it->peerId, &state) ||
+            (!it->expectedStage.empty() && state->stage != it->expectedStage))
         {
             ++it;
             continue;
         }
 
         DuskLog.info("Multiplayer progression cue peer arrived peer={} cue={} stage={}", it->peerId,
-                     it->cueKey, poseIt->second.stage);
+                     it->cueKey, state->stage);
         show_progression_sync_prompt(it->peerId, it->cueKey, it->title, it->body);
         it = sPendingProgressionCueArrivals.erase(it);
     }
@@ -1712,7 +2236,7 @@ void reserve_local_player_color_slot(uint8_t slot) {
     sLocalPlayerColorSlotReserved = true;
 }
 
-void assign_peer_color_slot(const std::string& peerId) {
+void assign_player_color(const std::string& peerId) {
     if (peerId.empty() || sPeerColorSlots.find(peerId) != sPeerColorSlots.end()) {
         return;
     }
@@ -1727,41 +2251,71 @@ void assign_peer_color_slot(const std::string& peerId) {
     sPeerColorSlots[peerId] = 7;
 }
 
-void assign_peer_color_slot(const std::string& peerId, uint8_t slot) {
+void assign_player_color(const std::string& peerId, uint8_t slot) {
     if (!peerId.empty()) {
         sPeerColorSlots[peerId] = std::min<uint8_t>(slot, static_cast<uint8_t>(7));
     }
 }
 
-ImU32 color_for_peer(const std::string& peerId) {
-    assign_peer_color_slot(peerId);
+uint8_t get_player_color_slot(const std::string& peerId) {
+    assign_player_color(peerId);
     const auto slotIt = sPeerColorSlots.find(peerId);
-    const uint8_t slot = slotIt != sPeerColorSlots.end() ? slotIt->second : 7;
+    return slotIt != sPeerColorSlots.end() ? slotIt->second : 7;
+}
 
-    static const ImU32 kPlayerNameColors[8] = {
-        IM_COL32(255, 255, 255, 255),  // Player 1
-        IM_COL32(94, 211, 255, 255),
-        IM_COL32(255, 214, 92, 255),
-        IM_COL32(101, 232, 132, 255),
-        IM_COL32(255, 133, 203, 255),
-        IM_COL32(255, 169, 82, 255),
-        IM_COL32(184, 160, 255, 255),
-        IM_COL32(90, 232, 209, 255),
+PlayerColor get_player_color(const std::string& peerId) {
+    static const PlayerColor kPlayerColors[8] = {
+        PlayerColor{255, 255, 255, 255},
+        PlayerColor{94, 211, 255, 255},
+        PlayerColor{255, 214, 92, 255},
+        PlayerColor{101, 232, 132, 255},
+        PlayerColor{255, 133, 203, 255},
+        PlayerColor{255, 169, 82, 255},
+        PlayerColor{184, 160, 255, 255},
+        PlayerColor{90, 232, 209, 255},
     };
-    return kPlayerNameColors[slot];
+    return kPlayerColors[get_player_color_slot(peerId)];
+}
+
+std::vector<MinimapPeerMarker> collect_minimap_peer_markers(uint32_t maxAgeTicks) {
+    std::vector<MinimapPeerMarker> markers;
+    if (!sEnabled) {
+        return markers;
+    }
+
+    const char* localStage = dComIfGp_getStartStageName();
+    if (localStage == nullptr || localStage[0] == '\0') {
+        return markers;
+    }
+
+    for (const auto& entry : sSession.peerPoses) {
+        const PeerPoseSnapshot& pose = entry.second;
+        if (!pose.valid || pose.ageTicks > maxAgeTicks || pose.stage != localStage) {
+            continue;
+        }
+
+        markers.push_back(MinimapPeerMarker{
+            pose.peerId.empty() ? entry.first : pose.peerId,
+            pose.room,
+            pose.x,
+            pose.y,
+            pose.z,
+            pose.angleY,
+            get_player_color(entry.first),
+        });
+    }
+
+    return markers;
+}
+
+JUtility::TColor native_color_for_peer(const std::string& peerId) {
+    const PlayerColor color = get_player_color(peerId);
+    return JUtility::TColor(color.r, color.g, color.b, color.a);
 }
 
 void clear_player_color_slots() {
     sPeerColorSlots.clear();
     reserve_local_player_color_slot(0);
-}
-
-float peer_label_height(const PeerPoseSnapshot& pose) {
-    if (pose.isTransforming) {
-        return pose.transformFromWolf && pose.transformToWolf ? 115.0f : 205.0f;
-    }
-
-    return pose.isWolf ? 115.0f : 205.0f;
 }
 
 bool peer_pose_is_visible_for_labels(const PeerPoseSnapshot& pose, const char* localStage) {
@@ -1773,7 +2327,7 @@ bool peer_pose_is_visible_for_labels(const PeerPoseSnapshot& pose, const char* l
 }
 
 bool should_draw_peer_name_labels_over_game() {
-    if (dComIfGp_isPauseFlag() || dScnPly_c::isPause() || dComIfGp_getMesgStatus() != 0) {
+    if (dComIfGp_isPauseFlag() || dScnPly_c::isPause()) {
         return false;
     }
 
@@ -1785,76 +2339,205 @@ bool should_draw_peer_name_labels_over_game() {
     return true;
 }
 
-bool project_peer_label_position(const PeerPoseSnapshot& pose, ImVec2* outPos) {
-    if (outPos == nullptr) {
-        return false;
-    }
+struct PeerWorldNameLabel {
+    std::string peerId;
+    std::string label;
+    cXyz worldPos;
+    f32 cameraDistSq = 0.0f;
+};
 
-    cXyz worldPos(pose.x, pose.y + peer_label_height(pose), pose.z);
-    cXyz cameraPos;
-    mDoLib_pos2camera(&worldPos, &cameraPos);
-    if (cameraPos.z >= -1.0f) {
-        return false;
-    }
+struct NameLabelFontAtlas {
+    ImFontAtlas atlas;
+    ImFont* font = nullptr;
+    std::vector<u8> rgbaPixels;
+    TGXTexObj texObj;
+    int texWidth = 0;
+    int texHeight = 0;
+    bool initialized = false;
+    bool valid = false;
+};
 
-    cXyz projected;
-    mDoLib_project(&worldPos, &projected);
-
-    const float gameMinX = mDoGph_gInf_c::getMinXF();
-    const float gameMinY = mDoGph_gInf_c::getMinYF();
-    const float gameWidth = mDoGph_gInf_c::getWidthF();
-    const float gameHeight = mDoGph_gInf_c::getHeightF();
-    if (gameWidth <= 0.0f || gameHeight <= 0.0f ||
-        projected.x < gameMinX || projected.x > gameMinX + gameWidth ||
-        projected.y < gameMinY || projected.y > gameMinY + gameHeight)
-    {
-        return false;
-    }
-
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    if (viewport == nullptr) {
-        return false;
-    }
-
-    const AuroraWindowSize windowSize = aurora::window::get_window_size();
-    if (windowSize.native_fb_width == 0 || windowSize.native_fb_height == 0 ||
-        windowSize.fb_width == 0 || windowSize.fb_height == 0)
-    {
-        return false;
-    }
-
-    uint32_t presentWidth = windowSize.native_fb_width;
-    uint32_t presentHeight = std::min<uint32_t>(
-        windowSize.native_fb_height,
-        std::max<uint32_t>(1u, static_cast<uint32_t>(std::lround(
-                                  static_cast<double>(presentWidth) *
-                                  static_cast<double>(windowSize.fb_height) /
-                                  static_cast<double>(windowSize.fb_width)))));
-    if (presentHeight == windowSize.native_fb_height) {
-        presentWidth = std::min<uint32_t>(
-            windowSize.native_fb_width,
-            std::max<uint32_t>(1u, static_cast<uint32_t>(std::lround(
-                                      static_cast<double>(presentHeight) *
-                                      static_cast<double>(windowSize.fb_width) /
-                                      static_cast<double>(windowSize.fb_height)))));
-    }
-
-    const float presentLeft =
-        static_cast<float>((windowSize.native_fb_width - presentWidth) / 2u);
-    const float presentTop =
-        static_cast<float>((windowSize.native_fb_height - presentHeight) / 2u);
-    const ImVec2 framebufferScale = ImGui::GetIO().DisplayFramebufferScale;
-    const float scaleX = framebufferScale.x > 0.0f ? framebufferScale.x : 1.0f;
-    const float scaleY = framebufferScale.y > 0.0f ? framebufferScale.y : 1.0f;
-
-    const float normX = (projected.x - gameMinX) / gameWidth;
-    const float normY = (projected.y - gameMinY) / gameHeight;
-    outPos->x = viewport->Pos.x + (presentLeft + normX * static_cast<float>(presentWidth)) / scaleX;
-    outPos->y = viewport->Pos.y + (presentTop + normY * static_cast<float>(presentHeight)) / scaleY;
-    return std::isfinite(outPos->x) && std::isfinite(outPos->y);
+std::string name_label_font_path() {
+#ifdef DUSK_ASSET_DIR
+    return dusk::io::fs_path_to_string(std::filesystem::path(DUSK_ASSET_DIR) /
+                                       "AlegreyaSC-Bold.ttf");
+#else
+    return dusk::io::fs_path_to_string(std::filesystem::current_path() / "res" /
+                                       "AlegreyaSC-Bold.ttf");
+#endif
 }
 
-void draw_peer_name_labels() {
+NameLabelFontAtlas* get_name_label_font_atlas() {
+    static NameLabelFontAtlas sAtlas;
+    if (sAtlas.initialized) {
+        return sAtlas.valid ? &sAtlas : nullptr;
+    }
+    sAtlas.initialized = true;
+
+    ImFontConfig config;
+    config.SizePixels = 64.0f;
+    config.OversampleH = 3;
+    config.OversampleV = 3;
+    config.PixelSnapH = false;
+    config.FontDataOwnedByAtlas = true;
+
+    const std::string fontPath = name_label_font_path();
+    sAtlas.font = sAtlas.atlas.AddFontFromFileTTF(fontPath.c_str(), config.SizePixels, &config);
+    if (sAtlas.font == nullptr || !sAtlas.atlas.Build()) {
+        DuskLog.warn("Multiplayer nametag font atlas failed path={}", fontPath);
+        return nullptr;
+    }
+
+    unsigned char* alphaPixels = nullptr;
+    int bytesPerPixel = 0;
+    sAtlas.atlas.GetTexDataAsAlpha8(&alphaPixels, &sAtlas.texWidth, &sAtlas.texHeight,
+                                    &bytesPerPixel);
+    if (alphaPixels == nullptr || sAtlas.texWidth <= 0 || sAtlas.texHeight <= 0) {
+        DuskLog.warn("Multiplayer nametag font atlas empty path={}", fontPath);
+        return nullptr;
+    }
+
+    sAtlas.rgbaPixels.resize(static_cast<size_t>(sAtlas.texWidth) * sAtlas.texHeight * 4);
+    for (int i = 0; i < sAtlas.texWidth * sAtlas.texHeight; ++i) {
+        sAtlas.rgbaPixels[i * 4 + 0] = 0xff;
+        sAtlas.rgbaPixels[i * 4 + 1] = 0xff;
+        sAtlas.rgbaPixels[i * 4 + 2] = 0xff;
+        sAtlas.rgbaPixels[i * 4 + 3] = alphaPixels[i];
+    }
+
+    GXInitTexObj(&sAtlas.texObj, sAtlas.rgbaPixels.data(), static_cast<u16>(sAtlas.texWidth),
+                 static_cast<u16>(sAtlas.texHeight), GX_TF_RGBA8_PC, GX_CLAMP, GX_CLAMP,
+                 GX_FALSE);
+    GXInitTexObjLOD(&sAtlas.texObj, GX_LINEAR, GX_LINEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE,
+                    GX_ANISO_1);
+    sAtlas.valid = true;
+    DuskLog.info("Multiplayer nametag font atlas loaded path={} size={}x{}", fontPath,
+                 sAtlas.texWidth, sAtlas.texHeight);
+    return &sAtlas;
+}
+
+float measure_name_label_width(NameLabelFontAtlas* atlas, const char* str) {
+    if (atlas == nullptr || atlas->font == nullptr || str == nullptr) {
+        return 0.0f;
+    }
+
+    float width = 0.0f;
+    for (const char* cursor = str; *cursor != '\0'; ++cursor) {
+        const ImWchar code = static_cast<unsigned char>(*cursor);
+        const ImFontGlyph* glyph = atlas->font->FindGlyph(code);
+        width += glyph != nullptr ? glyph->AdvanceX : atlas->font->FallbackAdvanceX;
+    }
+    return width;
+}
+
+void setup_name_label_gx(NameLabelFontAtlas* atlas) {
+    GXLoadPosMtxImm(j3dSys.getViewMtx(), GX_PNMTX0);
+    GXSetCurrentMtx(GX_PNMTX0);
+    GXLoadTexObj(&atlas->texObj, GX_TEXMAP0);
+    GXSetNumChans(1);
+    GXSetChanCtrl(GX_COLOR0A0, GX_FALSE, GX_SRC_REG, GX_SRC_VTX, GX_LIGHT_NULL, GX_DF_NONE,
+                  GX_AF_NONE);
+    GXSetNumTexGens(1);
+    GXSetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, GX_IDENTITY);
+    GXSetNumTevStages(1);
+    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
+    GXSetTevOp(GX_TEVSTAGE0, GX_MODULATE);
+    GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_SET);
+    GXSetZMode(GX_ENABLE, GX_LEQUAL, GX_FALSE);
+    GXSetAlphaCompare(GX_GREATER, 1, GX_AOP_OR, GX_GREATER, 1);
+    GXSetCullMode(GX_CULL_NONE);
+    GXClearVtxDesc();
+    GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
+    GXSetVtxDesc(GX_VA_CLR0, GX_DIRECT);
+    GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_CLR_RGBA, GX_RGBX8, 15);
+}
+
+void emit_name_label_glyph(const cXyz& origin, const cXyz& right, const cXyz& up, float scale,
+                           const ImFontGlyph& glyph, const JUtility::TColor& color) {
+    const cXyz p0 = origin + right * (glyph.X0 * scale) - up * (glyph.Y0 * scale);
+    const cXyz p1 = origin + right * (glyph.X1 * scale) - up * (glyph.Y0 * scale);
+    const cXyz p2 = origin + right * (glyph.X1 * scale) - up * (glyph.Y1 * scale);
+    const cXyz p3 = origin + right * (glyph.X0 * scale) - up * (glyph.Y1 * scale);
+    const u16 u0 = static_cast<u16>(std::clamp(glyph.U0, 0.0f, 1.0f) * 32767.0f);
+    const u16 v0 = static_cast<u16>(std::clamp(glyph.V0, 0.0f, 1.0f) * 32767.0f);
+    const u16 u1 = static_cast<u16>(std::clamp(glyph.U1, 0.0f, 1.0f) * 32767.0f);
+    const u16 v1 = static_cast<u16>(std::clamp(glyph.V1, 0.0f, 1.0f) * 32767.0f);
+
+    GXPosition3f32(p0.x, p0.y, p0.z);
+    GXColor1u32(color);
+    GXTexCoord2u16(u0, v0);
+    GXPosition3f32(p1.x, p1.y, p1.z);
+    GXColor1u32(color);
+    GXTexCoord2u16(u1, v0);
+    GXPosition3f32(p2.x, p2.y, p2.z);
+    GXColor1u32(color);
+    GXTexCoord2u16(u1, v1);
+    GXPosition3f32(p3.x, p3.y, p3.z);
+    GXColor1u32(color);
+    GXTexCoord2u16(u0, v1);
+}
+
+void draw_name_label_text_run(NameLabelFontAtlas* atlas, const cXyz& origin, const cXyz& right,
+                              const cXyz& up, float scale, const JUtility::TColor& color,
+                              const char* str) {
+    cXyz cursorOrigin = origin;
+    for (const char* cursor = str; *cursor != '\0'; ++cursor) {
+        const ImWchar code = static_cast<unsigned char>(*cursor);
+        const ImFontGlyph* glyph = atlas->font->FindGlyph(code);
+        if (glyph != nullptr && glyph->Visible) {
+            emit_name_label_glyph(cursorOrigin, right, up, scale, *glyph, color);
+        }
+        const float advance = glyph != nullptr ? glyph->AdvanceX : atlas->font->FallbackAdvanceX;
+        cursorOrigin += right * (advance * scale);
+    }
+}
+
+void draw_world_name_label_text(NameLabelFontAtlas* atlas, const cXyz& worldPos,
+                                const JUtility::TColor& color, const char* str) {
+    if (atlas == nullptr || atlas->font == nullptr || str == nullptr || str[0] == '\0') {
+        return;
+    }
+
+    Mtx invViewMtx;
+    if (!MTXInverse(j3dSys.getViewMtx(), invViewMtx)) {
+        return;
+    }
+
+    const cXyz right(invViewMtx[0][0], invViewMtx[1][0], invViewMtx[2][0]);
+    const cXyz up(invViewMtx[0][1], invViewMtx[1][1], invViewMtx[2][1]);
+    constexpr float kWorldScale = 0.34f;
+    constexpr float kOutlineOffsetPixels = 2.35f;
+    constexpr float kCenterBiasPixels = 2.5f;
+    constexpr float kBottomClearanceWorld = 16.0f;
+    const float width = measure_name_label_width(atlas, str);
+    const float baselineLift = atlas->font->Ascent * kWorldScale + kBottomClearanceWorld;
+    const cXyz origin = worldPos -
+                        right * ((width * 0.5f - kCenterBiasPixels) * kWorldScale) +
+                        up * baselineLift;
+
+    const JUtility::TColor outline(0, 0, 0, color.a);
+    static const cXyz kOffsets[] = {
+        cXyz(-1.0f, -1.0f, 0.0f), cXyz(0.0f, -1.0f, 0.0f),
+        cXyz(1.0f, -1.0f, 0.0f),  cXyz(-1.0f, 0.0f, 0.0f),
+        cXyz(1.0f, 0.0f, 0.0f),   cXyz(-1.0f, 1.0f, 0.0f),
+        cXyz(0.0f, 1.0f, 0.0f),   cXyz(1.0f, 1.0f, 0.0f),
+    };
+
+    GXBegin(GX_QUADS, GX_VTXFMT0, static_cast<u16>((std::strlen(str) * 8 + std::strlen(str)) * 4));
+    for (const cXyz& offset : kOffsets) {
+        const cXyz outlineOrigin =
+            origin + right * (offset.x * kOutlineOffsetPixels * kWorldScale) -
+            up * (offset.y * kOutlineOffsetPixels * kWorldScale);
+        draw_name_label_text_run(atlas, outlineOrigin, right, up, kWorldScale, outline, str);
+    }
+    draw_name_label_text_run(atlas, origin, right, up, kWorldScale, color, str);
+    GXEnd();
+}
+
+void draw_peer_name_labels_native_impl() {
     if (!sEnabled || !sNameLabelsEnabled || !sDummyModelEnabled || !sSession.debugMarker ||
         !has_recent_peer_pose(30) || !should_draw_peer_name_labels_over_game() ||
         !is_peer_dummy_gameplay_ready())
@@ -1863,11 +2546,17 @@ void draw_peer_name_labels() {
     }
 
     const char* localStage = dComIfGp_getStartStageName();
-    ImDrawList* drawList = ImGui::GetForegroundDrawList();
-    if (drawList == nullptr) {
+    NameLabelFontAtlas* atlas = get_name_label_font_atlas();
+    if (atlas == nullptr) {
         return;
     }
 
+    camera_process_class* camera = dComIfGp_getCamera(0);
+    if (camera == nullptr) {
+        return;
+    }
+
+    std::vector<PeerWorldNameLabel> labels;
     for (const auto& entry : sSession.peerPoses) {
         const PeerPoseSnapshot& pose = entry.second;
         if (!peer_pose_is_visible_for_labels(pose, localStage)) {
@@ -1879,34 +2568,33 @@ void draw_peer_name_labels() {
             continue;
         }
 
-        ImVec2 pos;
-        if (!project_peer_label_position(pose, &pos)) {
+        cXyz labelWorldPos;
+        if (!get_remote_link_dummy_label_position(entry.first, &labelWorldPos)) {
             continue;
         }
 
-        const float fontSize = ImGui::GetFontSize() * 0.92f;
-        const float fontScale = fontSize / ImGui::GetFontSize();
-        const ImVec2 baseTextSize = ImGui::CalcTextSize(label.c_str());
-        const ImVec2 textSize(baseTextSize.x * fontScale, baseTextSize.y * fontScale);
-        pos.x -= textSize.x * 0.5f;
-        pos.y -= fontSize + 8.0f;
-        pos.x = std::round(pos.x);
-        pos.y = std::round(pos.y);
-
-        const ImU32 outline = IM_COL32(0, 0, 0, 235);
-        const ImU32 text = color_for_peer(entry.first);
-        for (const ImVec2 offset : {ImVec2(-2.0f, 0.0f), ImVec2(-1.0f, 0.0f),
-                                    ImVec2(1.0f, 0.0f), ImVec2(2.0f, 0.0f),
-                                    ImVec2(0.0f, -2.0f), ImVec2(0.0f, -1.0f),
-                                    ImVec2(0.0f, 1.0f), ImVec2(0.0f, 2.0f),
-                                    ImVec2(-1.0f, -1.0f), ImVec2(1.0f, -1.0f),
-                                    ImVec2(-1.0f, 1.0f), ImVec2(1.0f, 1.0f)})
-        {
-            drawList->AddText(nullptr, fontSize, ImVec2(pos.x + offset.x, pos.y + offset.y),
-                              outline, label.c_str());
+        cXyz cameraPos;
+        mDoLib_pos2camera(&labelWorldPos, &cameraPos);
+        if (cameraPos.z >= -1.0f) {
+            continue;
         }
-        drawList->AddText(nullptr, fontSize, pos, text, label.c_str());
+
+        const cXyz fromCamera = labelWorldPos - camera->view.lookat.eye;
+        const f32 cameraDistSq = fromCamera.abs2();
+        labels.push_back({entry.first, label, labelWorldPos, cameraDistSq});
     }
+
+    std::sort(labels.begin(), labels.end(), [](const PeerWorldNameLabel& a,
+                                               const PeerWorldNameLabel& b) {
+        return a.cameraDistSq > b.cameraDistSq;
+    });
+
+    setup_name_label_gx(atlas);
+    for (const PeerWorldNameLabel& label : labels) {
+        JUtility::TColor color = native_color_for_peer(label.peerId);
+        draw_world_name_label_text(atlas, label.worldPos, color, label.label.c_str());
+    }
+    J3DShape::resetVcdVatCache();
 }
 
 void reset_connection_state() {
@@ -1942,23 +2630,33 @@ void reset_connection_state() {
     sSession.rxBuffer.clear();
     sSession.reconnectTicks = 0;
     sSession.pingTicks = 0;
+    sSession.progressionStateTicks = 0;
     sSession.poseSequence = 0;
     sSession.peerPoseLogTicks = 0;
     sSession.peerPoses.clear();
+    sPeerPresence.clear();
     sSession.udpPoseReassembly.clear();
     sSession.udpPoseLastProcessedSequence.clear();
+    sSession.pendingMidnaMatrices.clear();
     sSession.udpRemoteAddrKnown = false;
     sPendingLocalAudioEvents.clear();
     sPeerNames.clear();
     clear_player_color_slots();
     sNameLabelsEnabled = true;
+    sSyncWorldEnabled = false;
+    sDisplayRemoteMidnaEnabled = true;
+    sDirectRemoteWantsPuppet = true;
+    sDirectRemoteWantsMidna = true;
     sNotifications.clear();
     sProgressionSyncPrompt = {};
     sPendingProgressionSync = {};
     sPendingProgressionCueArrivals.clear();
     sPendingSyncReplies.clear();
+    sPeerProgressionStates.clear();
     sShownPoseProgressionCues.clear();
+    sHandledProgressionSyncCues.clear();
     sAwaitingManualSyncCueKey.clear();
+    sAwaitingManualSyncPeerId.clear();
     destroy_all_remote_link_dummies();
 }
 
@@ -1999,8 +2697,12 @@ const char* packet_category(const std::string& type) {
     if (type == "pose") {
         return "pose";
     }
-    if (type == "hello" || type == "welcome" || type == "peer_joined" ||
-        type == "peer_left" || type == "name_labels")
+    if (type == "midna_pose") {
+        return "midna_pose";
+    }
+    if (type == "hello" || type == "welcome" || type == "peer_joined" || type == "presence" ||
+        type == "peer_left" || type == "name_labels" || type == "remote_collision" ||
+        type == "progression_state")
     {
         return "session";
     }
@@ -2038,6 +2740,10 @@ const char* packet_category(const std::string& type) {
 bool packet_trace_enabled() {
     static const bool enabled = !env_disabled("DUSK_MP_PACKET_TRACE");
     return enabled;
+}
+
+bool remote_object_sync_enabled() {
+    return sSyncWorldEnabled && !env_disabled("DUSK_MP_REMOTE_OBJECTS");
 }
 
 size_t json_field_bytes(const json& object, const char* key) {
@@ -2103,6 +2809,7 @@ void trace_udp_pose_packet_tx(const json& message, size_t rawBytes, size_t compr
     }
 
     const uint32_t sequence = message.value("sequence", 0U);
+    const std::string type = message.value("type", "pose");
     const json state = message.value("state", json::object());
     const size_t totalDatagramBytes = compressedBytes + sizeof(UdpPoseChunkHeader) * chunkCount;
     const size_t lastPayload =
@@ -2112,6 +2819,18 @@ void trace_udp_pose_packet_tx(const json& message, size_t rawBytes, size_t compr
         sizeof(UdpPoseChunkHeader) + std::min(compressedBytes, kUdpPoseChunkPayloadBytes);
     const double avgDatagramBytes =
         static_cast<double>(totalDatagramBytes) / static_cast<double>(chunkCount);
+    (void)avgDatagramBytes;
+
+    if (type == "midna_pose") {
+        DuskLog.info(
+            "MP_PACKET_TX category=midna_udp type=midna_pose bytes={} raw_msgpack={} "
+            "compressed={} chunks={} datagram_min={} datagram_max={} matrix_packed={} "
+            "matrix_b64={} matrix_slots={}",
+            totalDatagramBytes, rawBytes, compressedBytes, chunkCount, minDatagramBytes,
+            maxDatagramBytes, sLastMidnaMatrixPackedBytes, sLastMidnaMatrixBase64Bytes,
+            sLastMidnaMatrixPresentSlots);
+        return;
+    }
 
     struct UdpPoseTraceSummary {
         uint32_t count = 0;
@@ -2261,7 +2980,48 @@ void send_hello() {
         {"session_id", sSession.sessionId},
         {"password", sSession.relayPassword},
         {"name", sSession.name},
+        {"want_puppet", wants_remote_puppet_matrices()},
+        {"want_midna", wants_remote_midna_matrices()},
     });
+}
+
+void send_progression_state(bool force = false) {
+    if (!sSession.welcomed) {
+        return;
+    }
+    if (!force && (++sSession.progressionStateTicks < kProgressionStateSendTicks)) {
+        return;
+    }
+    sSession.progressionStateTicks = 0;
+
+    fopAc_ac_c* player = dComIfGp_getPlayer(0);
+    const int room = player != nullptr ? static_cast<int>(fopAcM_GetRoomNo(player)) :
+        static_cast<int>(dComIfGp_roomControl_getStayNo());
+    send_json({
+        {"type", "progression_state"},
+        {"stage", current_stage_name()},
+        {"room", room},
+        {"layer", static_cast<int>(dComIfGp_getStartStageLayer())},
+        {"manual_sync_ready", !is_stage_load_unsafe_for_multiplayer()},
+        {"final_ganondorf_ready", is_local_final_ganondorf_ready()},
+    });
+}
+
+const PeerProgressionState* find_peer_progression_state(const std::string& peerId) {
+    const auto it = sPeerProgressionStates.find(peerId);
+    if (it == sPeerProgressionStates.end() || !it->second.valid) {
+        return nullptr;
+    }
+    return &it->second;
+}
+
+bool is_peer_progression_ready(const std::string& peerId, const PeerProgressionState** outState) {
+    const PeerProgressionState* state = find_peer_progression_state(peerId);
+    if (outState != nullptr) {
+        *outState = state;
+    }
+    return state != nullptr && state->ageTicks <= kProgressionStateReadyMaxAgeTicks &&
+           state->manualSyncReady;
 }
 
 std::string encode_manual_sync_full_state() {
@@ -2290,9 +3050,10 @@ std::string encode_manual_sync_full_state() {
         return "";
     }
     compressed.resize(compressedSize);
-    DuskLog.info("Multiplayer encoded manual sync full state stage={} room={} layer={} bytes={}",
+    DuskLog.info("Multiplayer encoded manual sync full state stage={} room={} layer={} point={} "
+                 "bytes={}",
                  packet.stageName, static_cast<int>(packet.roomNo), static_cast<int>(packet.layer),
-                 compressed.size());
+                 static_cast<int>(packet.startPoint), compressed.size());
     return absl::Base64Escape(compressed);
 }
 
@@ -2411,7 +3172,14 @@ bool apply_manual_sync_full_state(const std::string& encoded) {
         packet.layer = descriptor->warpLayer;
         packet.startPoint = descriptor->warpStartPoint;
     }
+    const std::string handledCueKey = sAwaitingManualSyncCueKey;
     sAwaitingManualSyncCueKey.clear();
+    const std::string handledPeerId = sAwaitingManualSyncPeerId;
+    sAwaitingManualSyncPeerId.clear();
+    if (!handledCueKey.empty() && !handledPeerId.empty()) {
+        mark_progression_sync_cue_handled(handledPeerId, handledCueKey,
+                                          "manual_sync_applied");
+    }
 
     toggleAutoSave(false);
     const u8 vibration = dComIfGs_getOptVibration();
@@ -2651,12 +3419,16 @@ void update_pending_sync_replies() {
         if (it->isDirectPeer) {
             const auto peerIt = sSession.directPeers.find(it->peerKey);
             if (peerIt != sSession.directPeers.end()) {
+                mark_progression_sync_cue_handled(it->peerKey, it->cueKey,
+                                                  "deferred_sync_reply");
                 send_save_snapshot(&peerIt->second, "", true);
                 DuskLog.info(
                     "Multiplayer replied to deferred direct manual sync request peer={} cue={}",
                     it->peerKey, it->cueKey);
             }
         } else if (sSession.mode == NetworkMode::RelayHarness && !it->targetClientId.empty()) {
+            mark_progression_sync_cue_handled(it->targetClientId, it->cueKey,
+                                              "deferred_sync_reply");
             send_save_snapshot(nullptr, it->targetClientId, true);
             DuskLog.info("Multiplayer replied to deferred relay manual sync request peer={} cue={}",
                          it->targetClientId, it->cueKey);
@@ -2691,6 +3463,9 @@ void send_welcome_to_peer(DirectPeer& peer) {
         {"room_id", sSession.room},
         {"client_id", peer.id},
         {"name_labels", sNameLabelsEnabled},
+        {"remote_collision", sRemoteCollisionEnabled},
+        {"want_puppet", wants_remote_puppet_matrices()},
+        {"want_midna", wants_remote_midna_matrices()},
         {"peers", direct_peer_list(peer.id)},
     });
     sSession.welcomed = sSession.welcomed || peer.welcomed;
@@ -2707,6 +3482,9 @@ void send_welcome() {
         {"room_id", sSession.room},
         {"client_id", "host"},
         {"name_labels", sNameLabelsEnabled},
+        {"remote_collision", sRemoteCollisionEnabled},
+        {"want_puppet", wants_remote_puppet_matrices()},
+        {"want_midna", wants_remote_midna_matrices()},
         {"peers", json::array()},
     });
     sSession.welcomed = sSession.welcomeSent;
@@ -3060,7 +3838,7 @@ LocalMidnaVisualState detect_midna_visual_state(daAlink_c* link, bool isWolf) {
     return state;
 }
 
-bool add_link_matrices(json& state) {
+bool add_link_matrices(json& state, json* midnaMatrices = nullptr) {
     // Note: deliberately not gated on dComIfGp_event_runCheck() here, unlike
     // the dummy draw path. This only reads already-built matrices off the
     // real local Link actor; it doesn't allocate/destroy anything. Personal
@@ -3092,10 +3870,6 @@ bool add_link_matrices(json& state) {
     }
 
     const bool isWolf = static_cast<bool>(link->checkWolf());
-    if (!sDummyModelEnabled && !isWolf) {
-        return true;
-    }
-
     const bool includeHumanCoreParts = !isWolf;
     const bool includeHumanParts = includeHumanCoreParts && !isTransforming;
     const LocalMidnaVisualState midnaVisual =
@@ -3136,6 +3910,9 @@ bool add_link_matrices(json& state) {
         } else if (rememberedBombActor != nullptr) {
             itemActor = rememberedBombActor;
         }
+        if (itemActor != nullptr && fopAcM_GetName(itemActor) == fpcNm_NBOMB_e) {
+            itemActor = nullptr;
+        }
 
         if (itemActor != nullptr && fopAcM_GetName(itemActor) == fpcNm_ARROW_e) {
             arrowModel = itemActor->model;
@@ -3144,14 +3921,29 @@ bool add_link_matrices(json& state) {
             itemActorKind = detect_item_actor_kind(itemActor);
             if (fopAcM_GetName(itemActor) == fpcNm_NBOMB_e) {
                 daNbomb_c* bomb = static_cast<daNbomb_c*>(itemActor);
-                itemActorBombExTime = bomb->getExTime();
-                itemActorBombFlash = calc_remote_bomb_flash(bomb, link);
+                const fpc_ProcID bombId = fopAcM_GetID(bomb);
+                auto bombState = sLocalBombPostExecuteStates.find(bombId);
+                if (bombState != sLocalBombPostExecuteStates.end() && bombState->second.valid &&
+                    bombState->second.ageTicks <= 3)
+                {
+                    itemActorKind = bombState->second.kind;
+                    itemActorBombExTime = bombState->second.exTime;
+                    itemActorBombFlash = bombState->second.flash;
+                } else {
+                    itemActorBombExTime = bomb->getExTime();
+                    itemActorBombFlash = calc_remote_bomb_flash(bomb, link);
+                }
                 static uint32_t sBombFuseTxLogCount = 0;
                 if (sBombFuseTxLogCount < 24 || itemActorBombExTime <= 20) {
                     ++sBombFuseTxLogCount;
-                    DuskLog.info("Multiplayer bomb fuse tx kind={} ex_time={} flash={} matrix={}",
-                                 itemActorKind, itemActorBombExTime, itemActorBombFlash,
-                                 itemActorModel != nullptr);
+                    DuskLog.info("Multiplayer bomb fuse tx id={} kind={} ex_time={} flash={} "
+                                 "matrix={} source={}",
+                                 bombId, itemActorKind, itemActorBombExTime, itemActorBombFlash,
+                                 itemActorModel != nullptr,
+                                 bombState != sLocalBombPostExecuteStates.end() &&
+                                         bombState->second.valid && bombState->second.ageTicks <= 3
+                                     ? "post_execute"
+                                     : "direct");
                 }
             }
         }
@@ -3185,6 +3977,37 @@ bool add_link_matrices(json& state) {
     const int midnaHairShape =
         (isWolf || midnaVisual.shadowForm) ? visible_material_shape_index(midnaHairModel, 3, 0) : 0;
 
+    if (midnaMatrices != nullptr) {
+        *midnaMatrices = link_matrix_pack_to_json(
+            {
+                {"body", nullptr},
+                {"hat", nullptr},
+                {"face", nullptr},
+                {"hand", nullptr},
+                {"sword", nullptr},
+                {"sheath", nullptr},
+                {"shield", nullptr},
+                {"held_item", nullptr},
+                {"hook_tip", nullptr},
+                {"hook_sub_item", nullptr},
+                {"hook_sub_tip", nullptr},
+                {"arrow", nullptr},
+                {"kantera", nullptr},
+                {"kantera_glow", nullptr},
+                {"item_actor", nullptr},
+                {"ride_actor", nullptr},
+                {"midna", midnaModel},
+                {"midna_mask", midnaMaskModel},
+                {"midna_hand", midnaHandModel},
+                {"midna_hair", midnaHairModel},
+                {"midna_glow", midnaGlowModel},
+            },
+            midnaHairShape);
+        sLastMidnaMatrixPackedBytes = sLastPoseMatrixPackedBytes;
+        sLastMidnaMatrixBase64Bytes = sLastPoseMatrixBase64Bytes;
+        sLastMidnaMatrixPresentSlots = sLastPoseMatrixPresentSlots;
+    }
+
     state["link_matrices"] = link_matrix_pack_to_json(
         {
             {"body", link->mpLinkModel},
@@ -3203,13 +4026,13 @@ bool add_link_matrices(json& state) {
             {"kantera_glow", includeHumanParts ? link->mpKanteraGlowModel : nullptr},
             {"item_actor", includeHumanParts ? itemActorModel : nullptr},
             {"ride_actor", includeHumanParts ? rideActorModel : nullptr},
-            {"midna", midnaModel},
-            {"midna_mask", midnaMaskModel},
-            {"midna_hand", midnaHandModel},
-            {"midna_hair", midnaHairModel},
-            {"midna_glow", midnaGlowModel},
+            {"midna", nullptr},
+            {"midna_mask", nullptr},
+            {"midna_hand", nullptr},
+            {"midna_hair", nullptr},
+            {"midna_glow", nullptr},
         },
-        midnaHairShape);
+        0);
 
     state["equip_item"] = static_cast<int>(link->mEquipItem);
     state["sword_variant"] = detect_sword_variant(link);
@@ -3609,6 +4432,42 @@ RemoteLinkMatrixSnapshot parse_link_matrices(const json& state) {
     return snapshot;
 }
 
+RemoteLinkMatrixSnapshot parse_midna_link_matrices(const json& state) {
+    RemoteLinkMatrixSnapshot snapshot;
+    const auto it = state.find("link_matrices");
+    if (it == state.end() || !it->is_object()) {
+        return snapshot;
+    }
+
+    snapshot = parse_packed_link_matrices(*it);
+    if (snapshot.midna.valid || snapshot.midnaMask.valid || snapshot.midnaHand.valid ||
+        snapshot.midnaHair.valid || snapshot.midnaGlow.valid)
+    {
+        return snapshot;
+    }
+
+    snapshot.midna = parse_model_matrices(it->value("midna", json::object()));
+    snapshot.midnaMask = parse_model_matrices(it->value("midna_mask", json::object()));
+    snapshot.midnaHand = parse_model_matrices(it->value("midna_hand", json::object()));
+    snapshot.midnaHair = parse_model_matrices(it->value("midna_hair", json::object()));
+    snapshot.midnaGlow = parse_model_matrices(it->value("midna_glow", json::object()));
+    snapshot.midnaHairShape = it->value("midna_hair_shape", 0);
+    if (snapshot.midnaHairShape < 0 || snapshot.midnaHairShape > 2) {
+        snapshot.midnaHairShape = 0;
+    }
+    return snapshot;
+}
+
+void apply_midna_matrices(RemoteLinkMatrixSnapshot& target,
+                          const RemoteLinkMatrixSnapshot& midna) {
+    target.midna = midna.midna;
+    target.midnaMask = midna.midnaMask;
+    target.midnaHand = midna.midnaHand;
+    target.midnaHair = midna.midnaHair;
+    target.midnaGlow = midna.midnaGlow;
+    target.midnaHairShape = midna.midnaHairShape;
+}
+
 template <size_t N>
 void parse_int16_array_field(const json& state, const char* key, std::array<int16_t, N>& out) {
     const auto it = state.find(key);
@@ -3624,6 +4483,48 @@ void parse_int16_array_field(const json& state, const char* key, std::array<int1
 }
 
 void apply_remote_tbox_bit(int stage, int flag);
+std::string local_udp_pose_sender_id();
+
+void forget_peer_state(const std::string& peerId) {
+    if (peerId.empty()) {
+        return;
+    }
+
+    sSession.peerPoses.erase(peerId);
+    sPeerProgressionStates.erase(peerId);
+    sPeerPresence.erase(peerId);
+    sPeerNames.erase(peerId);
+    sPeerColorSlots.erase(peerId);
+    sRemoteObjectsByPeer.erase(peerId);
+    sSession.pendingMidnaMatrices.erase(peerId);
+    sGanondorfRemoteHitLastSequenceByPeer.erase(peerId);
+    sGanondorfRemoteReactionLastSequenceByPeer.erase(peerId);
+    sGanondorfRemotePlayerDamageLastSequenceByPeer.erase(peerId);
+    sGanondorfRemotePlayerDamageCooldownByPeer.erase(peerId);
+    sPendingGanondorfRemoteHitEvents.erase(
+        std::remove_if(sPendingGanondorfRemoteHitEvents.begin(),
+                       sPendingGanondorfRemoteHitEvents.end(),
+                       [&](const GanondorfRemoteHitSnapshot& event) {
+                           return event.peerId == peerId;
+                       }),
+        sPendingGanondorfRemoteHitEvents.end());
+    sPendingGanondorfRemoteReactionEvents.erase(
+        std::remove_if(sPendingGanondorfRemoteReactionEvents.begin(),
+                       sPendingGanondorfRemoteReactionEvents.end(),
+                       [&](const GanondorfRemoteReactionSnapshot& event) {
+                           return event.peerId == peerId;
+                       }),
+        sPendingGanondorfRemoteReactionEvents.end());
+    sPendingGanondorfRemotePlayerDamageEvents.erase(
+        std::remove_if(sPendingGanondorfRemotePlayerDamageEvents.begin(),
+                       sPendingGanondorfRemotePlayerDamageEvents.end(),
+                       [&](const GanondorfRemotePlayerDamageEvent& event) {
+                           return event.peerId == peerId;
+                       }),
+        sPendingGanondorfRemotePlayerDamageEvents.end());
+    clear_progression_sync_cues_for_peer(peerId);
+    destroy_remote_link_dummy(peerId);
+}
 
 void remove_direct_peer(const std::string& peerId, const char* reason) {
     auto it = sSession.directPeers.find(peerId);
@@ -3636,10 +4537,7 @@ void remove_direct_peer(const std::string& peerId, const char* reason) {
     push_notification(peerName + " left");
     close_socket(it->second.sock);
     sSession.directPeers.erase(it);
-    sSession.peerPoses.erase(peerId);
-    sPeerNames.erase(peerId);
-    sPeerColorSlots.erase(peerId);
-    destroy_remote_link_dummy(peerId);
+    forget_peer_state(peerId);
 
     json left = {{"type", "peer_left"}, {"client_id", peerId}};
     for (auto& entry : sSession.directPeers) {
@@ -3649,7 +4547,7 @@ void remove_direct_peer(const std::string& peerId, const char* reason) {
     }
 }
 
-void broadcast_to_direct_peers(const json& message, const std::string& excludePeerId = "") {
+void broadcast_to_direct_peers(const json& message, const std::string& excludePeerId) {
     std::vector<std::string> failedPeers;
     for (auto& entry : sSession.directPeers) {
         DirectPeer& peer = entry.second;
@@ -3668,6 +4566,19 @@ void broadcast_to_direct_peers(const json& message, const std::string& excludePe
 
 bool should_forward_peer_message(const std::string& type) {
     return type != "hello" && type != "ping" && type != "pong" && type != "error";
+}
+
+void remember_peer_presence(const std::string& peerId, const json& message) {
+    if (peerId.empty() || peerId == local_udp_pose_sender_id()) {
+        return;
+    }
+
+    PeerPresence& presence = sPeerPresence[peerId];
+    presence.stage = message.value("stage", "");
+    presence.room = message.value("room", -1);
+    presence.layer = message.value("layer", -1);
+    presence.ageTicks = 0;
+    presence.valid = !presence.stage.empty();
 }
 
 void handle_message(const json& message, DirectPeer* sender = nullptr) {
@@ -3692,8 +4603,10 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         }
 
         sender->name = message.value("name", sender->name);
+        sender->wantsPuppet = message.value("want_puppet", sender->wantsPuppet);
+        sender->wantsMidna = message.value("want_midna", sender->wantsMidna);
         sPeerNames[sender->id] = sender->name;
-        assign_peer_color_slot(sender->id);
+        assign_player_color(sender->id);
         DuskLog.info("Multiplayer direct peer joined id={} name={} room={}", sender->id,
                      sender->name, message.value("room_id", ""));
         push_notification(sender->name + " joined");
@@ -3708,6 +4621,14 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         if (message.contains("name_labels")) {
             sNameLabelsEnabled = message.value("name_labels", sNameLabelsEnabled);
         }
+        if (message.contains("remote_collision")) {
+            sRemoteCollisionEnabled =
+                message.value("remote_collision", sRemoteCollisionEnabled);
+            DuskLog.info("Multiplayer remote collision synced from welcome {}",
+                         sRemoteCollisionEnabled ? "enabled" : "disabled");
+        }
+        sDirectRemoteWantsPuppet = message.value("want_puppet", sDirectRemoteWantsPuppet);
+        sDirectRemoteWantsMidna = message.value("want_midna", sDirectRemoteWantsMidna);
         DuskLog.info("Multiplayer joined room={} client_id={} peers={}",
                      message.value("room_id", ""), message.value("client_id", ""),
                      message.value("peers", json::array()).size());
@@ -3717,14 +4638,14 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         uint8_t nextColorSlot = 0;
         if (sSession.mode == NetworkMode::DirectJoin) {
             sPeerNames[kDirectPeerId] = "Host";
-            assign_peer_color_slot(kDirectPeerId, nextColorSlot++);
+            assign_player_color(kDirectPeerId, nextColorSlot++);
         }
         for (const json& peer : message.value("peers", json::array())) {
             const std::string peerId = peer.value("client_id", "");
             const std::string peerName = peer.value("name", peerId);
             if (!peerId.empty()) {
                 sPeerNames[peerId] = peerName;
-                assign_peer_color_slot(peerId, nextColorSlot++);
+                assign_player_color(peerId, nextColorSlot++);
             }
         }
         reserve_local_player_color_slot(nextColorSlot);
@@ -3734,24 +4655,84 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         const std::string peerName = message.value("name", peerId);
         if (!peerId.empty()) {
             sPeerNames[peerId] = peerName;
-            assign_peer_color_slot(peerId);
+            assign_player_color(peerId);
         }
         DuskLog.info("Multiplayer peer joined id={} name={}", message.value("client_id", ""),
                      message.value("name", ""));
         push_notification(display_name_for_peer(peerId) + " joined");
+    } else if (type == "midna_preference") {
+        const bool wantMidna = message.value("want_midna", true);
+        if (sender != nullptr) {
+            sender->wantsMidna = wantMidna;
+            DuskLog.info("Multiplayer peer Midna preference id={} want_midna={}",
+                         sender->id, sender->wantsMidna);
+        } else if (sSession.mode == NetworkMode::DirectJoin) {
+            sDirectRemoteWantsMidna = wantMidna;
+            DuskLog.info("Multiplayer host Midna preference want_midna={}",
+                         sDirectRemoteWantsMidna);
+        }
+    } else if (type == "puppet_preference") {
+        const bool wantPuppet = message.value("want_puppet", true);
+        const bool wantMidna = message.value("want_midna", wantPuppet);
+        if (sender != nullptr) {
+            sender->wantsPuppet = wantPuppet;
+            sender->wantsMidna = wantMidna;
+            DuskLog.info(
+                "Multiplayer peer puppet preference id={} want_puppet={} want_midna={}",
+                sender->id, sender->wantsPuppet, sender->wantsMidna);
+        } else if (sSession.mode == NetworkMode::DirectJoin) {
+            sDirectRemoteWantsPuppet = wantPuppet;
+            sDirectRemoteWantsMidna = wantMidna;
+            DuskLog.info("Multiplayer host puppet preference want_puppet={} want_midna={}",
+                         sDirectRemoteWantsPuppet, sDirectRemoteWantsMidna);
+        }
+    } else if (type == "presence") {
+        remember_peer_presence(resolve_peer_id(routedMessage), routedMessage);
     } else if (type == "name_labels") {
         if (sSession.mode == NetworkMode::DirectJoin) {
             sNameLabelsEnabled = message.value("enabled", sNameLabelsEnabled);
             DuskLog.info("Multiplayer name labels {}", sNameLabelsEnabled ? "enabled" : "disabled");
         }
+    } else if (type == "progression_state") {
+        const std::string peerId = resolve_peer_id(routedMessage);
+        if (!peerId.empty()) {
+            PeerProgressionState state;
+            state.valid = true;
+            state.ageTicks = 0;
+            state.stage = routedMessage.value("stage", "");
+            state.room = routedMessage.value("room", -1);
+            state.layer = routedMessage.value("layer", -1);
+            state.manualSyncReady = routedMessage.value("manual_sync_ready", false);
+            state.finalGanondorfReady = routedMessage.value("final_ganondorf_ready", false);
+            sPeerProgressionStates[peerId] = state;
+            DuskLog.info("Multiplayer progression state rx peer={} stage={} room={} layer={} "
+                         "ready={} final_ganondorf={} owner={}",
+                         peerId, state.stage, state.room, state.layer, state.manualSyncReady,
+                         state.finalGanondorfReady, sGanondorfFinalSyncOwnerPeerId);
+            if (peerId == sGanondorfFinalSyncOwnerPeerId && state.stage != "D_MN09B" &&
+                sLatestGanondorfSyncState.valid)
+            {
+                release_ganondorf_final_sync("owner_progression_stage", state.stage);
+            }
+            if (!state.finalGanondorfReady && state.stage != "D_MN09B" &&
+                state.stage != kProgressionCueFinalGanondorfStage)
+            {
+                clear_progression_sync_cue_for_peer(peerId, "final_ganondorf_entered");
+            }
+            maybe_show_progression_sync_prompt_for_pose_stage(peerId, state.stage,
+                                                              state.finalGanondorfReady);
+        }
+    } else if (type == "remote_collision") {
+        if (sSession.mode == NetworkMode::DirectJoin) {
+            sRemoteCollisionEnabled = message.value("enabled", sRemoteCollisionEnabled);
+            DuskLog.info("Multiplayer remote collision synced {}",
+                         sRemoteCollisionEnabled ? "enabled" : "disabled");
+        }
     } else if (type == "peer_left") {
         const std::string leftPeerId = resolve_peer_id(routedMessage);
         const std::string peerName = display_name_for_peer(leftPeerId);
         DuskLog.info("Multiplayer peer left id={}", leftPeerId);
-        sSession.peerPoses.erase(leftPeerId);
-        sPeerNames.erase(leftPeerId);
-        sPeerColorSlots.erase(leftPeerId);
-        destroy_remote_link_dummy(leftPeerId);
+        forget_peer_state(leftPeerId);
         push_notification(peerName + " left");
     } else if (type == "save_snapshot") {
         if (message.value("manual_sync", false) && message.contains("full_state")) {
@@ -3937,10 +4918,16 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         }
         DuskLog.info("Multiplayer applied save snapshot from peer");
     } else if (type == "sync_request") {
+        const std::string cueKey = routedMessage.value("cue_key", "");
         if (dComIfGp_getStageStagInfo() == nullptr || dComIfGp_event_runCheck()) {
             DuskLog.warn("Multiplayer manual sync request ignored while stage/event is not ready");
         } else {
-            const std::string cueKey = routedMessage.value("cue_key", "");
+            if (sender != nullptr) {
+                mark_progression_sync_cue_handled(sender->id, cueKey, "sync_request_received");
+            } else {
+                const std::string requesterId = routedMessage.value("client_id", "");
+                mark_progression_sync_cue_handled(requesterId, cueKey, "sync_request_received");
+            }
             if (!is_local_state_ready_for_cue(cueKey)) {
                 DuskLog.info(
                     "Multiplayer manual sync request deferred cue={} (local state not ready yet)",
@@ -3970,7 +4957,279 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                 }
             }
         }
+    } else if (type == "ganondorf_owner_claim") {
+        if (!remote_object_sync_enabled()) {
+            return;
+        }
+
+        const std::string peerId = resolve_peer_id(routedMessage);
+        const std::string syncId = routedMessage.value("sync_id", "");
+        const std::string ownerPeerId = routedMessage.value("owner_peer_id", peerId);
+        if (syncId != kGanondorfFinalSyncId || ownerPeerId.empty()) {
+            return;
+        }
+
+        if (sSession.mode == NetworkMode::DirectHost) {
+            if (sGanondorfFinalSyncOwnerPeerId.empty()) {
+                set_ganondorf_final_sync_owner(ownerPeerId, "direct_host_peer_claim");
+            } else {
+                broadcast_ganondorf_final_sync_owner();
+            }
+            DuskLog.info("Multiplayer Ganondorf sync owner_claim_rx peer={} requested={} owner={}",
+                         peerId, ownerPeerId, sGanondorfFinalSyncOwnerPeerId);
+        }
+    } else if (type == "ganondorf_owner") {
+        if (!remote_object_sync_enabled()) {
+            return;
+        }
+
+        const std::string syncId = routedMessage.value("sync_id", "");
+        const std::string ownerPeerId = routedMessage.value("owner_peer_id", "");
+        if (syncId == kGanondorfFinalSyncId && !ownerPeerId.empty()) {
+            set_ganondorf_final_sync_owner(ownerPeerId, "owner_broadcast");
+        }
+    } else if (type == "ganondorf_hit") {
+        const std::string peerId = resolve_peer_id(routedMessage);
+        if (peerId.empty() || peerId == local_udp_pose_sender_id()) {
+            return;
+        }
+
+        const json state = routedMessage.value("state", json::object());
+        const std::string syncId = state.value("sync_id", "");
+        const std::string stage = state.value("stage", "");
+        if (syncId != kGanondorfFinalSyncId || stage != "D_MN09B") {
+            static uint32_t sGanondorfHitRejectLogTicks = 0;
+            if ((sGanondorfHitRejectLogTicks++ % 60) == 0) {
+                DuskLog.info("Multiplayer Ganondorf hit rx_reject reason=bad_domain peer={} "
+                             "sync_id={} stage={}",
+                             peerId, syncId, stage);
+            }
+            return;
+        }
+
+        GanondorfRemoteHitSnapshot hit;
+        hit.valid = true;
+        hit.peerId = peerId;
+        hit.sequence = routedMessage.value("sequence", 0U);
+        hit.procId = state.value("proc_id", 0);
+        hit.cutType = state.value("cut_type", 0);
+        hit.cutCount = state.value("cut_count", 0);
+        hit.jumpCancelTurn = state.value("jump_cancel_turn", false);
+        hit.confirmedHit = state.value("confirmed_hit", false);
+        hit.attackFrame = state.value("attack_frame", 0.0f);
+        hit.linkAngleY = state.value("link_angle_y", 0);
+        hit.x = state.value("x", 0.0f);
+        hit.y = state.value("y", 0.0f);
+        hit.z = state.value("z", 0.0f);
+
+        if (!hit.confirmedHit && !remote_object_sync_enabled()) {
+            return;
+        }
+
+        sPendingGanondorfRemoteHitEvents.push_back(hit);
+
+        DuskLog.info("Multiplayer Ganondorf hit rx peer={} seq={} proc={} cut_type={} cut_count={} "
+                     "jump_cancel={} confirmed={} frame={} angle={} pos=({}, {}, {}) owner={} "
+                     "local_owner={}",
+                     hit.peerId, hit.sequence, hit.procId, hit.cutType, hit.cutCount,
+                     hit.jumpCancelTurn, hit.confirmedHit, hit.attackFrame, hit.linkAngleY,
+                     hit.x, hit.y, hit.z, sGanondorfFinalSyncOwnerPeerId,
+                     sGanondorfFinalSyncOwnerPeerId == local_udp_pose_sender_id());
+    } else if (type == "ganondorf_reaction") {
+        if (!remote_object_sync_enabled()) {
+            return;
+        }
+
+        const std::string peerId = resolve_peer_id(routedMessage);
+        if (peerId.empty() || peerId == local_udp_pose_sender_id()) {
+            return;
+        }
+
+        const json state = routedMessage.value("state", json::object());
+        const std::string syncId = state.value("sync_id", "");
+        const std::string stage = state.value("stage", "");
+        if (syncId != kGanondorfFinalSyncId || stage != "D_MN09B") {
+            return;
+        }
+
+        GanondorfRemoteReactionSnapshot reaction;
+        reaction.valid = true;
+        reaction.peerId = peerId;
+        reaction.sequence = routedMessage.value("sequence", 0U);
+        reaction.actionMode = state.value("action_mode", 0);
+        reaction.moveMode = state.value("move_mode", 0);
+        reaction.damageInvulnerabilityTimer = state.value("damage_invuln", 0);
+        reaction.downHitTimer = state.value("down_hit_timer", 0);
+        reaction.downHitCount = state.value("down_hit_count", 0);
+        reaction.downGate = state.value("down_gate", 0);
+        reaction.health = state.value("health", 0);
+        reaction.procId = state.value("proc_id", 0);
+        reaction.cutType = state.value("cut_type", 0);
+        reaction.cutCount = state.value("cut_count", 0);
+        reaction.jumpCancelTurn = state.value("jump_cancel_turn", false);
+        reaction.linkAngleY = state.value("link_angle_y", 0);
+        reaction.linkX = state.value("link_x", 0.0f);
+        reaction.linkY = state.value("link_y", 0.0f);
+        reaction.linkZ = state.value("link_z", 0.0f);
+        reaction.ganonX = state.value("ganon_x", 0.0f);
+        reaction.ganonY = state.value("ganon_y", 0.0f);
+        reaction.ganonZ = state.value("ganon_z", 0.0f);
+        sPendingGanondorfRemoteReactionEvents.push_back(reaction);
+
+        DuskLog.info("Multiplayer Ganondorf reaction rx peer={} seq={} action={} move={} "
+                     "health={} invuln={} proc={} cut_type={} link=({}, {}, {}) "
+                     "ganon=({}, {}, {}) local_owner={}",
+                     reaction.peerId, reaction.sequence, reaction.actionMode,
+                     reaction.moveMode, reaction.health,
+                     reaction.damageInvulnerabilityTimer, reaction.procId,
+                     reaction.cutType, reaction.linkX, reaction.linkY, reaction.linkZ,
+                     reaction.ganonX, reaction.ganonY, reaction.ganonZ,
+                     sGanondorfFinalSyncOwnerPeerId == local_udp_pose_sender_id());
+    } else if (type == "ganondorf_player_damage") {
+        if (!remote_object_sync_enabled()) {
+            return;
+        }
+
+        const std::string peerId = resolve_peer_id(routedMessage);
+        const json state = routedMessage.value("state", json::object());
+        const std::string syncId = state.value("sync_id", "");
+        const std::string stage = state.value("stage", "");
+        const std::string targetPeerId = state.value("target_peer_id", "");
+        if (syncId != kGanondorfFinalSyncId || stage != "D_MN09B" ||
+            targetPeerId != local_udp_pose_sender_id())
+        {
+            return;
+        }
+        if (!ganondorf_final_sync_sender_is_valid_owner(peerId, syncId)) {
+            return;
+        }
+
+        GanondorfRemotePlayerDamageEvent damage;
+        damage.valid = true;
+        damage.peerId = peerId;
+        damage.sequence = routedMessage.value("sequence", 0U);
+        damage.damageAmount = state.value("damage", 2);
+        damage.attackSpl = state.value("attack_spl", 0);
+        damage.x = state.value("x", 0.0f);
+        damage.y = state.value("y", 0.0f);
+        damage.z = state.value("z", 0.0f);
+        sPendingGanondorfRemotePlayerDamageEvents.push_back(damage);
+        DuskLog.info("Multiplayer Ganondorf player_damage rx owner={} seq={} damage={} "
+                     "spl={} pos=({}, {}, {}) target={}",
+                     damage.peerId, damage.sequence, damage.damageAmount, damage.attackSpl,
+                     damage.x, damage.y, damage.z, targetPeerId);
+    } else if (type == "ganondorf_state") {
+        if (!remote_object_sync_enabled()) {
+            static uint32_t sGanondorfRxSyncOffLogTicks = 0;
+            if ((sGanondorfRxSyncOffLogTicks++ % 60) == 0) {
+                DuskLog.info("Multiplayer Ganondorf sync rx_reject reason=sync_world_off");
+            }
+            return;
+        }
+
+        const std::string peerId = resolve_peer_id(routedMessage);
+        const json state = routedMessage.value("state", json::object());
+        const std::string syncId = state.value("sync_id", "");
+        if (!ganondorf_final_sync_sender_is_valid_owner(peerId, syncId)) {
+            return;
+        }
+
+        GanondorfSyncSnapshot snapshot;
+        snapshot.valid = true;
+        snapshot.sequence = routedMessage.value("sequence", 0U);
+        snapshot.ageTicks = 0;
+        snapshot.ownerPeerId = state.value("owner_peer_id", peerId);
+        snapshot.stage = state.value("stage", "");
+        snapshot.room = state.value("room", -1);
+        snapshot.health = state.value("health", 0);
+        snapshot.actionMode = state.value("action_mode", 0);
+        snapshot.moveMode = state.value("move_mode", 0);
+        snapshot.drawHorse = state.value("draw_horse", false);
+        snapshot.damageInvulnerabilityTimer = state.value("damage_invuln", 0);
+        snapshot.downHitTimer = state.value("down_hit_timer", 0);
+        snapshot.downHitCount = state.value("down_hit_count", 0);
+        snapshot.downGate = state.value("down_gate", 0);
+        snapshot.x = state.value("x", 0.0f);
+        snapshot.y = state.value("y", 0.0f);
+        snapshot.z = state.value("z", 0.0f);
+        snapshot.oldX = state.value("old_x", snapshot.x);
+        snapshot.oldY = state.value("old_y", snapshot.y);
+        snapshot.oldZ = state.value("old_z", snapshot.z);
+        snapshot.shapeAngleX = state.value("shape_angle_x", 0);
+        snapshot.shapeAngleY = state.value("shape_angle_y", 0);
+        snapshot.shapeAngleZ = state.value("shape_angle_z", 0);
+        snapshot.currentAngleX = state.value("current_angle_x", 0);
+        snapshot.currentAngleY = state.value("current_angle_y", 0);
+        snapshot.currentAngleZ = state.value("current_angle_z", 0);
+        snapshot.speedX = state.value("speed_x", 0.0f);
+        snapshot.speedY = state.value("speed_y", 0.0f);
+        snapshot.speedZ = state.value("speed_z", 0.0f);
+        snapshot.speedF = state.value("speed_f", 0.0f);
+        snapshot.anmId = state.value("anm_id", 0);
+        snapshot.anmPlayMode = state.value("anm_play_mode", 0);
+        snapshot.anmFrame = state.value("anm_frame", 0.0f);
+        snapshot.anmRate = state.value("anm_rate", 1.0f);
+
+        if (snapshot.stage != "D_MN09B") {
+            static uint32_t sGanondorfRxStageRejectLogTicks = 0;
+            if ((sGanondorfRxStageRejectLogTicks++ % 60) == 0) {
+                DuskLog.info("Multiplayer Ganondorf sync rx_reject reason=wrong_stage peer={} "
+                             "stage={} seq={}",
+                             peerId, snapshot.stage, snapshot.sequence);
+            }
+            return;
+        }
+        if (snapshot.ownerPeerId != sGanondorfFinalSyncOwnerPeerId) {
+            static uint32_t sGanondorfRxOwnerFieldRejectLogTicks = 0;
+            if ((sGanondorfRxOwnerFieldRejectLogTicks++ % 60) == 0) {
+                DuskLog.info("Multiplayer Ganondorf sync rx_reject reason=owner_field_mismatch "
+                             "peer={} owner_field={} current_owner={} seq={}",
+                             peerId, snapshot.ownerPeerId, sGanondorfFinalSyncOwnerPeerId,
+                             snapshot.sequence);
+            }
+            return;
+        }
+        if (sLatestGanondorfSyncState.valid &&
+            snapshot.sequence <= sLatestGanondorfSyncState.sequence)
+        {
+            static uint32_t sGanondorfRxStaleRejectLogTicks = 0;
+            if ((sGanondorfRxStaleRejectLogTicks++ % 60) == 0) {
+                DuskLog.info("Multiplayer Ganondorf sync rx_reject reason=stale_sequence peer={} "
+                             "seq={} last_seq={}",
+                             peerId, snapshot.sequence, sLatestGanondorfSyncState.sequence);
+            }
+            return;
+        }
+
+        sLatestGanondorfSyncState = snapshot;
+        static uint32_t sGanondorfSyncRxLogTicks = 0;
+        if ((sGanondorfSyncRxLogTicks++ % 60) == 0) {
+            DuskLog.info("Multiplayer Ganondorf sync rx owner={} seq={} action={} move={} "
+                         "health={} pos=({}, {}, {}) anm={} frame={}",
+                         snapshot.ownerPeerId, snapshot.sequence, snapshot.actionMode,
+                         snapshot.moveMode, snapshot.health, snapshot.x, snapshot.y, snapshot.z,
+                         snapshot.anmId, snapshot.anmFrame);
+        }
+    } else if (type == "midna_pose") {
+        if (!wants_remote_midna_matrices()) {
+            return;
+        }
+        const std::string peerId = resolve_peer_id(routedMessage);
+        const uint32_t sequence = routedMessage.value("sequence", 0U);
+        const json state = routedMessage.value("state", json::object());
+        RemoteLinkMatrixSnapshot midnaMatrices = parse_midna_link_matrices(state);
+        sSession.pendingMidnaMatrices[peerId] = {sequence, midnaMatrices};
+
+        auto existing = sSession.peerPoses.find(peerId);
+        if (existing != sSession.peerPoses.end() && existing->second.valid &&
+            sequence >= existing->second.sequence)
+        {
+            apply_midna_matrices(existing->second.linkMatrices, midnaMatrices);
+        }
     } else if (type == "pose") {
+        if (!wants_remote_puppet_matrices()) {
+            return;
+        }
         const std::string peerId = resolve_peer_id(routedMessage);
         const uint32_t sequence = routedMessage.value("sequence", 0U);
         auto existing = sSession.peerPoses.find(peerId);
@@ -3989,16 +5248,30 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         pose.stage = state.value("stage", "");
         pose.room = state.value("room", -1);
         pose.layer = state.value("layer", -1);
+        if (peerId == sGanondorfFinalSyncOwnerPeerId && pose.stage != "D_MN09B" &&
+            sLatestGanondorfSyncState.valid)
+        {
+            release_ganondorf_final_sync("owner_pose_stage", pose.stage);
+        }
+        remember_peer_presence(peerId, {
+            {"stage", pose.stage},
+            {"room", pose.room},
+            {"layer", pose.layer},
+        });
         pose.x = state.value("x", 0.0f);
         pose.y = state.value("y", 0.0f);
         pose.z = state.value("z", 0.0f);
         pose.angleY = state.value("angle_y", 0);
+        pose.finalGanondorfReady = state.value("final_ganondorf_ready", false);
         pose.procId = state.value("proc_id", 0);
         pose.procVar0 = state.value("proc_v0", 0);
         pose.procVar1 = state.value("proc_v1", 0);
         pose.procVar2 = state.value("proc_v2", 0);
         pose.procVar3 = state.value("proc_v3", 0);
         pose.procVar5 = state.value("proc_v5", 0);
+        pose.cutType = state.value("cut_type", 0);
+        pose.cutCount = state.value("cut_count", 0);
+        pose.jumpCancelTurn = state.value("jump_cancel_turn", false);
         pose.manualSyncReady = state.value("manual_sync_ready", false);
         pose.underFrame = state.value("under_frame", 0.0f);
         pose.underBck0 = state.value("under_bck0", 0);
@@ -4042,6 +5315,12 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         pose.itemActorBombFlash = state.value("item_actor_bomb_flash", -1);
         pose.rideActorKind = state.value("ride_actor_kind", REMOTE_RIDE_ACTOR_NONE);
         pose.linkMatrices = parse_link_matrices(state);
+        auto pendingMidna = sSession.pendingMidnaMatrices.find(peerId);
+        if (pendingMidna != sSession.pendingMidnaMatrices.end() &&
+            pendingMidna->second.first >= sequence)
+        {
+            apply_midna_matrices(pose.linkMatrices, pendingMidna->second.second);
+        }
         pose.audioEvents = parse_audio_events(state);
         if (sDummyTraceEnabled) {
             const bool hadExisting = existing != sSession.peerPoses.end() && existing->second.valid;
@@ -4089,8 +5368,6 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                          peerId, pose.isWolf ? "wolf" : "human", pose.stage, pose.room, pose.x,
                          pose.y, pose.z);
         }
-        maybe_show_progression_sync_prompt_for_pose_stage(
-            peerId, pose.stage, state.value("final_ganondorf_ready", false));
     } else if (type == "event_bit") {
         const uint16_t flag = routedMessage.value("flag", 0U);
         const bool set = routedMessage.value("set", true);
@@ -4622,7 +5899,7 @@ void setup_direct_join_udp() {
 }
 
 bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
-                           const std::string& senderId) {
+                           const std::string& senderId, uint8_t packetType = 2) {
     if (sSession.udpSock == INVALID_SOCKET) {
         return false;
     }
@@ -4668,7 +5945,7 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
         header.magic[2] = 'P';
         header.magic[3] = 'U';
         header.version = 1;
-        header.type = 2;
+        header.type = packetType;
         header.headerSize = sizeof(UdpPoseChunkHeader);
         header.sequence = sequence;
         header.chunkIndex = chunkIndex;
@@ -4717,6 +5994,7 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
         };
         static const char* const animKeys[] = {
             "proc_id", "proc_v0", "proc_v1", "proc_v2", "proc_v3", "proc_v5",
+            "cut_type", "cut_count", "jump_cancel_turn",
             "under_frame", "under_bck0", "under_frame0", "under_rate0", "upper_bck2",
             "upper_frame2", "upper_rate2",
         };
@@ -4789,11 +6067,209 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
     return true;
 }
 
-bool send_udp_pose_to_peer(DirectPeer& peer, const json& message, const std::string& senderId) {
+const char* remote_object_kind_name(uint8_t objectKind) {
+    switch (objectKind) {
+    case REMOTE_OBJECT_BOMB:
+        return "bomb";
+    default:
+        return "unknown";
+    }
+}
+
+void trace_udp_remote_object_tx(const UdpRemoteObjectPacket& object, size_t bytes) {
+    if (!packet_trace_enabled()) {
+        return;
+    }
+
+    static uint32_t sBombObjectTraceCount = 0;
+    if (sBombObjectTraceCount < 32 || object.exTime <= 20) {
+        ++sBombObjectTraceCount;
+        DuskLog.info(
+            "MP_PACKET_TX category=object_udp type={} bytes={} payload={} seq={} id={} "
+            "object_kind={} payload_kind={} room={} ex_time={} flags={}",
+            remote_object_kind_name(object.objectKind), bytes, sizeof(UdpRemoteObjectPacket),
+            object.sequence, object.objectId, static_cast<int>(object.objectKind),
+            static_cast<int>(object.kind), static_cast<int>(object.room),
+            static_cast<int>(object.exTime), static_cast<int>(object.flags));
+    }
+}
+
+bool send_udp_remote_object_to_addr(const sockaddr_in& addr, const UdpRemoteObjectPacket& object,
+                                    const std::string& senderId) {
+    if (sSession.udpSock == INVALID_SOCKET) {
+        return false;
+    }
+
+    std::array<uint8_t, sizeof(UdpPoseChunkHeader) + sizeof(UdpRemoteObjectPacket)> packet{};
+    UdpPoseChunkHeader header{};
+    header.magic[0] = 'D';
+    header.magic[1] = 'M';
+    header.magic[2] = 'P';
+    header.magic[3] = 'U';
+    header.version = 1;
+    header.type = 3;
+    header.headerSize = sizeof(UdpPoseChunkHeader);
+    header.sequence = object.sequence;
+    header.chunkIndex = 0;
+    header.chunkCount = 1;
+    header.uncompressedSize = sizeof(UdpRemoteObjectPacket);
+    header.compressedSize = sizeof(UdpRemoteObjectPacket);
+    header.payloadSize = sizeof(UdpRemoteObjectPacket);
+    set_udp_header_sender(header, senderId);
+
+    std::memcpy(packet.data(), &header, sizeof(header));
+    std::memcpy(packet.data() + sizeof(header), &object, sizeof(object));
+    const int packetSize = static_cast<int>(sizeof(header) + sizeof(object));
+    const int sent =
+        sendto(sSession.udpSock, reinterpret_cast<const char*>(packet.data()), packetSize, 0,
+               reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+    if (sent != packetSize) {
+        return false;
+    }
+
+    trace_udp_remote_object_tx(object, packetSize);
+    return true;
+}
+
+bool send_udp_remote_object_to_peer(DirectPeer& peer, const UdpRemoteObjectPacket& object,
+                                    const std::string& senderId) {
     if (!peer.welcomed || !peer.udpAddrKnown) {
         return false;
     }
+    return send_udp_remote_object_to_addr(peer.udpAddr, object, senderId);
+}
+
+bool broadcast_udp_remote_object_to_direct_peers(const UdpRemoteObjectPacket& object,
+                                                 const std::string& senderId,
+                                                 const std::string& excludePeerId = "") {
+    bool sentAny = false;
+    for (auto& entry : sSession.directPeers) {
+        DirectPeer& peer = entry.second;
+        if (peer.id == excludePeerId) {
+            continue;
+        }
+        sentAny = send_udp_remote_object_to_peer(peer, object, senderId) || sentAny;
+    }
+    return sentAny || sSession.directPeers.empty();
+}
+
+bool send_direct_remote_object_udp(const UdpRemoteObjectPacket& object) {
+    if (!remote_object_sync_enabled()) {
+        return false;
+    }
+
+    if (sSession.mode == NetworkMode::DirectHost) {
+        return broadcast_udp_remote_object_to_direct_peers(object, local_udp_pose_sender_id());
+    }
+
+    if (sSession.mode == NetworkMode::DirectJoin && sSession.udpRemoteAddrKnown &&
+        !sSession.clientId.empty())
+    {
+        return send_udp_remote_object_to_addr(sSession.udpRemoteAddr, object,
+                                              local_udp_pose_sender_id());
+    }
+
+    return false;
+}
+
+std::string stage_from_pose_message(const json& message, const std::string& senderId) {
+    const std::string directStage = message.value("stage", "");
+    if (!directStage.empty()) {
+        return directStage;
+    }
+
+    const json state = message.value("state", json::object());
+    const std::string stateStage = state.value("stage", "");
+    if (!stateStage.empty()) {
+        return stateStage;
+    }
+
+    if (!senderId.empty() && senderId != local_udp_pose_sender_id()) {
+        const auto poseIt = sSession.peerPoses.find(senderId);
+        if (poseIt != sSession.peerPoses.end() && poseIt->second.valid) {
+            return poseIt->second.stage;
+        }
+    }
+
+    return "";
+}
+
+std::string known_peer_stage(const std::string& peerId) {
+    const auto presenceIt = sPeerPresence.find(peerId);
+    if (presenceIt != sPeerPresence.end() && presenceIt->second.valid &&
+        !presenceIt->second.stage.empty())
+    {
+        return presenceIt->second.stage;
+    }
+
+    const auto poseIt = sSession.peerPoses.find(peerId);
+    if (poseIt == sSession.peerPoses.end() || !poseIt->second.valid) {
+        return "";
+    }
+    return poseIt->second.stage;
+}
+
+bool stages_match_or_unknown(std::string_view sourceStage, std::string_view targetStage) {
+    return sourceStage.empty() || targetStage.empty() || sourceStage == targetStage;
+}
+
+bool should_send_visual_pose_to_peer(const DirectPeer& peer, const json& message,
+                                     const std::string& senderId) {
+    const std::string sourceStage = stage_from_pose_message(message, senderId);
+    const std::string targetStage = known_peer_stage(peer.id);
+    const bool shouldSend = stages_match_or_unknown(sourceStage, targetStage);
+    if (!shouldSend) {
+        static uint32_t sStageSkipLogCount = 0;
+        ++sStageSkipLogCount;
+        if (sStageSkipLogCount <= 30 || (sStageSkipLogCount % 300) == 0) {
+            DuskLog.info(
+                "Multiplayer visual pose tx skipped target={} sender={} reason=stage_mismatch "
+                "source_stage={} target_stage={}",
+                peer.id, senderId, sourceStage, targetStage);
+        }
+    }
+    return shouldSend;
+}
+
+bool should_send_visual_pose_to_direct_host(const json& message) {
+    if (!sDirectRemoteWantsPuppet) {
+        return false;
+    }
+
+    const std::string sourceStage = stage_from_pose_message(message, local_udp_pose_sender_id());
+    const std::string hostStage = known_peer_stage(kDirectPeerId);
+    const bool shouldSend = stages_match_or_unknown(sourceStage, hostStage);
+    if (!shouldSend) {
+        static uint32_t sHostStageSkipLogCount = 0;
+        ++sHostStageSkipLogCount;
+        if (sHostStageSkipLogCount <= 30 || (sHostStageSkipLogCount % 300) == 0) {
+            DuskLog.info(
+                "Multiplayer visual pose tx skipped target=host reason=stage_mismatch "
+                "source_stage={} target_stage={}",
+                sourceStage, hostStage);
+        }
+    }
+    return shouldSend;
+}
+
+bool send_udp_pose_to_peer(DirectPeer& peer, const json& message, const std::string& senderId) {
+    if (!peer.wantsPuppet || !peer.welcomed || !peer.udpAddrKnown) {
+        return false;
+    }
+    if (!should_send_visual_pose_to_peer(peer, message, senderId)) {
+        return false;
+    }
     return send_udp_pose_to_addr(peer.udpAddr, message, senderId);
+}
+
+bool send_udp_midna_to_peer(DirectPeer& peer, const json& message, const std::string& senderId) {
+    if (!peer.wantsPuppet || !peer.wantsMidna || !peer.welcomed || !peer.udpAddrKnown) {
+        return false;
+    }
+    if (!should_send_visual_pose_to_peer(peer, message, senderId)) {
+        return false;
+    }
+    return send_udp_pose_to_addr(peer.udpAddr, message, senderId, 4);
 }
 
 bool broadcast_udp_pose_to_direct_peers(const json& message, const std::string& senderId,
@@ -4814,7 +6290,8 @@ bool send_direct_pose_udp(const json& message) {
         return broadcast_udp_pose_to_direct_peers(message, local_udp_pose_sender_id());
     }
 
-    if (sSession.mode == NetworkMode::DirectJoin && sSession.udpRemoteAddrKnown &&
+    if (sSession.mode == NetworkMode::DirectJoin && should_send_visual_pose_to_direct_host(message) &&
+        sSession.udpRemoteAddrKnown &&
         !sSession.clientId.empty())
     {
         return send_udp_pose_to_addr(sSession.udpRemoteAddr, message, local_udp_pose_sender_id());
@@ -4823,10 +6300,44 @@ bool send_direct_pose_udp(const json& message) {
     return false;
 }
 
-bool send_pose_message(const json& message) {
-    if ((sSession.mode == NetworkMode::DirectHost || sSession.mode == NetworkMode::DirectJoin) &&
-        send_direct_pose_udp(message))
+bool send_direct_midna_udp(const json& message) {
+    if (sSession.mode == NetworkMode::DirectHost) {
+        bool sentAny = false;
+        for (auto& entry : sSession.directPeers) {
+            DirectPeer& peer = entry.second;
+            sentAny = send_udp_midna_to_peer(peer, message, local_udp_pose_sender_id()) || sentAny;
+        }
+        return sentAny || sSession.directPeers.empty();
+    }
+
+    if (sSession.mode == NetworkMode::DirectJoin && sDirectRemoteWantsMidna &&
+        should_send_visual_pose_to_direct_host(message) &&
+        sSession.udpRemoteAddrKnown && !sSession.clientId.empty())
     {
+        return send_udp_pose_to_addr(sSession.udpRemoteAddr, message,
+                                     local_udp_pose_sender_id(), 4);
+    }
+
+    return false;
+}
+
+bool send_pose_message(const json& message) {
+    if (sSession.mode == NetworkMode::DirectHost || sSession.mode == NetworkMode::DirectJoin) {
+        // Direct visual pose traffic is optional per receiver. If no direct
+        // receiver wants puppets, do not fall back to JSON/TCP and preserve
+        // the bandwidth cost the preference is meant to avoid.
+        send_direct_pose_udp(message);
+        return true;
+    }
+    return send_json(message);
+}
+
+bool send_midna_pose_message(const json& message) {
+    if (sSession.mode == NetworkMode::DirectHost || sSession.mode == NetworkMode::DirectJoin) {
+        // Optional visual channels must not fall back to the generic JSON path
+        // when every direct receiver opted out. That would preserve the exact
+        // bandwidth cost the preference is meant to avoid.
+        send_direct_midna_udp(message);
         return true;
     }
     return send_json(message);
@@ -4843,17 +6354,87 @@ void process_udp_pose_message(json message, const std::string& senderId) {
             return;
         }
         handle_message(message);
-        broadcast_udp_pose_to_direct_peers(message, routedSender, routedSender);
+        if (message.value("type", "") == "midna_pose") {
+            for (auto& entry : sSession.directPeers) {
+                DirectPeer& peer = entry.second;
+                if (peer.id != routedSender) {
+                    send_udp_midna_to_peer(peer, message, routedSender);
+                }
+            }
+        } else {
+            broadcast_udp_pose_to_direct_peers(message, routedSender, routedSender);
+        }
         return;
     }
 
     handle_message(message);
 }
 
+void process_udp_remote_object_packet(const UdpRemoteObjectPacket& object,
+                                      const std::string& senderId) {
+    if (!remote_object_sync_enabled() || object.objectKind == REMOTE_OBJECT_NONE) {
+        return;
+    }
+
+    std::string routedSender = senderId.empty() ? kDirectPeerId : senderId;
+    if (routedSender == local_udp_pose_sender_id()) {
+        return;
+    }
+
+    if (sSession.mode == NetworkMode::DirectHost) {
+        if (routedSender == kDirectPeerId ||
+            sSession.directPeers.find(routedSender) == sSession.directPeers.end())
+        {
+            return;
+        }
+        broadcast_udp_remote_object_to_direct_peers(object, routedSender, routedSender);
+    }
+
+    RemoteObjectSnapshot snapshot;
+    snapshot.valid = true;
+    snapshot.peerId = routedSender;
+    snapshot.objectKind = object.objectKind;
+    snapshot.objectId = object.objectId;
+    snapshot.sequence = object.sequence;
+    snapshot.ageTicks = 0;
+    size_t stageLen = 0;
+    while (stageLen < sizeof(object.stageName) && object.stageName[stageLen] != '\0') {
+        ++stageLen;
+    }
+    snapshot.stage = std::string(object.stageName, stageLen);
+    snapshot.room = object.room;
+    snapshot.x = object.x;
+    snapshot.y = object.y;
+    snapshot.z = object.z;
+    snapshot.angleY = object.angleY;
+    snapshot.kind = object.kind;
+    snapshot.exTime = object.exTime;
+    snapshot.active = (object.flags & UDP_OBJECT_ACTIVE) != 0;
+    snapshot.exploding = (object.flags & UDP_OBJECT_EXPLODING) != 0;
+
+    auto& peerObjects = sRemoteObjectsByPeer[routedSender];
+    auto existing = peerObjects.find(snapshot.objectId);
+    if (existing != peerObjects.end() && snapshot.sequence <= existing->second.sequence) {
+        return;
+    }
+    peerObjects[snapshot.objectId] = snapshot;
+
+    static uint32_t sBombObjectRxTraceCount = 0;
+    if (sBombObjectRxTraceCount < 32 || snapshot.exTime <= 20) {
+        ++sBombObjectRxTraceCount;
+        DuskLog.info("MP_PACKET_RX category=object_udp type={} peer={} seq={} id={} "
+                     "object_kind={} payload_kind={} room={} ex_time={} active={} exploding={}",
+                     remote_object_kind_name(snapshot.objectKind), routedSender,
+                     snapshot.sequence, snapshot.objectId, static_cast<int>(snapshot.objectKind),
+                     snapshot.kind, snapshot.room, snapshot.exTime, snapshot.active,
+                     snapshot.exploding);
+    }
+}
+
 void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payload,
                            const sockaddr_in& fromAddr) {
     if (std::memcmp(header.magic, "DMPU", 4) != 0 || header.version != 1 ||
-        (header.type != 1 && header.type != 2) ||
+        (header.type != 1 && header.type != 2 && header.type != 3 && header.type != 4) ||
         header.headerSize != sizeof(UdpPoseChunkHeader) || header.payloadSize == 0 ||
         header.chunkCount == 0 || header.chunkIndex >= header.chunkCount ||
         header.compressedSize == 0 || header.compressedSize > kUdpPoseMaxCompressedBytes ||
@@ -4866,6 +6447,8 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
     if (senderId.empty()) {
         senderId = kDirectPeerId;
     }
+    const std::string reassemblySenderId =
+        header.type == 4 ? senderId + "#midna" : senderId;
 
     if (sSession.mode == NetworkMode::DirectHost) {
         auto peerIt = sSession.directPeers.find(senderId);
@@ -4878,14 +6461,28 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
         return;
     }
 
-    auto lastProcessedIt = sSession.udpPoseLastProcessedSequence.find(senderId);
+    if (header.type == 3) {
+        if (header.chunkIndex != 0 || header.chunkCount != 1 ||
+            header.payloadSize != sizeof(UdpRemoteObjectPacket) ||
+            header.uncompressedSize != sizeof(UdpRemoteObjectPacket) ||
+            header.compressedSize != sizeof(UdpRemoteObjectPacket))
+        {
+            return;
+        }
+        UdpRemoteObjectPacket object{};
+        std::memcpy(&object, payload, sizeof(object));
+        process_udp_remote_object_packet(object, senderId);
+        return;
+    }
+
+    auto lastProcessedIt = sSession.udpPoseLastProcessedSequence.find(reassemblySenderId);
     if (lastProcessedIt != sSession.udpPoseLastProcessedSequence.end() &&
         header.sequence <= lastProcessedIt->second)
     {
         return;
     }
 
-    auto& reassemblies = sSession.udpPoseReassembly[senderId];
+    auto& reassemblies = sSession.udpPoseReassembly[reassemblySenderId];
     auto reassemblyIt = reassemblies.find(header.sequence);
     if (reassemblyIt == reassemblies.end()) {
         while (reassemblies.size() >= kUdpPoseMaxInflightSequences) {
@@ -4938,12 +6535,12 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
     }
 
     try {
-        json message = header.type == 2
+        json message = (header.type == 2 || header.type == 4)
                            ? json::from_msgpack(raw)
                            : json::parse(std::string(reinterpret_cast<const char*>(raw.data()),
                                                      raw.size()));
         process_udp_pose_message(std::move(message), senderId);
-        sSession.udpPoseLastProcessedSequence[senderId] = header.sequence;
+        sSession.udpPoseLastProcessedSequence[reassemblySenderId] = header.sequence;
         reassemblies.erase(header.sequence);
         while (!reassemblies.empty() && reassemblies.begin()->first <= header.sequence) {
             reassemblies.erase(reassemblies.begin());
@@ -5147,6 +6744,69 @@ void update_listening() {
     DuskLog.info("Multiplayer direct peer connected id={}", peerId);
 }
 
+void send_remote_object_updates() {
+    if (!sSession.welcomed || !remote_object_sync_enabled()) {
+        return;
+    }
+
+    for (auto it = sLocalBombPostExecuteStates.begin();
+         it != sLocalBombPostExecuteStates.end();)
+    {
+        LocalBombPostExecuteState& state = it->second;
+        if (!state.valid || state.kind == REMOTE_ITEM_ACTOR_NONE || state.ageTicks > 3) {
+            ++it;
+            continue;
+        }
+
+        UdpRemoteObjectPacket packet{};
+        std::strncpy(packet.stageName, dComIfGp_getStartStageName(),
+                     sizeof(packet.stageName) - 1);
+        packet.sequence = ++sLocalBombObjectSequence;
+        packet.objectId = static_cast<int32_t>(state.actorId);
+        packet.x = state.x;
+        packet.y = state.y;
+        packet.z = state.z;
+        packet.angleY = static_cast<int16_t>(state.angleY);
+        packet.exTime = static_cast<int16_t>(std::clamp(state.exTime, -32768, 32767));
+        packet.room = static_cast<int8_t>(state.room);
+        packet.objectKind = REMOTE_OBJECT_BOMB;
+        packet.kind = static_cast<uint8_t>(state.kind);
+        packet.flags = UDP_OBJECT_ACTIVE;
+        if (state.exTime <= 0) {
+            packet.flags |= UDP_OBJECT_EXPLODING;
+            packet.flags &= ~UDP_OBJECT_ACTIVE;
+        }
+
+        send_direct_remote_object_udp(packet);
+
+        if ((packet.flags & UDP_OBJECT_ACTIVE) == 0) {
+            state.deleteSent = true;
+            sLocalBombTerminalSentIds.insert(state.actorId);
+            it = sLocalBombPostExecuteStates.erase(it);
+            continue;
+        }
+        ++it;
+    }
+}
+
+void send_presence() {
+    if (!sSession.welcomed || is_stage_load_unsafe_for_multiplayer()) {
+        return;
+    }
+
+    const char* stage = dComIfGp_getStartStageName();
+    if (stage == nullptr || stage[0] == '\0') {
+        return;
+    }
+
+    send_json({
+        {"type", "presence"},
+        {"stage", stage},
+        {"room", static_cast<int>(dComIfGp_roomControl_getStayNo())},
+        {"layer", static_cast<int>(dComIfGp_getStartStageLayer())},
+    });
+}
+
 void send_pose() {
     if (!sSession.welcomed) {
         return;
@@ -5245,9 +6905,7 @@ void send_pose() {
         {"stage", dComIfGp_getStartStageName()},
         {"room", static_cast<int>(fopAcM_GetRoomNo(player))},
         {"layer", static_cast<int>(dComIfGp_getStartStageLayer())},
-        {"final_ganondorf_ready",
-         std::strcmp(dComIfGp_getStartStageName(), "D_MN09B") == 0 &&
-             dComIfGs_isSaveDunSwitch(1)},
+        {"final_ganondorf_ready", is_local_final_ganondorf_ready()},
         {"x", poseX},
         {"y", poseY},
         {"z", poseZ},
@@ -5258,6 +6916,9 @@ void send_pose() {
         {"proc_v2", link != nullptr ? link->mProcVar2.field_0x300c : 0},
         {"proc_v3", link != nullptr ? link->mProcVar3.field_0x300e : 0},
         {"proc_v5", link != nullptr ? link->mProcVar5.field_0x3012 : 0},
+        {"cut_type", link != nullptr ? static_cast<int>(link->getCutType()) : 0},
+        {"cut_count", link != nullptr ? static_cast<int>(link->getCutCount()) : 0},
+        {"jump_cancel_turn", link != nullptr && static_cast<bool>(link->checkCutJumpCancelTurn())},
         {"manual_sync_ready", !is_stage_load_unsafe_for_multiplayer()},
         {"under_frame", underFrame0},
         {"under_bck0", link != nullptr ? static_cast<int>(link->mUnderAnmHeap[0].getIdx()) : 0},
@@ -5304,7 +6965,12 @@ void send_pose() {
         {"ride_actor_kind", REMOTE_RIDE_ACTOR_NONE},
         {"audio_events", audio_events_to_json(audioEvents)},
     };
-    if (isLink && (sDummyModelEnabled || isWolf || isTransforming) && !add_link_matrices(state)) {
+    json midnaMatrices;
+    sLastMidnaMatrixPackedBytes = 0;
+    sLastMidnaMatrixBase64Bytes = 0;
+    sLastMidnaMatrixPresentSlots = 0;
+    if (isLink && !add_link_matrices(state, &midnaMatrices))
+    {
         static uint32_t sMatrixPoseDropLogCount = 0;
         ++sMatrixPoseDropLogCount;
         if (sMatrixPoseDropLogCount < 20 ||
@@ -5340,11 +7006,20 @@ void send_pose() {
             state.value("upper_rate2", 1.0f));
     }
 
+    const uint32_t sequence = ++sSession.poseSequence;
     send_pose_message({
         {"type", "pose"},
-        {"sequence", ++sSession.poseSequence},
+        {"sequence", sequence},
         {"state", state},
     });
+    if (sLastMidnaMatrixPresentSlots > 0) {
+        send_midna_pose_message({
+            {"type", "midna_pose"},
+            {"sequence", sequence},
+            {"stage", dComIfGp_getStartStageName()},
+            {"state", {{"link_matrices", midnaMatrices}}},
+        });
+    }
 }
 
 // Applies a remote chest-bit-space transition (stage/flag, the same slot
@@ -5466,6 +7141,7 @@ void update_connected() {
         return;
     }
 
+    send_progression_state();
     update_pending_progression_cue_arrivals();
     flush_pending_progression_sync();
     update_pending_sync_replies();
@@ -5516,10 +7192,92 @@ void update_connected() {
         }
     }
 
+    for (auto it = sLocalBombPostExecuteStates.begin(); it != sLocalBombPostExecuteStates.end();) {
+        if (++it->second.ageTicks > 90) {
+            it = sLocalBombPostExecuteStates.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    for (auto it = sPendingGanondorfRemoteHitEvents.begin();
+         it != sPendingGanondorfRemoteHitEvents.end();)
+    {
+        if (++it->ageTicks > kGanondorfRemoteCombatIntentMaxAgeTicks) {
+            it = sPendingGanondorfRemoteHitEvents.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    for (auto it = sPendingGanondorfRemoteReactionEvents.begin();
+         it != sPendingGanondorfRemoteReactionEvents.end();)
+    {
+        if (++it->ageTicks > kGanondorfRemoteReactionMaxAgeTicks) {
+            it = sPendingGanondorfRemoteReactionEvents.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    for (auto it = sGanondorfRemotePlayerDamageCooldownByPeer.begin();
+         it != sGanondorfRemotePlayerDamageCooldownByPeer.end();)
+    {
+        if (it->second == 0 || --it->second == 0) {
+            it = sGanondorfRemotePlayerDamageCooldownByPeer.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    if (sGanondorfLocalPlayerDamageHandledTicks != 0) {
+        sGanondorfLocalPlayerDamageHandledTicks--;
+    }
+
+    for (auto it = sPendingGanondorfRemotePlayerDamageEvents.begin();
+         it != sPendingGanondorfRemotePlayerDamageEvents.end();)
+    {
+        const auto lastIt = sGanondorfRemotePlayerDamageLastSequenceByPeer.find(it->peerId);
+        if (lastIt != sGanondorfRemotePlayerDamageLastSequenceByPeer.end() &&
+            lastIt->second >= it->sequence)
+        {
+            it = sPendingGanondorfRemotePlayerDamageEvents.erase(it);
+            continue;
+        }
+
+        if (++it->ageTicks > kGanondorfRemotePlayerDamageMaxAgeTicks) {
+            it = sPendingGanondorfRemotePlayerDamageEvents.erase(it);
+            continue;
+        }
+
+        if (ganondorf_final_sync_domain_enabled()) {
+            if (sGanondorfLocalPlayerDamageHandledTicks != 0) {
+                sGanondorfRemotePlayerDamageLastSequenceByPeer[it->peerId] = it->sequence;
+                DuskLog.info("Multiplayer Ganondorf player_damage skip reason=local_collider "
+                             "owner={} seq={} damage={} spl={} age={} cooldown={}",
+                             it->peerId, it->sequence, it->damageAmount, it->attackSpl,
+                             it->ageTicks, sGanondorfLocalPlayerDamageHandledTicks);
+                it = sPendingGanondorfRemotePlayerDamageEvents.erase(it);
+                continue;
+            }
+            const bool appliedReaction = apply_ganondorf_remote_player_damage(*it);
+            sGanondorfRemotePlayerDamageLastSequenceByPeer[it->peerId] = it->sequence;
+            DuskLog.info("Multiplayer Ganondorf player_damage apply owner={} seq={} damage={} "
+                         "spl={} age={} reaction={}",
+                         it->peerId, it->sequence, it->damageAmount, it->attackSpl,
+                         it->ageTicks, appliedReaction);
+            it = sPendingGanondorfRemotePlayerDamageEvents.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    send_remote_object_updates();
     send_pose();
 
     if (++sSession.pingTicks >= 30) {
         sSession.pingTicks = 0;
+        send_presence();
         send_json({{"type", "ping"}});
     }
 }
@@ -5542,6 +7300,10 @@ bool configure_session() {
     sDummyModelEnabled = env_enabled("DUSK_MP_DUMMY_MODEL");
     sDummyTraceEnabled = !env_disabled("DUSK_MP_DUMMY_TRACE");
     sNameLabelsEnabled = !env_enabled("DUSK_MP_HIDE_NAME_LABELS");
+    sSyncWorldEnabled = env_enabled("DUSK_MP_SYNC_WORLD");
+    sDisplayRemoteMidnaEnabled = !env_enabled("DUSK_MP_HIDE_REMOTE_MIDNA");
+    sDirectRemoteWantsPuppet = true;
+    sDirectRemoteWantsMidna = true;
     sLayerRiskSyncEnabled = env_enabled("DUSK_MP_LAYER_SYNC");
     sSession.sessionId = make_session_token(9);
     sSession.sessionKey = make_session_token(16);
@@ -5608,6 +7370,113 @@ const char* state_name(ConnectionState state) {
 
 }  // namespace
 
+std::vector<MinimapPeerMarker> get_minimap_peer_markers(uint32_t maxAgeTicks) {
+    return collect_minimap_peer_markers(maxAgeTicks);
+}
+
+void notify_bomb_post_execute(daNbomb_c* bomb) {
+    if (bomb == nullptr || !is_enabled() || !remote_object_sync_enabled()) {
+        return;
+    }
+
+    const fpc_ProcID bombId = fopAcM_GetID(bomb);
+    if (sRemoteOwnedObjectActorIds.find(bombId) != sRemoteOwnedObjectActorIds.end()) {
+        return;
+    }
+    if (sLocalBombTerminalSentIds.find(bombId) != sLocalBombTerminalSentIds.end()) {
+        return;
+    }
+
+    LocalBombPostExecuteState state;
+    state.actorId = bombId;
+    state.kind = detect_item_actor_kind(bomb);
+    state.exTime = bomb->getExTime();
+    state.flash = calc_remote_bomb_flash(bomb, daAlink_getAlinkActorClass());
+    state.room = fopAcM_GetRoomNo(bomb);
+    state.x = bomb->current.pos.x;
+    state.y = bomb->current.pos.y;
+    state.z = bomb->current.pos.z;
+    state.angleY = bomb->shape_angle.y;
+    state.ageTicks = 0;
+    state.valid = state.kind != REMOTE_ITEM_ACTOR_NONE;
+    sLocalBombPostExecuteStates[state.actorId] = state;
+
+    static uint32_t sBombPostExecuteLogCount = 0;
+    if (state.valid && (sBombPostExecuteLogCount < 24 || state.exTime <= 20)) {
+        ++sBombPostExecuteLogCount;
+        DuskLog.info("Multiplayer bomb post_execute id={} kind={} ex_time={} flash={} room={}",
+                     state.actorId, state.kind, state.exTime, state.flash, state.room);
+    }
+}
+
+void register_remote_bomb_actor(daNbomb_c* bomb) {
+    if (bomb == nullptr) {
+        return;
+    }
+    register_remote_bomb_actor_id(static_cast<int32_t>(fopAcM_GetID(bomb)));
+}
+
+void register_remote_bomb_actor_id(int32_t actorId) {
+    if (actorId == static_cast<int32_t>(fpcM_ERROR_PROCESS_ID_e)) {
+        return;
+    }
+    sRemoteOwnedObjectActorIds.insert(static_cast<fpc_ProcID>(actorId));
+}
+
+void unregister_remote_bomb_actor_id(int32_t actorId) {
+    if (actorId == static_cast<int32_t>(fpcM_ERROR_PROCESS_ID_e)) {
+        return;
+    }
+    sRemoteOwnedObjectActorIds.erase(static_cast<fpc_ProcID>(actorId));
+}
+
+bool get_remote_bomb_object_for_peer(const std::string& peerId,
+                                     RemoteBombObjectSnapshot* out) {
+    if (out == nullptr || !remote_object_sync_enabled()) {
+        return false;
+    }
+
+    auto peerIt = sRemoteObjectsByPeer.find(peerId);
+    if (peerIt == sRemoteObjectsByPeer.end()) {
+        return false;
+    }
+
+    const char* localStageName = dComIfGp_getStartStageName();
+    const std::string localStage = localStageName != nullptr ? localStageName : "";
+    bool found = false;
+    RemoteObjectSnapshot best;
+
+    for (auto it = peerIt->second.begin(); it != peerIt->second.end();) {
+        RemoteObjectSnapshot& object = it->second;
+        if (++object.ageTicks > 90 || (!object.active && object.ageTicks > 10)) {
+            it = peerIt->second.erase(it);
+            continue;
+        }
+
+        ++it;
+        if (!object.valid || object.objectKind != REMOTE_OBJECT_BOMB) {
+            continue;
+        }
+        if (!object.stage.empty() && !localStage.empty() && object.stage != localStage) {
+            continue;
+        }
+        if (object.room >= 0 && !dComIfGp_roomControl_checkRoomDisp(object.room)) {
+            continue;
+        }
+        if (!found || object.sequence > best.sequence) {
+            best = object;
+            found = true;
+        }
+    }
+
+    if (!found) {
+        return false;
+    }
+
+    *out = best;
+    return true;
+}
+
 void record_local_link_audio_event(uint32_t soundId, bool level, uint32_t mapInfo, int reverb,
                                    uint8_t sourceKind) {
     if (!sEnabled || !sSession.welcomed || soundId == 0) {
@@ -5669,6 +7538,14 @@ void update() {
         return;
     }
 
+    ganondorf_final_sync_reset_if_disabled();
+    if (sSession.mode == NetworkMode::DirectHost && !sGanondorfFinalSyncOwnerPeerId.empty() &&
+        ++sLastGanondorfOwnerBroadcastTick >= 60)
+    {
+        sLastGanondorfOwnerBroadcastTick = 0;
+        broadcast_ganondorf_final_sync_owner();
+    }
+
     if (sFlagTraceActorWindowTicks > 0) {
         --sFlagTraceActorWindowTicks;
     }
@@ -5676,6 +7553,22 @@ void update() {
     for (auto& entry : sSession.peerPoses) {
         if (entry.second.valid) {
             ++entry.second.ageTicks;
+        }
+    }
+    for (auto& entry : sPeerProgressionStates) {
+        if (entry.second.valid) {
+            ++entry.second.ageTicks;
+        }
+    }
+    if (sLatestGanondorfSyncState.valid) {
+        ++sLatestGanondorfSyncState.ageTicks;
+    }
+    expire_ganondorf_final_sync_if_stale();
+    for (auto it = sPeerPresence.begin(); it != sPeerPresence.end();) {
+        if (++it->second.ageTicks > 180) {
+            it = sPeerPresence.erase(it);
+        } else {
+            ++it;
         }
     }
 
@@ -5799,6 +7692,9 @@ bool host_direct(const DirectHostOptions& options, std::string* errorOut) {
     sSession.debugMarker = options.debugMarker;
     sDummyModelEnabled = options.dummyModel;
     sNameLabelsEnabled = options.nameLabels;
+    sSyncWorldEnabled = options.syncWorld;
+    sDisplayRemoteMidnaEnabled = options.displayMidna;
+    sRemoteCollisionEnabled = options.remoteCollision;
     sSession.sessionId = make_session_token(9);
     sSession.sessionKey = make_session_token(16);
 
@@ -5861,6 +7757,9 @@ bool join_direct(const DirectJoinOptions& options, std::string* errorOut) {
     sSession.debugMarker = options.debugMarker;
     sDummyModelEnabled = options.dummyModel;
     sNameLabelsEnabled = options.nameLabels;
+    sSyncWorldEnabled = options.syncWorld;
+    sDisplayRemoteMidnaEnabled = options.displayMidna;
+    sRemoteCollisionEnabled = options.remoteCollision;
 
     DuskLog.info("Multiplayer module enabled mode={} room={}", mode_name(sSession.mode),
                  sSession.room);
@@ -5907,6 +7806,9 @@ bool join_relay(const RelayJoinOptions& options, std::string* errorOut) {
     sSession.debugMarker = options.debugMarker;
     sDummyModelEnabled = options.dummyModel;
     sNameLabelsEnabled = options.nameLabels;
+    sSyncWorldEnabled = options.syncWorld;
+    sDisplayRemoteMidnaEnabled = options.displayMidna;
+    sRemoteCollisionEnabled = options.remoteCollision;
 
     DuskLog.info("Multiplayer module enabled mode={} room={}", mode_name(sSession.mode),
                  sSession.room);
@@ -5998,6 +7900,10 @@ SessionStatus get_session_status() {
     status.dummyModel = sDummyModelEnabled;
     status.nameLabels = sNameLabelsEnabled;
     status.nameLabelsHostControlled = sSession.mode == NetworkMode::DirectJoin;
+    status.syncWorld = sSyncWorldEnabled;
+    status.displayMidna = sDisplayRemoteMidnaEnabled;
+    status.remoteCollision = sRemoteCollisionEnabled;
+    status.remoteCollisionHostControlled = sSession.mode == NetworkMode::DirectJoin;
     status.hasRecentPeerPose = has_recent_peer_pose(90);
     return status;
 }
@@ -6092,6 +7998,85 @@ void set_name_labels_enabled(bool enabled) {
     }
 }
 
+void set_sync_world_enabled(bool enabled) {
+    sSyncWorldEnabled = enabled;
+    DuskLog.info("Multiplayer sync world {}", sSyncWorldEnabled ? "enabled" : "disabled");
+    ganondorf_final_sync_reset_if_disabled();
+}
+
+bool sync_world_enabled() {
+    return remote_object_sync_enabled();
+}
+
+void set_remote_link_model_enabled(bool enabled) {
+    if (sDummyModelEnabled == enabled) {
+        return;
+    }
+
+    sDummyModelEnabled = enabled;
+    DuskLog.info("Multiplayer remote Link model {}", sDummyModelEnabled ? "enabled" : "disabled");
+    if (!sDummyModelEnabled) {
+        sSession.peerPoses.clear();
+        sSession.pendingMidnaMatrices.clear();
+        destroy_all_remote_link_dummies();
+    }
+
+    if (sEnabled && sSession.welcomed) {
+        json message = {
+            {"type", "puppet_preference"},
+            {"want_puppet", wants_remote_puppet_matrices()},
+            {"want_midna", wants_remote_midna_matrices()},
+        };
+        if (sSession.mode == NetworkMode::DirectHost) {
+            broadcast_to_direct_peers(message);
+        } else {
+            send_json(message);
+        }
+    }
+}
+
+void set_display_remote_midna_enabled(bool enabled) {
+    sDisplayRemoteMidnaEnabled = enabled;
+    DuskLog.info("Multiplayer remote Midna display {}",
+                 sDisplayRemoteMidnaEnabled ? "enabled" : "disabled");
+    if (sEnabled && sSession.welcomed) {
+        json message = {
+            {"type", "midna_preference"},
+            {"want_midna", wants_remote_midna_matrices()},
+        };
+        if (sSession.mode == NetworkMode::DirectHost) {
+            broadcast_to_direct_peers(message);
+        } else {
+            send_json(message);
+        }
+    }
+}
+
+bool display_remote_midna_enabled() {
+    return wants_remote_midna_matrices();
+}
+
+void set_remote_collision_enabled(bool enabled) {
+    if (sSession.mode == NetworkMode::DirectJoin) {
+        DuskLog.info("Multiplayer remote collision change ignored on join client; host controlled");
+        return;
+    }
+
+    sRemoteCollisionEnabled = enabled;
+    DuskLog.info("Multiplayer remote collision {}",
+                 sRemoteCollisionEnabled ? "enabled" : "disabled");
+    if (sEnabled && sSession.mode == NetworkMode::DirectHost) {
+        broadcast_to_direct_peers({
+            {"type", "remote_collision"},
+            {"enabled", sRemoteCollisionEnabled},
+        });
+    }
+}
+
+bool remote_collision_enabled() {
+    return sDummyModelEnabled && sRemoteCollisionEnabled;
+}
+
 bool has_recent_peer_pose(uint32_t maxAgeTicks) {
     for (const auto& entry : sSession.peerPoses) {
         if (entry.second.valid && entry.second.ageTicks <= maxAgeTicks) {
@@ -6111,6 +8096,576 @@ PeerPoseSnapshot get_latest_peer_pose() {
         return PeerPoseSnapshot{};
     }
     return sSession.peerPoses.begin()->second;
+}
+
+bool get_ganondorf_final_mp_target(float ganonX, float ganonY, float ganonZ,
+                                   GanondorfMpTargetSnapshot* out) {
+    if (out == nullptr) {
+        return false;
+    }
+
+    *out = GanondorfMpTargetSnapshot{};
+    if (!ganondorf_final_sync_domain_enabled()) {
+        return false;
+    }
+
+    float bestDist = std::numeric_limits<float>::max();
+    daPy_py_c* player = daPy_getPlayerActorClass();
+    if (player != nullptr) {
+        bestDist = dist_xz(ganonX, ganonZ, player->current.pos.x, player->current.pos.z);
+        out->valid = true;
+        out->local = true;
+        out->x = player->current.pos.x;
+        out->y = player->current.pos.y;
+        out->z = player->current.pos.z;
+        out->eyeX = player->eyePos.x;
+        out->eyeY = player->eyePos.y;
+        out->eyeZ = player->eyePos.z;
+        out->distXZ = bestDist;
+        out->angleYFromGanon =
+            angle_y_from_delta(player->current.pos.x - ganonX, player->current.pos.z - ganonZ);
+        out->shapeAngleY = player->shape_angle.y;
+    }
+
+    for (const auto& entry : sSession.peerPoses) {
+        const PeerPoseSnapshot& pose = entry.second;
+        if (!pose_is_ganondorf_final_candidate(pose)) {
+            continue;
+        }
+
+        const float peerDist = dist_xz(ganonX, ganonZ, pose.x, pose.z);
+        if (peerDist >= bestDist) {
+            continue;
+        }
+
+        bestDist = peerDist;
+        out->valid = true;
+        out->local = false;
+        out->peerId = entry.first;
+        out->x = pose.x;
+        out->y = pose.y;
+        out->z = pose.z;
+        out->eyeX = pose.x;
+        out->eyeY = pose.y + kGanondorfRemoteLinkEyeOffsetY;
+        out->eyeZ = pose.z;
+        out->distXZ = peerDist;
+        out->angleYFromGanon = angle_y_from_delta(pose.x - ganonX, pose.z - ganonZ);
+        out->shapeAngleY = pose.angleY;
+    }
+
+    static bool sWasRemoteTarget = false;
+    static uint32_t sRemoteTargetLogTicks = 0;
+    if (out->valid && !out->local &&
+        (!sWasRemoteTarget || (++sRemoteTargetLogTicks % 60) == 1))
+    {
+        DuskLog.info("Multiplayer Ganondorf target peer={} dist={} angle={} pos=({}, {}, {})",
+                     out->peerId, out->distXZ, out->angleYFromGanon, out->x, out->y, out->z);
+    }
+    sWasRemoteTarget = out->valid && !out->local;
+
+    return out->valid;
+}
+
+void report_ganondorf_final_local_hit(float linkX, float linkY, float linkZ, int cutType,
+                                      int cutCount, bool jumpCancelTurn, int procId,
+                                      float attackFrame, bool confirmedHit) {
+    const bool domainEnabled = confirmedHit ? ganondorf_final_finish_sync_domain_enabled()
+                                            : ganondorf_final_sync_domain_enabled();
+    if (!domainEnabled) {
+        static uint32_t sGanondorfHitTxGateLogTicks = 0;
+        if ((sGanondorfHitTxGateLogTicks++ % 60) == 0) {
+            DuskLog.info("Multiplayer Ganondorf hit tx_skip reason=domain_disabled confirmed={} "
+                         "sync_world={} final_ready={}",
+                         confirmedHit, remote_object_sync_enabled(),
+                         is_local_final_ganondorf_ready());
+        }
+        return;
+    }
+
+    daPy_py_c* player = daPy_getPlayerActorClass();
+    const int linkAngleY = player != nullptr ? static_cast<int>(player->shape_angle.y) : 0;
+    const uint32_t sequence = ++sLocalGanondorfHitSequence;
+    json state = {
+        {"sync_id", kGanondorfFinalSyncId},
+        {"stage", "D_MN09B"},
+        {"x", linkX},
+        {"y", linkY},
+        {"z", linkZ},
+        {"link_angle_y", linkAngleY},
+        {"proc_id", procId},
+        {"cut_type", cutType},
+        {"cut_count", cutCount},
+        {"jump_cancel_turn", jumpCancelTurn},
+        {"confirmed_hit", confirmedHit},
+        {"attack_frame", attackFrame},
+    };
+
+    const json message = {
+        {"type", "ganondorf_hit"},
+        {"sequence", sequence},
+        {"state", state},
+    };
+    if (confirmedHit) {
+        send_ganondorf_final_finish_message(message);
+    } else {
+        send_ganondorf_final_sync_message(message);
+    }
+
+    DuskLog.info("Multiplayer Ganondorf hit tx seq={} proc={} cut_type={} cut_count={} "
+                 "jump_cancel={} confirmed={} frame={} angle={} pos=({}, {}, {}) owner={} local_peer={}",
+                 sequence, procId, cutType, cutCount, jumpCancelTurn, confirmedHit, attackFrame,
+                 linkAngleY, linkX, linkY, linkZ, sGanondorfFinalSyncOwnerPeerId,
+                 local_udp_pose_sender_id());
+}
+
+bool consume_ganondorf_final_remote_hit(float ganonX, float ganonY, float ganonZ,
+                                        GanondorfRemoteHitSnapshot* out) {
+    if (out == nullptr) {
+        return false;
+    }
+
+    *out = GanondorfRemoteHitSnapshot{};
+    if (!ganondorf_final_sync_domain_enabled()) {
+        return false;
+    }
+
+    if (ganondorf_final_sync_local_is_owner()) {
+        for (auto it = sPendingGanondorfRemoteHitEvents.begin();
+             it != sPendingGanondorfRemoteHitEvents.end(); ++it)
+        {
+            const auto lastIt = sGanondorfRemoteHitLastSequenceByPeer.find(it->peerId);
+            if (!it->confirmedHit) {
+                continue;
+            }
+            if (lastIt != sGanondorfRemoteHitLastSequenceByPeer.end() &&
+                lastIt->second >= it->sequence)
+            {
+                continue;
+            }
+
+            *out = *it;
+            out->distXZ = dist_xz(ganonX, ganonZ, out->x, out->z);
+            out->angleYFromGanon = angle_y_from_delta(out->x - ganonX, out->z - ganonZ);
+            if (out->ageTicks > kGanondorfRemoteCombatIntentMaxAgeTicks ||
+                std::fabs((out->y + 80.0f) - ganonY) > kGanondorfRemoteHitHeightRange ||
+                out->distXZ > kGanondorfRemoteHitRange)
+            {
+                sGanondorfRemoteHitLastSequenceByPeer[out->peerId] = out->sequence;
+                it = sPendingGanondorfRemoteHitEvents.erase(it);
+                if (it == sPendingGanondorfRemoteHitEvents.end()) {
+                    break;
+                }
+                continue;
+            }
+            sGanondorfRemoteHitLastSequenceByPeer[out->peerId] = out->sequence;
+            sPendingGanondorfRemoteHitEvents.erase(it);
+            DuskLog.info("Multiplayer Ganondorf hit consume_event peer={} seq={} cut_type={} "
+                         "cut_count={} jump_cancel={} dist={} age={} owner={}",
+                         out->peerId, out->sequence, out->cutType, out->cutCount,
+                         out->jumpCancelTurn, out->distXZ, out->ageTicks,
+                         sGanondorfFinalSyncOwnerPeerId);
+            return true;
+        }
+    } else if (!sPendingGanondorfRemoteHitEvents.empty()) {
+        static uint32_t sGanondorfHitNonOwnerLogTicks = 0;
+        if ((sGanondorfHitNonOwnerLogTicks++ % 60) == 0) {
+            DuskLog.info("Multiplayer Ganondorf hit consume_skip reason=not_owner pending={} "
+                         "owner={} local_peer={}",
+                         sPendingGanondorfRemoteHitEvents.size(), sGanondorfFinalSyncOwnerPeerId,
+                         local_udp_pose_sender_id());
+        }
+    }
+
+    return false;
+}
+
+bool consume_ganondorf_final_remote_finish(float ganonX, float ganonY, float ganonZ,
+                                           GanondorfRemoteHitSnapshot* out) {
+    if (out == nullptr) {
+        return false;
+    }
+
+    *out = GanondorfRemoteHitSnapshot{};
+    if (!ganondorf_final_finish_sync_domain_enabled()) {
+        return false;
+    }
+
+    for (auto it = sPendingGanondorfRemoteHitEvents.begin();
+         it != sPendingGanondorfRemoteHitEvents.end(); ++it)
+    {
+        const bool isFinishIntent = it->procId == daAlink_c::PROC_GANON_FINISH ||
+                                    it->cutType == daPy_py_c::CUT_TYPE_DOWN ||
+                                    it->cutType == daPy_py_c::CUT_TYPE_FINISH_STAB;
+        if (!isFinishIntent || !it->confirmedHit) {
+            continue;
+        }
+
+        const auto lastIt = sGanondorfRemoteHitLastSequenceByPeer.find(it->peerId);
+        if (lastIt != sGanondorfRemoteHitLastSequenceByPeer.end() &&
+            lastIt->second >= it->sequence)
+        {
+            continue;
+        }
+
+        if (it->ageTicks > kGanondorfRemoteCombatIntentMaxAgeTicks ||
+            std::fabs((it->y + 80.0f) - ganonY) > kGanondorfRemoteHitHeightRange)
+        {
+            continue;
+        }
+
+        const float peerDist = dist_xz(ganonX, ganonZ, it->x, it->z);
+        if (peerDist > kGanondorfRemoteFinishRange) {
+            continue;
+        }
+
+        *out = *it;
+        out->distXZ = peerDist;
+        out->angleYFromGanon = angle_y_from_delta(out->x - ganonX, out->z - ganonZ);
+        sGanondorfRemoteHitLastSequenceByPeer[out->peerId] = out->sequence;
+        sPendingGanondorfRemoteHitEvents.erase(it);
+        DuskLog.info("Multiplayer Ganondorf finish consume peer={} seq={} proc={} cut_type={} "
+                     "dist={} age={} pos=({}, {}, {})",
+                     out->peerId, out->sequence, out->procId, out->cutType, out->distXZ,
+                     out->ageTicks, out->x, out->y, out->z);
+        return true;
+    }
+
+    return false;
+}
+
+bool ganondorf_final_remote_attack_active(float ganonX, float ganonY, float ganonZ,
+                                          float maxRange,
+                                          GanondorfRemoteHitSnapshot* out) {
+    if (out != nullptr) {
+        *out = GanondorfRemoteHitSnapshot{};
+    }
+    if (!ganondorf_final_sync_domain_enabled()) {
+        return false;
+    }
+
+    for (const GanondorfRemoteHitSnapshot& hit : sPendingGanondorfRemoteHitEvents) {
+        if (!hit.valid || hit.ageTicks > kGanondorfRemoteAttackActiveMaxAgeTicks) {
+            continue;
+        }
+
+        if (hit.confirmedHit) {
+            continue;
+        }
+
+        GanondorfRemoteHitSnapshot candidate = hit;
+        candidate.distXZ = dist_xz(ganonX, ganonZ, candidate.x, candidate.z);
+        candidate.angleYFromGanon =
+            angle_y_from_delta(candidate.x - ganonX, candidate.z - ganonZ);
+        if (candidate.distXZ > maxRange ||
+            std::fabs((candidate.y + 80.0f) - ganonY) > kGanondorfRemoteHitHeightRange)
+        {
+            continue;
+        }
+
+        if (out != nullptr) {
+            *out = candidate;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+void report_ganondorf_final_local_reaction(int actionMode, int moveMode,
+                                           int damageInvulnerabilityTimer, int downHitTimer,
+                                           int downHitCount, int downGate, int health,
+                                           float ganonX, float ganonY, float ganonZ,
+                                           float linkX, float linkY, float linkZ,
+                                           int procId, int cutType, int cutCount,
+                                           bool jumpCancelTurn) {
+    if (!ganondorf_final_sync_domain_enabled() || ganondorf_final_sync_local_is_owner()) {
+        return;
+    }
+
+    daPy_py_c* player = daPy_getPlayerActorClass();
+    const int linkAngleY = player != nullptr ? static_cast<int>(player->shape_angle.y) : 0;
+    const uint32_t sequence = ++sLocalGanondorfReactionSequence;
+    json state = {
+        {"sync_id", kGanondorfFinalSyncId},
+        {"stage", "D_MN09B"},
+        {"action_mode", actionMode},
+        {"move_mode", moveMode},
+        {"damage_invuln", damageInvulnerabilityTimer},
+        {"down_hit_timer", downHitTimer},
+        {"down_hit_count", downHitCount},
+        {"down_gate", downGate},
+        {"health", health},
+        {"ganon_x", ganonX},
+        {"ganon_y", ganonY},
+        {"ganon_z", ganonZ},
+        {"link_x", linkX},
+        {"link_y", linkY},
+        {"link_z", linkZ},
+        {"link_angle_y", linkAngleY},
+        {"proc_id", procId},
+        {"cut_type", cutType},
+        {"cut_count", cutCount},
+        {"jump_cancel_turn", jumpCancelTurn},
+    };
+
+    send_ganondorf_final_sync_message({
+        {"type", "ganondorf_reaction"},
+        {"sequence", sequence},
+        {"state", state},
+    });
+
+    DuskLog.info("Multiplayer Ganondorf reaction tx seq={} action={} move={} health={} "
+                 "invuln={} down_timer={} down_count={} proc={} cut_type={} "
+                 "link=({}, {}, {}) ganon=({}, {}, {}) owner={} local_peer={}",
+                 sequence, actionMode, moveMode, health, damageInvulnerabilityTimer,
+                 downHitTimer, downHitCount, procId, cutType, linkX, linkY, linkZ,
+                 ganonX, ganonY, ganonZ, sGanondorfFinalSyncOwnerPeerId,
+                 local_udp_pose_sender_id());
+}
+
+bool consume_ganondorf_final_remote_reaction(float ganonX, float ganonY, float ganonZ,
+                                             GanondorfRemoteReactionSnapshot* out) {
+    if (out == nullptr) {
+        return false;
+    }
+
+    *out = GanondorfRemoteReactionSnapshot{};
+    if (!ganondorf_final_sync_domain_enabled() || !ganondorf_final_sync_local_is_owner()) {
+        return false;
+    }
+
+    for (auto it = sPendingGanondorfRemoteReactionEvents.begin();
+         it != sPendingGanondorfRemoteReactionEvents.end(); ++it)
+    {
+        const auto lastIt = sGanondorfRemoteReactionLastSequenceByPeer.find(it->peerId);
+        if (lastIt != sGanondorfRemoteReactionLastSequenceByPeer.end() &&
+            lastIt->second >= it->sequence)
+        {
+            continue;
+        }
+
+        GanondorfRemoteReactionSnapshot candidate = *it;
+        candidate.distXZ = dist_xz(ganonX, ganonZ, candidate.linkX, candidate.linkZ);
+        candidate.angleYFromGanon =
+            angle_y_from_delta(candidate.linkX - ganonX, candidate.linkZ - ganonZ);
+        const float reportedGanonDist =
+            dist_xz(ganonX, ganonZ, candidate.ganonX, candidate.ganonZ);
+        if (candidate.ageTicks > kGanondorfRemoteReactionMaxAgeTicks ||
+            std::fabs((candidate.linkY + 80.0f) - ganonY) > kGanondorfRemoteHitHeightRange ||
+            candidate.distXZ > kGanondorfRemoteReactionRange ||
+            reportedGanonDist > 260.0f)
+        {
+            sGanondorfRemoteReactionLastSequenceByPeer[candidate.peerId] =
+                candidate.sequence;
+            it = sPendingGanondorfRemoteReactionEvents.erase(it);
+            if (it == sPendingGanondorfRemoteReactionEvents.end()) {
+                break;
+            }
+            continue;
+        }
+
+        *out = candidate;
+        sGanondorfRemoteReactionLastSequenceByPeer[out->peerId] = out->sequence;
+        sPendingGanondorfRemoteReactionEvents.erase(it);
+        DuskLog.info("Multiplayer Ganondorf reaction consume peer={} seq={} action={} "
+                     "move={} dist={} age={} health={} invuln={}",
+                     out->peerId, out->sequence, out->actionMode, out->moveMode,
+                     out->distXZ, out->ageTicks, out->health,
+                     out->damageInvulnerabilityTimer);
+        return true;
+    }
+
+    return false;
+}
+
+void report_ganondorf_final_remote_player_attack(float attackX, float attackY, float attackZ,
+                                                 float radius, int damageAmount, int attackSpl) {
+    if (!ganondorf_final_sync_domain_enabled() || !ganondorf_final_sync_local_is_owner()) {
+        return;
+    }
+
+    for (const auto& entry : sSession.peerPoses) {
+        const PeerPoseSnapshot& pose = entry.second;
+        if (!pose_is_ganondorf_final_candidate(pose)) {
+            continue;
+        }
+
+        const float dx = pose.x - attackX;
+        const float dz = pose.z - attackZ;
+        const float dy = (pose.y + 80.0f) - attackY;
+        const float hitRadius = radius + (pose.isWolf ? 45.0f : 55.0f);
+        if ((dx * dx + dz * dz) > (hitRadius * hitRadius) || std::fabs(dy) > 180.0f) {
+            continue;
+        }
+
+        auto cooldownIt = sGanondorfRemotePlayerDamageCooldownByPeer.find(entry.first);
+        if (cooldownIt != sGanondorfRemotePlayerDamageCooldownByPeer.end() &&
+            cooldownIt->second != 0) {
+            continue;
+        }
+
+        const uint32_t sequence = ++sLocalGanondorfRemotePlayerDamageSequence;
+        sGanondorfRemotePlayerDamageLastSequenceByPeer[entry.first] = sequence;
+        sGanondorfRemotePlayerDamageCooldownByPeer[entry.first] = 20;
+        json state = {
+            {"sync_id", kGanondorfFinalSyncId},
+            {"stage", "D_MN09B"},
+            {"target_peer_id", entry.first},
+            {"damage", damageAmount},
+            {"attack_spl", attackSpl},
+            {"x", attackX},
+            {"y", attackY},
+            {"z", attackZ},
+        };
+        send_ganondorf_final_sync_message({
+            {"type", "ganondorf_player_damage"},
+            {"sequence", sequence},
+            {"state", state},
+        });
+        DuskLog.info("Multiplayer Ganondorf player_damage tx target={} seq={} damage={} "
+                     "spl={} dist={} pos=({}, {}, {})",
+                     entry.first, sequence, damageAmount, attackSpl,
+                     std::sqrt(dx * dx + dz * dz), attackX, attackY, attackZ);
+    }
+}
+
+void note_ganondorf_final_local_player_damage_handled() {
+    if (!ganondorf_final_sync_domain_enabled()) {
+        return;
+    }
+
+    sGanondorfLocalPlayerDamageHandledTicks = 24;
+    DuskLog.info("Multiplayer Ganondorf player_damage local_collider_handled cooldown={}",
+                 sGanondorfLocalPlayerDamageHandledTicks);
+}
+
+bool ganondorf_final_sync_local_is_owner() {
+    return ganondorf_final_sync_claim_local_owner();
+}
+
+void send_ganondorf_final_sync_state(const GanondorfSyncSnapshot& snapshot) {
+    const bool localOwner = ganondorf_final_sync_local_is_owner();
+    if (!localOwner || !snapshot.valid) {
+        static uint32_t sGanondorfTxSkipLogTicks = 0;
+        if ((sGanondorfTxSkipLogTicks++ % 120) == 0) {
+            DuskLog.info("Multiplayer Ganondorf sync tx_skip local_owner={} snapshot_valid={} "
+                         "owner={} local_peer={} stage={} room={} action={} move={}",
+                         localOwner, snapshot.valid, sGanondorfFinalSyncOwnerPeerId,
+                         local_udp_pose_sender_id(), snapshot.stage, snapshot.room,
+                         snapshot.actionMode, snapshot.moveMode);
+        }
+        return;
+    }
+
+    if (++sLastGanondorfSyncSendTick < 2) {
+        return;
+    }
+    sLastGanondorfSyncSendTick = 0;
+
+    const uint32_t sequence = ++sLocalGanondorfSyncSequence;
+    const std::string localOwnerId = local_udp_pose_sender_id();
+    json state = {
+        {"sync_id", kGanondorfFinalSyncId},
+        {"owner_peer_id", localOwnerId},
+        {"stage", snapshot.stage},
+        {"room", snapshot.room},
+        {"health", snapshot.health},
+        {"action_mode", snapshot.actionMode},
+        {"move_mode", snapshot.moveMode},
+        {"draw_horse", snapshot.drawHorse},
+        {"damage_invuln", snapshot.damageInvulnerabilityTimer},
+        {"down_hit_timer", snapshot.downHitTimer},
+        {"down_hit_count", snapshot.downHitCount},
+        {"down_gate", snapshot.downGate},
+        {"x", snapshot.x},
+        {"y", snapshot.y},
+        {"z", snapshot.z},
+        {"old_x", snapshot.oldX},
+        {"old_y", snapshot.oldY},
+        {"old_z", snapshot.oldZ},
+        {"shape_angle_x", snapshot.shapeAngleX},
+        {"shape_angle_y", snapshot.shapeAngleY},
+        {"shape_angle_z", snapshot.shapeAngleZ},
+        {"current_angle_x", snapshot.currentAngleX},
+        {"current_angle_y", snapshot.currentAngleY},
+        {"current_angle_z", snapshot.currentAngleZ},
+        {"speed_x", snapshot.speedX},
+        {"speed_y", snapshot.speedY},
+        {"speed_z", snapshot.speedZ},
+        {"speed_f", snapshot.speedF},
+        {"anm_id", snapshot.anmId},
+        {"anm_play_mode", snapshot.anmPlayMode},
+        {"anm_frame", snapshot.anmFrame},
+        {"anm_rate", snapshot.anmRate},
+    };
+
+    send_ganondorf_final_sync_message({
+        {"type", "ganondorf_state"},
+        {"sequence", sequence},
+        {"state", state},
+    });
+
+    static uint32_t sGanondorfTxLogTicks = 0;
+    if ((sGanondorfTxLogTicks++ % 60) == 0) {
+        DuskLog.info("Multiplayer Ganondorf sync tx owner={} seq={} action={} move={} health={} "
+                     "pos=({}, {}, {}) anm={} frame={}",
+                     localOwnerId, sequence, snapshot.actionMode, snapshot.moveMode,
+                     snapshot.health, snapshot.x, snapshot.y, snapshot.z, snapshot.anmId,
+                     snapshot.anmFrame);
+    }
+}
+
+bool get_ganondorf_final_sync_state(GanondorfSyncSnapshot* out) {
+    if (out == nullptr) {
+        return false;
+    }
+
+    *out = GanondorfSyncSnapshot{};
+    const bool localOwner = !sGanondorfFinalSyncOwnerPeerId.empty() &&
+                            sGanondorfFinalSyncOwnerPeerId == local_udp_pose_sender_id();
+    const bool domainEnabled = ganondorf_final_sync_domain_enabled();
+    expire_ganondorf_final_sync_if_stale();
+
+    const bool manualSyncPending = sManualSyncReloadPending || sPendingManualSyncInfo.has_value();
+    const bool stageLoadUnsafe = is_stage_load_unsafe_for_multiplayer();
+    if (manualSyncPending || stageLoadUnsafe) {
+        static uint32_t sGanondorfWorldSyncWaitLogTicks = 0;
+        if ((sGanondorfWorldSyncWaitLogTicks++ % 30) == 0) {
+            DuskLog.info("Multiplayer Ganondorf sync apply_skip reason=world_sync_pending "
+                         "manual_reload={} pending_info={} stage_unsafe={} local_owner={} "
+                         "domain={} has_snapshot={} owner={} last_seq={}",
+                         sManualSyncReloadPending, sPendingManualSyncInfo.has_value(),
+                         stageLoadUnsafe, localOwner, domainEnabled,
+                         sLatestGanondorfSyncState.valid, sGanondorfFinalSyncOwnerPeerId,
+                         sLatestGanondorfSyncState.sequence);
+        }
+        return false;
+    }
+
+    if (localOwner || !domainEnabled || !sLatestGanondorfSyncState.valid ||
+        sLatestGanondorfSyncState.stage != "D_MN09B")
+    {
+        static uint32_t sGanondorfApplySkipLogTicks = 0;
+        if ((sGanondorfApplySkipLogTicks++ % 120) == 0) {
+            DuskLog.info("Multiplayer Ganondorf sync apply_skip local_owner={} domain={} "
+                         "has_snapshot={} snapshot_stage={} owner={} last_seq={} age={}",
+                         localOwner, domainEnabled, sLatestGanondorfSyncState.valid,
+                         sLatestGanondorfSyncState.stage, sGanondorfFinalSyncOwnerPeerId,
+                         sLatestGanondorfSyncState.sequence,
+                         sLatestGanondorfSyncState.ageTicks);
+        }
+        return false;
+    }
+
+    *out = sLatestGanondorfSyncState;
+    static uint32_t sGanondorfApplyLogTicks = 0;
+    if ((sGanondorfApplyLogTicks++ % 60) == 0) {
+        DuskLog.info("Multiplayer Ganondorf sync apply_candidate owner={} seq={} action={} "
+                     "move={} health={} pos=({}, {}, {}) anm={} frame={}",
+                     out->ownerPeerId, out->sequence, out->actionMode, out->moveMode,
+                     out->health, out->x, out->y, out->z, out->anmId, out->anmFrame);
+    }
+    return true;
 }
 
 void draw_debug_peer_marker() {
@@ -6189,14 +8744,26 @@ void draw_debug_peer_marker() {
     }
 }
 
+void draw_peer_name_labels_native() {
+    draw_peer_name_labels_native_impl();
+}
+
 bool request_progression_sync_now(const std::string& peerId, const std::string& peerName) {
     std::string error;
     if (request_manual_sync(peerId, &error)) {
+        if (!sAwaitingManualSyncCueKey.empty()) {
+            mark_progression_sync_cue_handled(peerId, sAwaitingManualSyncCueKey,
+                                              "manual_sync_requested");
+        }
         push_notification("Sync requested from " + peerName);
         DuskLog.info("Multiplayer progression sync requested peer={}", peerId);
         return true;
     }
 
+    if (sAwaitingManualSyncPeerId == peerId) {
+        sAwaitingManualSyncPeerId.clear();
+        sAwaitingManualSyncCueKey.clear();
+    }
     push_notification(error.empty() ? "Sync request failed" : error, 6.0f);
     DuskLog.warn("Multiplayer progression sync request failed peer={} error={}", peerId, error);
     return false;
@@ -6235,21 +8802,20 @@ void flush_pending_progression_sync() {
         return;
     }
 
-    const auto poseIt = sSession.peerPoses.find(sPendingProgressionSync.peerId);
-    if (poseIt == sSession.peerPoses.end() || !poseIt->second.valid ||
-        poseIt->second.ageTicks > 30 || !poseIt->second.manualSyncReady)
+    const PeerProgressionState* state = nullptr;
+    if (!is_peer_progression_ready(sPendingProgressionSync.peerId, &state))
     {
         sPendingProgressionSync.stableReadyTicks = 0;
         static uint32_t sProgressionWaitLogTicks = 0;
         if ((sProgressionWaitLogTicks++ % 60) == 0) {
             DuskLog.info(
                 "Multiplayer progression sync waiting for peer readiness peer={} cue={} "
-                "has_pose={} valid={} age={} ready={}",
+                "has_state={} age={} ready={} stage={}",
                 sPendingProgressionSync.peerId, sPendingProgressionSync.cueKey,
-                poseIt != sSession.peerPoses.end(),
-                poseIt != sSession.peerPoses.end() ? poseIt->second.valid : false,
-                poseIt != sSession.peerPoses.end() ? poseIt->second.ageTicks : 0xFFFFFFFF,
-                poseIt != sSession.peerPoses.end() ? poseIt->second.manualSyncReady : false);
+                state != nullptr,
+                state != nullptr ? state->ageTicks : 0xFFFFFFFF,
+                state != nullptr ? state->manualSyncReady : false,
+                state != nullptr ? state->stage : "");
         }
         return;
     }
@@ -6271,6 +8837,7 @@ void flush_pending_progression_sync() {
     DuskLog.info("Multiplayer progression sync pending flush peer={} cue={}", pending.peerId,
                  pending.cueKey);
     sAwaitingManualSyncCueKey = pending.cueKey;
+    sAwaitingManualSyncPeerId = pending.peerId;
     request_progression_sync_now(pending.peerId, pending.peerName);
     if (sProgressionSyncPrompt.active && sProgressionSyncPrompt.waiting &&
         sProgressionSyncPrompt.peerId == pending.peerId &&
@@ -6414,8 +8981,6 @@ void draw_progression_sync_prompt() {
 }
 
 void draw_notifications_overlay() {
-    draw_peer_name_labels();
-
     if (!sEnabled) {
         return;
     }

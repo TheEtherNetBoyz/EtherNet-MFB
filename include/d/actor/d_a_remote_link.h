@@ -45,13 +45,17 @@ public:
                               bool i_midnaHairDraw, bool i_midnaShadowForm, int i_itemActorKind,
                               int i_itemActorBombExTime, int i_itemActorBombFlash, int i_rideActorKind);
     void setRemoteMatrices(const dusk::multiplayer::RemoteLinkMatrixSnapshot& i_matrices);
+    void setRemoteBombObjectState(const dusk::multiplayer::RemoteBombObjectSnapshot& i_bomb);
     void setRemoteHatState(const std::array<int16_t, 10>& i_rotA,
                            const std::array<int16_t, 10>& i_rotB,
                            const std::array<int16_t, 3>& i_swing, s16 i_shapeY);
+    void applyRemoteBodyMatrixInterpolationForPresentation();
+    bool getNameLabelPosition(cXyz* o_pos) const;
     void playRemoteSound(const dusk::multiplayer::RemoteAudioEvent& i_event);
     int headModelCallBack(int i_jointNo);
 
     static int createHeapCallBack(fopAc_ac_c* i_this);
+    static bool canReserveSlot();
 
 private:
     enum VisualForm {
@@ -76,6 +80,13 @@ private:
     struct AramResourceCacheEntry {
         u16 resId;
         void* resource;
+    };
+
+    struct RemoteModelMatrixInterpState {
+        dusk::multiplayer::RemoteModelMatrixSnapshot prev;
+        dusk::multiplayer::RemoteModelMatrixSnapshot curr;
+        bool prevValid;
+        bool currValid;
     };
 
     struct HeldItemVisualDesc {
@@ -139,11 +150,25 @@ private:
     void* getArchiveObjectRes(OwnedArchiveSlot& i_slot, s32 i_index);
     bool copyRemoteModelMatrices(J3DModel* i_model,
                                  const dusk::multiplayer::RemoteModelMatrixSnapshot& i_source);
+    void captureRemoteModelMatrixSnapshot(
+        J3DModel* i_model, const dusk::multiplayer::RemoteModelMatrixSnapshot& i_source,
+        RemoteModelMatrixInterpState& io_state);
+    void clearRemoteModelMatrixInterpolation(RemoteModelMatrixInterpState& io_state);
+    bool applyInterpolatedRemoteModelMatrices(
+        J3DModel* i_model, RemoteModelMatrixInterpState& io_state, const char* i_label);
+    void overrideRemoteModelMatrices(J3DModel* i_model);
+    void applyInterpolatedRemoteAttachments();
+    void captureRemoteBodyMatrixSnapshot(
+        const dusk::multiplayer::RemoteModelMatrixSnapshot& i_source);
+    void clearRemoteBodyMatrixInterpolation();
+    void applyInterpolatedRemoteBodyMatrices();
     void setBaseMtx();
     void calcModels();
     void drawModel(J3DModel* i_model);
     void drawLinkedItemActorModel();
     void drawShadowMidnaModels();
+    void updateRemoteBombActor();
+    void stopRemoteBombActor(bool i_explode);
     void maybeSpawnRemoteBombExplosion(int i_nextItemActorKind);
     void spawnRemoteBombExplosion();
     void hideAllHandShapes();
@@ -266,7 +291,24 @@ private:
     bool mRemoteBombLastPosValid;
     bool mRemoteBombWasWater;
     bool mRemoteBombExplosionSpawned;
+    fpc_ProcID mRemoteBombActorId;
+    int mRemoteBombActorKind;
+    s16 mRemoteBombAngleY;
     cXyz mRemoteBombLastPos;
+    dusk::multiplayer::RemoteModelMatrixSnapshot mPrevBodyMatrixSnapshot;
+    dusk::multiplayer::RemoteModelMatrixSnapshot mCurrBodyMatrixSnapshot;
+    bool mPrevBodyMatrixSnapshotValid;
+    bool mCurrBodyMatrixSnapshotValid;
+    RemoteModelMatrixInterpState mFaceMatrixInterp;
+    RemoteModelMatrixInterpState mHandMatrixInterp;
+    RemoteModelMatrixInterpState mSwordMatrixInterp;
+    RemoteModelMatrixInterpState mSheathMatrixInterp;
+    RemoteModelMatrixInterpState mShieldMatrixInterp;
+    RemoteModelMatrixInterpState mMidnaMatrixInterp;
+    RemoteModelMatrixInterpState mMidnaMaskMatrixInterp;
+    RemoteModelMatrixInterpState mMidnaHandMatrixInterp;
+    RemoteModelMatrixInterpState mMidnaHairMatrixInterp;
+    RemoteModelMatrixInterpState mMidnaGlowMatrixInterp;
     /* 0xC24 */ int mMidnaHairShape;
     /* 0xC28 */ bool mSlotReserved;
 };

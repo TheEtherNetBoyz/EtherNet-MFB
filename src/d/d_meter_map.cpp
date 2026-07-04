@@ -18,6 +18,8 @@
 #include "d/d_camera.h"
 #if TARGET_PC
 #include "dusk/settings.h"
+#include "dusk/multiplayer/multiplayer.hpp"
+#include "SSystem/SComponent/c_math.h"
 #include <algorithm>
 #endif
 #include <cstring>
@@ -28,6 +30,143 @@
 
 #if (PLATFORM_WII || PLATFORM_SHIELD)
 dMeter_map_HIO_c g_meter_mapHIO;
+#endif
+
+#if TARGET_PC
+namespace {
+
+struct MinimapScreenArrow {
+    f32 x = 0.0f;
+    f32 y = 0.0f;
+    s16 angleY = 0;
+    GXColor color = {255, 255, 255, 255};
+};
+
+bool map_world_to_screen(dMap_c* map, const Vec& mapPos, f32 drawX, f32 drawY, f32 drawW,
+                         f32 drawH, MinimapScreenArrow* out) {
+    if (map == nullptr || out == nullptr || map->getTexSizeX() == 0 || map->getTexSizeY() == 0) {
+        return false;
+    }
+
+    const f32 texelPerCm = map->getTexelPerCm();
+    const f32 texX = (static_cast<f32>(map->getTexSizeX()) * 0.5f) +
+                     ((mapPos.x - map->getCenterX()) * texelPerCm);
+    const f32 texY = (static_cast<f32>(map->getTexSizeY()) * 0.5f) +
+                     ((mapPos.z - map->getCenterZ()) * texelPerCm);
+
+    if (texX < 0.0f || texY < 0.0f || texX > map->getTexSizeX() || texY > map->getTexSizeY()) {
+        return false;
+    }
+
+    out->x = drawX + (texX / static_cast<f32>(map->getTexSizeX())) * drawW;
+    out->y = drawY + (texY / static_cast<f32>(map->getTexSizeY())) * drawH;
+    return true;
+}
+
+Vec transformed_map_pos_for_room(const dusk::multiplayer::MinimapPeerMarker& marker) {
+    BE(Vec) pos;
+    pos.x = marker.x;
+    pos.y = marker.y;
+    pos.z = marker.z;
+
+    dStage_FileList2_dt_c* fileList2 = dStage_roomControl_c::getFileList2(marker.room);
+    if (fileList2 != nullptr) {
+        dMapInfo_n::rotAngle(fileList2, &pos);
+        dMapInfo_n::offsetPlus(fileList2, &pos);
+    }
+
+    return pos;
+}
+
+s16 transformed_map_angle_for_room(int angleY, int room) {
+    s16 angle = static_cast<s16>(angleY);
+    dStage_FileList2_dt_c* fileList2 = dStage_roomControl_c::getFileList2(room);
+    if (fileList2 != nullptr) {
+        angle += fileList2->field_0x1c;
+    }
+    return angle;
+}
+
+void setup_minimap_arrow_gx() {
+    GXClearVtxDesc();
+    GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
+    GXSetVtxDesc(GX_VA_CLR0, GX_DIRECT);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XY, GX_F32, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
+    GXSetNumChans(1);
+    GXSetNumTexGens(0);
+    GXSetNumTevStages(1);
+    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
+    GXSetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
+    GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_SET);
+    GXSetZMode(GX_DISABLE, GX_ALWAYS, GX_FALSE);
+}
+
+void draw_minimap_screen_arrow(const MinimapScreenArrow& arrow, f32 cursorSize, f32 scaleX,
+                               f32 scaleY) {
+    static const Vec l_offset[3] = {
+        {0.0f, 0.0f, 400.0f},
+        {-200.0f, 0.0f, -240.0f},
+        {200.0f, 0.0f, -240.0f},
+    };
+
+    const f32 baseScale = cursorSize / 640.0f;
+    const f32 sinY = cM_ssin(arrow.angleY);
+    const f32 cosY = cM_scos(arrow.angleY);
+
+    GXBegin(GX_TRIANGLES, GX_VTXFMT0, 3);
+    for (int i = 0; i < 3; ++i) {
+        const f32 localX = l_offset[i].x * baseScale;
+        const f32 localZ = l_offset[i].z * baseScale;
+        const f32 rotX = localX * cosY + localZ * sinY;
+        const f32 rotZ = localZ * cosY - localX * sinY;
+
+        GXPosition2f32(arrow.x + rotX * scaleX, arrow.y + rotZ * scaleY);
+        GXColor4u8(arrow.color.r, arrow.color.g, arrow.color.b, arrow.color.a);
+    }
+    GXEnd();
+}
+
+void draw_multiplayer_minimap_arrows(dMap_c* map, f32 drawX, f32 drawY, f32 drawW, f32 drawH,
+                                     u8 alpha) {
+    if (map == nullptr || alpha == 0) {
+        return;
+    }
+
+    const auto markers = dusk::multiplayer::get_minimap_peer_markers(30);
+    if (markers.empty()) {
+        return;
+    }
+
+    setup_minimap_arrow_gx();
+
+    const f32 scaleX = drawW / static_cast<f32>(map->getTexSizeX());
+    const f32 scaleY = drawH / static_cast<f32>(map->getTexSizeY());
+    const f32 cursorSize = map->getPlayerCursorSize();
+    for (const auto& marker : markers) {
+        if (marker.room < 0 || marker.room >= 64 ||
+            !dComIfGp_roomControl_checkRoomDisp(marker.room)) {
+            continue;
+        }
+        if (map->isCheckFloor() &&
+            dMapInfo_c::calcFloorNo(marker.y, true, marker.room) != dMapInfo_c::getNowStayFloorNo()) {
+            continue;
+        }
+
+        MinimapScreenArrow arrow;
+        const Vec mapPos = transformed_map_pos_for_room(marker);
+        if (!map_world_to_screen(map, mapPos, drawX, drawY, drawW, drawH, &arrow)) {
+            continue;
+        }
+
+        arrow.angleY = transformed_map_angle_for_room(marker.angleY, marker.room);
+        arrow.color = {marker.color.r, marker.color.g, marker.color.b,
+                       static_cast<u8>((static_cast<u16>(marker.color.a) * alpha) / 255)};
+        draw_minimap_screen_arrow(arrow, cursorSize, scaleX, scaleY);
+    }
+}
+
+}  // namespace
 #endif
 
 #if DEBUG
@@ -645,6 +784,9 @@ void dMeterMap_c::draw() {
         mMapJ2DPicture->draw(mDoGph_gInf_c::ScaleHUDXLeft(drawPosX),
                              drawPosY + mapBottomShift, scaledSizeX, scaledSizeY,
                              false, false, false);
+        draw_multiplayer_minimap_arrows(mMap, mDoGph_gInf_c::ScaleHUDXLeft(drawPosX),
+                                        drawPosY + mapBottomShift, scaledSizeX, scaledSizeY,
+                                        alpha);
         #else
         mMapJ2DPicture->draw(drawPosX, drawPosY, sizeX, sizeY, false, false, false);
         #endif

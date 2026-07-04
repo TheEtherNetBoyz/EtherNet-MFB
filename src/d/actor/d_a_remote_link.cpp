@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <vector>
 
 #include "d/dolzel_rel.h"  // IWYU pragma: keep
 
@@ -22,8 +24,11 @@
 #include "JSystem/JKernel/JKRMemArchive.h"
 #include "SSystem/SComponent/c_math.h"
 #include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_nbomb.h"
+#include "d/d_bomb.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_item_data.h"
+#include "d/d_particle.h"
 #include "f_op/f_op_overlap_mng.h"
 #include "f_pc/f_pc_draw_priority.h"
 #include "m_Do/m_Do_ext.h"
@@ -35,7 +40,9 @@
 #include "Z2AudioLib/Z2AudioMgr.h"
 #include "Z2AudioLib/Z2Audience.h"
 #include "Z2AudioLib/Z2SoundInfo.h"
+#include "dusk/frame_interpolation.h"
 #include "dusk/logging.h"
+#include "dusk/multiplayer/multiplayer.hpp"
 #include <dvd.h>
 
 namespace {
@@ -92,6 +99,64 @@ static f32 remoteBombPulse(int i_exTime, int i_flash, int i_fallbackTicks) {
         return static_cast<f32>(std::clamp(i_flash, 0, 15)) / 15.0f;
     }
     return std::fabs(std::sin(static_cast<f32>(i_fallbackTicks) * 0.22f));
+}
+
+static bool remoteBombGameplayEffectsEnabled() {
+    return true;
+}
+
+static bool remoteBombRealActorEnabled() {
+    return true;
+}
+
+static bool envValueIsOff(const char* i_value) {
+    if (i_value == NULL || i_value[0] == '\0') {
+        return false;
+    }
+
+    char value[8] = {};
+    size_t i = 0;
+    for (; i < sizeof(value) - 1 && i_value[i] != '\0'; ++i) {
+        const char c = i_value[i];
+        value[i] = c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+    }
+    value[i] = '\0';
+
+    return value[0] == '0' ||
+           (value[0] == 'n' && value[1] == 'o' && value[2] == '\0') ||
+           (value[0] == 'o' && value[1] == 'f' && value[2] == 'f' && value[3] == '\0') ||
+           (value[0] == 'f' && value[1] == 'a' && value[2] == 'l' && value[3] == 's' &&
+            value[4] == 'e' && value[5] == '\0');
+}
+
+static bool remoteMatrixLocalInterpolationEnabled() {
+    static int s_enabled = -1;
+    if (s_enabled < 0) {
+        const char* value = std::getenv("DUSK_MP_MATRIX_LOCAL_INTERP");
+        s_enabled = envValueIsOff(value) ? 0 : 1;
+        if (s_enabled != 0) {
+            DuskLog.info("RemoteLink: local-space matrix interpolation enabled");
+        } else {
+            DuskLog.info("RemoteLink: local-space matrix interpolation force disabled");
+        }
+    }
+    return s_enabled != 0;
+}
+
+static u32 remoteBombCreateParam(int i_kind) {
+    switch (i_kind) {
+    case 3:
+        return dBomb_c::PRM_WATER_BOMB_PLAYER;
+    case 4:
+        return dBomb_c::PRM_INSECT_BOMB_PLAYER;
+    case 2:
+    default:
+        return dBomb_c::PRM_BOMB_WAIT;
+    }
+}
+
+static u32 remoteBombExplosionParam(int i_kind) {
+    return i_kind == 3 ? dBomb_c::PRM_WATER_BOMB_EXPLODE : dBomb_c::PRM_NORMAL_BOMB_EXPLODE;
 }
 
 static bool isRemoteTransformProc(int i_procId) {
@@ -284,6 +349,156 @@ static void flatMatrixToMtx(const float* i_values, Mtx o_mtx) {
     }
 }
 
+struct RemoteLocalJointTransform {
+    cXyz translation;
+    cXyz scale;
+    Quaternion rotation;
+};
+
+struct RemoteInterpMtx {
+    Mtx value;
+};
+
+static bool matrixTranslationFinite(CMtxP i_mtx) {
+    return std::isfinite(i_mtx[0][3]) && std::isfinite(i_mtx[1][3]) &&
+           std::isfinite(i_mtx[2][3]);
+}
+
+static f32 matrixTranslationDistanceSq(CMtxP i_a, CMtxP i_b) {
+    const f32 dx = i_a[0][3] - i_b[0][3];
+    const f32 dy = i_a[1][3] - i_b[1][3];
+    const f32 dz = i_a[2][3] - i_b[2][3];
+    return dx * dx + dy * dy + dz * dz;
+}
+
+static void setMatrixTranslation(Mtx io_mtx, const cXyz& i_pos) {
+    io_mtx[0][3] = i_pos.x;
+    io_mtx[1][3] = i_pos.y;
+    io_mtx[2][3] = i_pos.z;
+}
+
+static void setMatrixHorizontalTranslation(Mtx io_mtx, const cXyz& i_pos) {
+    io_mtx[0][3] = i_pos.x;
+    io_mtx[2][3] = i_pos.z;
+}
+
+static bool snapshotMatrixToMtx(const std::array<float, 12>& i_source, Mtx o_mtx) {
+    flatMatrixToMtx(i_source.data(), o_mtx);
+    return matrixTranslationFinite(o_mtx);
+}
+
+static bool snapshotJointMatrixToMtx(const dusk::multiplayer::RemoteModelMatrixSnapshot& i_source,
+                                     u16 i_joint, Mtx o_mtx) {
+    const size_t offset = static_cast<size_t>(i_joint) * 12;
+    if (offset + 12 > i_source.joints.size()) {
+        return false;
+    }
+    flatMatrixToMtx(i_source.joints.data() + offset, o_mtx);
+    return matrixTranslationFinite(o_mtx);
+}
+
+static bool matrixValuesNearlyEqual(const float* i_a, const float* i_b, size_t i_count) {
+    constexpr float kDuplicateMatrixEpsilon = 0.000001f;
+    for (size_t i = 0; i < i_count; ++i) {
+        if (std::fabs(i_a[i] - i_b[i]) > kDuplicateMatrixEpsilon) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool remoteModelMatrixSnapshotNearlyEqual(
+    const dusk::multiplayer::RemoteModelMatrixSnapshot& i_a,
+    const dusk::multiplayer::RemoteModelMatrixSnapshot& i_b) {
+    if (!i_a.valid || !i_b.valid || i_a.jointCount != i_b.jointCount ||
+        i_a.weightCount != i_b.weightCount || i_a.joints.size() != i_b.joints.size() ||
+        i_a.weights.size() != i_b.weights.size())
+    {
+        return false;
+    }
+
+    return matrixValuesNearlyEqual(i_a.base.data(), i_b.base.data(), i_a.base.size()) &&
+           (i_a.joints.empty() ||
+            matrixValuesNearlyEqual(i_a.joints.data(), i_b.joints.data(), i_a.joints.size())) &&
+           (i_a.weights.empty() ||
+            matrixValuesNearlyEqual(i_a.weights.data(), i_b.weights.data(), i_a.weights.size()));
+}
+
+static f32 columnLength(CMtxP i_mtx, int i_col) {
+    return std::sqrt(i_mtx[0][i_col] * i_mtx[0][i_col] +
+                     i_mtx[1][i_col] * i_mtx[1][i_col] +
+                     i_mtx[2][i_col] * i_mtx[2][i_col]);
+}
+
+static bool decomposeMatrixTRS(CMtxP i_mtx, RemoteLocalJointTransform* o_transform) {
+    if (o_transform == NULL || !matrixTranslationFinite(i_mtx)) {
+        return false;
+    }
+
+    o_transform->translation.set(i_mtx[0][3], i_mtx[1][3], i_mtx[2][3]);
+    o_transform->scale.set(columnLength(i_mtx, 0), columnLength(i_mtx, 1),
+                           columnLength(i_mtx, 2));
+    if (o_transform->scale.x <= 0.00001f || o_transform->scale.y <= 0.00001f ||
+        o_transform->scale.z <= 0.00001f)
+    {
+        return false;
+    }
+
+    Mtx rot;
+    for (int row = 0; row < 3; ++row) {
+        rot[row][0] = i_mtx[row][0] / o_transform->scale.x;
+        rot[row][1] = i_mtx[row][1] / o_transform->scale.y;
+        rot[row][2] = i_mtx[row][2] / o_transform->scale.z;
+        rot[row][3] = 0.0f;
+    }
+    QUATMtx(&o_transform->rotation, rot);
+    return std::isfinite(o_transform->rotation.x) &&
+           std::isfinite(o_transform->rotation.y) &&
+           std::isfinite(o_transform->rotation.z) &&
+           std::isfinite(o_transform->rotation.w);
+}
+
+static void composeMatrixTRS(const RemoteLocalJointTransform& i_transform, Mtx o_mtx) {
+    MTXQuat(o_mtx, &i_transform.rotation);
+    for (int row = 0; row < 3; ++row) {
+        o_mtx[row][0] *= i_transform.scale.x;
+        o_mtx[row][1] *= i_transform.scale.y;
+        o_mtx[row][2] *= i_transform.scale.z;
+    }
+    o_mtx[0][3] = i_transform.translation.x;
+    o_mtx[1][3] = i_transform.translation.y;
+    o_mtx[2][3] = i_transform.translation.z;
+}
+
+static RemoteLocalJointTransform interpolateLocalTransform(
+    const RemoteLocalJointTransform& i_prev, const RemoteLocalJointTransform& i_curr, f32 i_alpha) {
+    const f32 invAlpha = 1.0f - i_alpha;
+    RemoteLocalJointTransform out;
+    out.translation.set(i_prev.translation.x * invAlpha + i_curr.translation.x * i_alpha,
+                        i_prev.translation.y * invAlpha + i_curr.translation.y * i_alpha,
+                        i_prev.translation.z * invAlpha + i_curr.translation.z * i_alpha);
+    out.scale.set(i_prev.scale.x * invAlpha + i_curr.scale.x * i_alpha,
+                  i_prev.scale.y * invAlpha + i_curr.scale.y * i_alpha,
+                  i_prev.scale.z * invAlpha + i_curr.scale.z * i_alpha);
+    QUATSlerp(&i_prev.rotation, &i_curr.rotation, &out.rotation, i_alpha);
+    return out;
+}
+
+static void fillJointParentMap(J3DJoint* i_joint, int i_parent,
+                               std::vector<int16_t>& o_parents) {
+    if (i_joint == NULL) {
+        return;
+    }
+
+    const u16 jointNo = i_joint->getJntNo();
+    if (jointNo < o_parents.size()) {
+        o_parents[jointNo] = static_cast<int16_t>(i_parent);
+        for (J3DJoint* child = i_joint->getChild(); child != NULL; child = child->getYounger()) {
+            fillJointParentMap(child, jointNo, o_parents);
+        }
+    }
+}
+
 static int daRemoteLink_Create(fopAc_ac_c* i_this) {
     daRemoteLink_c* actor = static_cast<daRemoteLink_c*>(i_this);
     fopAcM_RegisterCreateID(actor, "RemoteLink");
@@ -305,6 +520,15 @@ static int daRemoteLink_IsDelete(daRemoteLink_c*) {
 
 static int daRemoteLink_Draw(daRemoteLink_c* i_this) {
     return i_this->Draw();
+}
+
+static void daRemoteLink_matrixInterpCallback(bool i_isSimFrame, void* i_userWork) {
+    if (i_isSimFrame || i_userWork == NULL) {
+        return;
+    }
+
+    static_cast<daRemoteLink_c*>(i_userWork)
+        ->applyRemoteBodyMatrixInterpolationForPresentation();
 }
 
 static actor_method_class l_daRemoteLink_Method = {
@@ -426,7 +650,24 @@ daRemoteLink_c::daRemoteLink_c()
       mRemoteBombLastPosValid(false),
       mRemoteBombWasWater(false),
       mRemoteBombExplosionSpawned(false),
+      mRemoteBombActorId(fpcM_ERROR_PROCESS_ID_e),
+      mRemoteBombActorKind(0),
+      mRemoteBombAngleY(0),
       mRemoteBombLastPos(cXyz::Zero),
+      mPrevBodyMatrixSnapshot(),
+      mCurrBodyMatrixSnapshot(),
+      mPrevBodyMatrixSnapshotValid(false),
+      mCurrBodyMatrixSnapshotValid(false),
+      mFaceMatrixInterp(),
+      mHandMatrixInterp(),
+      mSwordMatrixInterp(),
+      mSheathMatrixInterp(),
+      mShieldMatrixInterp(),
+      mMidnaMatrixInterp(),
+      mMidnaMaskMatrixInterp(),
+      mMidnaHandMatrixInterp(),
+      mMidnaHairMatrixInterp(),
+      mMidnaGlowMatrixInterp(),
       mMidnaHairShape(0),
       mSlotReserved(false) {
     mVisualState.form = FORM_HUMAN_KOKIRI;
@@ -1841,7 +2082,7 @@ bool daRemoteLink_c::reserveSlot() {
         return true;
     }
 
-    if (sLiveRemoteLinkActors >= l_maxRemoteLinkActors) {
+    if (!canReserveSlot()) {
         DuskLog.warn("RemoteLink: refusing create, live actor cap reached ({}/{})",
                      sLiveRemoteLinkActors, l_maxRemoteLinkActors);
         return false;
@@ -1852,6 +2093,10 @@ bool daRemoteLink_c::reserveSlot() {
     DuskLog.info("RemoteLink: reserved slot live={}/{}", sLiveRemoteLinkActors,
                  l_maxRemoteLinkActors);
     return true;
+}
+
+bool daRemoteLink_c::canReserveSlot() {
+    return sLiveRemoteLinkActors < l_maxRemoteLinkActors;
 }
 
 void daRemoteLink_c::releaseSlot() {
@@ -2159,6 +2404,10 @@ int daRemoteLink_c::Execute() {
         return TRUE;
     }
 
+    if (remoteMatrixLocalInterpolationEnabled()) {
+        dusk::frame_interp::add_interpolation_callback(&daRemoteLink_matrixInterpCallback, this);
+    }
+
     if (isRemoteBombActorKind(mRemoteItemActorKind) && mItemActorMatrixValid) {
         ++mRemoteBombFlashTicks;
         if (mRemoteBombExTime > 0) {
@@ -2172,6 +2421,7 @@ int daRemoteLink_c::Execute() {
         setBaseMtx();
         calcModels();
     }
+    updateRemoteBombActor();
     return TRUE;
 }
 
@@ -2289,6 +2539,10 @@ void daRemoteLink_c::setRemoteActionState(int i_procId, int i_procVar0, int i_pr
 }
 
 void daRemoteLink_c::maybeSpawnRemoteBombExplosion(int i_nextItemActorKind) {
+    if (remoteBombRealActorEnabled()) {
+        return;
+    }
+
     if (!isRemoteBombActorKind(mRemoteItemActorKind) || !mRemoteBombLastPosValid ||
         mRemoteBombExplosionSpawned)
     {
@@ -2326,6 +2580,103 @@ void daRemoteLink_c::spawnRemoteBombExplosion() {
     }
 }
 
+void daRemoteLink_c::stopRemoteBombActor(bool i_explode) {
+    const fpc_ProcID oldBombId = mRemoteBombActorId;
+    const int bombKind = mRemoteBombActorKind;
+
+    fopAc_ac_c* actor = oldBombId != fpcM_ERROR_PROCESS_ID_e ? fopAcM_SearchByID(oldBombId) : NULL;
+    if (actor != NULL && fopAcM_GetName(actor) == fpcNm_NBOMB_e) {
+        fopAcM_delete(actor);
+    }
+
+    if (i_explode && !mRemoteBombExplosionSpawned && remoteBombGameplayEffectsEnabled()) {
+        csXyz angle;
+        angle.set(0, mRemoteBombAngleY, 0);
+        const int roomNo = fopAcM_GetRoomNo(this);
+        fpc_ProcID explosionId =
+            fopAcM_create(fpcNm_NBOMB_e, remoteBombExplosionParam(bombKind), &mRemoteBombLastPos,
+                          roomNo, &angle, NULL, -1);
+        dusk::multiplayer::register_remote_bomb_actor_id(static_cast<int32_t>(explosionId));
+        fopAc_ac_c* explosion = fopAcM_SearchByID(explosionId);
+        if (explosion != NULL && fopAcM_GetName(explosion) == fpcNm_NBOMB_e) {
+            fopAcM_SetRoomNo(explosion, roomNo);
+            static_cast<daNbomb_c*>(explosion)->mCcStts.SetRoomId(roomNo);
+        }
+        mRemoteBombExplosionSpawned = true;
+        DuskLog.info("RemoteLink: local bomb explosion create id={} old_id={} kind={} actor={} pos=({}, {}, {})",
+                     explosionId, oldBombId, bombKind, (void*)explosion, mRemoteBombLastPos.x,
+                     mRemoteBombLastPos.y, mRemoteBombLastPos.z);
+    }
+
+    mRemoteBombActorId = fpcM_ERROR_PROCESS_ID_e;
+    mRemoteBombActorKind = 0;
+}
+
+void daRemoteLink_c::updateRemoteBombActor() {
+    if (!remoteBombRealActorEnabled() || !isRemoteBombActorKind(mRemoteItemActorKind) ||
+        !mRemoteBombLastPosValid)
+    {
+        stopRemoteBombActor(false);
+        return;
+    }
+
+    fopAc_ac_c* actor = mRemoteBombActorId != fpcM_ERROR_PROCESS_ID_e
+                            ? fopAcM_SearchByID(mRemoteBombActorId)
+                            : NULL;
+    if (actor != NULL && fopAcM_GetName(actor) != fpcNm_NBOMB_e) {
+        actor = NULL;
+        mRemoteBombActorId = fpcM_ERROR_PROCESS_ID_e;
+        mRemoteBombActorKind = 0;
+    }
+
+    if (actor != NULL && mRemoteBombActorKind != mRemoteItemActorKind) {
+        stopRemoteBombActor(false);
+        actor = NULL;
+    }
+
+    if (mRemoteBombExTime <= 0) {
+        stopRemoteBombActor(true);
+        return;
+    }
+
+    if (actor == NULL) {
+        csXyz angle;
+        angle.set(0, mRemoteBombAngleY, 0);
+        mRemoteBombActorId =
+            fopAcM_create(fpcNm_NBOMB_e, remoteBombCreateParam(mRemoteItemActorKind),
+                          &mRemoteBombLastPos, fopAcM_GetRoomNo(this), &angle, NULL, -1);
+        dusk::multiplayer::register_remote_bomb_actor_id(static_cast<int32_t>(mRemoteBombActorId));
+        mRemoteBombActorKind = mRemoteItemActorKind;
+        actor = fopAcM_SearchByID(mRemoteBombActorId);
+        DuskLog.info("RemoteLink: real bomb spawn id={} kind={} actor={} ex_time={}",
+                     mRemoteBombActorId, mRemoteBombActorKind, (void*)actor, mRemoteBombExTime);
+    }
+
+    if (actor == NULL || fopAcM_GetName(actor) != fpcNm_NBOMB_e) {
+        return;
+    }
+
+    daNbomb_c* bomb = static_cast<daNbomb_c*>(actor);
+    bomb->old.pos = bomb->current.pos;
+    bomb->current.pos = mRemoteBombLastPos;
+    bomb->shape_angle.y = mRemoteBombAngleY;
+    bomb->current.angle.y = mRemoteBombAngleY;
+    fopAcM_SetRoomNo(bomb, fopAcM_GetRoomNo(this));
+    bomb->mCcStts.SetRoomId(fopAcM_GetRoomNo(this));
+    if (mRemoteBombExTime >= 0) {
+        bomb->mExTime = std::max(mRemoteBombExTime, 2);
+    }
+    bomb->speed = cXyz::Zero;
+    bomb->speedF = 0.0f;
+
+    if (bomb->mpModel != NULL) {
+        mDoMtx_stack_c::transS(bomb->current.pos);
+        mDoMtx_stack_c::ZXYrotM(0, bomb->shape_angle.y, bomb->shape_angle.z);
+        bomb->mpModel->setBaseTRMtx(mDoMtx_stack_c::get());
+        fopAcM_SetMtx(bomb, bomb->mpModel->getBaseTRMtx());
+    }
+}
+
 bool daRemoteLink_c::copyRemoteModelMatrices(
     J3DModel* i_model, const dusk::multiplayer::RemoteModelMatrixSnapshot& i_source) {
     if (i_model == NULL || i_model->getModelData() == NULL || !i_source.valid) {
@@ -2358,10 +2709,509 @@ bool daRemoteLink_c::copyRemoteModelMatrices(
     return true;
 }
 
+void daRemoteLink_c::clearRemoteModelMatrixInterpolation(
+    RemoteModelMatrixInterpState& io_state) {
+    io_state = {};
+}
+
+void daRemoteLink_c::captureRemoteModelMatrixSnapshot(
+    J3DModel* i_model, const dusk::multiplayer::RemoteModelMatrixSnapshot& i_source,
+    RemoteModelMatrixInterpState& io_state) {
+    if (!remoteMatrixLocalInterpolationEnabled()) {
+        return;
+    }
+
+    if (i_model == NULL || i_model->getModelData() == NULL || !i_source.valid) {
+        clearRemoteModelMatrixInterpolation(io_state);
+        return;
+    }
+
+    J3DModelData* data = i_model->getModelData();
+    if (i_source.jointCount != data->getJointNum() ||
+        i_source.weightCount != data->getWEvlpMtxNum() ||
+        i_source.joints.size() != static_cast<size_t>(i_source.jointCount) * 12 ||
+        i_source.weights.size() != static_cast<size_t>(i_source.weightCount) * 12)
+    {
+        clearRemoteModelMatrixInterpolation(io_state);
+        return;
+    }
+
+    if (io_state.currValid && remoteModelMatrixSnapshotNearlyEqual(io_state.curr, i_source)) {
+        io_state.prev = io_state.curr;
+        io_state.prevValid = true;
+        return;
+    }
+
+    if (io_state.currValid) {
+        io_state.prev = io_state.curr;
+        io_state.prevValid = true;
+    } else {
+        io_state.prevValid = false;
+    }
+    io_state.curr = i_source;
+    io_state.currValid = true;
+}
+
+void daRemoteLink_c::overrideRemoteModelMatrices(J3DModel* i_model) {
+    if (i_model == NULL || i_model->getModelData() == NULL) {
+        return;
+    }
+
+    J3DModelData* data = i_model->getModelData();
+    for (u16 i = 0; i < data->getJointNum(); ++i) {
+        dusk::frame_interp::override_replacement(i_model->getAnmMtx(i), i_model->getAnmMtx(i));
+    }
+    for (u16 i = 0; i < data->getWEvlpMtxNum(); ++i) {
+        dusk::frame_interp::override_replacement(i_model->getWeightAnmMtx(i),
+                                                 i_model->getWeightAnmMtx(i));
+    }
+}
+
+bool daRemoteLink_c::applyInterpolatedRemoteModelMatrices(
+    J3DModel* i_model, RemoteModelMatrixInterpState& io_state, const char* i_label) {
+    if (!remoteMatrixLocalInterpolationEnabled() || !io_state.prevValid || !io_state.currValid ||
+        i_model == NULL || i_model->getModelData() == NULL ||
+        !dusk::frame_interp::is_enabled() || dusk::frame_interp::is_sim_frame())
+    {
+        return false;
+    }
+
+    J3DModelData* data = i_model->getModelData();
+    const u16 jointCount = data->getJointNum();
+    if (jointCount == 0 || io_state.prev.jointCount != jointCount ||
+        io_state.curr.jointCount != jointCount ||
+        io_state.prev.weightCount != data->getWEvlpMtxNum() ||
+        io_state.curr.weightCount != data->getWEvlpMtxNum())
+    {
+        return false;
+    }
+
+    Mtx prevBase;
+    Mtx currBase;
+    if (!snapshotMatrixToMtx(io_state.prev.base, prevBase) ||
+        !snapshotMatrixToMtx(io_state.curr.base, currBase))
+    {
+        return false;
+    }
+
+    static f32 const kMaxInterpolatedRootMoveSq = 400.0f * 400.0f;
+    if (matrixTranslationDistanceSq(prevBase, currBase) > kMaxInterpolatedRootMoveSq) {
+        return false;
+    }
+
+    J3DJoint* rootJoint = data->getJointTree().getRootNode();
+    if (rootJoint == NULL) {
+        return false;
+    }
+
+    std::vector<int16_t> parents(jointCount, -1);
+    fillJointParentMap(rootJoint, -1, parents);
+
+    std::vector<RemoteInterpMtx> prevWorld(jointCount);
+    std::vector<RemoteInterpMtx> currWorld(jointCount);
+    for (u16 i = 0; i < jointCount; ++i) {
+        if (parents[i] == -1 && data->getJointNodePointer(i) != rootJoint) {
+            return false;
+        }
+        if (!snapshotJointMatrixToMtx(io_state.prev, i, prevWorld[i].value) ||
+            !snapshotJointMatrixToMtx(io_state.curr, i, currWorld[i].value))
+        {
+            return false;
+        }
+    }
+
+    const f32 alpha = std::clamp(dusk::frame_interp::get_interpolation_step(), 0.0f, 1.0f);
+    static int sAttachmentInterpLogCount = 0;
+    if (sAttachmentInterpLogCount < 16) {
+        DuskLog.info("RemoteLink: local matrix interp attachment={} alpha={} joints={} weights={}",
+                     i_label, alpha, jointCount, data->getWEvlpMtxNum());
+        ++sAttachmentInterpLogCount;
+    }
+
+    RemoteLocalJointTransform prevBaseTransform;
+    RemoteLocalJointTransform currBaseTransform;
+    if (!decomposeMatrixTRS(prevBase, &prevBaseTransform) ||
+        !decomposeMatrixTRS(currBase, &currBaseTransform))
+    {
+        return false;
+    }
+
+    Mtx worldOut;
+    composeMatrixTRS(interpolateLocalTransform(prevBaseTransform, currBaseTransform, alpha),
+                     worldOut);
+    i_model->setBaseTRMtx(worldOut);
+
+    Mtx invParentPrev;
+    Mtx invParentCurr;
+    Mtx localPrev;
+    Mtx localCurr;
+    Mtx localOut;
+    RemoteLocalJointTransform prevTransform;
+    RemoteLocalJointTransform currTransform;
+    std::vector<RemoteInterpMtx> rebuiltWorld(jointCount);
+
+    for (u16 i = 0; i < jointCount; ++i) {
+        const int parent = parents[i];
+        if (parent >= 0) {
+            if (!MTXInverse(prevWorld[parent].value, invParentPrev) ||
+                !MTXInverse(currWorld[parent].value, invParentCurr))
+            {
+                return false;
+            }
+        } else if (!MTXInverse(prevBase, invParentPrev) || !MTXInverse(currBase, invParentCurr)) {
+            return false;
+        }
+
+        MTXConcat(invParentPrev, prevWorld[i].value, localPrev);
+        MTXConcat(invParentCurr, currWorld[i].value, localCurr);
+        if (!decomposeMatrixTRS(localPrev, &prevTransform) ||
+            !decomposeMatrixTRS(localCurr, &currTransform))
+        {
+            return false;
+        }
+
+        composeMatrixTRS(interpolateLocalTransform(prevTransform, currTransform, alpha), localOut);
+        if (parent >= 0) {
+            MTXConcat(rebuiltWorld[parent].value, localOut, worldOut);
+        } else {
+            MTXConcat(i_model->getBaseTRMtx(), localOut, worldOut);
+        }
+        MTXCopy(worldOut, rebuiltWorld[i].value);
+        i_model->setAnmMtx(i, worldOut);
+    }
+
+    i_model->calcWeightEnvelopeMtx();
+    overrideRemoteModelMatrices(i_model);
+    return true;
+}
+
+void daRemoteLink_c::applyInterpolatedRemoteAttachments() {
+    if (mpHeadModel != NULL && mpBodyModel != NULL) {
+        mpHeadModel->setBaseTRMtx(mpBodyModel->getAnmMtx(4));
+        mpHeadModel->calc();
+        overrideRemoteModelMatrices(mpHeadModel);
+    }
+
+    applyInterpolatedRemoteModelMatrices(mpFaceModel, mFaceMatrixInterp, "face");
+    applyInterpolatedRemoteModelMatrices(mpHandModel, mHandMatrixInterp, "hand");
+    if (mVisualState.form != FORM_WOLF) {
+        applyInterpolatedRemoteModelMatrices(mpSwordModel, mSwordMatrixInterp, "sword");
+        applyInterpolatedRemoteModelMatrices(mpSheathModel, mSheathMatrixInterp, "sheath");
+        applyInterpolatedRemoteModelMatrices(mpShieldModel, mShieldMatrixInterp, "shield");
+    }
+
+    if (mRemoteMidnaShadowForm) {
+        applyInterpolatedRemoteModelMatrices(mpShadowMidnaModel, mMidnaMatrixInterp, "midna");
+        applyInterpolatedRemoteModelMatrices(mpShadowMidnaMaskModel, mMidnaMaskMatrixInterp,
+                                             "midna_mask");
+        applyInterpolatedRemoteModelMatrices(mpShadowMidnaHandModel, mMidnaHandMatrixInterp,
+                                             "midna_hand");
+        applyInterpolatedRemoteModelMatrices(mpShadowMidnaHairModel, mMidnaHairMatrixInterp,
+                                             "midna_hair");
+    } else {
+        applyInterpolatedRemoteModelMatrices(mpMidnaModel, mMidnaMatrixInterp, "midna");
+        applyInterpolatedRemoteModelMatrices(mpMidnaMaskModel, mMidnaMaskMatrixInterp,
+                                             "midna_mask");
+        applyInterpolatedRemoteModelMatrices(mpMidnaHandModel, mMidnaHandMatrixInterp,
+                                             "midna_hand");
+        applyInterpolatedRemoteModelMatrices(mpMidnaHairModel, mMidnaHairMatrixInterp,
+                                             "midna_hair");
+    }
+    applyInterpolatedRemoteModelMatrices(mpMidnaGlowModel, mMidnaGlowMatrixInterp, "midna_glow");
+}
+
+void daRemoteLink_c::captureRemoteBodyMatrixSnapshot(
+    const dusk::multiplayer::RemoteModelMatrixSnapshot& i_source) {
+    if (!remoteMatrixLocalInterpolationEnabled()) {
+        return;
+    }
+
+    static int sCaptureRejectLogCount = 0;
+    const auto logCaptureReject = [&](const char* reason) {
+        if (sCaptureRejectLogCount < 16) {
+            DuskLog.info("RemoteLink: local matrix interp capture skipped reason={} valid={} "
+                         "body={} data={}",
+                         reason, i_source.valid, (void*)mpBodyModel,
+                         mpBodyModel != NULL ? (void*)mpBodyModel->getModelData() : NULL);
+            ++sCaptureRejectLogCount;
+        }
+    };
+
+    if (!i_source.valid || mpBodyModel == NULL || mpBodyModel->getModelData() == NULL) {
+        logCaptureReject(!i_source.valid ? "source_invalid" : "model_missing");
+        clearRemoteBodyMatrixInterpolation();
+        return;
+    }
+
+    J3DModelData* data = mpBodyModel->getModelData();
+    if (i_source.jointCount != data->getJointNum() ||
+        i_source.weightCount != data->getWEvlpMtxNum() ||
+        i_source.joints.size() != static_cast<size_t>(i_source.jointCount) * 12)
+    {
+        logCaptureReject("shape_mismatch");
+        clearRemoteBodyMatrixInterpolation();
+        return;
+    }
+
+    if (mCurrBodyMatrixSnapshotValid &&
+        remoteModelMatrixSnapshotNearlyEqual(mCurrBodyMatrixSnapshot, i_source))
+    {
+        mPrevBodyMatrixSnapshot = mCurrBodyMatrixSnapshot;
+        mPrevBodyMatrixSnapshotValid = true;
+        static int sDuplicateCaptureLogCount = 0;
+        if (sDuplicateCaptureLogCount < 12) {
+            DuskLog.info("RemoteLink: local matrix interp duplicate body snapshot collapsed");
+            ++sDuplicateCaptureLogCount;
+        }
+        return;
+    }
+
+    if (mCurrBodyMatrixSnapshotValid) {
+        mPrevBodyMatrixSnapshot = mCurrBodyMatrixSnapshot;
+        mPrevBodyMatrixSnapshotValid = true;
+    } else {
+        mPrevBodyMatrixSnapshotValid = false;
+    }
+    mCurrBodyMatrixSnapshot = i_source;
+    mCurrBodyMatrixSnapshotValid = true;
+
+    static int sCaptureLogCount = 0;
+    if (sCaptureLogCount < 12) {
+        DuskLog.info("RemoteLink: local matrix interp capture prev={} curr={} joints={} weights={}",
+                     mPrevBodyMatrixSnapshotValid, mCurrBodyMatrixSnapshotValid,
+                     i_source.jointCount, i_source.weightCount);
+        ++sCaptureLogCount;
+    }
+}
+
+void daRemoteLink_c::clearRemoteBodyMatrixInterpolation() {
+    mPrevBodyMatrixSnapshot = {};
+    mCurrBodyMatrixSnapshot = {};
+    mPrevBodyMatrixSnapshotValid = false;
+    mCurrBodyMatrixSnapshotValid = false;
+    clearRemoteModelMatrixInterpolation(mFaceMatrixInterp);
+    clearRemoteModelMatrixInterpolation(mHandMatrixInterp);
+    clearRemoteModelMatrixInterpolation(mSwordMatrixInterp);
+    clearRemoteModelMatrixInterpolation(mSheathMatrixInterp);
+    clearRemoteModelMatrixInterpolation(mShieldMatrixInterp);
+    clearRemoteModelMatrixInterpolation(mMidnaMatrixInterp);
+    clearRemoteModelMatrixInterpolation(mMidnaMaskMatrixInterp);
+    clearRemoteModelMatrixInterpolation(mMidnaHandMatrixInterp);
+    clearRemoteModelMatrixInterpolation(mMidnaHairMatrixInterp);
+    clearRemoteModelMatrixInterpolation(mMidnaGlowMatrixInterp);
+}
+
+void daRemoteLink_c::applyRemoteBodyMatrixInterpolationForPresentation() {
+    applyInterpolatedRemoteBodyMatrices();
+    applyInterpolatedRemoteAttachments();
+}
+
+bool daRemoteLink_c::getNameLabelPosition(cXyz* o_pos) const {
+    if (o_pos == NULL || !mHasRemotePose) {
+        return false;
+    }
+
+    if (mpBodyModel != NULL && mpBodyModel->getModelData() != NULL &&
+        mpBodyModel->getModelData()->getJointNum() > 4)
+    {
+        MtxP neckMtx = mpBodyModel->getAnmMtx(4);
+        Mtx interpNeckMtx;
+        if (dusk::frame_interp::lookup_replacement(neckMtx, interpNeckMtx)) {
+            neckMtx = interpNeckMtx;
+        }
+        o_pos->set(neckMtx[0][3], neckMtx[1][3], neckMtx[2][3]);
+        o_pos->y += mVisualState.form == FORM_WOLF ? 22.0f : 30.0f;
+        return true;
+    }
+
+    *o_pos = current.pos;
+    o_pos->y += mVisualState.form == FORM_WOLF ? 46.0f : 82.0f;
+    return true;
+}
+
+void daRemoteLink_c::applyInterpolatedRemoteBodyMatrices() {
+    if (!remoteMatrixLocalInterpolationEnabled()) {
+        return;
+    }
+
+    static int sApplyRejectLogCount = 0;
+    const auto logApplyReject = [&](const char* reason) {
+        if (sApplyRejectLogCount < 24) {
+            DuskLog.info("RemoteLink: local matrix interp apply skipped reason={} prev={} curr={} "
+                         "body={} data={} fi_enabled={} sim_frame={}",
+                         reason, mPrevBodyMatrixSnapshotValid, mCurrBodyMatrixSnapshotValid,
+                         (void*)mpBodyModel,
+                         mpBodyModel != NULL ? (void*)mpBodyModel->getModelData() : NULL,
+                         dusk::frame_interp::is_enabled(), dusk::frame_interp::is_sim_frame());
+            ++sApplyRejectLogCount;
+        }
+    };
+
+    if (!mPrevBodyMatrixSnapshotValid || !mCurrBodyMatrixSnapshotValid) {
+        logApplyReject("snapshot_missing");
+        return;
+    }
+
+    if (mpBodyModel == NULL || mpBodyModel->getModelData() == NULL) {
+        logApplyReject("model_missing");
+        return;
+    }
+
+    if (!dusk::frame_interp::is_enabled()) {
+        logApplyReject("frame_interp_disabled");
+        return;
+    }
+
+    if (dusk::frame_interp::is_sim_frame()) {
+        logApplyReject("sim_frame");
+        return;
+    }
+
+    J3DModelData* data = mpBodyModel->getModelData();
+    const u16 jointCount = data->getJointNum();
+    if (jointCount == 0 || mPrevBodyMatrixSnapshot.jointCount != jointCount ||
+        mCurrBodyMatrixSnapshot.jointCount != jointCount ||
+        mPrevBodyMatrixSnapshot.weightCount != data->getWEvlpMtxNum() ||
+        mCurrBodyMatrixSnapshot.weightCount != data->getWEvlpMtxNum())
+    {
+        logApplyReject("shape_mismatch");
+        return;
+    }
+
+    Mtx prevBase;
+    Mtx currBase;
+    if (!snapshotMatrixToMtx(mPrevBodyMatrixSnapshot.base, prevBase) ||
+        !snapshotMatrixToMtx(mCurrBodyMatrixSnapshot.base, currBase))
+    {
+        logApplyReject("base_invalid");
+        return;
+    }
+
+    static f32 const kMaxInterpolatedRootMoveSq = 400.0f * 400.0f;
+    if (matrixTranslationDistanceSq(prevBase, currBase) > kMaxInterpolatedRootMoveSq) {
+        logApplyReject("root_teleport");
+        return;
+    }
+
+    J3DJoint* rootJoint = data->getJointTree().getRootNode();
+    if (rootJoint == NULL) {
+        logApplyReject("root_missing");
+        return;
+    }
+
+    std::vector<int16_t> parents(jointCount, -1);
+    fillJointParentMap(rootJoint, -1, parents);
+
+    std::vector<RemoteInterpMtx> prevWorld(jointCount);
+    std::vector<RemoteInterpMtx> currWorld(jointCount);
+    for (u16 i = 0; i < jointCount; ++i) {
+        if (parents[i] == -1 && data->getJointNodePointer(i) != rootJoint) {
+            logApplyReject("parent_map_incomplete");
+            return;
+        }
+        if (!snapshotJointMatrixToMtx(mPrevBodyMatrixSnapshot, i, prevWorld[i].value) ||
+            !snapshotJointMatrixToMtx(mCurrBodyMatrixSnapshot, i, currWorld[i].value))
+        {
+            logApplyReject("joint_invalid");
+            return;
+        }
+    }
+
+    f32 alpha = std::clamp(dusk::frame_interp::get_interpolation_step(), 0.0f, 1.0f);
+    static int sLocalInterpLogCount = 0;
+    if (sLocalInterpLogCount < 12) {
+        DuskLog.info("RemoteLink: local matrix interp apply alpha={} joints={} weights={}",
+                     alpha, jointCount, data->getWEvlpMtxNum());
+        sLocalInterpLogCount++;
+    }
+    Mtx invParentPrev;
+    Mtx invParentCurr;
+    Mtx localPrev;
+    Mtx localCurr;
+    Mtx localOut;
+    Mtx worldOut;
+
+    RemoteLocalJointTransform prevTransform;
+    RemoteLocalJointTransform currTransform;
+    std::vector<RemoteInterpMtx> rebuiltWorld(jointCount);
+
+    RemoteLocalJointTransform prevBaseTransform;
+    RemoteLocalJointTransform currBaseTransform;
+    if (!decomposeMatrixTRS(prevBase, &prevBaseTransform) ||
+        !decomposeMatrixTRS(currBase, &currBaseTransform))
+    {
+        logApplyReject("base_decompose_failed");
+        return;
+    }
+    composeMatrixTRS(interpolateLocalTransform(prevBaseTransform, currBaseTransform, alpha),
+                     worldOut);
+    if (mHasRemotePose) {
+        const f32 invAlpha = 1.0f - alpha;
+        cXyz anchoredPos;
+        anchoredPos.set(old.pos.x * invAlpha + current.pos.x * alpha,
+                        old.pos.y * invAlpha + current.pos.y * alpha,
+                        old.pos.z * invAlpha + current.pos.z * alpha);
+        if ((current.pos - old.pos).abs2() <= 400.0f * 400.0f) {
+            setMatrixHorizontalTranslation(worldOut, anchoredPos);
+        } else {
+            setMatrixTranslation(worldOut, current.pos);
+        }
+    }
+    mpBodyModel->setBaseTRMtx(worldOut);
+
+    for (u16 i = 0; i < jointCount; ++i) {
+        const int parent = parents[i];
+        if (parent >= 0) {
+            if (!MTXInverse(prevWorld[parent].value, invParentPrev) ||
+                !MTXInverse(currWorld[parent].value, invParentCurr))
+            {
+                logApplyReject("parent_inverse_failed");
+                return;
+            }
+        } else {
+            if (!MTXInverse(prevBase, invParentPrev) || !MTXInverse(currBase, invParentCurr)) {
+                logApplyReject("base_inverse_failed");
+                return;
+            }
+        }
+
+        MTXConcat(invParentPrev, prevWorld[i].value, localPrev);
+        MTXConcat(invParentCurr, currWorld[i].value, localCurr);
+        if (!decomposeMatrixTRS(localPrev, &prevTransform) ||
+            !decomposeMatrixTRS(localCurr, &currTransform))
+        {
+            logApplyReject("joint_decompose_failed");
+            return;
+        }
+
+        composeMatrixTRS(interpolateLocalTransform(prevTransform, currTransform, alpha), localOut);
+        if (parent >= 0) {
+            MTXConcat(rebuiltWorld[parent].value, localOut, worldOut);
+        } else {
+            MTXConcat(mpBodyModel->getBaseTRMtx(), localOut, worldOut);
+        }
+        MTXCopy(worldOut, rebuiltWorld[i].value);
+        mpBodyModel->setAnmMtx(i, worldOut);
+    }
+
+    mpBodyModel->calcWeightEnvelopeMtx();
+    for (u16 i = 0; i < jointCount; ++i) {
+        dusk::frame_interp::override_replacement(mpBodyModel->getAnmMtx(i),
+                                                 mpBodyModel->getAnmMtx(i));
+    }
+    for (u16 i = 0; i < data->getWEvlpMtxNum(); ++i) {
+        dusk::frame_interp::override_replacement(mpBodyModel->getWeightAnmMtx(i),
+                                                 mpBodyModel->getWeightAnmMtx(i));
+    }
+    fopAcM_SetMtx(this, mpBodyModel->getBaseTRMtx());
+    model = mpBodyModel;
+}
+
 void daRemoteLink_c::setRemoteMatrices(
     const dusk::multiplayer::RemoteLinkMatrixSnapshot& i_matrices) {
     if (!i_matrices.valid) {
         mHasRemoteMatrices = false;
+        clearRemoteBodyMatrixInterpolation();
         mHeldItemMatrixValid = false;
         mHookTipMatrixValid = false;
         mHookSubItemMatrixValid = false;
@@ -2396,6 +3246,7 @@ void daRemoteLink_c::setRemoteMatrices(
             sCalcLogCount++;
         }
         mHasRemoteMatrices = false;
+        clearRemoteBodyMatrixInterpolation();
         mHeldItemMatrixValid = false;
         mHookTipMatrixValid = false;
         mHookSubItemMatrixValid = false;
@@ -2413,6 +3264,7 @@ void daRemoteLink_c::setRemoteMatrices(
         mMidnaHairShape = 0;
         return;
     }
+    captureRemoteBodyMatrixSnapshot(i_matrices.body);
 
     applyHeavyBootMatrices();
     if (mVisualState.form == FORM_WOLF) {
@@ -2422,12 +3274,36 @@ void daRemoteLink_c::setRemoteMatrices(
         mpHeadModel->setBaseTRMtx(mpBodyModel->getAnmMtx(4));
         mpHeadModel->calc();
     }
-    copyRemoteModelMatrices(mpFaceModel, i_matrices.face);
-    copyRemoteModelMatrices(mpHandModel, i_matrices.hand);
+    if (copyRemoteModelMatrices(mpFaceModel, i_matrices.face)) {
+        captureRemoteModelMatrixSnapshot(mpFaceModel, i_matrices.face, mFaceMatrixInterp);
+    } else {
+        clearRemoteModelMatrixInterpolation(mFaceMatrixInterp);
+    }
+    if (copyRemoteModelMatrices(mpHandModel, i_matrices.hand)) {
+        captureRemoteModelMatrixSnapshot(mpHandModel, i_matrices.hand, mHandMatrixInterp);
+    } else {
+        clearRemoteModelMatrixInterpolation(mHandMatrixInterp);
+    }
     if (mVisualState.form != FORM_WOLF) {
-        copyRemoteModelMatrices(mpSwordModel, i_matrices.sword);
-        copyRemoteModelMatrices(mpSheathModel, i_matrices.sheath);
-        copyRemoteModelMatrices(mpShieldModel, i_matrices.shield);
+        if (copyRemoteModelMatrices(mpSwordModel, i_matrices.sword)) {
+            captureRemoteModelMatrixSnapshot(mpSwordModel, i_matrices.sword, mSwordMatrixInterp);
+        } else {
+            clearRemoteModelMatrixInterpolation(mSwordMatrixInterp);
+        }
+        if (copyRemoteModelMatrices(mpSheathModel, i_matrices.sheath)) {
+            captureRemoteModelMatrixSnapshot(mpSheathModel, i_matrices.sheath, mSheathMatrixInterp);
+        } else {
+            clearRemoteModelMatrixInterpolation(mSheathMatrixInterp);
+        }
+        if (copyRemoteModelMatrices(mpShieldModel, i_matrices.shield)) {
+            captureRemoteModelMatrixSnapshot(mpShieldModel, i_matrices.shield, mShieldMatrixInterp);
+        } else {
+            clearRemoteModelMatrixInterpolation(mShieldMatrixInterp);
+        }
+    } else {
+        clearRemoteModelMatrixInterpolation(mSwordMatrixInterp);
+        clearRemoteModelMatrixInterpolation(mSheathMatrixInterp);
+        clearRemoteModelMatrixInterpolation(mShieldMatrixInterp);
     }
     mHeldItemMatrixValid =
         mRemoteItemDraw && copyRemoteModelMatrices(mpHeldItemModel, i_matrices.heldItem);
@@ -2451,11 +3327,14 @@ void daRemoteLink_c::setRemoteMatrices(
                                i_matrices.itemActor.base[11]);
         mRemoteBombLastPosValid = true;
         mRemoteBombWasWater = mRemoteItemActorKind == 3;
-        if (mRemoteBombExTime <= 0 && !mRemoteBombExplosionSpawned) {
+        if (!remoteBombRealActorEnabled() && mRemoteBombExTime <= 0 &&
+            !mRemoteBombExplosionSpawned)
+        {
             spawnRemoteBombExplosion();
             mRemoteBombExplosionSpawned = true;
         }
         if (mRemoteBombExTime <= 0) {
+            stopRemoteBombActor(true);
             mItemActorMatrixValid = false;
         }
     }
@@ -2469,30 +3348,84 @@ void daRemoteLink_c::setRemoteMatrices(
         }
         mMidnaMatrixValid =
             mRemoteMidnaDraw && copyRemoteModelMatrices(mpShadowMidnaModel, i_matrices.midna);
+        if (mMidnaMatrixValid) {
+            captureRemoteModelMatrixSnapshot(mpShadowMidnaModel, i_matrices.midna,
+                                             mMidnaMatrixInterp);
+        } else {
+            clearRemoteModelMatrixInterpolation(mMidnaMatrixInterp);
+        }
         mMidnaMaskMatrixValid = mRemoteMidnaMaskDraw &&
                                 copyRemoteModelMatrices(mpShadowMidnaMaskModel,
                                                         i_matrices.midnaMask);
+        if (mMidnaMaskMatrixValid) {
+            captureRemoteModelMatrixSnapshot(mpShadowMidnaMaskModel, i_matrices.midnaMask,
+                                             mMidnaMaskMatrixInterp);
+        } else {
+            clearRemoteModelMatrixInterpolation(mMidnaMaskMatrixInterp);
+        }
         mMidnaHandMatrixValid = mRemoteMidnaHandDraw &&
                                 copyRemoteModelMatrices(mpShadowMidnaHandModel,
                                                         i_matrices.midnaHand);
+        if (mMidnaHandMatrixValid) {
+            captureRemoteModelMatrixSnapshot(mpShadowMidnaHandModel, i_matrices.midnaHand,
+                                             mMidnaHandMatrixInterp);
+        } else {
+            clearRemoteModelMatrixInterpolation(mMidnaHandMatrixInterp);
+        }
         mMidnaHairMatrixValid = mRemoteMidnaHairDraw &&
                                 copyRemoteModelMatrices(mpShadowMidnaHairModel,
                                                         i_matrices.midnaHair);
+        if (mMidnaHairMatrixValid) {
+            captureRemoteModelMatrixSnapshot(mpShadowMidnaHairModel, i_matrices.midnaHair,
+                                             mMidnaHairMatrixInterp);
+        } else {
+            clearRemoteModelMatrixInterpolation(mMidnaHairMatrixInterp);
+        }
         mMidnaGlowMatrixValid = copyRemoteModelMatrices(mpMidnaGlowModel,
                                                         i_matrices.midnaGlow);
+        if (mMidnaGlowMatrixValid) {
+            captureRemoteModelMatrixSnapshot(mpMidnaGlowModel, i_matrices.midnaGlow,
+                                             mMidnaGlowMatrixInterp);
+        } else {
+            clearRemoteModelMatrixInterpolation(mMidnaGlowMatrixInterp);
+        }
     } else {
         mMidnaMatrixValid = mVisualState.form == FORM_WOLF && mRemoteMidnaDraw &&
                             copyRemoteModelMatrices(mpMidnaModel, i_matrices.midna);
+        if (mMidnaMatrixValid) {
+            captureRemoteModelMatrixSnapshot(mpMidnaModel, i_matrices.midna, mMidnaMatrixInterp);
+        } else {
+            clearRemoteModelMatrixInterpolation(mMidnaMatrixInterp);
+        }
         mMidnaMaskMatrixValid = mVisualState.form == FORM_WOLF && mRemoteMidnaMaskDraw &&
                                 copyRemoteModelMatrices(mpMidnaMaskModel,
                                                         i_matrices.midnaMask);
+        if (mMidnaMaskMatrixValid) {
+            captureRemoteModelMatrixSnapshot(mpMidnaMaskModel, i_matrices.midnaMask,
+                                             mMidnaMaskMatrixInterp);
+        } else {
+            clearRemoteModelMatrixInterpolation(mMidnaMaskMatrixInterp);
+        }
         mMidnaHandMatrixValid = mVisualState.form == FORM_WOLF && mRemoteMidnaHandDraw &&
                                 copyRemoteModelMatrices(mpMidnaHandModel,
                                                         i_matrices.midnaHand);
+        if (mMidnaHandMatrixValid) {
+            captureRemoteModelMatrixSnapshot(mpMidnaHandModel, i_matrices.midnaHand,
+                                             mMidnaHandMatrixInterp);
+        } else {
+            clearRemoteModelMatrixInterpolation(mMidnaHandMatrixInterp);
+        }
         mMidnaHairMatrixValid = mVisualState.form == FORM_WOLF && mRemoteMidnaHairDraw &&
                                 copyRemoteModelMatrices(mpMidnaHairModel,
                                                         i_matrices.midnaHair);
+        if (mMidnaHairMatrixValid) {
+            captureRemoteModelMatrixSnapshot(mpMidnaHairModel, i_matrices.midnaHair,
+                                             mMidnaHairMatrixInterp);
+        } else {
+            clearRemoteModelMatrixInterpolation(mMidnaHairMatrixInterp);
+        }
         mMidnaGlowMatrixValid = false;
+        clearRemoteModelMatrixInterpolation(mMidnaGlowMatrixInterp);
     }
     mMidnaHairShape = i_matrices.midnaHairShape;
     if (!mItemActorMatrixValid && (mRemoteItemActorKind != 0 || i_matrices.itemActor.valid) &&
@@ -2512,6 +3445,43 @@ void daRemoteLink_c::setRemoteMatrices(
     fopAcM_SetMtx(this, mpBodyModel->getBaseTRMtx());
     model = mpBodyModel;
     mHasRemoteMatrices = true;
+}
+
+void daRemoteLink_c::setRemoteBombObjectState(
+    const dusk::multiplayer::RemoteBombObjectSnapshot& i_bomb) {
+    if (!i_bomb.valid || !i_bomb.active || !isRemoteBombActorKind(i_bomb.kind)) {
+        if (i_bomb.valid && i_bomb.exploding && isRemoteBombActorKind(i_bomb.kind)) {
+            mRemoteBombLastPos.set(i_bomb.x, i_bomb.y, i_bomb.z);
+            mRemoteBombLastPosValid = true;
+            mRemoteBombWasWater = i_bomb.kind == 3;
+            mRemoteBombAngleY = static_cast<s16>(i_bomb.angleY);
+            if (!isRemoteBombActorKind(mRemoteBombActorKind)) {
+                mRemoteBombActorKind = i_bomb.kind;
+            }
+            stopRemoteBombActor(true);
+        }
+        else if (isRemoteBombActorKind(mRemoteItemActorKind)) {
+            stopRemoteBombActor(i_bomb.valid && i_bomb.exploding);
+        }
+        mRemoteItemActorKind = 0;
+        mRemoteBombExTime = -1;
+        mRemoteBombFlash = -1;
+        mRemoteBombLastPosValid = false;
+        return;
+    }
+
+    if (mRemoteItemActorKind != i_bomb.kind) {
+        mRemoteBombFlashTicks = 0;
+        mRemoteBombExplosionSpawned = false;
+    }
+
+    mRemoteItemActorKind = i_bomb.kind;
+    mRemoteBombExTime = i_bomb.exTime;
+    mRemoteBombFlash = -1;
+    mRemoteBombLastPos.set(i_bomb.x, i_bomb.y, i_bomb.z);
+    mRemoteBombLastPosValid = true;
+    mRemoteBombWasWater = i_bomb.kind == 3;
+    mRemoteBombAngleY = static_cast<s16>(i_bomb.angleY);
 }
 
 void daRemoteLink_c::setRemoteHatState(const std::array<int16_t, 10>& i_rotA,
@@ -2535,6 +3505,10 @@ void daRemoteLink_c::drawModel(J3DModel* i_model) {
 
 void daRemoteLink_c::drawLinkedItemActorModel() {
     if (mpItemActorModel == NULL) {
+        return;
+    }
+
+    if (remoteBombRealActorEnabled() && isRemoteBombActorKind(mRemoteItemActorKind)) {
         return;
     }
 
@@ -2809,6 +3783,7 @@ int daRemoteLink_c::Delete() {
         mpHeldItemModel != NULL ? (void*)mpHeldItemModel->getModelData() : NULL,
         mpItemActorModel != NULL ? (void*)mpItemActorModel->getModelData() : NULL,
         (void*)mpArcHeap);
+    stopRemoteBombActor(false);
     releaseSlot();
     destroyEquipmentModels();
     for (u32 i = 0; i < ARRAY_SIZE(mEquipmentArchives); ++i) {

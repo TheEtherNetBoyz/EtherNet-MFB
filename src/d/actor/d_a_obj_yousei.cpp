@@ -10,6 +10,10 @@
 #include "d/d_s_play.h"
 #include "d/d_item.h"
 #include "Z2AudioLib/Z2Instances.h"
+#if TARGET_PC
+#include "dusk/logging.h"
+#include "dusk/multiplayer/multiplayer.hpp"
+#endif
 
 void daObjYOUSEI_c::InitCcSph() {
     const static dCcD_SrcSph ccSphSrc = {
@@ -322,6 +326,17 @@ void daObjYOUSEI_c::WaitAction() {
     case 2:
         if (field_0x5d6 == 0 && current.pos.y - sLink_Pos->y > 250.0f) {
             JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(field_0x604);
+#if TARGET_PC
+            if (emitter == NULL && dusk::multiplayer::get_session_status().syncWorld) {
+                DuskLog.warn("Multiplayer fairy particle cleanup skipped stale emitter id={} "
+                             "mode={} prm={} pos=({}, {}, {})",
+                             field_0x604, mMode, mPrm, current.pos.x, current.pos.y,
+                             current.pos.z);
+                sp18 = 1;
+                fopAcM_delete(this);
+                break;
+            }
+#endif
             emitter->deleteAllParticle();
             dComIfGp_particle_levelEmitterOnEventMove(field_0x604);
             sp18 = 1;
@@ -360,12 +375,32 @@ void daObjYOUSEI_c::WaitAction() {
 
     if (eventInfo.checkCommandCatch()) {
         JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(field_0x604);
+#if TARGET_PC
+        if (emitter == NULL && dusk::multiplayer::get_session_status().syncWorld) {
+            DuskLog.warn("Multiplayer fairy catch cleanup skipped stale emitter id={} "
+                         "mode={} prm={} pos=({}, {}, {})",
+                         field_0x604, mMode, mPrm, current.pos.x, current.pos.y,
+                         current.pos.z);
+        } else
+#endif
+        {
         emitter->deleteAllParticle();
         dComIfGp_particle_levelEmitterOnEventMove(field_0x604);
+        }
 
         emitter = dComIfGp_particle_getEmitter(field_0x608);
+#if TARGET_PC
+        if (emitter == NULL && dusk::multiplayer::get_session_status().syncWorld) {
+            DuskLog.warn("Multiplayer fairy catch cleanup skipped stale emitter id={} "
+                         "mode={} prm={} pos=({}, {}, {})",
+                         field_0x608, mMode, mPrm, current.pos.x, current.pos.y,
+                         current.pos.z);
+        } else
+#endif
+        {
         emitter->deleteAllParticle();
         dComIfGp_particle_levelEmitterOnEventMove(field_0x608);
+        }
 
         sp18 = 1;
         data_804D1831 = 0;

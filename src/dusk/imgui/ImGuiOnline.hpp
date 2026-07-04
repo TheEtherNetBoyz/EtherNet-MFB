@@ -25,6 +25,9 @@ private:
     bool m_debugMarker = true;
     bool m_dummyModel = true;
     bool m_nameLabels = true;
+    bool m_syncWorld = false;
+    bool m_displayMidna = true;
+    bool m_remoteCollision = true;
     int m_syncPeerIndex = 0;
     std::string m_statusMessage;
 };

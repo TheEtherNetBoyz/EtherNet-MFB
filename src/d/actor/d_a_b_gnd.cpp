@@ -21,6 +21,8 @@
 #include "dusk/settings.h"
 #if TARGET_PC
 #include "dusk/achievements.h"
+#include "dusk/logging.h"
+#include "dusk/multiplayer/multiplayer.hpp"
 #endif
 
 class daB_GND_HIO_c : public JORReflexible {
@@ -2096,13 +2098,40 @@ static void b_gnd_g_down(b_gnd_class* i_this) {
         i_this->mMoveMode = 0;
         a_this->current.angle.y = a_this->shape_angle.y;
         return;
-    case 2:
+    case 2: {
         mant_p->field_0x3965 = 1;
-        if (daPy_getPlayerActorClass()->getCutType() == daPy_py_c::CUT_TYPE_DOWN) {
+#if TARGET_PC
+        dusk::multiplayer::GanondorfRemoteHitSnapshot mp_finish_hit;
+        const bool mp_remote_finish =
+            dusk::multiplayer::consume_ganondorf_final_remote_finish(
+                a_this->current.pos.x, a_this->current.pos.y, a_this->current.pos.z,
+                &mp_finish_hit);
+#else
+        const bool mp_remote_finish = false;
+#endif
+        if (daPy_getPlayerActorClass()->getCutType() == daPy_py_c::CUT_TYPE_DOWN ||
+            mp_remote_finish)
+        {
             i_this->mDemoCamMode = 60;
             i_this->mActionMode = ACTION_END;
             i_this->mMoveMode = 0;
             Z2GetAudioMgr()->bgmStop(30, 0);
+#if TARGET_PC
+            if (!mp_remote_finish) {
+                daAlink_c* player = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
+                dusk::multiplayer::report_ganondorf_final_local_hit(
+                    player->current.pos.x, player->current.pos.y, player->current.pos.z,
+                    player->getCutType(), player->getCutCount(),
+                    player->checkCutJumpCancelTurn(), player->mProcID,
+                    0.0f, true);
+            } else {
+                DuskLog.info("Multiplayer Ganondorf final blow rx peer={} seq={} proc={} "
+                             "cut_type={} dist={}",
+                             mp_finish_hit.peerId, mp_finish_hit.sequence,
+                             mp_finish_hit.procId, mp_finish_hit.cutType,
+                             mp_finish_hit.distXZ);
+            }
+#endif
         }
 
         if (i_this->field_0xc44[0] != 0 && daPy_getPlayerActorClass()->checkMasterSwordEquip()) {
@@ -2113,6 +2142,7 @@ static void b_gnd_g_down(b_gnd_class* i_this) {
         a_this->current.angle.y = a_this->shape_angle.y;
         i_this->mMoveMode = 3;
         e_this->offDownFlg();
+    }
     case 3:
         if (anm_frame <= 10) {
             mant_p->field_0x3965 = 1;
