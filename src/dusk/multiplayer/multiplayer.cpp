@@ -100,6 +100,7 @@ void consume_progression_prompt_start_button();
 void apply_remote_link_model_enabled(bool enabled);
 void apply_sync_flags_enabled(bool enabled);
 void apply_sync_world_enabled(bool enabled);
+void apply_pvp_enabled(bool enabled);
 
 namespace {
 
@@ -183,6 +184,11 @@ constexpr uint32_t kGanondorfRemotePlayerDamageMaxAgeTicks = 20;
 constexpr uint32_t kGanondorfRemoteReactionMaxAgeTicks = 12;
 constexpr float kGanondorfRemoteReactionRange = 700.0f;
 constexpr uint32_t kGanondorfSyncSnapshotMaxAgeTicks = 45;
+constexpr uint8_t kPvpLocalHitCooldownTicks = 18;
+constexpr int kPvpAttackLight = 1;
+constexpr int kPvpAttackHeavy = 2;
+constexpr int kPvpLightDamage = 2;
+constexpr int kPvpHeavyDamage = 4;
 
 std::map<std::string, uint32_t> sGanondorfRemoteHitLastSequenceByPeer;
 std::map<std::string, uint32_t> sGanondorfRemoteReactionLastSequenceByPeer;
@@ -200,6 +206,11 @@ uint32_t sLastGanondorfSyncSendTick = 0;
 uint32_t sLastGanondorfOwnerClaimTick = 0;
 uint32_t sLastGanondorfOwnerBroadcastTick = 0;
 uint8_t sGanondorfLocalPlayerDamageHandledTicks = 0;
+uint32_t sLocalPvpHitSequence = 0;
+std::map<std::string, uint32_t> sPvpRemoteHitLastSequenceByPeer;
+std::map<std::string, uint8_t> sPvpLocalHitCooldownByPeer;
+uint32_t sPvpLocalHitProbeLogCount = 0;
+uint32_t sPvpLocalHitSkipLogCount = 0;
 
 struct GanondorfRemotePlayerDamageEvent {
     bool valid = false;
@@ -242,6 +253,27 @@ bool apply_ganondorf_remote_player_damage(const GanondorfRemotePlayerDamageEvent
     }
 
     daPy_py_c::setPlayerDamage(damage.damageAmount, TRUE);
+    return false;
+}
+
+bool apply_pvp_player_damage(int attackClass, float sourceX, float sourceZ) {
+    daAlink_c* player = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
+    if (player != nullptr) {
+        const s16 hitAngle =
+            static_cast<s16>(angle_y_from_delta(player->current.pos.x - sourceX,
+                                                player->current.pos.z - sourceZ));
+        if (attackClass == kPvpAttackHeavy) {
+            player->setThrowDamage(hitAngle, 35.0f, 22.0f, kPvpHeavyDamage, 1, 0);
+            return player->procCoLargeDamageInit(-3, TRUE, 0, 0, nullptr, 0) != 0;
+        }
+
+        player->setDamagePointNormal(kPvpLightDamage);
+        player->field_0x3102 = static_cast<s16>(hitAngle - 0x8000);
+        return player->procDamageInit(nullptr, 1) != 0;
+    }
+
+    daPy_py_c::setPlayerDamage(attackClass == kPvpAttackHeavy ? kPvpHeavyDamage : kPvpLightDamage,
+                               TRUE);
     return false;
 }
 
@@ -577,6 +609,7 @@ bool sDisplayRemoteMidnaEnabled = true;
 // pose-based body push; future engine-backed collision should use the same
 // switch so presets do not need to care which implementation is active.
 bool sRemoteCollisionEnabled = true;
+bool sPvpEnabled = false;
 bool sDirectRemoteWantsPuppet = true;
 bool sDirectRemoteWantsMidna = true;
 fpc_ProcID sLastPlayerBombActorId = fpcM_ERROR_PROCESS_ID_e;
@@ -2718,7 +2751,7 @@ const char* packet_category(const std::string& type) {
     if (type == "hello" || type == "welcome" || type == "peer_joined" || type == "presence" ||
         type == "peer_left" || type == "name_labels" || type == "dummy_model" ||
         type == "sync_flags" || type == "sync_world" || type == "remote_collision" ||
-        type == "progression_state")
+        type == "pvp_enabled" || type == "progression_state" || type == "pvp_hit")
     {
         return "session";
     }
@@ -3490,6 +3523,7 @@ void send_welcome_to_peer(DirectPeer& peer) {
         {"sync_flags", sSyncFlagsEnabled},
         {"sync_world", sSyncWorldEnabled},
         {"remote_collision", sRemoteCollisionEnabled},
+        {"pvp", sPvpEnabled},
         {"want_puppet", wants_remote_puppet_matrices()},
         {"want_midna", wants_remote_midna_matrices()},
         {"peers", direct_peer_list(peer.id)},
@@ -3511,6 +3545,7 @@ void send_welcome() {
         {"sync_flags", sSyncFlagsEnabled},
         {"sync_world", sSyncWorldEnabled},
         {"remote_collision", sRemoteCollisionEnabled},
+        {"pvp", sPvpEnabled},
         {"want_puppet", wants_remote_puppet_matrices()},
         {"want_midna", wants_remote_midna_matrices()},
         {"peers", json::array()},
@@ -4529,6 +4564,8 @@ void forget_peer_state(const std::string& peerId) {
     sGanondorfRemoteReactionLastSequenceByPeer.erase(peerId);
     sGanondorfRemotePlayerDamageLastSequenceByPeer.erase(peerId);
     sGanondorfRemotePlayerDamageCooldownByPeer.erase(peerId);
+    sPvpRemoteHitLastSequenceByPeer.erase(peerId);
+    sPvpLocalHitCooldownByPeer.erase(peerId);
     sPendingGanondorfRemoteHitEvents.erase(
         std::remove_if(sPendingGanondorfRemoteHitEvents.begin(),
                        sPendingGanondorfRemoteHitEvents.end(),
@@ -4684,8 +4721,14 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         if (message.contains("remote_collision")) {
             sRemoteCollisionEnabled =
                 message.value("remote_collision", sRemoteCollisionEnabled);
+            if (!sRemoteCollisionEnabled) {
+                apply_pvp_enabled(false);
+            }
             DuskLog.info("Multiplayer remote collision synced from welcome {}",
                          sRemoteCollisionEnabled ? "enabled" : "disabled");
+        }
+        if (message.contains("pvp")) {
+            apply_pvp_enabled(message.value("pvp", sPvpEnabled));
         }
         sDirectRemoteWantsPuppet = message.value("want_puppet", sDirectRemoteWantsPuppet);
         sDirectRemoteWantsMidna = message.value("want_midna", sDirectRemoteWantsMidna);
@@ -4805,8 +4848,52 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
     } else if (type == "remote_collision") {
         if (sSession.mode == NetworkMode::DirectJoin) {
             sRemoteCollisionEnabled = message.value("enabled", sRemoteCollisionEnabled);
+            if (!sRemoteCollisionEnabled) {
+                apply_pvp_enabled(false);
+            }
             DuskLog.info("Multiplayer remote collision synced {}",
                          sRemoteCollisionEnabled ? "enabled" : "disabled");
+        }
+    } else if (type == "pvp_enabled") {
+        if (sSession.mode == NetworkMode::DirectJoin) {
+            apply_pvp_enabled(message.value("enabled", sPvpEnabled));
+        }
+    } else if (type == "pvp_hit") {
+        const std::string peerId = resolve_peer_id(routedMessage);
+        const json state = routedMessage.value("state", json::object());
+        const std::string targetPeerId = state.value("target_peer_id", "");
+        if (peerId.empty() || peerId == local_udp_pose_sender_id()) {
+            return;
+        }
+
+        if (targetPeerId == local_udp_pose_sender_id()) {
+            if (!pvp_enabled() || is_stage_load_unsafe_for_multiplayer()) {
+                return;
+            }
+
+            const uint32_t sequence = routedMessage.value("sequence", 0U);
+            const auto lastIt = sPvpRemoteHitLastSequenceByPeer.find(peerId);
+            if (lastIt != sPvpRemoteHitLastSequenceByPeer.end() && lastIt->second >= sequence) {
+                return;
+            }
+
+            const std::string stage = state.value("stage", "");
+            const char* localStage = dComIfGp_getStartStageName();
+            if (localStage == nullptr || stage != localStage) {
+                return;
+            }
+
+            const int attackClass = state.value("attack_class", kPvpAttackLight);
+            if (attackClass != kPvpAttackLight && attackClass != kPvpAttackHeavy) {
+                return;
+            }
+
+            const float sourceX = state.value("source_x", 0.0f);
+            const float sourceZ = state.value("source_z", 0.0f);
+            const bool appliedReaction = apply_pvp_player_damage(attackClass, sourceX, sourceZ);
+            sPvpRemoteHitLastSequenceByPeer[peerId] = sequence;
+            DuskLog.info("Multiplayer PvP hit rx peer={} seq={} class={} reaction={}",
+                         peerId, sequence, attackClass, appliedReaction);
         }
     } else if (type == "peer_left") {
         const std::string leftPeerId = resolve_peer_id(routedMessage);
@@ -7310,6 +7397,14 @@ void update_connected() {
         }
     }
 
+    for (auto it = sPvpLocalHitCooldownByPeer.begin(); it != sPvpLocalHitCooldownByPeer.end();) {
+        if (it->second == 0 || --it->second == 0) {
+            it = sPvpLocalHitCooldownByPeer.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
     if (sGanondorfLocalPlayerDamageHandledTicks != 0) {
         sGanondorfLocalPlayerDamageHandledTicks--;
     }
@@ -7557,6 +7652,98 @@ bool get_remote_bomb_object_for_peer(const std::string& peerId,
     return true;
 }
 
+int classify_pvp_attack(dCcD_GObjInf* attackInfo) {
+    if (attackInfo == nullptr) {
+        return kPvpAttackLight;
+    }
+
+    if (attackInfo->ChkAtType(AT_TYPE_HEAVY_BOOTS)) {
+        return kPvpAttackLight;
+    }
+
+    if (attackInfo->GetAtSpl() != dCcG_At_Spl_UNK_0 ||
+        attackInfo->ChkAtType(AT_TYPE_IRON_BALL | AT_TYPE_WOLF_CUT_TURN))
+    {
+        return kPvpAttackHeavy;
+    }
+
+    return kPvpAttackLight;
+}
+
+void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo) {
+    if (link == nullptr || attackInfo == nullptr || !attackInfo->ChkAtHit()) {
+        return;
+    }
+
+    fopAc_ac_c* hitActor = attackInfo->GetAtHitAc();
+    if (sPvpLocalHitProbeLogCount < 40) {
+        ++sPvpLocalHitProbeLogCount;
+        DuskLog.info("Multiplayer PvP hit probe actor={} at_type={:#x} at_grp={:#x} "
+                     "at_spl={} remote_collision={} pvp={} enabled={} welcomed={} unsafe={}",
+                     hitActor != nullptr ? fopAcM_GetName(hitActor) : -1, attackInfo->GetAtType(),
+                     attackInfo->GetAtGrp(), static_cast<int>(attackInfo->GetAtSpl()),
+                     remote_collision_enabled(), pvp_enabled(), sEnabled, sSession.welcomed,
+                     is_stage_load_unsafe_for_multiplayer());
+    }
+
+    if (!sEnabled || !sSession.welcomed || !pvp_enabled() ||
+        is_stage_load_unsafe_for_multiplayer())
+    {
+        return;
+    }
+
+    std::string targetPeerId;
+    if (!get_remote_link_dummy_peer_id_for_actor(hitActor, &targetPeerId) ||
+        targetPeerId.empty() || targetPeerId == local_udp_pose_sender_id())
+    {
+        if (sPvpLocalHitSkipLogCount < 40) {
+            ++sPvpLocalHitSkipLogCount;
+            DuskLog.info("Multiplayer PvP hit skip: hit actor is not remote Link actor={} "
+                         "target_peer={}",
+                         hitActor != nullptr ? fopAcM_GetName(hitActor) : -1, targetPeerId);
+        }
+        return;
+    }
+
+    const auto cooldownIt = sPvpLocalHitCooldownByPeer.find(targetPeerId);
+    if (cooldownIt != sPvpLocalHitCooldownByPeer.end() && cooldownIt->second != 0) {
+        return;
+    }
+
+    const uint32_t sequence = ++sLocalPvpHitSequence;
+    const int attackClass = classify_pvp_attack(attackInfo);
+    json state = {
+        {"target_peer_id", targetPeerId},
+        {"stage", dComIfGp_getStartStageName()},
+        {"room", static_cast<int>(dComIfGp_roomControl_getStayNo())},
+        {"attack_class", attackClass},
+        {"source_x", link->current.pos.x},
+        {"source_y", link->current.pos.y},
+        {"source_z", link->current.pos.z},
+    };
+
+    send_json({
+        {"type", "pvp_hit"},
+        {"sequence", sequence},
+        {"state", state},
+    });
+    sPvpLocalHitCooldownByPeer[targetPeerId] = kPvpLocalHitCooldownTicks;
+    DuskLog.info("Multiplayer PvP hit tx target={} seq={} class={} at_type={:#x} at_spl={}",
+                 targetPeerId, sequence, attackClass, attackInfo->GetAtType(),
+                 static_cast<int>(attackInfo->GetAtSpl()));
+}
+
+void report_remote_link_pvp_target_hit(fopAc_ac_c* remoteLinkActor, fopAc_ac_c* attackActor,
+                                       dCcD_GObjInf* attackInfo) {
+    if (remoteLinkActor == nullptr || attackActor == nullptr || attackInfo == nullptr ||
+        fopAcM_GetName(attackActor) != fpcNm_ALINK_e)
+    {
+        return;
+    }
+
+    report_local_pvp_attack_hit(static_cast<daAlink_c*>(attackActor), attackInfo);
+}
+
 void record_local_link_audio_event(uint32_t soundId, bool level, uint32_t mapInfo, int reverb,
                                    uint8_t sourceKind) {
     if (!sEnabled || !sSession.welcomed || soundId == 0) {
@@ -7775,6 +7962,7 @@ bool host_direct(const DirectHostOptions& options, std::string* errorOut) {
     sSyncWorldEnabled = options.syncWorld;
     sDisplayRemoteMidnaEnabled = options.displayMidna;
     sRemoteCollisionEnabled = options.remoteCollision;
+    apply_pvp_enabled(options.pvp);
     sSession.sessionId = make_session_token(9);
     sSession.sessionKey = make_session_token(16);
 
@@ -7840,6 +8028,7 @@ bool join_direct(const DirectJoinOptions& options, std::string* errorOut) {
     sSyncWorldEnabled = options.syncWorld;
     sDisplayRemoteMidnaEnabled = options.displayMidna;
     sRemoteCollisionEnabled = options.remoteCollision;
+    apply_pvp_enabled(options.pvp);
 
     DuskLog.info("Multiplayer module enabled mode={} room={}", mode_name(sSession.mode),
                  sSession.room);
@@ -7889,6 +8078,7 @@ bool join_relay(const RelayJoinOptions& options, std::string* errorOut) {
     sSyncWorldEnabled = options.syncWorld;
     sDisplayRemoteMidnaEnabled = options.displayMidna;
     sRemoteCollisionEnabled = options.remoteCollision;
+    apply_pvp_enabled(options.pvp);
 
     DuskLog.info("Multiplayer module enabled mode={} room={}", mode_name(sSession.mode),
                  sSession.room);
@@ -7994,6 +8184,8 @@ SessionStatus get_session_status() {
     status.displayMidna = sDisplayRemoteMidnaEnabled;
     status.remoteCollision = sRemoteCollisionEnabled;
     status.remoteCollisionHostControlled = sSession.mode == NetworkMode::DirectJoin;
+    status.pvp = pvp_enabled();
+    status.pvpHostControlled = sSession.mode == NetworkMode::DirectJoin;
     status.hasRecentPeerPose = has_recent_peer_pose(90);
     return status;
 }
@@ -8212,6 +8404,9 @@ void set_remote_collision_enabled(bool enabled) {
     }
 
     sRemoteCollisionEnabled = enabled;
+    if (!sRemoteCollisionEnabled) {
+        apply_pvp_enabled(false);
+    }
     DuskLog.info("Multiplayer remote collision {}",
                  sRemoteCollisionEnabled ? "enabled" : "disabled");
     if (sEnabled && sSession.mode == NetworkMode::DirectHost) {
@@ -8219,11 +8414,39 @@ void set_remote_collision_enabled(bool enabled) {
             {"type", "remote_collision"},
             {"enabled", sRemoteCollisionEnabled},
         });
+        broadcast_to_direct_peers({
+            {"type", "pvp_enabled"},
+            {"enabled", pvp_enabled()},
+        });
     }
 }
 
 bool remote_collision_enabled() {
     return sDummyModelEnabled && sRemoteCollisionEnabled;
+}
+
+void apply_pvp_enabled(bool enabled) {
+    sPvpEnabled = enabled && sRemoteCollisionEnabled;
+    DuskLog.info("Multiplayer PvP {}", sPvpEnabled ? "enabled" : "disabled");
+}
+
+void set_pvp_enabled(bool enabled) {
+    if (sSession.mode == NetworkMode::DirectJoin) {
+        DuskLog.info("Multiplayer PvP change ignored on join client; host controlled");
+        return;
+    }
+
+    apply_pvp_enabled(enabled);
+    if (sEnabled && sSession.mode == NetworkMode::DirectHost) {
+        broadcast_to_direct_peers({
+            {"type", "pvp_enabled"},
+            {"enabled", pvp_enabled()},
+        });
+    }
+}
+
+bool pvp_enabled() {
+    return remote_collision_enabled() && sPvpEnabled;
 }
 
 bool has_recent_peer_pose(uint32_t maxAgeTicks) {

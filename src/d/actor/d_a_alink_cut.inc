@@ -321,6 +321,7 @@ BOOL daAlink_c::notSwordHitVibActor(fopAc_ac_c* i_actor) {
 
 BOOL daAlink_c::setSwordHitVibration(dCcD_GObjInf* i_gobj) {
     if (i_gobj->ChkAtHit()) {
+        dusk::multiplayer::report_local_pvp_attack_hit(this, i_gobj);
         if (notSwordHitVibActor(i_gobj->GetAtHitAc())) {
             return true;
         }

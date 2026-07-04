@@ -516,6 +516,22 @@ bool get_remote_link_dummy_label_position(const std::string& peerId, cXyz* outPo
     return actor != nullptr && actor->getNameLabelPosition(outPos);
 }
 
+bool get_remote_link_dummy_peer_id_for_actor(fopAc_ac_c* actor, std::string* outPeerId) {
+    if (actor == nullptr || outPeerId == nullptr || fopAcM_GetName(actor) != fpcNm_REMOTE_LINK_e) {
+        return false;
+    }
+
+    const fpc_ProcID actorId = fopAcM_GetID(actor);
+    for (const auto& entry : sActorDummies) {
+        if (entry.second.actorId == actorId) {
+            *outPeerId = entry.first;
+            return !outPeerId->empty();
+        }
+    }
+
+    return false;
+}
+
 void destroy_remote_link_dummy(const std::string& peerId) {
     destroy_remote_link_actor_dummy(peerId);
 }

@@ -50,7 +50,6 @@ void ImGuiOnline::draw(bool& open) {
         ImGui::Checkbox("Remote Link model", &m_dummyModel);
         ImGui::SameLine();
         ImGui::Checkbox("Sync world", &m_syncWorld);
-        ImGui::SameLine();
         if (!m_dummyModel) {
             ImGui::BeginDisabled();
         }
@@ -64,6 +63,16 @@ void ImGuiOnline::draw(bool& open) {
         }
         ImGui::Checkbox("Remote collision", &m_remoteCollision);
         if (!m_dummyModel) {
+            ImGui::EndDisabled();
+        }
+        if (!m_remoteCollision) {
+            m_pvp = false;
+        }
+        if (!m_remoteCollision) {
+            ImGui::BeginDisabled();
+        }
+        ImGui::Checkbox("PvP", &m_pvp);
+        if (!m_remoteCollision) {
             ImGui::EndDisabled();
         }
     }
@@ -130,7 +139,6 @@ void ImGuiOnline::draw(bool& open) {
         if (status.syncWorldHostControlled) {
             ImGui::EndDisabled();
         }
-        ImGui::SameLine();
         bool displayMidna = status.displayMidna;
         // Local display-only toggle for now. A later upload/room policy can
         // decide whether Midna matrices are streamed at all.
@@ -155,6 +163,20 @@ void ImGuiOnline::draw(bool& open) {
         }
         if (!status.dummyModel || status.remoteCollisionHostControlled) {
             ImGui::EndDisabled();
+        }
+        bool pvp = status.pvp;
+        if (!status.remoteCollision || status.pvpHostControlled) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Checkbox("PvP", &pvp) && status.remoteCollision && !status.pvpHostControlled) {
+            multiplayer::set_pvp_enabled(pvp);
+            m_pvp = pvp;
+        }
+        if (!status.remoteCollision || status.pvpHostControlled) {
+            ImGui::EndDisabled();
+        }
+        if (!status.remoteCollision) {
+            m_pvp = false;
         }
 
         const auto players = multiplayer::get_player_list();
@@ -237,6 +259,7 @@ void ImGuiOnline::draw(bool& open) {
                     options.syncWorld = m_syncWorld;
                     options.displayMidna = m_displayMidna;
                     options.remoteCollision = m_remoteCollision;
+                    options.pvp = m_pvp;
 
                     std::string error;
                     if (multiplayer::host_direct(options, &error)) {
@@ -264,6 +287,7 @@ void ImGuiOnline::draw(bool& open) {
                     options.syncWorld = m_syncWorld;
                     options.displayMidna = m_displayMidna;
                     options.remoteCollision = m_remoteCollision;
+                    options.pvp = m_pvp;
 
                     std::string error;
                     if (multiplayer::join_direct(options, &error)) {
@@ -301,6 +325,7 @@ void ImGuiOnline::draw(bool& open) {
                 options.syncWorld = m_syncWorld;
                 options.displayMidna = m_displayMidna;
                 options.remoteCollision = m_remoteCollision;
+                options.pvp = m_pvp;
 
                 std::string error;
                 if (multiplayer::join_relay(options, &error)) {

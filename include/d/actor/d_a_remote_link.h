@@ -3,6 +3,7 @@
 
 #include "SSystem/SComponent/c_phase.h"
 #include "d/d_resorce.h"
+#include "d/d_cc_d.h"
 #include "d/d_kankyo.h"
 #include "dusk/multiplayer/multiplayer.hpp"
 #include "f_op/f_op_actor_mng.h"
@@ -171,6 +172,8 @@ private:
     void stopRemoteBombActor(bool i_explode);
     void maybeSpawnRemoteBombExplosion(int i_nextItemActorKind);
     void spawnRemoteBombExplosion();
+    void initPvpTargetCollision();
+    void updatePvpTargetCollision();
     void hideAllHandShapes();
     void setupDrawHands();
     void setupHeavyBootModels();
@@ -309,6 +312,9 @@ private:
     RemoteModelMatrixInterpState mMidnaHandMatrixInterp;
     RemoteModelMatrixInterpState mMidnaHairMatrixInterp;
     RemoteModelMatrixInterpState mMidnaGlowMatrixInterp;
+    dCcD_Stts mPvpTargetStts;
+    dCcD_Cyl mPvpTargetCyl;
+    bool mPvpTargetCollisionInitialized;
     /* 0xC24 */ int mMidnaHairShape;
     /* 0xC28 */ bool mSlotReserved;
 };

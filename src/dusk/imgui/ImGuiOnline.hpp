@@ -28,6 +28,7 @@ private:
     bool m_syncWorld = false;
     bool m_displayMidna = true;
     bool m_remoteCollision = true;
+    bool m_pvp = false;
     int m_syncPeerIndex = 0;
     std::string m_statusMessage;
 };

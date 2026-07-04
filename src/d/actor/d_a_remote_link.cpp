@@ -62,7 +62,34 @@ static int sCalcLogCount;
 static int sItemActorRejectLogCount;
 static int sRemoteBombFuseLogCount;
 static int sLiveRemoteLinkActors;
+static int sPvpTargetLogCount;
+static uint32_t sPvpTargetLogTicks;
 static f32 const l_remoteMotionAudioVolumeScale = 0.75f;
+
+static dCcD_SrcCyl l_pvpTargetCylSrc = {
+    {
+        {0, {{AT_TYPE_0, 0, 0}, {0xD8FBFDFF, 5}, 0x73}},
+        {dCcD_SE_NONE, 0, 0, 0, {0}},
+        {dCcD_SE_NONE, 0, 0, 0, {0}},
+        {0},
+    },
+    {
+        {
+            {0.0f, 0.0f, 0.0f},
+            35.0f,
+            180.0f,
+        },
+    }
+};
+
+static void daRemoteLink_pvpTargetHitCallback(fopAc_ac_c* i_targetActor,
+                                              dCcD_GObjInf* i_targetObj,
+                                              fopAc_ac_c* i_attackActor,
+                                              dCcD_GObjInf* i_attackObj) {
+    (void)i_targetObj;
+    dusk::multiplayer::report_remote_link_pvp_target_hit(i_targetActor, i_attackActor,
+                                                         i_attackObj);
+}
 
 static bool isValidRemoteBck(u16 i_resId) {
     return i_resId != 0 && i_resId != 0xFFFF;
@@ -668,6 +695,9 @@ daRemoteLink_c::daRemoteLink_c()
       mMidnaHandMatrixInterp(),
       mMidnaHairMatrixInterp(),
       mMidnaGlowMatrixInterp(),
+      mPvpTargetStts(),
+      mPvpTargetCyl(),
+      mPvpTargetCollisionInitialized(false),
       mMidnaHairShape(0),
       mSlotReserved(false) {
     mVisualState.form = FORM_HUMAN_KOKIRI;
@@ -2144,6 +2174,17 @@ int daRemoteLink_c::CreateHeap() {
     return TRUE;
 }
 
+void daRemoteLink_c::initPvpTargetCollision() {
+    mPvpTargetStts.Init(0xFF, 0, this);
+    mPvpTargetCyl.Set(l_pvpTargetCylSrc);
+    mPvpTargetCyl.SetStts(&mPvpTargetStts);
+    mPvpTargetCyl.SetTgGrp(0x1E);
+    mPvpTargetCyl.SetTgHitCallback(daRemoteLink_pvpTargetHitCallback);
+    mPvpTargetCyl.OffAtSetBit();
+    mPvpTargetCyl.OffCoSetBit();
+    mPvpTargetCollisionInitialized = true;
+}
+
 cPhs_Step daRemoteLink_c::create() {
     fopAcM_ct(this, daRemoteLink_c);
 
@@ -2173,6 +2214,7 @@ cPhs_Step daRemoteLink_c::create() {
         fopAcM_SetMtx(this, mpBodyModel->getBaseTRMtx());
         model = mpBodyModel;
         fopAcM_setCullSizeBox2(this, mpBodyModel->getModelData());
+        initPvpTargetCollision();
         DuskLog.info("RemoteLink: visual actor created form={} pos=({}, {}, {}) room={} "
                      "scale=({}, {}, {})",
                      mVisualState.form == FORM_WOLF ? "wolf" : "human", current.pos.x,
@@ -2188,6 +2230,40 @@ void daRemoteLink_c::setBaseMtx() {
     mDoMtx_stack_c::ZXYrotM(shape_angle);
     mpBodyModel->setBaseScale(scale);
     mpBodyModel->setBaseTRMtx(mDoMtx_stack_c::get());
+}
+
+void daRemoteLink_c::updatePvpTargetCollision() {
+    if (!mPvpTargetCollisionInitialized) {
+        return;
+    }
+
+    if (!dusk::multiplayer::pvp_enabled() || isRemoteLinkSceneUnsafe()) {
+        mPvpTargetCyl.OffTgSetBit();
+        mPvpTargetCyl.ResetTgHit();
+        return;
+    }
+
+    const f32 height = mVisualState.form == FORM_WOLF ? 95.0f : 180.0f;
+    const f32 radius = mVisualState.form == FORM_WOLF ? 35.0f : 35.0f;
+    cXyz center = current.pos;
+    center.y -= 20.0f;
+    mPvpTargetCyl.SetC(center);
+    mPvpTargetCyl.SetH(height);
+    mPvpTargetCyl.SetR(radius);
+    mPvpTargetCyl.OnTgSetBit();
+    mPvpTargetCyl.OffAtSetBit();
+    mPvpTargetCyl.OffCoSetBit();
+    dComIfG_Ccsp()->Set(&mPvpTargetCyl);
+
+    if (sPvpTargetLogCount < 20 || (++sPvpTargetLogTicks % 120) == 0) {
+        ++sPvpTargetLogCount;
+        DuskLog.info("RemoteLink: PvP target active id={} form={} pos=({}, {}, {}) "
+                     "room={} tg_type={:#x} tg_grp={:#x} radius={} height={}",
+                     fopAcM_GetID(this),
+                     mVisualState.form == FORM_WOLF ? "wolf" : "human", center.x, center.y,
+                     center.z, fopAcM_GetRoomNo(this), mPvpTargetCyl.GetTgType(),
+                     mPvpTargetCyl.GetTgGrp(), radius, height);
+    }
 }
 
 void daRemoteLink_c::setupDrawHands() {
@@ -2421,6 +2497,7 @@ int daRemoteLink_c::Execute() {
         setBaseMtx();
         calcModels();
     }
+    updatePvpTargetCollision();
     updateRemoteBombActor();
     return TRUE;
 }

@@ -55,6 +55,7 @@
 #include "d/d_s_play.h"
 #include "d/d_stage.h"
 #include "dusk/cutscene_skip.h"
+#include "dusk/multiplayer/multiplayer.hpp"
 #include "Z2AudioLib/Z2Instances.h"
 
 #if TARGET_PC

@@ -6,6 +6,9 @@
 #include <vector>
 
 class daNbomb_c;
+class daAlink_c;
+class dCcD_GObjInf;
+class fopAc_ac_c;
 
 namespace dusk::multiplayer {
 
@@ -294,6 +297,7 @@ struct DirectHostOptions {
     bool syncWorld = false;
     bool displayMidna = true;
     bool remoteCollision = true;
+    bool pvp = false;
 };
 
 struct DirectJoinOptions {
@@ -305,6 +309,7 @@ struct DirectJoinOptions {
     bool syncWorld = false;
     bool displayMidna = true;
     bool remoteCollision = true;
+    bool pvp = false;
 };
 
 struct RelayJoinOptions {
@@ -319,6 +324,7 @@ struct RelayJoinOptions {
     bool syncWorld = false;
     bool displayMidna = true;
     bool remoteCollision = true;
+    bool pvp = false;
 };
 
 struct SessionStatus {
@@ -343,6 +349,8 @@ struct SessionStatus {
     bool displayMidna = true;
     bool remoteCollision = true;
     bool remoteCollisionHostControlled = false;
+    bool pvp = false;
+    bool pvpHostControlled = false;
     bool hasRecentPeerPose = false;
 };
 
@@ -364,6 +372,9 @@ bool is_enabled();
 void record_local_link_audio_event(uint32_t soundId, bool level, uint32_t mapInfo = 0,
                                    int reverb = -1, uint8_t sourceKind = 0);
 void notify_bomb_post_execute(daNbomb_c* bomb);
+void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo);
+void report_remote_link_pvp_target_hit(fopAc_ac_c* remoteLinkActor, fopAc_ac_c* attackActor,
+                                       dCcD_GObjInf* attackInfo);
 void register_remote_bomb_actor(daNbomb_c* bomb);
 void register_remote_bomb_actor_id(int32_t actorId);
 void unregister_remote_bomb_actor_id(int32_t actorId);
@@ -386,6 +397,8 @@ void set_display_remote_midna_enabled(bool enabled);
 bool display_remote_midna_enabled();
 void set_remote_collision_enabled(bool enabled);
 bool remote_collision_enabled();
+void set_pvp_enabled(bool enabled);
+bool pvp_enabled();
 bool has_recent_peer_pose(uint32_t maxAgeTicks);
 PeerPoseSnapshot get_latest_peer_pose();
 bool get_ganondorf_final_mp_target(float ganonX, float ganonY, float ganonZ,
