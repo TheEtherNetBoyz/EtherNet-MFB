@@ -127,18 +127,11 @@ BOOL daAlink_c::setBodyAngleToCamera() {
                 var_f31 /= dComIfGp_getCameraZoomScale(field_0x317c);
             }
 
-#if TARGET_PC
-            if (dusk::getSettings().game.enableMouseAim && checkAimInputContext()) {
-                sp8 = mBodyAngle.x;
-            } else
-#endif
-            {
-                shape_angle.y = shape_angle.y + (var_f31 * cM_ssin(mStickAngle) IF_DUSK(* (dusk::getSettings().game.invertFirstPersonXAxis ? -1.0f : 1.0f)));
-                sp8 = mBodyAngle.x + (var_f31 * cM_scos(mStickAngle) IF_DUSK(* (dusk::getSettings().game.invertFirstPersonYAxis ? -1.0f : 1.0f)));
+            shape_angle.y = shape_angle.y + (var_f31 * cM_ssin(mStickAngle) IF_DUSK(* (dusk::getSettings().game.invertFirstPersonXAxis ? -1.0f : 1.0f)));
+            sp8 = mBodyAngle.x + (var_f31 * cM_scos(mStickAngle) IF_DUSK(* (dusk::getSettings().game.invertFirstPersonYAxis ? -1.0f : 1.0f)));
 
-                if (checkNotItemSinkLimit() && sp8 > 0 && sp8 > mBodyAngle.x) {
-                    sp8 = mBodyAngle.x;
-                }
+            if (checkNotItemSinkLimit() && sp8 > 0 && sp8 > mBodyAngle.x) {
+                sp8 = mBodyAngle.x;
             }
         } else {
             sp8 = mBodyAngle.x;
@@ -161,7 +154,7 @@ BOOL daAlink_c::setBodyAngleToCamera() {
             f32 final_yaw = 0.f;
             f32 final_pitch = 0.f;
             if (dusk::getSettings().game.enableMouseAim) {
-                dusk::mouse::getAimDeltas(final_yaw, final_pitch);
+                dusk::mouse::get_aim_deltas(final_yaw, final_pitch);
             }
             if (dusk::getSettings().game.enableCameraSpeedControls) {
                 gyro_scale *= std::clamp(static_cast<f32>(dusk::getSettings().game.aimingCameraSensitivityLevel), 1.0f, 10.0f) / 5.0f;
