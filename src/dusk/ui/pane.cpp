@@ -222,6 +222,9 @@ bool Pane::focus_closest_child(float posY) {
     } else if (posY >= 0.f) {
         float closestRightChildDistance = std::numeric_limits<float>::max();
         for (const auto& child : children()) {
+            if (child->disabled()) {
+                continue;
+            }
             float distance = std::abs(posY - child->root()->GetAbsoluteTop());
             if (distance < closestRightChildDistance) {
                 closestchild = child->root();

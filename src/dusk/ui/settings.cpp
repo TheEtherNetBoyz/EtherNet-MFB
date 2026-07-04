@@ -162,6 +162,24 @@ constexpr std::array kFpsOverlayCornerNames = {
     "Bottom Right",
 };
 
+constexpr std::array kInterpolationModes = {
+    "Off",
+    "Capped",
+    "Unlimited",
+};
+
+constexpr std::array kTouchTargetingLabels = {
+    "Hybrid",
+    "Hold",
+    "Switch",
+};
+
+constexpr std::array kTouchTargetingDescriptions = {
+    "Tap once to lock on when a target is found. Double-tap when none is found to hold L.",
+    "L stays held only while your finger is on the button.",
+    "Tap L to keep it held. Tap again to release it.",
+};
+
 constexpr std::array kGyroInputModeLabels = {
     "Sensor",
     "Mouse",
@@ -901,6 +919,14 @@ bool gyro_enabled() {
     return getSettings().game.enableGyroAim || getSettings().game.enableGyroRollgoal;
 }
 
+Rml::String touch_targeting_label(TouchTargeting targeting) {
+    const auto index = static_cast<std::size_t>(targeting);
+    if (index >= kTouchTargetingLabels.size()) {
+        return "Unknown";
+    }
+    return kTouchTargetingLabels[index];
+}
+
 struct ConfigBoolProps {
     Rml::String key;
     Rml::String icon;
@@ -1576,6 +1602,45 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             rightPane, [](Pane& pane) {
                 pane.clear();
                 pane.add_text("Open the touch controls layout editor.");
+            });
+        leftPane.register_control(leftPane.add_select_button({
+                                      .key = "Touch Targeting",
+                                      .getValue =
+                                          [] {
+                                              return touch_targeting_label(
+                                                  getSettings().game.touchTargeting.getValue());
+                                          },
+                                      .isDisabled =
+                                          [] { return !getSettings().game.enableTouchControls; },
+                                      .isModified =
+                                          [] {
+                                              const auto& targeting =
+                                                  getSettings().game.touchTargeting;
+                                              return targeting.getValue() !=
+                                                     targeting.getDefaultValue();
+                                          },
+                                  }),
+            rightPane, [](Pane& pane) {
+                pane.clear();
+                for (int i = 0; i < static_cast<int>(kTouchTargetingLabels.size()); ++i) {
+                    pane.add_button({
+                            .text = kTouchTargetingLabels[i],
+                            .isSelected =
+                                [i] {
+                                    return getSettings().game.touchTargeting.getValue() ==
+                                           static_cast<TouchTargeting>(i);
+                                },
+                        })
+                        .on_pressed([i] {
+                            mDoAud_seStartMenu(kSoundItemChange);
+                            getSettings().game.touchTargeting.setValue(
+                                static_cast<TouchTargeting>(i));
+                            config::Save();
+                        });
+                }
+                pane.add_rml(fmt::format("<br/>Hybrid: {}<br/>Hold: {}<br/>Switch: {}",
+                    kTouchTargetingDescriptions[0], kTouchTargetingDescriptions[1],
+                    kTouchTargetingDescriptions[2]));
             });
         config_percent_select(leftPane, rightPane, getSettings().game.touchCameraXSensitivity,
             "Touch Camera X Sensitivity",

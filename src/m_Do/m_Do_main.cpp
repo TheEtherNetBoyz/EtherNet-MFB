@@ -52,6 +52,7 @@
 #include "SSystem/SComponent/c_API.h"
 #include "dusk/android_frame_rate.hpp"
 #include "dusk/app_info.hpp"
+#include "dusk/cosmetics/midna_hair_color.hpp"
 #include "dusk/crash_handler.h"
 #include "dusk/crash_reporting.h"
 #include "dusk/custom_music/CustomMusicIsoTransaction.h"
@@ -268,12 +269,12 @@ void main01(void) {
                 goto eventsDone;
             case AURORA_PAUSED:
                 dusk::audio::SetPaused(true);
-                dusk::mouse::onFocusLost();
+                dusk::mouse::on_focus_lost();
                 break;
             case AURORA_UNPAUSED:
                 dusk::audio::SetPaused(false);
                 dusk::game_clock::reset_frame_timer();
-                dusk::mouse::onFocusGained();
+                dusk::mouse::on_focus_gained();
                 break;
             case AURORA_SDL_EVENT:
                 dusk::latency_trace::on_sdl_event(event->sdl);
@@ -736,6 +737,8 @@ int game_main(int argc, char* argv[]) {
     }
 
     dusk::audio::ApplySettings();
+
+    dusk::cosmetics::set_all_midna_hair_colors();
 
     // Run ImGui UI loop if Aurora couldn't initialize a backend
     if (auroraInfo.backend == BACKEND_NULL) {
