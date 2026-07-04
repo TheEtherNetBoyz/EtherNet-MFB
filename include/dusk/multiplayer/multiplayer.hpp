@@ -288,9 +288,9 @@ struct DirectHostOptions {
     std::string bindHost = "0.0.0.0";
     std::string publicHost = "127.0.0.1";
     int port = 34197;
-    bool debugMarker = true;
     bool dummyModel = true;
     bool nameLabels = true;
+    bool syncFlags = true;
     bool syncWorld = false;
     bool displayMidna = true;
     bool remoteCollision = true;
@@ -299,9 +299,9 @@ struct DirectHostOptions {
 struct DirectJoinOptions {
     std::string name = "Joiner";
     std::string inviteCode;
-    bool debugMarker = true;
     bool dummyModel = true;
     bool nameLabels = true;
+    bool syncFlags = true;
     bool syncWorld = false;
     bool displayMidna = true;
     bool remoteCollision = true;
@@ -313,9 +313,9 @@ struct RelayJoinOptions {
     std::string password;
     std::string host = "127.0.0.1";
     int port = 34197;
-    bool debugMarker = true;
     bool dummyModel = true;
     bool nameLabels = true;
+    bool syncFlags = true;
     bool syncWorld = false;
     bool displayMidna = true;
     bool remoteCollision = true;
@@ -332,11 +332,14 @@ struct SessionStatus {
     std::string publicHost;
     std::string inviteCode;
     int port = 0;
-    bool debugMarker = false;
     bool dummyModel = false;
+    bool dummyModelHostControlled = false;
     bool nameLabels = false;
     bool nameLabelsHostControlled = false;
+    bool syncFlags = true;
+    bool syncFlagsHostControlled = false;
     bool syncWorld = false;
+    bool syncWorldHostControlled = false;
     bool displayMidna = true;
     bool remoteCollision = true;
     bool remoteCollisionHostControlled = false;
@@ -374,6 +377,8 @@ bool request_manual_sync(const std::string& peerId, std::string* errorOut = null
 SessionStatus get_session_status();
 std::vector<PlayerListEntry> get_player_list();
 void set_name_labels_enabled(bool enabled);
+void set_sync_flags_enabled(bool enabled);
+bool sync_flags_enabled();
 void set_sync_world_enabled(bool enabled);
 bool sync_world_enabled();
 void set_remote_link_model_enabled(bool enabled);

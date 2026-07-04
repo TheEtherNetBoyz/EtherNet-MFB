@@ -22,9 +22,9 @@ private:
     char m_relayHost[128] = "127.0.0.1";
     int m_port = 34197;
     int m_relayPort = 34197;
-    bool m_debugMarker = true;
     bool m_dummyModel = true;
     bool m_nameLabels = true;
+    bool m_syncFlags = true;
     bool m_syncWorld = false;
     bool m_displayMidna = true;
     bool m_remoteCollision = true;

@@ -852,4 +852,5 @@ namespace dusk {
         ImGui::ProgressBar(percent);
         ImGui::End();
     }
+
 }

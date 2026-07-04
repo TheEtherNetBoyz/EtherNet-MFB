@@ -97,6 +97,9 @@ namespace dusk::multiplayer {
 
 void flush_pending_progression_sync();
 void consume_progression_prompt_start_button();
+void apply_remote_link_model_enabled(bool enabled);
+void apply_sync_flags_enabled(bool enabled);
+void apply_sync_world_enabled(bool enabled);
 
 namespace {
 
@@ -532,7 +535,6 @@ struct Session {
     std::string relayPassword;
     std::string rxBuffer;
     int port = 34197;
-    bool debugMarker = false;
     uint32_t reconnectTicks = 0;
     uint32_t pingTicks = 0;
     uint32_t progressionStateTicks = 0;
@@ -565,6 +567,7 @@ bool sNameLabelsEnabled = true;
 // logic remotely. Bombs are only the first proof of concept; leave this off
 // while the main online model is visual puppets plus progression flags.
 bool sSyncWorldEnabled = false;
+bool sSyncFlagsEnabled = true;
 // Local receive/display preference. Direct peers advertise this so the sender
 // can skip the separate Midna-matrix lane for clients that do not want it.
 // Relay still needs relay-side routing support before it can avoid forwarding
@@ -897,6 +900,18 @@ bool is_stage_dependent_message_type(const std::string& type) {
            type == "visited_room" || type == "rupee_count";
 }
 
+bool is_sync_flags_message_type(const std::string& type) {
+    return type == "progression_state" || type == "sync_request" ||
+           type == "save_snapshot" || type == "event_bit" || type == "tbox_bit" ||
+           type == "switch_bit" || type == "item_bit" || type == "dungeon_item_bit" ||
+           type == "item_get" || type == "collect_crystal" || type == "collect_mirror" ||
+           type == "dark_clear_lv" || type == "transform_lv" || type == "region_bit" ||
+           type == "collect" || type == "visited_room" || type == "letter_get" ||
+           type == "key_num" || type == "light_drop_num" ||
+           type == "light_drop_get_flag" || type == "max_life_update" ||
+           type == "bottle_slots" || type == "rupee_count" || type == "ganondorf_hit";
+}
+
 bool is_stage_load_unsafe_for_multiplayer() {
     return dComIfGp_getStageStagInfo() == nullptr || dComIfGp_event_runCheck() ||
            dComIfGp_isEnableNextStage() || fopOvlpM_IsPeek() || fopOvlpM_IsDoingReq();
@@ -923,7 +938,7 @@ bool ganondorf_final_sync_domain_enabled() {
 }
 
 bool ganondorf_final_finish_sync_domain_enabled() {
-    return is_enabled() && is_local_final_ganondorf_ready();
+    return sync_flags_enabled() && is_local_final_ganondorf_ready();
 }
 
 void release_ganondorf_final_sync(const char* reason, const std::string& stage = "") {
@@ -2538,9 +2553,8 @@ void draw_world_name_label_text(NameLabelFontAtlas* atlas, const cXyz& worldPos,
 }
 
 void draw_peer_name_labels_native_impl() {
-    if (!sEnabled || !sNameLabelsEnabled || !sDummyModelEnabled || !sSession.debugMarker ||
-        !has_recent_peer_pose(30) || !should_draw_peer_name_labels_over_game() ||
-        !is_peer_dummy_gameplay_ready())
+    if (!sEnabled || !sNameLabelsEnabled || !sDummyModelEnabled || !has_recent_peer_pose(30) ||
+        !should_draw_peer_name_labels_over_game() || !is_peer_dummy_gameplay_ready())
     {
         return;
     }
@@ -2644,6 +2658,7 @@ void reset_connection_state() {
     clear_player_color_slots();
     sNameLabelsEnabled = true;
     sSyncWorldEnabled = false;
+    sSyncFlagsEnabled = true;
     sDisplayRemoteMidnaEnabled = true;
     sDirectRemoteWantsPuppet = true;
     sDirectRemoteWantsMidna = true;
@@ -2701,7 +2716,8 @@ const char* packet_category(const std::string& type) {
         return "midna_pose";
     }
     if (type == "hello" || type == "welcome" || type == "peer_joined" || type == "presence" ||
-        type == "peer_left" || type == "name_labels" || type == "remote_collision" ||
+        type == "peer_left" || type == "name_labels" || type == "dummy_model" ||
+        type == "sync_flags" || type == "sync_world" || type == "remote_collision" ||
         type == "progression_state")
     {
         return "session";
@@ -2986,6 +3002,9 @@ void send_hello() {
 }
 
 void send_progression_state(bool force = false) {
+    if (!sSyncFlagsEnabled) {
+        return;
+    }
     if (!sSession.welcomed) {
         return;
     }
@@ -3211,6 +3230,11 @@ bool apply_manual_sync_full_state(const std::string& encoded) {
 // receiving a bit twice or in any order is harmless.
 void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetClientId = "",
                         bool manualSync = false) {
+    if (!sSyncFlagsEnabled) {
+        DuskLog.info("Multiplayer save snapshot skipped because sync flags are disabled");
+        return;
+    }
+
     json eventFlags = json::array();
     for (int i = 0; i < 256 * 8; ++i) {
         const uint16_t flag = static_cast<uint16_t>(i);
@@ -3462,7 +3486,9 @@ void send_welcome_to_peer(DirectPeer& peer) {
         {"protocol_version", 1},
         {"room_id", sSession.room},
         {"client_id", peer.id},
-        {"name_labels", sNameLabelsEnabled},
+        {"dummy_model", sDummyModelEnabled},
+        {"sync_flags", sSyncFlagsEnabled},
+        {"sync_world", sSyncWorldEnabled},
         {"remote_collision", sRemoteCollisionEnabled},
         {"want_puppet", wants_remote_puppet_matrices()},
         {"want_midna", wants_remote_midna_matrices()},
@@ -3481,7 +3507,9 @@ void send_welcome() {
         {"protocol_version", 1},
         {"room_id", sSession.room},
         {"client_id", "host"},
-        {"name_labels", sNameLabelsEnabled},
+        {"dummy_model", sDummyModelEnabled},
+        {"sync_flags", sSyncFlagsEnabled},
+        {"sync_world", sSyncWorldEnabled},
         {"remote_collision", sRemoteCollisionEnabled},
         {"want_puppet", wants_remote_puppet_matrices()},
         {"want_midna", wants_remote_midna_matrices()},
@@ -4587,6 +4615,19 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
     if (sender != nullptr && type != "hello") {
         routedMessage["client_id"] = sender->id;
     }
+    if (is_sync_flags_message_type(type) && !sSyncFlagsEnabled) {
+        static uint32_t sSyncFlagsRxSkipLogTicks = 0;
+        if ((sSyncFlagsRxSkipLogTicks++ % 120) == 0) {
+            DuskLog.info("Multiplayer sync flags rx_skip type={} sender={}", type,
+                         resolve_peer_id(routedMessage));
+        }
+        if (sender != nullptr && should_forward_peer_message(type) && type != "sync_request" &&
+            !(type == "save_snapshot" && routedMessage.value("manual_sync", false)))
+        {
+            broadcast_to_direct_peers(routedMessage, sender->id);
+        }
+        return;
+    }
     if (is_stage_dependent_message_type(type) && is_stage_load_unsafe_for_multiplayer()) {
         sPendingStageMessages.push_back(routedMessage);
         if (sender != nullptr && should_forward_peer_message(type) &&
@@ -4618,8 +4659,27 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         }, sender->id);
     } else if (type == "welcome") {
         sSession.welcomed = true;
-        if (message.contains("name_labels")) {
-            sNameLabelsEnabled = message.value("name_labels", sNameLabelsEnabled);
+        if (message.contains("sync_flags")) {
+            apply_sync_flags_enabled(message.value("sync_flags", sSyncFlagsEnabled));
+            DuskLog.info("Multiplayer sync flags synced from welcome {}",
+                         sSyncFlagsEnabled ? "enabled" : "disabled");
+        }
+        if (message.contains("dummy_model")) {
+            apply_remote_link_model_enabled(message.value("dummy_model", sDummyModelEnabled));
+            if (sSession.mode == NetworkMode::DirectJoin) {
+                send_json({
+                    {"type", "puppet_preference"},
+                    {"want_puppet", wants_remote_puppet_matrices()},
+                    {"want_midna", wants_remote_midna_matrices()},
+                });
+            }
+            DuskLog.info("Multiplayer remote Link model synced from welcome {}",
+                         sDummyModelEnabled ? "enabled" : "disabled");
+        }
+        if (message.contains("sync_world")) {
+            apply_sync_world_enabled(message.value("sync_world", sSyncWorldEnabled));
+            DuskLog.info("Multiplayer sync world synced from welcome {}",
+                         sSyncWorldEnabled ? "enabled" : "disabled");
         }
         if (message.contains("remote_collision")) {
             sRemoteCollisionEnabled =
@@ -4689,9 +4749,29 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
     } else if (type == "presence") {
         remember_peer_presence(resolve_peer_id(routedMessage), routedMessage);
     } else if (type == "name_labels") {
+        return;
+    } else if (type == "dummy_model") {
         if (sSession.mode == NetworkMode::DirectJoin) {
-            sNameLabelsEnabled = message.value("enabled", sNameLabelsEnabled);
-            DuskLog.info("Multiplayer name labels {}", sNameLabelsEnabled ? "enabled" : "disabled");
+            apply_remote_link_model_enabled(message.value("enabled", sDummyModelEnabled));
+            send_json({
+                {"type", "puppet_preference"},
+                {"want_puppet", wants_remote_puppet_matrices()},
+                {"want_midna", wants_remote_midna_matrices()},
+            });
+            DuskLog.info("Multiplayer remote Link model synced {}",
+                         sDummyModelEnabled ? "enabled" : "disabled");
+        }
+    } else if (type == "sync_flags") {
+        if (sSession.mode == NetworkMode::DirectJoin) {
+            apply_sync_flags_enabled(message.value("enabled", sSyncFlagsEnabled));
+            DuskLog.info("Multiplayer sync flags synced {}",
+                         sSyncFlagsEnabled ? "enabled" : "disabled");
+        }
+    } else if (type == "sync_world") {
+        if (sSession.mode == NetworkMode::DirectJoin) {
+            apply_sync_world_enabled(message.value("enabled", sSyncWorldEnabled));
+            DuskLog.info("Multiplayer sync world synced {}",
+                         sSyncWorldEnabled ? "enabled" : "disabled");
         }
     } else if (type == "progression_state") {
         const std::string peerId = resolve_peer_id(routedMessage);
@@ -7296,10 +7376,10 @@ bool configure_session() {
     sSession.room = env_string("DUSK_MP_ROOM", "dev");
     sSession.relayPassword = env_string("DUSK_MP_PASSWORD", "");
     sSession.port = env_int("DUSK_MP_PORT", 34197);
-    sSession.debugMarker = env_enabled("DUSK_MP_DEBUG_MARKER");
     sDummyModelEnabled = env_enabled("DUSK_MP_DUMMY_MODEL");
     sDummyTraceEnabled = !env_disabled("DUSK_MP_DUMMY_TRACE");
     sNameLabelsEnabled = !env_enabled("DUSK_MP_HIDE_NAME_LABELS");
+    sSyncFlagsEnabled = !env_disabled("DUSK_MP_SYNC_FLAGS");
     sSyncWorldEnabled = env_enabled("DUSK_MP_SYNC_WORLD");
     sDisplayRemoteMidnaEnabled = !env_enabled("DUSK_MP_HIDE_REMOTE_MIDNA");
     sDirectRemoteWantsPuppet = true;
@@ -7689,9 +7769,9 @@ bool host_direct(const DirectHostOptions& options, std::string* errorOut) {
     sSession.bindHost = options.bindHost;
     sSession.publicHost = options.publicHost;
     sSession.port = options.port;
-    sSession.debugMarker = options.debugMarker;
     sDummyModelEnabled = options.dummyModel;
     sNameLabelsEnabled = options.nameLabels;
+    sSyncFlagsEnabled = options.syncFlags;
     sSyncWorldEnabled = options.syncWorld;
     sDisplayRemoteMidnaEnabled = options.displayMidna;
     sRemoteCollisionEnabled = options.remoteCollision;
@@ -7754,9 +7834,9 @@ bool join_direct(const DirectJoinOptions& options, std::string* errorOut) {
     sSession.sessionId = payload->sessionId;
     sSession.sessionKey = payload->sessionKey;
     sSession.inviteCode = options.inviteCode;
-    sSession.debugMarker = options.debugMarker;
     sDummyModelEnabled = options.dummyModel;
     sNameLabelsEnabled = options.nameLabels;
+    sSyncFlagsEnabled = options.syncFlags;
     sSyncWorldEnabled = options.syncWorld;
     sDisplayRemoteMidnaEnabled = options.displayMidna;
     sRemoteCollisionEnabled = options.remoteCollision;
@@ -7803,9 +7883,9 @@ bool join_relay(const RelayJoinOptions& options, std::string* errorOut) {
     sSession.port = options.port;
     sSession.room = options.room;
     sSession.relayPassword = options.password;
-    sSession.debugMarker = options.debugMarker;
     sDummyModelEnabled = options.dummyModel;
     sNameLabelsEnabled = options.nameLabels;
+    sSyncFlagsEnabled = options.syncFlags;
     sSyncWorldEnabled = options.syncWorld;
     sDisplayRemoteMidnaEnabled = options.displayMidna;
     sRemoteCollisionEnabled = options.remoteCollision;
@@ -7834,6 +7914,13 @@ bool request_manual_sync(const std::string& peerId, std::string* errorOut) {
     if (!sEnabled || !sSession.welcomed) {
         if (errorOut != nullptr) {
             *errorOut = "Not connected.";
+        }
+        return false;
+    }
+
+    if (!sSyncFlagsEnabled) {
+        if (errorOut != nullptr) {
+            *errorOut = "Sync flags is disabled.";
         }
         return false;
     }
@@ -7896,11 +7983,14 @@ SessionStatus get_session_status() {
     status.publicHost = sSession.publicHost;
     status.inviteCode = sSession.inviteCode;
     status.port = sSession.port;
-    status.debugMarker = sSession.debugMarker;
     status.dummyModel = sDummyModelEnabled;
+    status.dummyModelHostControlled = sSession.mode == NetworkMode::DirectJoin;
     status.nameLabels = sNameLabelsEnabled;
-    status.nameLabelsHostControlled = sSession.mode == NetworkMode::DirectJoin;
+    status.nameLabelsHostControlled = false;
+    status.syncFlags = sSyncFlagsEnabled;
+    status.syncFlagsHostControlled = sSession.mode == NetworkMode::DirectJoin;
     status.syncWorld = sSyncWorldEnabled;
+    status.syncWorldHostControlled = sSession.mode == NetworkMode::DirectJoin;
     status.displayMidna = sDisplayRemoteMidnaEnabled;
     status.remoteCollision = sRemoteCollisionEnabled;
     status.remoteCollisionHostControlled = sSession.mode == NetworkMode::DirectJoin;
@@ -7990,25 +8080,68 @@ std::vector<PlayerListEntry> get_player_list() {
 
 void set_name_labels_enabled(bool enabled) {
     sNameLabelsEnabled = enabled;
+}
+
+void apply_sync_flags_enabled(bool enabled) {
+    sSyncFlagsEnabled = enabled;
+    DuskLog.info("Multiplayer sync flags {}", sSyncFlagsEnabled ? "enabled" : "disabled");
+    if (!sSyncFlagsEnabled) {
+        sPendingStageMessages.clear();
+        sPendingProgressionCueArrivals.clear();
+        sPendingSyncReplies.clear();
+        sProgressionSyncPrompt = {};
+        sPendingProgressionSync = {};
+        sAwaitingManualSyncCueKey.clear();
+        sAwaitingManualSyncPeerId.clear();
+        sManualSyncReloadPending = false;
+    }
+}
+
+void set_sync_flags_enabled(bool enabled) {
+    if (sSession.mode == NetworkMode::DirectJoin) {
+        DuskLog.info("Multiplayer sync flags change ignored on join client; host controlled");
+        return;
+    }
+
+    apply_sync_flags_enabled(enabled);
     if (sEnabled && sSession.mode == NetworkMode::DirectHost) {
-        send_json({
-            {"type", "name_labels"},
-            {"enabled", sNameLabelsEnabled},
+        broadcast_to_direct_peers({
+            {"type", "sync_flags"},
+            {"enabled", sSyncFlagsEnabled},
         });
     }
 }
 
-void set_sync_world_enabled(bool enabled) {
+bool sync_flags_enabled() {
+    return sEnabled && sSyncFlagsEnabled;
+}
+
+void apply_sync_world_enabled(bool enabled) {
     sSyncWorldEnabled = enabled;
     DuskLog.info("Multiplayer sync world {}", sSyncWorldEnabled ? "enabled" : "disabled");
     ganondorf_final_sync_reset_if_disabled();
+}
+
+void set_sync_world_enabled(bool enabled) {
+    if (sSession.mode == NetworkMode::DirectJoin) {
+        DuskLog.info("Multiplayer sync world change ignored on join client; host controlled");
+        return;
+    }
+
+    apply_sync_world_enabled(enabled);
+    if (sEnabled && sSession.mode == NetworkMode::DirectHost) {
+        broadcast_to_direct_peers({
+            {"type", "sync_world"},
+            {"enabled", sSyncWorldEnabled},
+        });
+    }
 }
 
 bool sync_world_enabled() {
     return remote_object_sync_enabled();
 }
 
-void set_remote_link_model_enabled(bool enabled) {
+void apply_remote_link_model_enabled(bool enabled) {
     if (sDummyModelEnabled == enabled) {
         return;
     }
@@ -8020,8 +8153,24 @@ void set_remote_link_model_enabled(bool enabled) {
         sSession.pendingMidnaMatrices.clear();
         destroy_all_remote_link_dummies();
     }
+}
+
+void set_remote_link_model_enabled(bool enabled) {
+    if (sSession.mode == NetworkMode::DirectJoin) {
+        DuskLog.info("Multiplayer remote Link model change ignored on join client; host controlled");
+        return;
+    }
+
+    apply_remote_link_model_enabled(enabled);
 
     if (sEnabled && sSession.welcomed) {
+        if (sSession.mode == NetworkMode::DirectHost) {
+            broadcast_to_direct_peers({
+                {"type", "dummy_model"},
+                {"enabled", sDummyModelEnabled},
+            });
+        }
+
         json message = {
             {"type", "puppet_preference"},
             {"want_puppet", wants_remote_puppet_matrices()},
@@ -8686,10 +8835,6 @@ void draw_debug_peer_marker() {
         log_transform_draw_gate("dummy_model_disabled");
         return;
     }
-    if (!sSession.debugMarker) {
-        log_transform_draw_gate("debug_marker_disabled");
-        return;
-    }
     if (!has_recent_peer_pose(30)) {
         log_transform_draw_gate("no_recent_peer_pose");
         return;
@@ -9031,7 +9176,7 @@ void draw_notifications_overlay() {
 }
 
 void notify_local_event_bit_set(uint16_t flag) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
     if (is_unsynced_event_bit(flag)) {
@@ -9048,7 +9193,7 @@ void notify_local_event_bit_set(uint16_t flag) {
 }
 
 void notify_local_event_bit_cleared(uint16_t flag) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
     if (is_unsynced_event_bit(flag)) {
@@ -9065,7 +9210,7 @@ void notify_local_event_bit_cleared(uint16_t flag) {
 }
 
 void notify_local_tbox_set(int flag) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
 
@@ -9084,7 +9229,7 @@ void notify_local_tbox_set(int flag) {
 }
 
 void notify_local_dungeon_item_set(int kind) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
 
@@ -9103,7 +9248,7 @@ void notify_local_dungeon_item_set(int kind) {
 }
 
 void notify_local_item_get(int itemId) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
 
@@ -9119,7 +9264,7 @@ void notify_local_item_get(int itemId) {
 }
 
 void notify_local_memory_switch_set(int flag) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
 
@@ -9185,7 +9330,7 @@ void notify_local_memory_switch_set(int flag) {
 }
 
 void notify_local_memory_switch_cleared(int flag) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
 
@@ -9304,7 +9449,7 @@ void notify_local_room_scene_initialized(int room) {
 }
 
 void notify_local_memory_item_set(int flag) {
-    if (!sEnabled || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || sApplyingRemoteSaveBit) {
         return;
     }
 
@@ -9331,7 +9476,7 @@ void notify_local_memory_item_set(int flag) {
 }
 
 void notify_local_collect_crystal_set(int item) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
 
@@ -9343,7 +9488,7 @@ void notify_local_collect_crystal_set(int item) {
 }
 
 void notify_local_collect_mirror_set(int item) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
 
@@ -9355,7 +9500,9 @@ void notify_local_collect_mirror_set(int item) {
 }
 
 void notify_local_dark_clear_lv_set(int no) {
-    if (!sEnabled || !sLayerRiskSyncEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sLayerRiskSyncEnabled || !sSession.welcomed ||
+        sApplyingRemoteSaveBit)
+    {
         return;
     }
 
@@ -9367,7 +9514,9 @@ void notify_local_dark_clear_lv_set(int no) {
 }
 
 void notify_local_transform_lv_set(int no) {
-    if (!sEnabled || !sLayerRiskSyncEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sLayerRiskSyncEnabled || !sSession.welcomed ||
+        sApplyingRemoteSaveBit)
+    {
         return;
     }
 
@@ -9379,7 +9528,7 @@ void notify_local_transform_lv_set(int no) {
 }
 
 void notify_local_region_bit_set(int region) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
 
@@ -9391,7 +9540,7 @@ void notify_local_region_bit_set(int region) {
 }
 
 void notify_local_collect_set(int type, int item) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
 
@@ -9404,7 +9553,7 @@ void notify_local_collect_set(int type, int item) {
 }
 
 void notify_local_visited_room_set(int stage, int roomNo) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
 
@@ -9417,7 +9566,7 @@ void notify_local_visited_room_set(int stage, int roomNo) {
 }
 
 void notify_local_letter_get_set(int no) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
 
@@ -9434,7 +9583,7 @@ void notify_local_letter_get_set(int no) {
 // where the receiving player physically is, unlike a fix that depends on
 // finding a live actor in the world.
 void notify_local_key_num_set(uint8_t keyNum) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
 
@@ -9453,7 +9602,7 @@ void notify_local_key_num_set(uint8_t keyNum) {
 }
 
 void notify_local_light_drop_num_set(uint8_t area, uint8_t num) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
 
@@ -9466,7 +9615,7 @@ void notify_local_light_drop_num_set(uint8_t area, uint8_t num) {
 }
 
 void notify_local_light_drop_get_flag_set(uint8_t area) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit || area >= 3) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit || area >= 3) {
         return;
     }
 
@@ -9483,7 +9632,7 @@ void notify_local_light_drop_get_flag_set(uint8_t area) {
 // light_drop_num, but merged as monotonic-max on receive since max life
 // should never decrease.
 void notify_local_max_life_set(uint8_t maxLife) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
 
@@ -9499,7 +9648,7 @@ void notify_local_max_life_set(uint8_t maxLife) {
 // first. Broadcasts the slot count only, not contents (see
 // notify_local_bottle_slot_count_set's declaration for why).
 void notify_local_bottle_slot_count_set(uint8_t count) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
 
@@ -9511,7 +9660,7 @@ void notify_local_bottle_slot_count_set(uint8_t count) {
 }
 
 void notify_local_rupee_count_set(uint16_t rupees) {
-    if (!sEnabled || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
 

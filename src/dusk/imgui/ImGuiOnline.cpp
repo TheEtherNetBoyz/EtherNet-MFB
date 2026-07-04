@@ -43,6 +43,30 @@ void ImGuiOnline::draw(bool& open) {
     const auto status = multiplayer::get_session_status();
     draw_status_row("Mode", status.mode);
     draw_status_row("State", status.state);
+    if (!status.enabled) {
+        ImGui::Checkbox("Name labels", &m_nameLabels);
+        ImGui::Checkbox("Sync flags", &m_syncFlags);
+        ImGui::SameLine();
+        ImGui::Checkbox("Remote Link model", &m_dummyModel);
+        ImGui::SameLine();
+        ImGui::Checkbox("Sync world", &m_syncWorld);
+        ImGui::SameLine();
+        if (!m_dummyModel) {
+            ImGui::BeginDisabled();
+        }
+        ImGui::Checkbox("Display Midna", &m_displayMidna);
+        if (!m_dummyModel) {
+            ImGui::EndDisabled();
+        }
+        ImGui::SameLine();
+        if (!m_dummyModel) {
+            ImGui::BeginDisabled();
+        }
+        ImGui::Checkbox("Remote collision", &m_remoteCollision);
+        if (!m_dummyModel) {
+            ImGui::EndDisabled();
+        }
+    }
     if (status.enabled) {
         draw_status_row("Room", status.room);
         draw_status_row("Player", status.name);
@@ -67,18 +91,44 @@ void ImGuiOnline::draw(bool& open) {
             ImGui::TextDisabled("(host controlled)");
         }
 
+        bool syncFlags = status.syncFlags;
+        if (status.syncFlagsHostControlled) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Checkbox("Sync flags", &syncFlags) && !status.syncFlagsHostControlled) {
+            multiplayer::set_sync_flags_enabled(syncFlags);
+            m_syncFlags = syncFlags;
+        }
+        if (status.syncFlagsHostControlled) {
+            ImGui::EndDisabled();
+        }
+        ImGui::SameLine();
         bool dummyModel = status.dummyModel;
-        if (ImGui::Checkbox("Remote Link model##active", &dummyModel)) {
+        if (status.dummyModelHostControlled) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Checkbox("Remote Link model##active", &dummyModel) &&
+            !status.dummyModelHostControlled)
+        {
             multiplayer::set_remote_link_model_enabled(dummyModel);
             m_dummyModel = dummyModel;
+        }
+        if (status.dummyModelHostControlled) {
+            ImGui::EndDisabled();
         }
         ImGui::SameLine();
         bool syncWorld = status.syncWorld;
         // Future preset hook: this is the real-object/world-state lane, kept
         // separate from visual puppets and progression flags.
-        if (ImGui::Checkbox("Sync world", &syncWorld)) {
+        if (status.syncWorldHostControlled) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Checkbox("Sync world", &syncWorld) && !status.syncWorldHostControlled) {
             multiplayer::set_sync_world_enabled(syncWorld);
             m_syncWorld = syncWorld;
+        }
+        if (status.syncWorldHostControlled) {
+            ImGui::EndDisabled();
         }
         ImGui::SameLine();
         bool displayMidna = status.displayMidna;
@@ -173,28 +223,6 @@ void ImGuiOnline::draw(bool& open) {
                 ImGui::InputText("Public Host", m_publicHost, sizeof(m_publicHost));
                 ImGui::SetNextItemWidth(190.0f);
                 ImGui::InputInt("Port", &m_port);
-                ImGui::Checkbox("Debug marker", &m_debugMarker);
-                ImGui::SameLine();
-                ImGui::Checkbox("Remote Link model", &m_dummyModel);
-                ImGui::SameLine();
-                ImGui::Checkbox("Name labels", &m_nameLabels);
-                ImGui::Checkbox("Sync world", &m_syncWorld);
-                ImGui::SameLine();
-                if (!m_dummyModel) {
-                    ImGui::BeginDisabled();
-                }
-                ImGui::Checkbox("Display Midna", &m_displayMidna);
-                if (!m_dummyModel) {
-                    ImGui::EndDisabled();
-                }
-                ImGui::SameLine();
-                if (!m_dummyModel) {
-                    ImGui::BeginDisabled();
-                }
-                ImGui::Checkbox("Remote collision", &m_remoteCollision);
-                if (!m_dummyModel) {
-                    ImGui::EndDisabled();
-                }
 
                 if (ImGui::Button("Host Lobby")) {
                     multiplayer::DirectHostOptions options;
@@ -203,9 +231,9 @@ void ImGuiOnline::draw(bool& open) {
                     options.bindHost = m_bindHost;
                     options.publicHost = m_publicHost;
                     options.port = m_port;
-                    options.debugMarker = m_debugMarker;
                     options.dummyModel = m_dummyModel;
                     options.nameLabels = m_nameLabels;
+                    options.syncFlags = m_syncFlags;
                     options.syncWorld = m_syncWorld;
                     options.displayMidna = m_displayMidna;
                     options.remoteCollision = m_remoteCollision;
@@ -225,36 +253,14 @@ void ImGuiOnline::draw(bool& open) {
                 ImGui::InputText("Name##joinName", m_joinName, sizeof(m_joinName));
                 ImGui::SetNextItemWidth(-1.0f);
                 ImGui::InputTextMultiline("Invite Code", m_inviteCode, sizeof(m_inviteCode), ImVec2(0.0f, ImGui::GetTextLineHeight() * 3.0f));
-                ImGui::Checkbox("Debug marker##join", &m_debugMarker);
-                ImGui::SameLine();
-                ImGui::Checkbox("Remote Link model##join", &m_dummyModel);
-                ImGui::SameLine();
-                ImGui::Checkbox("Name labels##join", &m_nameLabels);
-                ImGui::Checkbox("Sync world##join", &m_syncWorld);
-                ImGui::SameLine();
-                if (!m_dummyModel) {
-                    ImGui::BeginDisabled();
-                }
-                ImGui::Checkbox("Display Midna##join", &m_displayMidna);
-                if (!m_dummyModel) {
-                    ImGui::EndDisabled();
-                }
-                ImGui::SameLine();
-                if (!m_dummyModel) {
-                    ImGui::BeginDisabled();
-                }
-                ImGui::Checkbox("Remote collision##join", &m_remoteCollision);
-                if (!m_dummyModel) {
-                    ImGui::EndDisabled();
-                }
 
                 if (ImGui::Button("Join Lobby")) {
                     multiplayer::DirectJoinOptions options;
                     options.name = m_joinName;
                     options.inviteCode = m_inviteCode;
-                    options.debugMarker = m_debugMarker;
                     options.dummyModel = m_dummyModel;
                     options.nameLabels = m_nameLabels;
+                    options.syncFlags = m_syncFlags;
                     options.syncWorld = m_syncWorld;
                     options.displayMidna = m_displayMidna;
                     options.remoteCollision = m_remoteCollision;
@@ -281,28 +287,6 @@ void ImGuiOnline::draw(bool& open) {
             ImGui::InputText("Relay Host", m_relayHost, sizeof(m_relayHost));
             ImGui::SetNextItemWidth(190.0f);
             ImGui::InputInt("Relay Port", &m_relayPort);
-            ImGui::Checkbox("Debug marker##relay", &m_debugMarker);
-            ImGui::SameLine();
-            ImGui::Checkbox("Remote Link model##relay", &m_dummyModel);
-            ImGui::SameLine();
-            ImGui::Checkbox("Name labels##relay", &m_nameLabels);
-            ImGui::Checkbox("Sync world##relay", &m_syncWorld);
-            ImGui::SameLine();
-            if (!m_dummyModel) {
-                ImGui::BeginDisabled();
-            }
-            ImGui::Checkbox("Display Midna##relay", &m_displayMidna);
-            if (!m_dummyModel) {
-                ImGui::EndDisabled();
-            }
-            ImGui::SameLine();
-            if (!m_dummyModel) {
-                ImGui::BeginDisabled();
-            }
-            ImGui::Checkbox("Remote collision##relay", &m_remoteCollision);
-            if (!m_dummyModel) {
-                ImGui::EndDisabled();
-            }
 
             if (ImGui::Button("Join Relay Lobby")) {
                 multiplayer::RelayJoinOptions options;
@@ -311,9 +295,9 @@ void ImGuiOnline::draw(bool& open) {
                 options.password = m_relayPassword;
                 options.host = m_relayHost;
                 options.port = m_relayPort;
-                options.debugMarker = m_debugMarker;
                 options.dummyModel = m_dummyModel;
                 options.nameLabels = m_nameLabels;
+                options.syncFlags = m_syncFlags;
                 options.syncWorld = m_syncWorld;
                 options.displayMidna = m_displayMidna;
                 options.remoteCollision = m_remoteCollision;
