@@ -4239,6 +4239,12 @@ constexpr uint8_t kMatrixResidualSmall = 1;
 constexpr uint8_t kMatrixResidualFull = 2;
 constexpr float kMatrixResidualTranslationScale = 16.0f;
 constexpr uint32_t kLinkMatrixFullPoseInterval = 1;
+constexpr uint32_t kVisualPoseNormalSendInterval = 1;
+constexpr uint32_t kVisualPoseReducedSendInterval = 2;
+constexpr uint32_t kVisualPoseAckLagDownshiftThreshold = 12;
+constexpr uint32_t kVisualPoseAckLagUpshiftThreshold = 10;
+constexpr uint32_t kVisualPoseDownshiftSustainTicks = 45;
+constexpr uint32_t kVisualPoseUpshiftSustainTicks = 360;
 constexpr bool kUseAckedMatrixDeltas = true;
 constexpr size_t kMatrixBaselineHistoryLimit = 300;
 constexpr uint64_t kFnv1a64Offset = 14695981039346656037ull;
@@ -7575,6 +7581,35 @@ std::string pose_ack_key(const std::string& receiverId, const std::string& poseS
     return receiverId + "\x1f" + poseSenderId + "\x1f" + std::to_string(packetType);
 }
 
+uint32_t max_local_pose_ack_lag(uint32_t currentSequence, bool* hasAckOut) {
+    bool hasAck = false;
+    uint32_t maxLag = 0;
+    const std::string senderId = local_udp_pose_sender_id();
+
+    auto considerReceiver = [&](const std::string& receiverId) {
+        const auto it = sSession.udpPoseAckedSequenceByReceiver.find(
+            pose_ack_key(receiverId, senderId, kUdpPacketTypePoseMsgpack));
+        if (it == sSession.udpPoseAckedSequenceByReceiver.end() || it->second == 0) {
+            return;
+        }
+        hasAck = true;
+        maxLag = std::max(maxLag, currentSequence > it->second ? currentSequence - it->second : 0);
+    };
+
+    if (sSession.mode == NetworkMode::DirectHost) {
+        for (const auto& entry : sSession.directPeers) {
+            considerReceiver(entry.second.id);
+        }
+    } else if (sSession.mode == NetworkMode::DirectJoin) {
+        considerReceiver(kDirectPeerId);
+    }
+
+    if (hasAckOut != nullptr) {
+        *hasAckOut = hasAck;
+    }
+    return maxLag;
+}
+
 size_t compressed_size_for_diagnostics(const void* data, size_t size) {
     const size_t bound = ZSTD_compressBound(size);
     std::vector<uint8_t> compressed(bound);
@@ -9015,6 +9050,43 @@ void send_pose() {
     const bool isTransforming =
         link != nullptr && (link->mProcID == daAlink_c::PROC_METAMORPHOSE ||
                             link->mProcID == daAlink_c::PROC_METAMORPHOSE_ONLY);
+    const uint32_t nextPoseSequence = sSession.poseSequence + 1;
+    static uint32_t sVisualPoseSendTick = 0;
+    static uint32_t sVisualPoseSendInterval = kVisualPoseNormalSendInterval;
+    static uint32_t sVisualPosePressureTicks = 0;
+    static uint32_t sVisualPoseHealthyTicks = 0;
+    bool hasPoseAck = false;
+    const uint32_t poseAckLag = max_local_pose_ack_lag(sSession.poseSequence, &hasPoseAck);
+    if (hasPoseAck && poseAckLag >= kVisualPoseAckLagDownshiftThreshold) {
+        ++sVisualPosePressureTicks;
+        sVisualPoseHealthyTicks = 0;
+    } else if (hasPoseAck && poseAckLag <= kVisualPoseAckLagUpshiftThreshold) {
+        ++sVisualPoseHealthyTicks;
+        sVisualPosePressureTicks = 0;
+    } else {
+        sVisualPosePressureTicks = 0;
+        sVisualPoseHealthyTicks = 0;
+    }
+    if (sVisualPoseSendInterval == kVisualPoseNormalSendInterval &&
+        sVisualPosePressureTicks >= kVisualPoseDownshiftSustainTicks)
+    {
+        sVisualPoseSendInterval = kVisualPoseReducedSendInterval;
+        sVisualPosePressureTicks = 0;
+        DuskLog.info("MP_VISUAL_RATE mode=downshift interval={} ack_lag={} seq={}",
+                     sVisualPoseSendInterval, poseAckLag, sSession.poseSequence);
+    } else if (sVisualPoseSendInterval == kVisualPoseReducedSendInterval &&
+               sVisualPoseHealthyTicks >= kVisualPoseUpshiftSustainTicks)
+    {
+        sVisualPoseSendInterval = kVisualPoseNormalSendInterval;
+        sVisualPoseHealthyTicks = 0;
+        DuskLog.info("MP_VISUAL_RATE mode=upshift interval={} ack_lag={} seq={}",
+                     sVisualPoseSendInterval, poseAckLag, sSession.poseSequence);
+    }
+    if (!isTransforming && sVisualPoseSendInterval > 1 &&
+        (++sVisualPoseSendTick % sVisualPoseSendInterval) != 0)
+    {
+        return;
+    }
     static bool sLocalTransformObserved = false;
     static bool sLocalTransformFromWolf = false;
     static bool sLocalTransformToWolf = false;
@@ -9157,7 +9229,6 @@ void send_pose() {
     sLastMidnaMatrixPackedBytes = 0;
     sLastMidnaMatrixBase64Bytes = 0;
     sLastMidnaMatrixPresentSlots = 0;
-    const uint32_t nextPoseSequence = sSession.poseSequence + 1;
     const bool sendFullMatrices =
         isLink &&
         (nextPoseSequence <= 3 || isTransforming || sWasSendingTransform ||
