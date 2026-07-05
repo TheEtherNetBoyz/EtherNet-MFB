@@ -181,7 +181,9 @@ constexpr size_t kUdpPoseMaxUncompressedBytes = 512 * 1024;
 constexpr size_t kUdpPoseMaxInflightSequences = 8;
 constexpr int kUdpPoseSocketBufferBytes = 1024 * 1024;
 constexpr size_t kUdpTxPacerMaxQueuedDatagrams = 512;
-constexpr auto kUdpTxPacerDatagramGap = std::chrono::milliseconds(1);
+constexpr size_t kUdpTxPacerTargetBytesPerSecond = 512 * 1024;
+constexpr auto kUdpTxPacerMinDatagramGap = std::chrono::milliseconds(1);
+constexpr size_t kTcpTxBufferMaxBytes = 256 * 1024;
 constexpr uint8_t kUdpPacketTypePoseJson = 1;
 constexpr uint8_t kUdpPacketTypePoseMsgpack = 2;
 constexpr uint8_t kUdpPacketTypeRemoteObject = 3;
@@ -580,6 +582,7 @@ struct DirectPeer {
     std::string id;
     std::string name = "Peer";
     std::string rxBuffer;
+    std::string txBuffer;
     bool welcomed = false;
     bool snapshotPending = false;
     bool udpAddrKnown = false;
@@ -618,6 +621,7 @@ struct Session {
     std::string sessionKey;
     std::string relayPassword;
     std::string rxBuffer;
+    std::string txBuffer;
     int port = 34197;
     uint32_t reconnectTicks = 0;
     uint32_t pingTicks = 0;
@@ -2065,6 +2069,15 @@ bool send_udp_tx_datagram_now(const UdpTxDatagram& datagram) {
     return true;
 }
 
+std::chrono::microseconds udp_tx_pacer_gap_for_datagram(const UdpTxDatagram& datagram) {
+    const size_t bytes = std::max<size_t>(datagram.bytes.size(), 1);
+    const auto byteRateGap = std::chrono::microseconds(
+        static_cast<int64_t>((bytes * 1000000ull) / kUdpTxPacerTargetBytesPerSecond));
+    return std::max(std::chrono::duration_cast<std::chrono::microseconds>(
+                        kUdpTxPacerMinDatagramGap),
+                    byteRateGap);
+}
+
 void udp_tx_pacer_thread_main() {
     for (;;) {
         UdpTxDatagram datagram;
@@ -2097,7 +2110,7 @@ void udp_tx_pacer_thread_main() {
                     DuskLog.warn("Multiplayer direct UDP tx pacer would block count={} queued={}",
                                  wouldBlockCount, queued);
                 }
-                std::this_thread::sleep_for(kUdpTxPacerDatagramGap * 2);
+                std::this_thread::sleep_for(udp_tx_pacer_gap_for_datagram(datagram) * 2);
                 continue;
             }
         } else {
@@ -2105,7 +2118,7 @@ void udp_tx_pacer_thread_main() {
             ++sUdpTxPacerSent;
         }
 
-        std::this_thread::sleep_for(kUdpTxPacerDatagramGap);
+        std::this_thread::sleep_for(udp_tx_pacer_gap_for_datagram(datagram));
     }
 }
 
@@ -2156,8 +2169,27 @@ bool enqueue_udp_tx_datagrams(std::vector<UdpTxDatagram> datagrams,
             return false;
         }
 
+        std::map<uint32_t, size_t> queuedDatagramsBySequence;
+        std::map<uint32_t, size_t> expectedDatagramsBySequence;
+        for (const UdpTxDatagram& queued : sUdpTxPacerQueue) {
+            if (queued.queueKey != queueKey || queued.sequence >= sequence) {
+                continue;
+            }
+            ++queuedDatagramsBySequence[queued.sequence];
+            expectedDatagramsBySequence[queued.sequence] =
+                static_cast<size_t>(queued.chunkCount) + (queued.chunkCount > 1 ? 1 : 0);
+        }
+
         for (auto it = sUdpTxPacerQueue.begin(); it != sUdpTxPacerQueue.end();) {
-            if (it->queueKey == queueKey && it->sequence < sequence) {
+            const auto queuedCountIt = queuedDatagramsBySequence.find(it->sequence);
+            const auto expectedCountIt = expectedDatagramsBySequence.find(it->sequence);
+            const bool wholeSnapshotStillQueued =
+                queuedCountIt != queuedDatagramsBySequence.end() &&
+                expectedCountIt != expectedDatagramsBySequence.end() &&
+                queuedCountIt->second >= expectedCountIt->second;
+            if (it->queueKey == queueKey && it->sequence < sequence &&
+                wholeSnapshotStillQueued)
+            {
                 it = sUdpTxPacerQueue.erase(it);
                 ++droppedStale;
             } else {
@@ -3277,19 +3309,17 @@ void trace_udp_pose_packet_tx(const json& message, size_t rawBytes, size_t compr
     sUdpPoseTraceSummary = UdpPoseTraceSummary{};
 }
 
-bool send_bytes(socket_t sock, const std::string& bytes) {
+bool flush_socket_tx_buffer(socket_t sock, std::string& txBuffer) {
     if (sock == INVALID_SOCKET) {
         return false;
     }
 
-    const char* cursor = bytes.data();
-    int remaining = static_cast<int>(bytes.size());
-
-    while (remaining > 0) {
-        const int sent = send(sock, cursor, remaining, kSendFlags);
+    while (!txBuffer.empty()) {
+        const int sendBytes = static_cast<int>(
+            std::min<size_t>(txBuffer.size(), static_cast<size_t>(std::numeric_limits<int>::max())));
+        const int sent = send(sock, txBuffer.data(), sendBytes, kSendFlags);
         if (sent > 0) {
-            cursor += sent;
-            remaining -= sent;
+            txBuffer.erase(0, static_cast<size_t>(sent));
             continue;
         }
 
@@ -3303,14 +3333,22 @@ bool send_bytes(socket_t sock, const std::string& bytes) {
     return true;
 }
 
-bool send_json_to_socket(socket_t sock, const json& message) {
+bool queue_json_to_socket(socket_t sock, std::string& txBuffer, const json& message) {
     const std::string bytes = serialize_json_line(message);
     trace_packet_tx(message, bytes.size());
-    return send_bytes(sock, bytes);
+    if (txBuffer.size() + bytes.size() > kTcpTxBufferMaxBytes) {
+        DuskLog.warn("Multiplayer TCP tx buffer overflow type={} queued={} append={} max={}",
+                     message.value("type", ""), txBuffer.size(), bytes.size(),
+                     kTcpTxBufferMaxBytes);
+        return false;
+    }
+
+    txBuffer.append(bytes);
+    return flush_socket_tx_buffer(sock, txBuffer);
 }
 
 bool send_json_to_peer(DirectPeer& peer, const json& message) {
-    if (send_json_to_socket(peer.sock, message)) {
+    if (queue_json_to_socket(peer.sock, peer.txBuffer, message)) {
         return true;
     }
 
@@ -3331,7 +3369,7 @@ bool send_json(const json& message) {
         return sentAny || sSession.directPeers.empty();
     }
 
-    if (send_json_to_socket(sSession.sock, message)) {
+    if (queue_json_to_socket(sSession.sock, sSession.txBuffer, message)) {
         return true;
     }
 
@@ -7168,8 +7206,18 @@ bool pump_receive_from_socket(socket_t sock, std::string& rxBuffer, DirectPeer* 
 }
 
 void pump_receive() {
+    if (!flush_socket_tx_buffer(sSession.sock, sSession.txBuffer)) {
+        disconnect("send failed");
+        return;
+    }
+
     if (!pump_receive_from_socket(sSession.sock, sSession.rxBuffer)) {
         disconnect("remote closed");
+        return;
+    }
+
+    if (!flush_socket_tx_buffer(sSession.sock, sSession.txBuffer)) {
+        disconnect("send failed");
     }
 }
 
@@ -7177,7 +7225,15 @@ void pump_direct_peer_receives() {
     std::vector<std::string> disconnectedPeers;
     for (auto& entry : sSession.directPeers) {
         DirectPeer& peer = entry.second;
+        if (!flush_socket_tx_buffer(peer.sock, peer.txBuffer)) {
+            disconnectedPeers.push_back(peer.id);
+            continue;
+        }
         if (!pump_receive_from_socket(peer.sock, peer.rxBuffer, &peer)) {
+            disconnectedPeers.push_back(peer.id);
+            continue;
+        }
+        if (!flush_socket_tx_buffer(peer.sock, peer.txBuffer)) {
             disconnectedPeers.push_back(peer.id);
         }
     }
