@@ -3959,11 +3959,14 @@ void update_pending_sync_replies() {
                     "Multiplayer replied to deferred direct manual sync request peer={} cue={}",
                     it->peerKey, it->cueKey);
             }
-        } else if (sSession.mode == NetworkMode::RelayHarness && !it->targetClientId.empty()) {
+        } else if ((sSession.mode == NetworkMode::RelayHarness ||
+                    sSession.mode == NetworkMode::DirectJoin) &&
+                   !it->targetClientId.empty())
+        {
             mark_progression_sync_cue_handled(it->targetClientId, it->cueKey,
                                               "deferred_sync_reply");
             send_save_snapshot(nullptr, it->targetClientId, true);
-            DuskLog.info("Multiplayer replied to deferred relay manual sync request peer={} cue={}",
+            DuskLog.info("Multiplayer replied to deferred routed manual sync request peer={} cue={}",
                          it->targetClientId, it->cueKey);
         } else {
             send_save_snapshot(nullptr, "", true);
@@ -6040,6 +6043,28 @@ void broadcast_to_direct_peers(const json& message, const std::string& excludePe
     }
 }
 
+bool route_direct_host_message_to_peer(const json& message, const std::string& targetPeerId,
+                                       const char* description) {
+    if (targetPeerId.empty() || targetPeerId == kDirectPeerId || targetPeerId == "host") {
+        return false;
+    }
+
+    auto peerIt = sSession.directPeers.find(targetPeerId);
+    if (peerIt == sSession.directPeers.end() || !peerIt->second.welcomed) {
+        DuskLog.warn("Multiplayer direct host failed to route {} target={}",
+                     description != nullptr ? description : "message", targetPeerId);
+        return true;
+    }
+
+    if (!send_json_to_peer(peerIt->second, message)) {
+        remove_direct_peer(targetPeerId, "send failed");
+    } else {
+        DuskLog.info("Multiplayer direct host routed {} target={}",
+                     description != nullptr ? description : "message", targetPeerId);
+    }
+    return true;
+}
+
 bool should_forward_peer_message(const std::string& type) {
     return type != "hello" && type != "ping" && type != "pong" && type != "error";
 }
@@ -6062,6 +6087,19 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
     json routedMessage = message;
     if (sender != nullptr && type != "hello") {
         routedMessage["client_id"] = sender->id;
+    }
+    if (sender != nullptr && sSession.mode == NetworkMode::DirectHost && sSyncFlagsEnabled) {
+        const std::string targetPeerId = routedMessage.value("target_client_id", "");
+        if (type == "sync_request" &&
+            route_direct_host_message_to_peer(routedMessage, targetPeerId, "manual sync request"))
+        {
+            return;
+        }
+        if (type == "save_snapshot" && routedMessage.value("manual_sync", false) &&
+            route_direct_host_message_to_peer(routedMessage, targetPeerId, "manual sync snapshot"))
+        {
+            return;
+        }
     }
     if (is_sync_flags_message_type(type) && !sSyncFlagsEnabled) {
         static uint32_t sSyncFlagsRxSkipLogTicks = 0;
@@ -6525,9 +6563,12 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                 DuskLog.info("Multiplayer replied to direct manual sync request peer={}", sender->id);
             } else {
                 const std::string requesterId = routedMessage.value("client_id", "");
-                if (sSession.mode == NetworkMode::RelayHarness && !requesterId.empty()) {
+                if ((sSession.mode == NetworkMode::RelayHarness ||
+                     sSession.mode == NetworkMode::DirectJoin) &&
+                    !requesterId.empty())
+                {
                     send_save_snapshot(nullptr, requesterId, true);
-                    DuskLog.info("Multiplayer replied to relay manual sync request peer={}",
+                    DuskLog.info("Multiplayer replied to routed manual sync request peer={}",
                                  requesterId);
                 } else {
                     send_save_snapshot(nullptr, "", true);
@@ -10001,12 +10042,6 @@ bool request_manual_sync(const std::string& peerId, std::string* errorOut) {
         request["client_id"] = "host";
         send_json_to_peer(peerIt->second, request);
     } else if (sSession.mode == NetworkMode::DirectJoin) {
-        if (peerId != kDirectPeerId) {
-            if (errorOut != nullptr) {
-                *errorOut = "Direct join can only sync from the host.";
-            }
-            return false;
-        }
         send_json(request);
     } else {
         if (sSession.clientId.empty()) {
