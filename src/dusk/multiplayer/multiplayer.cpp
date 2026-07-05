@@ -870,6 +870,92 @@ constexpr uint32_t kPendingSyncReplyTimeoutTicks = 1800;
 // current stage memory back into the savedata table yet.
 std::map<int, std::set<int>> sObservedMemoryItems;
 
+struct BombBagSlotSyncState {
+    u8 item = dItemNo_NONE_e;
+    u8 count = 0;
+    bool valid = false;
+};
+
+std::array<BombBagSlotSyncState, 3> sLastLocalBombBagSlotStates{};
+
+bool is_syncable_bomb_bag_item(int itemId) {
+    return itemId == dItemNo_NORMAL_BOMB_e || itemId == dItemNo_WATER_BOMB_e ||
+           itemId == dItemNo_POKE_BOMB_e;
+}
+
+bool is_rental_bomb_bag_slot(int bagIdx) {
+    const u8 rentalBag = dMeter2Info_getRentalBombBag();
+    return rentalBag != 0xFF && rentalBag == static_cast<u8>(bagIdx);
+}
+
+BombBagSlotSyncState read_bomb_bag_slot_state(int bagIdx) {
+    BombBagSlotSyncState state;
+    if (bagIdx < 0 || bagIdx >= static_cast<int>(sLastLocalBombBagSlotStates.size())) {
+        return state;
+    }
+
+    state.item = dComIfGs_getItem(SLOT_15 + bagIdx, false);
+    state.count = dComIfGs_getBombNum(static_cast<u8>(bagIdx));
+    state.valid = true;
+    return state;
+}
+
+json make_bomb_bag_slots_snapshot() {
+    json slots = json::array();
+    for (int bagIdx = 0; bagIdx < 3; ++bagIdx) {
+        if (is_rental_bomb_bag_slot(bagIdx)) {
+            continue;
+        }
+
+        const BombBagSlotSyncState state = read_bomb_bag_slot_state(bagIdx);
+        if (state.valid && is_syncable_bomb_bag_item(state.item) && state.count > 0) {
+            slots.push_back({
+                {"bag", bagIdx},
+                {"item", state.item},
+                {"count", state.count},
+            });
+        }
+    }
+    return slots;
+}
+
+void remember_local_bomb_bag_slot_state(int bagIdx) {
+    if (bagIdx < 0 || bagIdx >= static_cast<int>(sLastLocalBombBagSlotStates.size())) {
+        return;
+    }
+
+    sLastLocalBombBagSlotStates[bagIdx] = read_bomb_bag_slot_state(bagIdx);
+}
+
+void apply_remote_bomb_bag_slot(int bagIdx, int itemId, int count, const char* source) {
+    if (bagIdx < 0 || bagIdx >= 3 || !is_syncable_bomb_bag_item(itemId) || count <= 0 ||
+        count > 99)
+    {
+        DuskLog.info("Multiplayer skipped remote bomb bag slot source={} bag={} item={} count={}",
+                     source, bagIdx, itemId, count);
+        return;
+    }
+    if (is_rental_bomb_bag_slot(bagIdx)) {
+        DuskLog.info(
+            "Multiplayer skipped remote bomb bag slot source={} bag={} item={} count={} because "
+            "that local bag is the active rental index",
+            source, bagIdx, itemId, count);
+        return;
+    }
+
+    const int slot = SLOT_15 + bagIdx;
+    const bool wasApplyingRemoteSaveBit = sApplyingRemoteSaveBit;
+    sApplyingRemoteSaveBit = true;
+    dComIfGs_setItem(slot, static_cast<u8>(itemId));
+    dComIfGp_setItem(static_cast<u8>(slot), static_cast<u8>(itemId));
+    dComIfGs_setBombNum(static_cast<u8>(bagIdx), static_cast<u8>(count));
+    dComIfGs_setLineUpItem();
+    sApplyingRemoteSaveBit = wasApplyingRemoteSaveBit;
+    remember_local_bomb_bag_slot_state(bagIdx);
+    DuskLog.info("Multiplayer applied remote bomb bag slot source={} bag={} item={} count={}",
+                 source, bagIdx, itemId, count);
+}
+
 bool is_unsynced_event_bit(uint16_t flag) {
     switch (flag) {
     case kUnsyncedEventBitOrdonSpringMonsterAttack:
@@ -1042,7 +1128,8 @@ bool is_sync_flags_message_type(const std::string& type) {
            type == "collect" || type == "visited_room" || type == "letter_get" ||
            type == "key_num" || type == "light_drop_num" ||
            type == "light_drop_get_flag" || type == "max_life_update" ||
-           type == "bottle_slots" || type == "rupee_count" || type == "ganondorf_hit";
+           type == "bottle_slots" || type == "rupee_count" || type == "bomb_bag_slot" ||
+           type == "ganondorf_hit";
 }
 
 bool is_stage_load_unsafe_for_multiplayer() {
@@ -3841,6 +3928,7 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
             keyItems.push_back(i);
         }
     }
+    const json bombBagSlots = make_bomb_bag_slots_snapshot();
 
     json crystals = json::array();
     json mirrors = json::array();
@@ -3883,6 +3971,7 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
         {"light_drop_counts", lightDropCounts},
         {"light_drop_get_flags", lightDropGetFlags},
         {"key_items", keyItems},
+        {"bomb_bag_slots", bombBagSlots},
         {"crystals", crystals},
         {"mirrors", mirrors},
         {"dark_clear_levels", darkClearLevels},
@@ -3913,12 +4002,44 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
     }
     DuskLog.info(
         "Multiplayer sent save snapshot event_flags={} chest_stages={} switch_stages={} "
-        "item_stages={} dungeon_stages={} key_items={} collect_clothing={} "
+        "item_stages={} dungeon_stages={} key_items={} bomb_bag_slots={} collect_clothing={} "
         "collect_sword={} collect_shield={} equip_sword={} equip_shield={} equip_armor={}",
         eventFlags.size(), chestStages.size(), switchStages.size(), itemStages.size(),
-        dungeonStages.size(), keyItems.size(), collectClothing.size(), collectSword.size(),
-        collectShield.size(), dComIfGs_getSelectEquipSword(), dComIfGs_getSelectEquipShield(),
-        dComIfGs_getSelectEquipClothes());
+        dungeonStages.size(), keyItems.size(), bombBagSlots.size(), collectClothing.size(),
+        collectSword.size(), collectShield.size(), dComIfGs_getSelectEquipSword(),
+        dComIfGs_getSelectEquipShield(), dComIfGs_getSelectEquipClothes());
+}
+
+void update_local_bomb_bag_slot_sync() {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    for (int bagIdx = 0; bagIdx < 3; ++bagIdx) {
+        if (is_rental_bomb_bag_slot(bagIdx)) {
+            continue;
+        }
+
+        const BombBagSlotSyncState current = read_bomb_bag_slot_state(bagIdx);
+        BombBagSlotSyncState& previous = sLastLocalBombBagSlotStates[bagIdx];
+        const bool shouldSend = current.valid && is_syncable_bomb_bag_item(current.item) &&
+            current.count > 0 &&
+            (!previous.valid || previous.item != current.item || previous.count == 0);
+
+        previous = current;
+        if (!shouldSend) {
+            continue;
+        }
+
+        send_json({
+            {"type", "bomb_bag_slot"},
+            {"bag", bagIdx},
+            {"item", current.item},
+            {"count", current.count},
+        });
+        DuskLog.info("Multiplayer sent local bomb bag slot bag={} item={} count={}", bagIdx,
+                     current.item, current.count);
+    }
 }
 
 // Retries deferred sync_request replies (see is_local_state_ready_for_cue())
@@ -6466,6 +6587,10 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                 DuskLog.info("Multiplayer snapshot key item item_id={}", itemId);
             }
         }
+        for (const json& entry : message.value("bomb_bag_slots", json::array())) {
+            apply_remote_bomb_bag_slot(entry.value("bag", -1), entry.value("item", -1),
+                                       entry.value("count", -1), "snapshot");
+        }
         for (const json& entry : message.value("crystals", json::array())) {
             dComIfGs_onCollectCrystal(static_cast<u8>(entry.get<int>()));
         }
@@ -7210,6 +7335,9 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             sApplyingRemoteSaveBit = false;
             DuskLog.info("Multiplayer applied remote item get item_id={}", itemId);
         }
+    } else if (type == "bomb_bag_slot") {
+        apply_remote_bomb_bag_slot(message.value("bag", -1), message.value("item", -1),
+                                   message.value("count", -1), "live");
     } else if (type == "item_first_bit") {
         const int itemId = message.value("item_id", -1);
         const bool owned = message.value("owned", true);
@@ -9213,6 +9341,7 @@ void update_connected() {
     update_pending_progression_cue_arrivals();
     flush_pending_progression_sync();
     update_pending_sync_replies();
+    update_local_bomb_bag_slot_sync();
 
     if (!is_stage_load_unsafe_for_multiplayer()) {
         if (sSession.snapshotPending) {
