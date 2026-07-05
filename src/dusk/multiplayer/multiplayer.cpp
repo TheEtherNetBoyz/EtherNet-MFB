@@ -14,6 +14,7 @@
 #include "d/actor/d_a_obj_picture.h"
 #include "d/actor/d_a_obj_scannon.h"
 #include "d/actor/d_a_obj_smallkey.h"
+#include "d/actor/d_a_obj_so.h"
 #include "d/actor/d_a_obj_sword.h"
 #include "d/actor/d_a_spinner.h"
 #include "d/actor/d_a_tbox.h"
@@ -812,6 +813,11 @@ bool sApplyingRemoteSaveBit = false;
 
 constexpr int kProgressionCueSewersStage = dStage_SaveTbl_PRISON;
 constexpr int kProgressionCueWakeUpInJailSwitch = 27; // ImGui flag 08:08 / "wake up in jail cs".
+constexpr int kProgressionCueFaronCageStage = dStage_SaveTbl_FARON;
+constexpr int kProgressionCueFaronBothCageBokoblinsKilledSwitch = 45; // Faron area flag 0E:20.
+constexpr int kProgressionCueFaronMonkeyCageBrokenSwitch = 46; // Faron area flag 0E:40.
+constexpr int kProgressionCueFaronLeftCageBokoblinKilledSwitch = 47; // Faron area flag 0E:80.
+constexpr int kProgressionCueFaronRightCageBokoblinKilledSwitch = 48; // Faron area flag 0D:01.
 constexpr uint16_t kProgressionCueSewersCompleteEventBit = 0x6140; // offset 0x61 bit 64 - "remove midna from z (temporary flag after sewers)".
 constexpr uint16_t kProgressionCueFaronTwilightEventBit = 0x0640; // offset 0x06 bit 64 - "watched faron twilight intro cutscene".
 constexpr int kUnsyncedSwitchOrdonStage = dStage_SaveTbl_ORDON;
@@ -1512,6 +1518,7 @@ void remember_remote_switch(int stage, int flag, bool deferred) {
     sRecentRemoteSwitches.push_back({stage, flag, 0, deferred});
 }
 
+bool repair_remote_faron_cage_sequence_switch(int stage, int flag);
 bool repair_remote_breakable_carry_box_switch(int stage, int flag);
 bool is_sewers_progression_switch(int stage, int flag);
 
@@ -1528,28 +1535,29 @@ void dispatch_remote_switch_repair_hook(int stage, int flag, const char* reason)
     const bool repairedLv4PoGate = stage == 19 && flag == 0x26 && duskRepairLv4PoGateOpen();
     const bool repairedPZ = duskRepairE_PZRemoteDefeat(flag);
     const bool repairedSCannon = duskRepairSCannonRemotePortalClosed(flag);
+    const bool repairedFaronCageSequence = repair_remote_faron_cage_sequence_switch(stage, flag);
     const bool repairedBreakableCarryBox = repair_remote_breakable_carry_box_switch(stage, flag);
 
     if (repairedCBlock || repairedJumpTbox || repairedLv4PoGate || repairedPZ ||
-        repairedSCannon || repairedBreakableCarryBox)
+        repairedSCannon || repairedFaronCageSequence || repairedBreakableCarryBox)
     {
         DuskLog.info("Multiplayer remote switch repair stage={} flag={} reason={} "
-                     "cblock={} jump_tbox={} lv4_poe_gate={} e_pz={} scannon={} breakable_box={} "
-                     "picture_monitor={} npc_chin_monitor={}",
+                     "cblock={} jump_tbox={} lv4_poe_gate={} e_pz={} scannon={} "
+                     "faron_cage_sequence={} breakable_box={} picture_monitor={} npc_chin_monitor={}",
                      stage, flag, reason, repairedCBlock, repairedJumpTbox, repairedLv4PoGate,
-                     repairedPZ, repairedSCannon, repairedBreakableCarryBox, monitoredPicture,
-                     monitoredNpcChin);
+                     repairedPZ, repairedSCannon, repairedFaronCageSequence,
+                     repairedBreakableCarryBox, monitoredPicture, monitoredNpcChin);
     } else if (monitoredPicture || monitoredNpcChin) {
         DuskLog.info("Multiplayer remote switch monitor stage={} flag={} reason={} "
                      "picture_monitor={} npc_chin_monitor={} repair=reload_or_cosmetic",
                      stage, flag, reason, monitoredPicture, monitoredNpcChin);
     } else {
         DuskLog.info("Multiplayer remote switch repair checked stage={} flag={} reason={} "
-                     "cblock={} jump_tbox={} lv4_poe_gate={} e_pz={} scannon={} breakable_box={} "
-                     "picture_monitor={} npc_chin_monitor={}",
+                     "cblock={} jump_tbox={} lv4_poe_gate={} e_pz={} scannon={} "
+                     "faron_cage_sequence={} breakable_box={} picture_monitor={} npc_chin_monitor={}",
                      stage, flag, reason, repairedCBlock, repairedJumpTbox, repairedLv4PoGate,
-                     repairedPZ, repairedSCannon, repairedBreakableCarryBox, monitoredPicture,
-                     monitoredNpcChin);
+                     repairedPZ, repairedSCannon, repairedFaronCageSequence,
+                     repairedBreakableCarryBox, monitoredPicture, monitoredNpcChin);
     }
 }
 
@@ -1596,6 +1604,114 @@ bool is_remote_switch_deferred(int stage, int flag) {
     }
 
     return false;
+}
+
+struct FaronCageSequenceRepairSearch {
+    int flag;
+    bool repaired;
+    bool sawActor;
+};
+
+void* repair_faron_cage_bokoblin_by_switch(void* actor, void* data) {
+    if (actor == nullptr || data == nullptr || !fopAcM_IsActor(actor) ||
+        fopAcM_GetName(actor) != fpcNm_E_RD_e)
+    {
+        return nullptr;
+    }
+
+    auto* search = static_cast<FaronCageSequenceRepairSearch*>(data);
+    const uint32_t params = fopAcM_GetParam(actor);
+    const int sw = (params >> 24) & 0xFF;
+    if (sw != search->flag) {
+        return nullptr;
+    }
+
+    auto* enemy = static_cast<fopAc_ac_c*>(actor);
+    search->sawActor = true;
+    DuskLog.info("Multiplayer Faron cage saw E_RD bokoblin room={} homeRoom={} sw={} "
+                 "params=0x{:08X} pos=({}, {}, {})",
+                 fopAcM_GetRoomNo(enemy), fopAcM_GetHomeRoomNo(enemy), sw, params,
+                 enemy->current.pos.x, enemy->current.pos.y, enemy->current.pos.z);
+
+    dComIfGs_onSwitch(sw, fopAcM_GetRoomNo(enemy));
+    fopAcM_createDisappear(enemy, &enemy->current.pos, 10, 0, 11);
+    fopAcM_delete(enemy);
+    search->repaired = true;
+    return actor;
+}
+
+void* repair_faron_monkey_cage_by_switch(void* actor, void* data) {
+    if (actor == nullptr || data == nullptr || !fopAcM_IsActor(actor) ||
+        fopAcM_GetName(actor) != fpcNm_OBJ_SO_e)
+    {
+        return nullptr;
+    }
+
+    auto* search = static_cast<FaronCageSequenceRepairSearch*>(data);
+    auto* cage = static_cast<obj_so_class*>(actor);
+    const uint32_t params = fopAcM_GetParam(&cage->actor);
+    const int highSw = (params >> 24) & 0xFF;
+    const int midSw = (params >> 16) & 0xFF;
+    if (highSw != search->flag && midSw != search->flag) {
+        return nullptr;
+    }
+
+    search->sawActor = true;
+    DuskLog.info("Multiplayer Faron cage saw OBJ_SO room={} homeRoom={} swHigh={} swMid={} "
+                 "params=0x{:08X} pos=({}, {}, {}) broken={} action={} mode={}",
+                 fopAcM_GetRoomNo(&cage->actor), fopAcM_GetHomeRoomNo(&cage->actor), highSw,
+                 midSw, params, cage->actor.current.pos.x, cage->actor.current.pos.y,
+                 cage->actor.current.pos.z, cage->field_0x1054, cage->field_0xdae,
+                 cage->field_0xdb0);
+
+    cage->actor.health = 0;
+    cage->field_0xdae = 1;
+    cage->field_0xdb0 = 2;
+    cage->field_0xdc8 = 0.0f;
+    cage->field_0x1054 = 1;
+    for (int i = 0; i < 8; ++i) {
+        cage->field_0x1a98[i] = 2;
+        cage->field_0x750[i + 2] = 0.0f;
+    }
+
+    dComIfGs_onSwitch(search->flag, fopAcM_GetRoomNo(&cage->actor));
+    search->repaired = true;
+    return actor;
+}
+
+bool repair_remote_faron_cage_sequence_switch(int stage, int flag) {
+    if (stage != kProgressionCueFaronCageStage) {
+        return false;
+    }
+
+    bool repaired = false;
+    const auto repairBokoblin = [&](int bokoblinFlag) {
+        FaronCageSequenceRepairSearch search = {bokoblinFlag, false, false};
+        fopAcM_Search(repair_faron_cage_bokoblin_by_switch, &search);
+        if (!search.sawActor) {
+            DuskLog.info("Multiplayer Faron cage found no live E_RD bokoblin for switch {}",
+                         bokoblinFlag);
+        }
+        repaired = repaired || search.repaired;
+    };
+
+    if (flag == kProgressionCueFaronLeftCageBokoblinKilledSwitch ||
+        flag == kProgressionCueFaronRightCageBokoblinKilledSwitch)
+    {
+        repairBokoblin(flag);
+    } else if (flag == kProgressionCueFaronBothCageBokoblinsKilledSwitch) {
+        repairBokoblin(kProgressionCueFaronLeftCageBokoblinKilledSwitch);
+        repairBokoblin(kProgressionCueFaronRightCageBokoblinKilledSwitch);
+    } else if (flag == kProgressionCueFaronMonkeyCageBrokenSwitch) {
+        FaronCageSequenceRepairSearch search = {flag, false, false};
+        fopAcM_Search(repair_faron_monkey_cage_by_switch, &search);
+        if (!search.sawActor) {
+            DuskLog.info("Multiplayer Faron cage found no live OBJ_SO for switch {}", flag);
+        }
+        repaired = search.repaired;
+    }
+
+    return repaired;
 }
 
 struct BreakableCarryBoxRepairSearch {
