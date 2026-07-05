@@ -20,6 +20,7 @@
 #if TARGET_PC
 #include <f_ap/f_ap_game.h>
 #include <dusk/autosave.h>
+#include "dusk/multiplayer/event_sync.hpp"
 #endif
 
 char DUSK_CONST* daDoor20_c::getStopBmdName() {
@@ -874,7 +875,14 @@ int daDoor20_c::demoProc() {
                  !dComIfGs_isSwitch(swBit, 0xffffffff) &&
                 (door_param2_c::getFrontOption(this) == 2 || door_param2_c::getBackOption(this) == 2))
             {
+#if TARGET_PC
+                dusk::multiplayer::begin_local_switch_actor_context(
+                    fopAcM_GetName(this), fopAcM_GetRoomNo(this), swBit, fopAcM_GetParam(this));
+#endif
                 dComIfGs_onSwitch(swBit, 0xffffffff);
+#if TARGET_PC
+                dusk::multiplayer::end_local_switch_actor_context();
+#endif
                 dComIfGp_setItemKeyNumCount(-1);
                 if (field_0x673 == 1) {
                     fopAcM_seStart(this, Z2SE_OBJ_DOOR_LOCK_OPEN, 0);
@@ -1202,6 +1210,32 @@ int daDoor20_c::actionWait() {
     return 1;
 }
 
+void daDoor20_c::syncRemoteKeyUnlock() {
+    int swBit = door_param2_c::getSwbit(this);
+    if (!field_0x5f0 || field_0x5ec == -1 || swBit == 0xff ||
+        !dComIfGs_isSwitch(swBit, 0xffffffff) ||
+        (door_param2_c::getFrontOption(this) != 2 && door_param2_c::getBackOption(this) != 2))
+    {
+        return;
+    }
+
+    if (field_0x673 == 1) {
+        daObjLv5Key_c* lv5Key = (daObjLv5Key_c*)fopAcM_SearchByID(field_0x5ec);
+        if (lv5Key == NULL) {
+            return;
+        }
+        lv5Key->keylock_open_start();
+    } else {
+        obj_keyhole_class* keyhole = (obj_keyhole_class*)fopAcM_SearchByID(field_0x5ec);
+        if (keyhole == NULL) {
+            return;
+        }
+        keyhole->setOpen();
+    }
+
+    field_0x5f0 = false;
+}
+
 int daDoor20_c::actionStopClose() {
     if (mDoorStop.closeProc(this)) {
         setAction(ACTION_WAIT);
@@ -1251,6 +1285,7 @@ int daDoor20_c::execute() {
                 actionDemo();
                 break;
         }
+        syncRemoteKeyUnlock();
         break;
     case 1:
         startDemoProc();

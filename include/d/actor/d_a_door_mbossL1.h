@@ -111,6 +111,7 @@ public:
     int actionOpen();
     int actionInit();
     int actionStartDemo();
+    void syncRemoteKeyUnlock();
     int execute();
     int draw();
     void draw_sub0();

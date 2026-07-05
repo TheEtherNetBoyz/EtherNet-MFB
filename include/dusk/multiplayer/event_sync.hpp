@@ -32,12 +32,18 @@ void notify_local_dungeon_item_set(int kind);
 // not represented by actor/chest flags alone. Keep this narrowly filtered in
 // the implementation; TP's item table also includes consumables.
 void notify_local_item_get(int itemId);
+void notify_local_item_first_bit_set(int itemId);
+void notify_local_item_first_bit_cleared(int itemId);
 
 // Memory-tier switch bits only (dSv_memBit_c, per-stage, persistent). The
 // caller (d_com_inf_game.h) already filtered out dungeon-tier and zone-tier
 // switch IDs, which are deliberately ephemeral/room-resetting by design and
 // not synced.
 void notify_local_memory_switch_set(int flag);
+// Door/gate unlock switches can live in the room/zone switch range rather
+// than the per-stage memory range. These are only emitted from a narrow actor
+// context filter in the implementation.
+void notify_local_room_switch_set(int flag, int room);
 // Mirrors notify_local_memory_switch_set for the off/clear direction -- e.g.
 // the Darkhammer mini-boss's "fight in progress" switch gets cleared on
 // death (d_a_e_th.cpp), and without this a peer who wasn't present for the

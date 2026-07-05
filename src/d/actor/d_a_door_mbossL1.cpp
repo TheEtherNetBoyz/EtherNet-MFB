@@ -1633,6 +1633,20 @@ int daMBdoorL1_c::actionStartDemo() {
     return 1;
 }
 
+void daMBdoorL1_c::syncRemoteKeyUnlock() {
+    u8 swBit = door_param2_c::getSwbit(this);
+    if (mKeyHoleId == 0xffffffff || door_param2_c::getFrontOption(this) != 2 || swBit == 0xff ||
+        !fopAcM_isSwitch(this, swBit))
+    {
+        return;
+    }
+
+    obj_keyhole_class* keyHole = (obj_keyhole_class*)fopAcM_SearchByID(mKeyHoleId);
+    if (keyHole != NULL && !keyHole->checkOpen() && !keyHole->checkOpenEnd()) {
+        keyHole->setOpen();
+    }
+}
+
 int daMBdoorL1_c::execute() {
     static actionFunc l_action[7] = {
         &daMBdoorL1_c::actionInit,
@@ -1644,6 +1658,7 @@ int daMBdoorL1_c::execute() {
         &daMBdoorL1_c::actionStopClose,
     };
     (this->*(l_action[mAction]))();
+    syncRemoteKeyUnlock();
     return 1;
 }
 

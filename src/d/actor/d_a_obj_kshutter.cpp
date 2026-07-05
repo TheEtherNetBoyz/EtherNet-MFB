@@ -418,6 +418,7 @@ int daObjKshtr_c::Execute(Mtx** param_1) {
         event_proc_call2();
     }
 
+    syncRemoteKeyUnlock();
     *param_1 = &mBgMtx;
     setBaseMtx();
 
@@ -598,6 +599,19 @@ BOOL daObjKshtr_c::keyUnlock() {
     }
 
     return FALSE;
+}
+
+void daObjKshtr_c::syncRemoteKeyUnlock() {
+    if (!mIsCheckKey || mKeyHoleId == fpcM_ERROR_PROCESS_ID_e ||
+        mSwNo == 0xFF || !fopAcM_isSwitch(this, mSwNo))
+    {
+        return;
+    }
+
+    obj_keyhole_class* keyhole_p = (obj_keyhole_class*)fopAcM_SearchByID(mKeyHoleId);
+    if (keyhole_p != NULL && !keyhole_p->checkOpen() && !keyhole_p->checkOpenEnd()) {
+        keyhole_p->setOpen();
+    }
 }
 
 BOOL daObjKshtr_c::openInit() {

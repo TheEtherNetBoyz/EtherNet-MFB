@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
 
 #include "d/dolzel_rel.h"  // IWYU pragma: keep
@@ -449,6 +450,12 @@ static bool remoteModelMatrixSnapshotNearlyEqual(
             matrixValuesNearlyEqual(i_a.joints.data(), i_b.joints.data(), i_a.joints.size())) &&
            (i_a.weights.empty() ||
             matrixValuesNearlyEqual(i_a.weights.data(), i_b.weights.data(), i_a.weights.size()));
+}
+
+static bool remoteModelSnapshotHasUsableWeights(
+    const dusk::multiplayer::RemoteModelMatrixSnapshot& i_source) {
+    return i_source.weights.size() == static_cast<size_t>(i_source.weightCount) * 12 ||
+           (i_source.weightsOmitted && i_source.weights.empty());
 }
 
 static f32 columnLength(CMtxP i_mtx, int i_col) {
@@ -2764,7 +2771,7 @@ bool daRemoteLink_c::copyRemoteModelMatrices(
     if (i_source.jointCount != data->getJointNum() ||
         i_source.weightCount != data->getWEvlpMtxNum() ||
         i_source.joints.size() != static_cast<size_t>(i_source.jointCount) * 12 ||
-        i_source.weights.size() != static_cast<size_t>(i_source.weightCount) * 12)
+        !remoteModelSnapshotHasUsableWeights(i_source))
     {
         return false;
     }
@@ -2778,9 +2785,11 @@ bool daRemoteLink_c::copyRemoteModelMatrices(
         i_model->setAnmMtx(i, mtx);
     }
 
-    for (u16 i = 0; i < i_source.weightCount; ++i) {
-        flatMatrixToMtx(&i_source.weights[static_cast<size_t>(i) * 12], mtx);
-        mDoMtx_copy(mtx, i_model->getWeightAnmMtx(i));
+    if (!i_source.weightsOmitted) {
+        for (u16 i = 0; i < i_source.weightCount; ++i) {
+            flatMatrixToMtx(&i_source.weights[static_cast<size_t>(i) * 12], mtx);
+            mDoMtx_copy(mtx, i_model->getWeightAnmMtx(i));
+        }
     }
 
     return true;
@@ -2804,16 +2813,36 @@ void daRemoteLink_c::captureRemoteModelMatrixSnapshot(
     }
 
     J3DModelData* data = i_model->getModelData();
-    if (i_source.jointCount != data->getJointNum() ||
-        i_source.weightCount != data->getWEvlpMtxNum() ||
-        i_source.joints.size() != static_cast<size_t>(i_source.jointCount) * 12 ||
-        i_source.weights.size() != static_cast<size_t>(i_source.weightCount) * 12)
+    dusk::multiplayer::RemoteModelMatrixSnapshot source = i_source;
+    if (source.weightsOmitted) {
+        if (io_state.currValid && io_state.curr.weightCount == source.weightCount &&
+            io_state.curr.weights.size() == static_cast<size_t>(source.weightCount) * 12)
+        {
+            source.weights = io_state.curr.weights;
+            source.weightsOmitted = false;
+        }
+    }
+
+    if (source.jointCount != data->getJointNum() ||
+        source.weightCount != data->getWEvlpMtxNum() ||
+        source.joints.size() != static_cast<size_t>(source.jointCount) * 12 ||
+        source.weights.size() != static_cast<size_t>(source.weightCount) * 12)
     {
+        static int sAttachmentCaptureRejectLogCount = 0;
+        if (sAttachmentCaptureRejectLogCount < 20) {
+            DuskLog.info("RemoteLink: local matrix interp attachment capture skipped "
+                         "model_joints={} matrix_joints={} model_weights={} matrix_weights={} "
+                         "weight_values={} weights_omitted={} curr_valid={}",
+                         data->getJointNum(), source.jointCount, data->getWEvlpMtxNum(),
+                         source.weightCount, source.weights.size(), i_source.weightsOmitted,
+                         io_state.currValid);
+            ++sAttachmentCaptureRejectLogCount;
+        }
         clearRemoteModelMatrixInterpolation(io_state);
         return;
     }
 
-    if (io_state.currValid && remoteModelMatrixSnapshotNearlyEqual(io_state.curr, i_source)) {
+    if (io_state.currValid && remoteModelMatrixSnapshotNearlyEqual(io_state.curr, source)) {
         io_state.prev = io_state.curr;
         io_state.prevValid = true;
         return;
@@ -2825,7 +2854,7 @@ void daRemoteLink_c::captureRemoteModelMatrixSnapshot(
     } else {
         io_state.prevValid = false;
     }
-    io_state.curr = i_source;
+    io_state.curr = source;
     io_state.currValid = true;
 }
 
@@ -2916,6 +2945,49 @@ bool daRemoteLink_c::applyInterpolatedRemoteModelMatrices(
     Mtx worldOut;
     composeMatrixTRS(interpolateLocalTransform(prevBaseTransform, currBaseTransform, alpha),
                      worldOut);
+    if (mHasRemotePose && mPrevBodyMatrixSnapshotValid && mCurrBodyMatrixSnapshotValid) {
+        Mtx prevBodyBase;
+        Mtx currBodyBase;
+        RemoteLocalJointTransform prevBodyBaseTransform;
+        RemoteLocalJointTransform currBodyBaseTransform;
+        if (snapshotMatrixToMtx(mPrevBodyMatrixSnapshot.base, prevBodyBase) &&
+            snapshotMatrixToMtx(mCurrBodyMatrixSnapshot.base, currBodyBase) &&
+            matrixTranslationDistanceSq(prevBodyBase, currBodyBase) <=
+                kMaxInterpolatedRootMoveSq &&
+            decomposeMatrixTRS(prevBodyBase, &prevBodyBaseTransform) &&
+            decomposeMatrixTRS(currBodyBase, &currBodyBaseTransform))
+        {
+            Mtx rawBodyBaseOut;
+            composeMatrixTRS(
+                interpolateLocalTransform(prevBodyBaseTransform, currBodyBaseTransform, alpha),
+                rawBodyBaseOut);
+
+            const f32 invAlpha = 1.0f - alpha;
+            cXyz anchoredPos;
+            anchoredPos.set(old.pos.x * invAlpha + current.pos.x * alpha,
+                            old.pos.y * invAlpha + current.pos.y * alpha,
+                            old.pos.z * invAlpha + current.pos.z * alpha);
+            if ((current.pos - old.pos).abs2() <= kMaxInterpolatedRootMoveSq) {
+                worldOut[0][3] += anchoredPos.x - rawBodyBaseOut[0][3];
+                worldOut[2][3] += anchoredPos.z - rawBodyBaseOut[2][3];
+            } else {
+                worldOut[0][3] += current.pos.x - rawBodyBaseOut[0][3];
+                worldOut[1][3] += current.pos.y - rawBodyBaseOut[1][3];
+                worldOut[2][3] += current.pos.z - rawBodyBaseOut[2][3];
+            }
+
+            static int sAttachmentRootCorrectionLogCount = 0;
+            if (sAttachmentRootCorrectionLogCount < 12 && i_label != NULL &&
+                std::strcmp(i_label, "face") == 0)
+            {
+                DuskLog.info("RemoteLink: local matrix interp attachment root correction={} "
+                             "alpha={} dx={} dz={}",
+                             i_label, alpha, anchoredPos.x - rawBodyBaseOut[0][3],
+                             anchoredPos.z - rawBodyBaseOut[2][3]);
+                ++sAttachmentRootCorrectionLogCount;
+            }
+        }
+    }
     i_model->setBaseTRMtx(worldOut);
 
     Mtx invParentPrev;

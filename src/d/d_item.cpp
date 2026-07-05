@@ -8,7 +8,6 @@
 #include "d/d_item.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_meter2_info.h"
-#include "dusk/multiplayer/event_sync.hpp"
 #include <cstring>
 
 static void (*item_func_ptr[256])() = {
@@ -277,7 +276,6 @@ inline void getItemFunc(u8 i_itemNo) {
 
 void execItemGet(u8 i_itemNo) {
     getItemFunc(i_itemNo);
-    dusk::multiplayer::notify_local_item_get(i_itemNo);
 }
 
 static int (*item_getcheck_func_ptr[256])() = {

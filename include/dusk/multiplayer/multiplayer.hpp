@@ -33,6 +33,7 @@ struct RemoteModelMatrixSnapshot {
     bool valid = false;
     uint16_t jointCount = 0;
     uint16_t weightCount = 0;
+    bool weightsOmitted = false;
     std::array<float, 12> base{};
     std::vector<float> joints;
     std::vector<float> weights;
@@ -184,6 +185,7 @@ struct PeerPoseSnapshot {
     int itemActorBombFlash = -1;
     int rideActorKind = 0;
     RemoteLinkMatrixSnapshot linkMatrices;
+    bool linkMatricesFresh = false;
     std::vector<RemoteAudioEvent> audioEvents;
 };
 

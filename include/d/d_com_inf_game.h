@@ -1661,11 +1661,22 @@ inline void dComIfGs_setBaitItem(u8 i_item) {
 }
 
 inline void dComIfGs_onItemFirstBit(u8 i_itemNo) {
+    const int alreadyOwned =
+        g_dComIfG_gameInfo.info.getPlayer().getGetItem().isFirstBit(i_itemNo);
     g_dComIfG_gameInfo.info.getPlayer().getGetItem().onFirstBit(i_itemNo);
+    if (!alreadyOwned) {
+        dusk::multiplayer::notify_local_item_get(i_itemNo);
+        dusk::multiplayer::notify_local_item_first_bit_set(i_itemNo);
+    }
 }
 
 inline void dComIfGs_offItemFirstBit(u8 i_itemNo) {
+    const int alreadyOwned =
+        g_dComIfG_gameInfo.info.getPlayer().getGetItem().isFirstBit(i_itemNo);
     g_dComIfG_gameInfo.info.getPlayer().getGetItem().offFirstBit(i_itemNo);
+    if (alreadyOwned) {
+        dusk::multiplayer::notify_local_item_first_bit_cleared(i_itemNo);
+    }
 }
 
 inline int dComIfGs_isItemFirstBit(u8 i_no) {
@@ -2480,11 +2491,15 @@ inline int dComIfGs_createZone(int roomNo) {
 
 inline void dComIfGs_onSwitch(int i_no, int i_roomNo) {
     const BOOL isMemorySwitch = i_no >= 0 && i_no < dSv_info_c::MEMORY_SWITCH;
-    const BOOL wasSet = isMemorySwitch && g_dComIfG_gameInfo.info.isSwitch(i_no, i_roomNo);
+    const BOOL isRoomSwitch = i_no >= dSv_info_c::MEMORY_SWITCH && i_roomNo >= 0;
+    const BOOL wasSet = (isMemorySwitch || isRoomSwitch) &&
+        g_dComIfG_gameInfo.info.isSwitch(i_no, i_roomNo);
     g_dComIfG_gameInfo.info.onSwitch(i_no, i_roomNo);
 #if TARGET_PC
     if (isMemorySwitch && !wasSet) {
         dusk::multiplayer::notify_local_memory_switch_set(i_no);
+    } else if (isRoomSwitch && !wasSet) {
+        dusk::multiplayer::notify_local_room_switch_set(i_no, i_roomNo);
     }
 #endif
 }

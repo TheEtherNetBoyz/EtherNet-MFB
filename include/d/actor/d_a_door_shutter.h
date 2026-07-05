@@ -114,6 +114,7 @@ public:
     void setStop();
     int chkStopOpen();
     int chkMakeKey();
+    void syncRemoteKeyUnlock();
 
     virtual char DUSK_CONST* getDzbName();
     virtual int getDemoAction();

@@ -419,6 +419,44 @@ void sync_remote_link_actor_dummies(const std::map<std::string, PeerPoseSnapshot
         }
 
         update_actor_dummy_collision(peerId, pose);
+        if (!pose.linkMatricesFresh) {
+            if (dummy_trace_enabled()) {
+                const uint32_t sequenceDelta =
+                    dummy.lastTraceSequence != 0 ? pose.sequence - dummy.lastTraceSequence : 0;
+                dummy.lastTraceSequence = pose.sequence;
+                if (sequenceDelta > 1) {
+                    ++dummy.traceSeqGapCount;
+                    if (sequenceDelta > dummy.traceMaxSeqDelta) {
+                        dummy.traceMaxSeqDelta = sequenceDelta;
+                    }
+                } else if (sequenceDelta == 0) {
+                    ++dummy.traceRepeatCount;
+                }
+                if (pose.ageTicks > 1) {
+                    ++dummy.traceAgeSpikeCount;
+                    if (pose.ageTicks > dummy.traceMaxAge) {
+                        dummy.traceMaxAge = pose.ageTicks;
+                    }
+                }
+
+                ++dummy.traceApplyTicks;
+                if ((dummy.traceApplyTicks % 60) == 1) {
+                    DuskLog.info(
+                        "Multiplayer dummy trace summary peer={} id={} applies={} seq={} "
+                        "last_delta={} gaps={} max_gap={} repeats={} age={} age_spikes={} "
+                        "max_age={} matrix={} matrix_fresh=false matrix_false={} "
+                        "pos=({}, {}, {}) room={} proc={} under_bck={} under_frame={} "
+                        "upper_bck={} upper_frame={}",
+                        peerId, dummy.actorId, dummy.traceApplyTicks, pose.sequence,
+                        sequenceDelta, dummy.traceSeqGapCount, dummy.traceMaxSeqDelta,
+                        dummy.traceRepeatCount, pose.ageTicks, dummy.traceAgeSpikeCount,
+                        dummy.traceMaxAge, pose.linkMatrices.valid, dummy.traceMatrixFalseCount,
+                        pose.x, pose.y, pose.z, pose.room, pose.procId, pose.underBck0,
+                        pose.underFrame0, pose.upperBck2, pose.upperFrame2);
+                }
+            }
+            continue;
+        }
         actor->setRemotePose(actorPos, static_cast<s16>(pose.angleY), static_cast<s8>(pose.room));
         const bool displayMidna = display_remote_midna_enabled();
         actor->setRemoteActionState(pose.procId, pose.procVar0, pose.procVar1, pose.procVar2,
@@ -472,14 +510,14 @@ void sync_remote_link_actor_dummies(const std::map<std::string, PeerPoseSnapshot
                 DuskLog.info(
                     "Multiplayer dummy trace summary peer={} id={} applies={} seq={} "
                     "last_delta={} gaps={} max_gap={} repeats={} age={} age_spikes={} "
-                    "max_age={} matrix={} matrix_false={} pos=({}, {}, {}) room={} proc={} "
-                    "under_bck={} under_frame={} upper_bck={} upper_frame={}",
+                    "max_age={} matrix={} matrix_fresh={} matrix_false={} pos=({}, {}, {}) "
+                    "room={} proc={} under_bck={} under_frame={} upper_bck={} upper_frame={}",
                     peerId, dummy.actorId, dummy.traceApplyTicks, pose.sequence, sequenceDelta,
                     dummy.traceSeqGapCount, dummy.traceMaxSeqDelta, dummy.traceRepeatCount,
                     pose.ageTicks, dummy.traceAgeSpikeCount, dummy.traceMaxAge,
-                    pose.linkMatrices.valid, dummy.traceMatrixFalseCount, pose.x, pose.y, pose.z,
-                    pose.room, pose.procId, pose.underBck0, pose.underFrame0, pose.upperBck2,
-                    pose.upperFrame2);
+                    pose.linkMatrices.valid, pose.linkMatricesFresh,
+                    dummy.traceMatrixFalseCount, pose.x, pose.y, pose.z, pose.room, pose.procId,
+                    pose.underBck0, pose.underFrame0, pose.upperBck2, pose.upperFrame2);
             }
         }
         for (const RemoteAudioEvent& event : pose.audioEvents) {

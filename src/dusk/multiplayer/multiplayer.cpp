@@ -79,17 +79,22 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -136,6 +141,7 @@ struct MatrixPackSlotMetrics {
     float basisMaxAbs = 0.0f;
     uint64_t weightHash = 0;
     bool weightChanged = false;
+    bool weightsOmitted = false;
     uint32_t weightStableFrames = 0;
 };
 
@@ -166,12 +172,21 @@ struct ManualSyncStatePacket {
 constexpr size_t kManualSyncStatePacketSize =
     sizeof(ManualSyncStatePacket) + sizeof(dSv_info_c);
 
-constexpr size_t kUdpPoseChunkPayloadBytes = 1100;
+// Keep UDP datagrams below the common 1500-byte MTU while avoiding extra
+// chunks. Header is 58 bytes, so payload 1350 is about 1436 bytes with IP/UDP.
+constexpr size_t kUdpPoseChunkPayloadBytes = 1350;
 constexpr size_t kUdpPoseSenderIdBytes = 32;
 constexpr size_t kUdpPoseMaxCompressedBytes = 256 * 1024;
 constexpr size_t kUdpPoseMaxUncompressedBytes = 512 * 1024;
 constexpr size_t kUdpPoseMaxInflightSequences = 8;
 constexpr int kUdpPoseSocketBufferBytes = 1024 * 1024;
+constexpr size_t kUdpTxPacerMaxQueuedDatagrams = 512;
+constexpr auto kUdpTxPacerDatagramGap = std::chrono::milliseconds(1);
+constexpr uint8_t kUdpPacketTypePoseJson = 1;
+constexpr uint8_t kUdpPacketTypePoseMsgpack = 2;
+constexpr uint8_t kUdpPacketTypeRemoteObject = 3;
+constexpr uint8_t kUdpPacketTypeMidnaMsgpack = 4;
+constexpr uint8_t kUdpPacketTypePoseAck = 5;
 constexpr uint32_t kGanondorfTargetMaxAgeTicks = 30;
 constexpr const char* kGanondorfFinalSyncId = "D_MN09B:GANONDORF_FINAL";
 constexpr float kGanondorfRemoteLinkEyeOffsetY = 150.0f;
@@ -228,6 +243,8 @@ std::vector<GanondorfRemotePlayerDamageEvent> sPendingGanondorfRemotePlayerDamag
 
 bool remote_object_sync_enabled();
 std::string local_udp_pose_sender_id();
+std::string pose_ack_key(const std::string& receiverId, const std::string& poseSenderId,
+                         uint8_t packetType);
 bool send_json(const json& message);
 void broadcast_to_direct_peers(const json& message, const std::string& excludePeerId = "");
 int angle_y_from_delta(float dx, float dz);
@@ -325,6 +342,14 @@ struct UdpRemoteObjectPacket {
 
 static_assert(sizeof(UdpRemoteObjectPacket) <= 40);
 
+#pragma pack(push, 1)
+struct UdpPoseAckPacket {
+    uint32_t sequence;
+    uint8_t ackedType;
+    char ackedSenderId[kUdpPoseSenderIdBytes];
+};
+#pragma pack(pop)
+
 enum UdpObjectFlags : uint8_t {
     UDP_OBJECT_ACTIVE = 1 << 0,
     UDP_OBJECT_EXPLODING = 1 << 1,
@@ -338,7 +363,34 @@ struct UdpPoseReassembly {
     uint16_t receivedCount = 0;
     std::vector<uint8_t> compressed;
     std::vector<uint8_t> received;
+    std::vector<uint8_t> parity;
+    bool parityReceived = false;
 };
+
+struct UdpPoseRxStats {
+    uint64_t datagrams = 0;
+    uint64_t dataChunks = 0;
+    uint64_t parityChunks = 0;
+    uint64_t oldChunks = 0;
+    uint64_t duplicateChunks = 0;
+    uint64_t newSequences = 0;
+    uint64_t completedSequences = 0;
+    uint64_t evictedSequences = 0;
+    uint64_t parityRecoveries = 0;
+    uint64_t decompressionFailures = 0;
+    uint64_t decodeFailures = 0;
+    uint64_t deltaFailures = 0;
+    uint64_t sequenceGaps = 0;
+    uint64_t missingSequences = 0;
+    uint64_t expectedDataChunks = 0;
+    uint64_t completedDataChunks = 0;
+    uint32_t maxGap = 0;
+    uint16_t maxInflight = 0;
+    uint16_t maxMissingChunksOnEvict = 0;
+    uint64_t lastSummaryDatagrams = 0;
+};
+
+std::map<std::string, UdpPoseRxStats> sUdpPoseRxStats;
 
 enum class NetworkMode {
     Disabled,
@@ -584,6 +636,8 @@ struct Session {
     std::map<std::string, DirectPeer> directPeers;
     std::map<std::string, std::map<uint32_t, UdpPoseReassembly>> udpPoseReassembly;
     std::map<std::string, uint32_t> udpPoseLastProcessedSequence;
+    std::map<std::string, uint32_t> udpPoseAckedSequenceByReceiver;
+    std::map<std::string, std::map<uint32_t, std::string>> udpMatrixBaselineHistory;
     std::map<std::string, std::pair<uint32_t, RemoteLinkMatrixSnapshot>> pendingMidnaMatrices;
     bool udpRemoteAddrKnown = false;
 };
@@ -591,6 +645,27 @@ struct Session {
 bool sInitialized = false;
 bool sEnabled = false;
 Session sSession;
+
+struct UdpTxDatagram {
+    sockaddr_in addr{};
+    std::vector<uint8_t> bytes;
+    std::string queueKey;
+    uint32_t sequence = 0;
+    uint8_t packetType = 0;
+    uint16_t chunkIndex = 0;
+    uint16_t chunkCount = 0;
+};
+
+std::mutex sUdpTxPacerMutex;
+std::condition_variable sUdpTxPacerCv;
+std::deque<UdpTxDatagram> sUdpTxPacerQueue;
+std::thread sUdpTxPacerThread;
+bool sUdpTxPacerStop = false;
+bool sUdpTxPacerRunning = false;
+uint64_t sUdpTxPacerEnqueued = 0;
+uint64_t sUdpTxPacerSent = 0;
+uint64_t sUdpTxPacerDropped = 0;
+uint64_t sUdpTxPacerWouldBlock = 0;
 
 bool sDummyModelEnabled = false;
 bool sDummyTraceEnabled = false;
@@ -805,6 +880,20 @@ bool is_unsynced_switch_bit(int stage, int flag) {
             flag == kUnsyncedSwitchLanayruLakeHyliaIntroTwilightCs);
 }
 
+bool is_small_key_door_switch_actor(int actorName) {
+    switch (actorName) {
+    case fpcNm_DOOR20_e:
+    case fpcNm_L1MBOSS_DOOR_e:
+    case fpcNm_Obj_Kshutter_e:
+    case fpcNm_Obj_CRVGATE_e:
+    case fpcNm_Obj_KkrGate_e:
+    case fpcNm_Obj_RiderGate_e:
+        return true;
+    default:
+        return false;
+    }
+}
+
 // Incoming messages that touch per-stage save state (everything except
 // event bits) need dComIfGp_getStageStagInfo() to be non-null -- every
 // dComIfGs_onStageX accessor dereferences it via dStage_stagInfo_GetSaveTbl
@@ -929,15 +1018,16 @@ bool is_stage_dependent_message_type(const std::string& type) {
     // player-level save data with no per-stage lookup, same exemption as
     // event_bit.
     return type == "save_snapshot" || type == "tbox_bit" || type == "switch_bit" ||
-           type == "item_bit" || type == "dungeon_item_bit" || type == "key_num" ||
-           type == "visited_room" || type == "rupee_count";
+           type == "room_switch_bit" || type == "item_bit" || type == "dungeon_item_bit" ||
+           type == "key_num" || type == "visited_room" || type == "rupee_count";
 }
 
 bool is_sync_flags_message_type(const std::string& type) {
     return type == "progression_state" || type == "sync_request" ||
            type == "save_snapshot" || type == "event_bit" || type == "tbox_bit" ||
-           type == "switch_bit" || type == "item_bit" || type == "dungeon_item_bit" ||
-           type == "item_get" || type == "collect_crystal" || type == "collect_mirror" ||
+           type == "switch_bit" || type == "room_switch_bit" || type == "item_bit" ||
+           type == "dungeon_item_bit" || type == "item_get" || type == "item_first_bit" ||
+           type == "collect_crystal" || type == "collect_mirror" ||
            type == "dark_clear_lv" || type == "transform_lv" || type == "region_bit" ||
            type == "collect" || type == "visited_room" || type == "letter_get" ||
            type == "key_num" || type == "light_drop_num" ||
@@ -1322,6 +1412,10 @@ bool is_synced_key_item(int itemId) {
     }
 }
 
+bool is_synced_reversible_item_first_bit(int itemId) {
+    return itemId >= dItemNo_M_BEETLE_e && itemId <= dItemNo_F_MAYFLY_e;
+}
+
 void remember_memory_item_bit(int stageNo, int flag) {
     if (stageNo >= 0 && flag >= 0 && flag < dSv_info_c::DAN_ITEM) {
         sObservedMemoryItems[stageNo].insert(flag);
@@ -1624,6 +1718,37 @@ void apply_remote_switch_bit_off(int stage, int flag) {
     DuskLog.info("Multiplayer applied remote switch bit cleared stage={} flag={}", stage, flag);
 }
 
+void apply_remote_room_switch_bit(int stage, int flag, int room, int sourceActor) {
+    stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+    if (stagInfo == nullptr) {
+        return;
+    }
+
+    const int currentStage = dStage_stagInfo_GetSaveTbl(stagInfo);
+    if (stage != currentStage) {
+        DuskLog.info("Multiplayer ignored remote room switch bit stage={} flag={} room={} "
+                     "currentStage={} sourceActor={} reason=stage_mismatch",
+                     stage, flag, room, currentStage, sourceActor);
+        return;
+    }
+
+    if (dComIfGs_isSwitch(flag, room)) {
+        DuskLog.info("Multiplayer remote room switch already set stage={} flag={} room={} "
+                     "sourceActor={}",
+                     stage, flag, room, sourceActor);
+        return;
+    }
+
+    const bool wasApplyingRemoteSaveBit = sApplyingRemoteSaveBit;
+    sApplyingRemoteSaveBit = true;
+    dComIfGs_onSwitch(flag, room);
+    sApplyingRemoteSaveBit = wasApplyingRemoteSaveBit;
+
+    DuskLog.info("Multiplayer applied remote room switch bit stage={} flag={} room={} "
+                 "sourceActor={}",
+                 stage, flag, room, sourceActor);
+}
+
 void defer_remote_switch_bit(int stage, int flag, const RemoteSwitchPolicy& policy) {
     if (is_remote_switch_deferred(stage, flag)) {
         DuskLog.info("Multiplayer remote switch defer duplicate stage={} flag={} policyMode={} "
@@ -1811,7 +1936,7 @@ bool is_peer_dummy_gameplay_ready() {
 bool has_transforming_peer_pose() {
     for (const auto& entry : sSession.peerPoses) {
         const PeerPoseSnapshot& pose = entry.second;
-        if (pose.valid && pose.ageTicks <= 30 && pose.isTransforming) {
+        if (pose.valid && pose.ageTicks <= 90 && pose.isTransforming) {
             return true;
         }
     }
@@ -1904,6 +2029,163 @@ void configure_udp_socket_buffers(socket_t sock) {
                sizeof(bufferBytes));
     setsockopt(sock, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&bufferBytes),
                sizeof(bufferBytes));
+}
+
+std::string udp_tx_addr_key(const sockaddr_in& addr) {
+    return std::to_string(ntohl(addr.sin_addr.s_addr)) + ":" +
+           std::to_string(ntohs(addr.sin_port));
+}
+
+std::string udp_tx_queue_key(const sockaddr_in& addr, const std::string& senderId,
+                             uint8_t packetType, const std::string& receiverId) {
+    return udp_tx_addr_key(addr) + "|" + std::to_string(static_cast<unsigned>(packetType)) +
+           "|" + senderId + "|" + receiverId;
+}
+
+bool send_udp_tx_datagram_now(const UdpTxDatagram& datagram) {
+    if (sSession.udpSock == INVALID_SOCKET || datagram.bytes.empty()) {
+        return false;
+    }
+
+    const int packetSize = static_cast<int>(datagram.bytes.size());
+    const int sent =
+        sendto(sSession.udpSock, reinterpret_cast<const char*>(datagram.bytes.data()),
+               packetSize, 0, reinterpret_cast<const sockaddr*>(&datagram.addr),
+               sizeof(datagram.addr));
+    if (sent < 0) {
+        return false;
+    }
+    if (sent != packetSize) {
+        DuskLog.warn("Multiplayer direct UDP tx pacer partial send type={} seq={} chunk={}/{} "
+                     "sent={} expected={}",
+                     datagram.packetType, datagram.sequence, datagram.chunkIndex + 1,
+                     datagram.chunkCount, sent, packetSize);
+        return false;
+    }
+    return true;
+}
+
+void udp_tx_pacer_thread_main() {
+    for (;;) {
+        UdpTxDatagram datagram;
+        {
+            std::unique_lock<std::mutex> lock(sUdpTxPacerMutex);
+            sUdpTxPacerCv.wait(lock, [] {
+                return sUdpTxPacerStop || !sUdpTxPacerQueue.empty();
+            });
+            if (sUdpTxPacerStop) {
+                break;
+            }
+            datagram = std::move(sUdpTxPacerQueue.front());
+            sUdpTxPacerQueue.pop_front();
+        }
+
+        if (!send_udp_tx_datagram_now(datagram)) {
+            if (would_block()) {
+                size_t queued = 0;
+                uint64_t wouldBlockCount = 0;
+                {
+                    std::lock_guard<std::mutex> lock(sUdpTxPacerMutex);
+                    if (!sUdpTxPacerStop) {
+                        sUdpTxPacerQueue.push_front(std::move(datagram));
+                    }
+                    ++sUdpTxPacerWouldBlock;
+                    wouldBlockCount = sUdpTxPacerWouldBlock;
+                    queued = sUdpTxPacerQueue.size();
+                }
+                if (wouldBlockCount <= 20 || (wouldBlockCount % 120) == 0) {
+                    DuskLog.warn("Multiplayer direct UDP tx pacer would block count={} queued={}",
+                                 wouldBlockCount, queued);
+                }
+                std::this_thread::sleep_for(kUdpTxPacerDatagramGap * 2);
+                continue;
+            }
+        } else {
+            std::lock_guard<std::mutex> lock(sUdpTxPacerMutex);
+            ++sUdpTxPacerSent;
+        }
+
+        std::this_thread::sleep_for(kUdpTxPacerDatagramGap);
+    }
+}
+
+void stop_udp_tx_pacer() {
+    {
+        std::lock_guard<std::mutex> lock(sUdpTxPacerMutex);
+        if (!sUdpTxPacerRunning) {
+            sUdpTxPacerQueue.clear();
+            return;
+        }
+        sUdpTxPacerStop = true;
+        sUdpTxPacerQueue.clear();
+    }
+    sUdpTxPacerCv.notify_all();
+    if (sUdpTxPacerThread.joinable()) {
+        sUdpTxPacerThread.join();
+    }
+    {
+        std::lock_guard<std::mutex> lock(sUdpTxPacerMutex);
+        sUdpTxPacerQueue.clear();
+        sUdpTxPacerStop = false;
+        sUdpTxPacerRunning = false;
+    }
+}
+
+void start_udp_tx_pacer() {
+    std::lock_guard<std::mutex> lock(sUdpTxPacerMutex);
+    if (sUdpTxPacerRunning) {
+        return;
+    }
+    sUdpTxPacerQueue.clear();
+    sUdpTxPacerStop = false;
+    sUdpTxPacerRunning = true;
+    sUdpTxPacerThread = std::thread(udp_tx_pacer_thread_main);
+}
+
+bool enqueue_udp_tx_datagrams(std::vector<UdpTxDatagram> datagrams,
+                              const std::string& queueKey, uint32_t sequence,
+                              uint8_t packetType) {
+    if (datagrams.empty()) {
+        return false;
+    }
+
+    size_t droppedStale = 0;
+    {
+        std::lock_guard<std::mutex> lock(sUdpTxPacerMutex);
+        if (!sUdpTxPacerRunning) {
+            return false;
+        }
+
+        for (auto it = sUdpTxPacerQueue.begin(); it != sUdpTxPacerQueue.end();) {
+            if (it->queueKey == queueKey && it->sequence < sequence) {
+                it = sUdpTxPacerQueue.erase(it);
+                ++droppedStale;
+            } else {
+                ++it;
+            }
+        }
+
+        for (UdpTxDatagram& datagram : datagrams) {
+            datagram.queueKey = queueKey;
+            sUdpTxPacerQueue.push_back(std::move(datagram));
+            ++sUdpTxPacerEnqueued;
+        }
+
+        while (sUdpTxPacerQueue.size() > kUdpTxPacerMaxQueuedDatagrams) {
+            sUdpTxPacerQueue.pop_front();
+            ++sUdpTxPacerDropped;
+        }
+
+        if (droppedStale != 0 || (sUdpTxPacerEnqueued % 900) == 0) {
+            DuskLog.info("MP_UDP_TX_PACER type={} seq={} enqueued={} queued={} "
+                         "dropped_stale={} dropped_overflow={} sent={} would_block={}",
+                         packetType, sequence, sUdpTxPacerEnqueued, sUdpTxPacerQueue.size(),
+                         droppedStale, sUdpTxPacerDropped, sUdpTxPacerSent,
+                         sUdpTxPacerWouldBlock);
+        }
+    }
+    sUdpTxPacerCv.notify_one();
+    return true;
 }
 
 void push_notification(std::string text, float durationSeconds = 5.0f) {
@@ -2645,6 +2927,7 @@ void draw_peer_name_labels_native_impl() {
 }
 
 void reset_connection_state() {
+    stop_udp_tx_pacer();
     close_socket(sSession.sock);
     close_socket(sSession.listenSock);
     close_socket(sSession.udpSock);
@@ -2684,6 +2967,8 @@ void reset_connection_state() {
     sPeerPresence.clear();
     sSession.udpPoseReassembly.clear();
     sSession.udpPoseLastProcessedSequence.clear();
+    sSession.udpPoseAckedSequenceByReceiver.clear();
+    sSession.udpMatrixBaselineHistory.clear();
     sSession.pendingMidnaMatrices.clear();
     sSession.udpRemoteAddrKnown = false;
     sPendingLocalAudioEvents.clear();
@@ -2765,11 +3050,12 @@ const char* packet_category(const std::string& type) {
         return "save_snapshot";
     }
     if (type == "event_bit" || type == "tbox_bit" || type == "switch_bit" ||
-        type == "item_bit" || type == "dungeon_item_bit")
+        type == "room_switch_bit" || type == "item_bit" || type == "dungeon_item_bit")
     {
         return "world_state";
     }
-    if (type == "item_get" || type == "collect_crystal" || type == "collect_mirror" ||
+    if (type == "item_get" || type == "item_first_bit" ||
+        type == "collect_crystal" || type == "collect_mirror" ||
         type == "dark_clear_lv" || type == "transform_lv" || type == "region_bit" ||
         type == "collect" || type == "visited_room" || type == "letter_get")
     {
@@ -2869,6 +3155,42 @@ void trace_udp_pose_packet_tx(const json& message, size_t rawBytes, size_t compr
     const double avgDatagramBytes =
         static_cast<double>(totalDatagramBytes) / static_cast<double>(chunkCount);
     (void)avgDatagramBytes;
+
+    struct UdpPoseChunkHistogram {
+        uint32_t count = 0;
+        uint32_t chunks1 = 0;
+        uint32_t chunks2 = 0;
+        uint32_t chunks3 = 0;
+        uint32_t chunks4 = 0;
+        uint32_t chunks5Plus = 0;
+        size_t compressedTotal = 0;
+    };
+    static UdpPoseChunkHistogram sPoseChunkHistogram;
+    if (type == "pose") {
+        ++sPoseChunkHistogram.count;
+        sPoseChunkHistogram.compressedTotal += compressedBytes;
+        if (chunkCount <= 1) {
+            ++sPoseChunkHistogram.chunks1;
+        } else if (chunkCount == 2) {
+            ++sPoseChunkHistogram.chunks2;
+        } else if (chunkCount == 3) {
+            ++sPoseChunkHistogram.chunks3;
+        } else if (chunkCount == 4) {
+            ++sPoseChunkHistogram.chunks4;
+        } else {
+            ++sPoseChunkHistogram.chunks5Plus;
+        }
+        if ((sPoseChunkHistogram.count % 300) == 0) {
+            DuskLog.info("MP_UDP_TX_CHUNKS type=pose samples={} avg_compressed={} "
+                         "chunks_1={} chunks_2={} chunks_3={} chunks_4={} chunks_5plus={}",
+                         sPoseChunkHistogram.count,
+                         static_cast<double>(sPoseChunkHistogram.compressedTotal) /
+                             static_cast<double>(sPoseChunkHistogram.count),
+                         sPoseChunkHistogram.chunks1, sPoseChunkHistogram.chunks2,
+                         sPoseChunkHistogram.chunks3, sPoseChunkHistogram.chunks4,
+                         sPoseChunkHistogram.chunks5Plus);
+        }
+    }
 
     if (type == "midna_pose") {
         DuskLog.info(
@@ -3617,11 +3939,30 @@ void append_pack_i16(std::string& out, int16_t value) {
     append_pack_bytes(out, &value, sizeof(value));
 }
 
+void append_pack_u32(std::string& out, uint32_t value) {
+    append_pack_bytes(out, &value, sizeof(value));
+}
+
 constexpr float kPackedMatrixBasisRange = 1.0f;
 constexpr bool kUseQuantizedMatrixWire = true;
 constexpr bool kUseBinaryMatrixUdpWire = true;
+constexpr bool kOmitStableMatrixWeights = true;
 constexpr uint8_t kPackedMatrixModeFloat32 = 0;
 constexpr uint8_t kPackedMatrixModeQuantizedBasis = 1;
+constexpr uint8_t kPackedModelWeightsIncluded = 1 << 0;
+constexpr uint32_t kMatrixWeightFullRedundantFrames = 6;
+constexpr uint32_t kMatrixWeightFullRepairInterval = 30;
+constexpr uint8_t kMatrixDeltaSlotUnchanged = 0;
+constexpr uint8_t kMatrixDeltaSlotFull = 1;
+constexpr uint8_t kMatrixDeltaSlotMatrixMask = 2;
+constexpr uint8_t kMatrixDeltaSlotMatrixResidual = 3;
+constexpr uint8_t kMatrixResidualUnchanged = 0;
+constexpr uint8_t kMatrixResidualSmall = 1;
+constexpr uint8_t kMatrixResidualFull = 2;
+constexpr float kMatrixResidualTranslationScale = 16.0f;
+constexpr uint32_t kLinkMatrixFullPoseInterval = 1;
+constexpr bool kUseAckedMatrixDeltas = true;
+constexpr size_t kMatrixBaselineHistoryLimit = 300;
 constexpr uint64_t kFnv1a64Offset = 14695981039346656037ull;
 constexpr uint64_t kFnv1a64Prime = 1099511628211ull;
 
@@ -3762,12 +4103,20 @@ MatrixPackSlotMetrics append_pack_model(std::string& out, const MatrixPackSlotIn
     append_pack_u8(out, 1);
     append_pack_u16(out, jointCount);
     append_pack_u16(out, weightCount);
+    const bool omitWeights =
+        kOmitStableMatrixWeights && weightCount > 0 && !metrics.weightChanged &&
+        metrics.weightStableFrames >= kMatrixWeightFullRedundantFrames &&
+        (metrics.weightStableFrames % kMatrixWeightFullRepairInterval) != 0;
+    metrics.weightsOmitted = omitWeights;
+    append_pack_u8(out, omitWeights ? 0 : kPackedModelWeightsIncluded);
     append_pack_matrix(out, model->getBaseTRMtx(), &metrics);
     for (u16 i = 0; i < jointCount; ++i) {
         append_pack_matrix(out, model->getAnmMtx(i), &metrics);
     }
-    for (u16 i = 0; i < weightCount; ++i) {
-        append_pack_matrix(out, model->getWeightAnmMtx(i), &metrics);
+    if (!omitWeights) {
+        for (u16 i = 0; i < weightCount; ++i) {
+            append_pack_matrix(out, model->getWeightAnmMtx(i), &metrics);
+        }
     }
     metrics.bytes = out.size() - startBytes;
     return metrics;
@@ -3800,7 +4149,8 @@ json link_matrix_pack_to_json(std::initializer_list<MatrixPackSlotInput> models,
         DuskLog.info(
             "MP_MATRIX_PACK total_packed={} total_b64={} slots={} present={} format={}",
             sLastPoseMatrixPackedBytes, sLastPoseMatrixBase64Bytes, models.size(),
-            presentSlots, kUseQuantizedMatrixWire ? "qrot16_trans32_v1" : "f32_pack_v1");
+            presentSlots,
+            kUseQuantizedMatrixWire ? "qrot16_trans32_womit_v1" : "f32_pack_womit_v1");
         for (const MatrixPackSlotMetrics& metrics : sLastPoseMatrixSlotMetrics) {
             if (!metrics.present) {
                 continue;
@@ -3808,17 +4158,18 @@ json link_matrix_pack_to_json(std::initializer_list<MatrixPackSlotInput> models,
             DuskLog.info(
                 "MP_MATRIX_SLOT name={} bytes={} joints={} weights={} matrices={} "
                 "basis_q={} basis_f32={} basis_max_abs={} weight_hash={} "
-                "weight_changed={} weight_stable={}",
+                "weight_changed={} weight_stable={} weight_omitted={}",
                 metrics.name, metrics.bytes, metrics.jointCount, metrics.weightCount,
                 1 + static_cast<uint32_t>(metrics.jointCount) +
                     static_cast<uint32_t>(metrics.weightCount),
                 metrics.basisQuantizedMatrices, metrics.basisFloatMatrices, metrics.basisMaxAbs,
-                metrics.weightHash, metrics.weightChanged, metrics.weightStableFrames);
+                metrics.weightHash, metrics.weightChanged, metrics.weightStableFrames,
+                metrics.weightsOmitted);
         }
     }
 
     return {
-        {"format", kUseQuantizedMatrixWire ? "qrot16_trans32_v1" : "f32_pack_v1"},
+        {"format", kUseQuantizedMatrixWire ? "qrot16_trans32_womit_v1" : "f32_pack_womit_v1"},
         {"data", encoded},
         {"midna_hair_shape", midnaHairShape},
     };
@@ -3901,7 +4252,7 @@ LocalMidnaVisualState detect_midna_visual_state(daAlink_c* link, bool isWolf) {
     return state;
 }
 
-bool add_link_matrices(json& state, json* midnaMatrices = nullptr) {
+bool add_link_matrices(json& state, json* midnaMatrices = nullptr, bool includeLinkMatrices = true) {
     // Note: deliberately not gated on dComIfGp_event_runCheck() here, unlike
     // the dummy draw path. This only reads already-built matrices off the
     // real local Link actor; it doesn't allocate/destroy anything. Personal
@@ -4040,7 +4391,7 @@ bool add_link_matrices(json& state, json* midnaMatrices = nullptr) {
     const int midnaHairShape =
         (isWolf || midnaVisual.shadowForm) ? visible_material_shape_index(midnaHairModel, 3, 0) : 0;
 
-    if (midnaMatrices != nullptr) {
+    if (midnaMatrices != nullptr && includeLinkMatrices) {
         *midnaMatrices = link_matrix_pack_to_json(
             {
                 {"body", nullptr},
@@ -4069,33 +4420,44 @@ bool add_link_matrices(json& state, json* midnaMatrices = nullptr) {
         sLastMidnaMatrixPackedBytes = sLastPoseMatrixPackedBytes;
         sLastMidnaMatrixBase64Bytes = sLastPoseMatrixBase64Bytes;
         sLastMidnaMatrixPresentSlots = sLastPoseMatrixPresentSlots;
+    } else if (midnaMatrices != nullptr) {
+        *midnaMatrices = json::object();
+        sLastMidnaMatrixPackedBytes = 0;
+        sLastMidnaMatrixBase64Bytes = 0;
+        sLastMidnaMatrixPresentSlots = 0;
     }
 
-    state["link_matrices"] = link_matrix_pack_to_json(
-        {
-            {"body", link->mpLinkModel},
-            {"hat", nullptr},
-            {"face", includeHumanCoreParts ? link->mpLinkFaceModel : nullptr},
-            {"hand", includeHumanCoreParts ? link->mpLinkHandModel : nullptr},
-            {"sword", includeHumanParts ? link->mSwordModel : nullptr},
-            {"sheath", includeHumanParts ? link->mSheathModel : nullptr},
-            {"shield", includeHumanParts ? link->mShieldModel : nullptr},
-            {"held_item", includeHumanParts ? link->mHeldItemModel : nullptr},
-            {"hook_tip", includeHumanParts ? link->mpHookTipModel : nullptr},
-            {"hook_sub_item", includeHumanParts ? link->field_0x0710 : nullptr},
-            {"hook_sub_tip", includeHumanParts ? link->field_0x0714 : nullptr},
-            {"arrow", includeHumanParts ? arrowModel : nullptr},
-            {"kantera", includeHumanParts ? link->mpKanteraModel : nullptr},
-            {"kantera_glow", includeHumanParts ? link->mpKanteraGlowModel : nullptr},
-            {"item_actor", includeHumanParts ? itemActorModel : nullptr},
-            {"ride_actor", includeHumanParts ? rideActorModel : nullptr},
-            {"midna", nullptr},
-            {"midna_mask", nullptr},
-            {"midna_hand", nullptr},
-            {"midna_hair", nullptr},
-            {"midna_glow", nullptr},
-        },
-        0);
+    if (includeLinkMatrices) {
+        state["link_matrices"] = link_matrix_pack_to_json(
+            {
+                {"body", link->mpLinkModel},
+                {"hat", nullptr},
+                {"face", includeHumanCoreParts ? link->mpLinkFaceModel : nullptr},
+                {"hand", includeHumanCoreParts ? link->mpLinkHandModel : nullptr},
+                {"sword", includeHumanParts ? link->mSwordModel : nullptr},
+                {"sheath", includeHumanParts ? link->mSheathModel : nullptr},
+                {"shield", includeHumanParts ? link->mShieldModel : nullptr},
+                {"held_item", includeHumanParts ? link->mHeldItemModel : nullptr},
+                {"hook_tip", includeHumanParts ? link->mpHookTipModel : nullptr},
+                {"hook_sub_item", includeHumanParts ? link->field_0x0710 : nullptr},
+                {"hook_sub_tip", includeHumanParts ? link->field_0x0714 : nullptr},
+                {"arrow", includeHumanParts ? arrowModel : nullptr},
+                {"kantera", includeHumanParts ? link->mpKanteraModel : nullptr},
+                {"kantera_glow", includeHumanParts ? link->mpKanteraGlowModel : nullptr},
+                {"item_actor", includeHumanParts ? itemActorModel : nullptr},
+                {"ride_actor", includeHumanParts ? rideActorModel : nullptr},
+                {"midna", nullptr},
+                {"midna_mask", nullptr},
+                {"midna_hand", nullptr},
+                {"midna_hair", nullptr},
+                {"midna_glow", nullptr},
+            },
+            0);
+    } else {
+        sLastPoseMatrixPackedBytes = 0;
+        sLastPoseMatrixBase64Bytes = 0;
+        sLastPoseMatrixPresentSlots = 0;
+    }
 
     state["equip_item"] = static_cast<int>(link->mEquipItem);
     state["sword_variant"] = detect_sword_variant(link);
@@ -4171,6 +4533,10 @@ bool read_pack_u8(const std::string& source, size_t& cursor, uint8_t& out) {
 }
 
 bool read_pack_u16(const std::string& source, size_t& cursor, uint16_t& out) {
+    return read_pack_bytes(source, cursor, &out, sizeof(out));
+}
+
+bool read_pack_u32(const std::string& source, size_t& cursor, uint32_t& out) {
     return read_pack_bytes(source, cursor, &out, sizeof(out));
 }
 
@@ -4277,9 +4643,798 @@ bool read_pack_float_vector(const std::string& source, size_t& cursor, size_t co
     return true;
 }
 
+std::string matrix_history_key(const std::string& senderId, uint8_t packetType) {
+    return senderId + "\x1f" + std::to_string(packetType);
+}
+
+std::optional<std::string> matrix_delta_format_for_base(const std::string& format) {
+    if (format == "qrot16_trans32_womit_bin_v1") {
+        return "qrot16_trans32_womit_delta_bin_v1";
+    }
+    if (format == "qrot16_trans32_womit_v1") {
+        return "qrot16_trans32_womit_delta_v1";
+    }
+    if (format == "f32_pack_womit_bin_v1") {
+        return "f32_pack_womit_delta_bin_v1";
+    }
+    if (format == "f32_pack_womit_v1") {
+        return "f32_pack_womit_delta_v1";
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> matrix_base_format_for_delta(const std::string& format) {
+    if (format == "qrot16_trans32_womit_delta_bin_v1") {
+        return "qrot16_trans32_womit_bin_v1";
+    }
+    if (format == "qrot16_trans32_womit_delta_v1") {
+        return "qrot16_trans32_womit_v1";
+    }
+    if (format == "f32_pack_womit_delta_bin_v1") {
+        return "f32_pack_womit_bin_v1";
+    }
+    if (format == "f32_pack_womit_delta_v1") {
+        return "f32_pack_womit_v1";
+    }
+    return std::nullopt;
+}
+
+size_t matrix_bytes_per_packed_matrix(const std::string& format) {
+    if (format == "qrot16_trans32_womit_v1" ||
+        format == "qrot16_trans32_womit_bin_v1")
+    {
+        return 30;
+    }
+    if (format == "f32_pack_womit_v1" || format == "f32_pack_womit_bin_v1") {
+        return 48;
+    }
+    return 0;
+}
+
+bool matrix_json_packed_bytes(const json& matrices, std::string& packed) {
+    packed.clear();
+    const auto dataIt = matrices.find("data");
+    if (dataIt == matrices.end()) {
+        return false;
+    }
+    if (dataIt->is_binary()) {
+        const auto& bytes = dataIt->get_binary();
+        packed.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        return true;
+    }
+    if (dataIt->is_string()) {
+        const std::string encoded = dataIt->get<std::string>();
+        return !encoded.empty() && absl::Base64Unescape(encoded, &packed);
+    }
+    return false;
+}
+
+void set_matrix_json_binary_data(json& matrices, const std::string& packed) {
+    std::vector<uint8_t> bytes(packed.begin(), packed.end());
+    matrices["data"] = json::binary(std::move(bytes));
+}
+
+bool split_packed_matrix_slots(const std::string& format, const std::string& packed,
+                               std::string& header, std::vector<std::string>& slots) {
+    const size_t matrixBytes = matrix_bytes_per_packed_matrix(format);
+    if (matrixBytes == 0) {
+        return false;
+    }
+
+    size_t cursor = 0;
+    char magic[4]{};
+    uint8_t version = 0;
+    uint8_t slotCount = 0;
+    if (!read_pack_bytes(packed, cursor, magic, sizeof(magic)) ||
+        std::memcmp(magic, "DMPM", 4) != 0 ||
+        !read_pack_u8(packed, cursor, version) ||
+        !read_pack_u8(packed, cursor, slotCount) ||
+        version != 1 || slotCount != 21)
+    {
+        return false;
+    }
+
+    header.assign(packed.data(), cursor);
+    slots.clear();
+    slots.reserve(slotCount);
+    for (uint8_t slotIndex = 0; slotIndex < slotCount; ++slotIndex) {
+        const size_t slotStart = cursor;
+        uint8_t present = 0;
+        if (!read_pack_u8(packed, cursor, present)) {
+            return false;
+        }
+        if (present == 0) {
+            slots.emplace_back(packed.data() + slotStart, cursor - slotStart);
+            continue;
+        }
+
+        uint16_t jointCount = 0;
+        uint16_t weightCount = 0;
+        uint8_t flags = 0;
+        if (present != 1 ||
+            !read_pack_u16(packed, cursor, jointCount) ||
+            !read_pack_u16(packed, cursor, weightCount) ||
+            !read_pack_u8(packed, cursor, flags))
+        {
+            return false;
+        }
+
+        const bool weightsIncluded = (flags & kPackedModelWeightsIncluded) != 0 ||
+                                     weightCount == 0;
+        const size_t matrixCount = 1 + static_cast<size_t>(jointCount) +
+                                   (weightsIncluded ? static_cast<size_t>(weightCount) : 0);
+        const size_t payloadBytes = matrixCount * matrixBytes;
+        if (cursor > packed.size() || payloadBytes > packed.size() - cursor) {
+            return false;
+        }
+        cursor += payloadBytes;
+        slots.emplace_back(packed.data() + slotStart, cursor - slotStart);
+    }
+
+    return cursor == packed.size();
+}
+
+size_t packed_slot_matrix_count(const std::string& slot, size_t matrixBytes) {
+    if (slot.size() < 1 || matrixBytes == 0) {
+        return 0;
+    }
+    const uint8_t present = static_cast<uint8_t>(slot[0]);
+    if (present == 0) {
+        return 0;
+    }
+    if (present != 1 || slot.size() < 6) {
+        return 0;
+    }
+
+    size_t cursor = 1;
+    uint16_t jointCount = 0;
+    uint16_t weightCount = 0;
+    uint8_t flags = 0;
+    if (!read_pack_u16(slot, cursor, jointCount) ||
+        !read_pack_u16(slot, cursor, weightCount) ||
+        !read_pack_u8(slot, cursor, flags))
+    {
+        return 0;
+    }
+
+    const bool weightsIncluded = (flags & kPackedModelWeightsIncluded) != 0 ||
+                                 weightCount == 0;
+    const size_t matrixCount = 1 + static_cast<size_t>(jointCount) +
+                               (weightsIncluded ? static_cast<size_t>(weightCount) : 0);
+    if (slot.size() != cursor + matrixCount * matrixBytes) {
+        return 0;
+    }
+    return matrixCount;
+}
+
+bool build_matrix_mask_slot_delta(const std::string& currentSlot,
+                                  const std::string& baselineSlot,
+                                  size_t matrixBytes, std::string& payload,
+                                  uint32_t& changedMatrices,
+                                  uint32_t& unchangedMatrices) {
+    changedMatrices = 0;
+    unchangedMatrices = 0;
+    if (currentSlot.size() < 6 || baselineSlot.size() < 6 ||
+        currentSlot.compare(0, 6, baselineSlot, 0, 6) != 0)
+    {
+        return false;
+    }
+
+    const size_t matrixCount = packed_slot_matrix_count(currentSlot, matrixBytes);
+    if (matrixCount == 0 || matrixCount != packed_slot_matrix_count(baselineSlot, matrixBytes) ||
+        matrixCount > 1024)
+    {
+        return false;
+    }
+
+    const size_t maskBytes = (matrixCount + 7) / 8;
+    payload.clear();
+    payload.reserve(6 + maskBytes + currentSlot.size());
+    payload.append(currentSlot.data(), 6);
+    const size_t maskOffset = payload.size();
+    payload.append(maskBytes, '\0');
+
+    constexpr size_t kSlotMatrixDataOffset = 6;
+    for (size_t matrixIndex = 0; matrixIndex < matrixCount; ++matrixIndex) {
+        const size_t matrixOffset = kSlotMatrixDataOffset + matrixIndex * matrixBytes;
+        const bool changed =
+            std::memcmp(currentSlot.data() + matrixOffset,
+                        baselineSlot.data() + matrixOffset, matrixBytes) != 0;
+        if (!changed) {
+            ++unchangedMatrices;
+            continue;
+        }
+
+        payload[maskOffset + matrixIndex / 8] =
+            static_cast<char>(static_cast<uint8_t>(payload[maskOffset + matrixIndex / 8]) |
+                              static_cast<uint8_t>(1u << (matrixIndex % 8)));
+        payload.append(currentSlot.data() + matrixOffset, matrixBytes);
+        ++changedMatrices;
+    }
+
+    return changedMatrices > 0 && payload.size() < currentSlot.size();
+}
+
+bool apply_matrix_mask_slot_delta(const std::string& payload,
+                                  const std::string& baselineSlot,
+                                  size_t matrixBytes, std::string& currentSlot) {
+    if (payload.size() < 6 || baselineSlot.size() < 6 ||
+        payload.compare(0, 6, baselineSlot, 0, 6) != 0)
+    {
+        return false;
+    }
+
+    const size_t matrixCount = packed_slot_matrix_count(baselineSlot, matrixBytes);
+    if (matrixCount == 0 || matrixCount > 1024) {
+        return false;
+    }
+
+    const size_t maskBytes = (matrixCount + 7) / 8;
+    const size_t matrixDataOffset = 6 + maskBytes;
+    if (payload.size() < matrixDataOffset) {
+        return false;
+    }
+
+    currentSlot = baselineSlot;
+    size_t cursor = matrixDataOffset;
+    constexpr size_t kSlotMatrixDataOffset = 6;
+    for (size_t matrixIndex = 0; matrixIndex < matrixCount; ++matrixIndex) {
+        const uint8_t mask =
+            static_cast<uint8_t>(payload[6 + matrixIndex / 8]);
+        if ((mask & static_cast<uint8_t>(1u << (matrixIndex % 8))) == 0) {
+            continue;
+        }
+        if (cursor > payload.size() || matrixBytes > payload.size() - cursor) {
+            return false;
+        }
+        const size_t matrixOffset = kSlotMatrixDataOffset + matrixIndex * matrixBytes;
+        std::memcpy(currentSlot.data() + matrixOffset, payload.data() + cursor, matrixBytes);
+        cursor += matrixBytes;
+    }
+    return cursor == payload.size();
+}
+
+bool qrot_matrix_residual_payload(const char* current, const char* baseline,
+                                  std::string& payload) {
+    for (size_t i = 0; i < 9; ++i) {
+        int16_t currentBasis = 0;
+        int16_t baselineBasis = 0;
+        std::memcpy(&currentBasis, current + i * sizeof(int16_t), sizeof(currentBasis));
+        std::memcpy(&baselineBasis, baseline + i * sizeof(int16_t), sizeof(baselineBasis));
+        const int delta = static_cast<int>(currentBasis) - static_cast<int>(baselineBasis);
+        if (delta < (std::numeric_limits<int8_t>::min)() ||
+            delta > (std::numeric_limits<int8_t>::max)())
+        {
+            return false;
+        }
+        const int8_t packedDelta = static_cast<int8_t>(delta);
+        append_pack_bytes(payload, &packedDelta, sizeof(packedDelta));
+    }
+
+    constexpr size_t kTranslationOffset = 9 * sizeof(int16_t);
+    for (size_t i = 0; i < 3; ++i) {
+        float currentTranslation = 0.0f;
+        float baselineTranslation = 0.0f;
+        std::memcpy(&currentTranslation, current + kTranslationOffset + i * sizeof(float),
+                    sizeof(currentTranslation));
+        std::memcpy(&baselineTranslation, baseline + kTranslationOffset + i * sizeof(float),
+                    sizeof(baselineTranslation));
+        const float delta = currentTranslation - baselineTranslation;
+        if (!std::isfinite(delta)) {
+            return false;
+        }
+        const float scaled = std::round(delta * kMatrixResidualTranslationScale);
+        if (scaled < static_cast<float>((std::numeric_limits<int16_t>::min)()) ||
+            scaled > static_cast<float>((std::numeric_limits<int16_t>::max)()))
+        {
+            return false;
+        }
+        const int16_t packedDelta = static_cast<int16_t>(scaled);
+        append_pack_i16(payload, packedDelta);
+    }
+    return true;
+}
+
+void apply_qrot_matrix_residual(const char* baseline, const char* residual,
+                                char* current) {
+    for (size_t i = 0; i < 9; ++i) {
+        int16_t baselineBasis = 0;
+        std::memcpy(&baselineBasis, baseline + i * sizeof(int16_t), sizeof(baselineBasis));
+        const int8_t delta = *reinterpret_cast<const int8_t*>(residual + i);
+        const int16_t currentBasis =
+            static_cast<int16_t>(static_cast<int>(baselineBasis) + static_cast<int>(delta));
+        std::memcpy(current + i * sizeof(int16_t), &currentBasis, sizeof(currentBasis));
+    }
+
+    constexpr size_t kTranslationOffset = 9 * sizeof(int16_t);
+    constexpr size_t kResidualTranslationOffset = 9 * sizeof(int8_t);
+    for (size_t i = 0; i < 3; ++i) {
+        float baselineTranslation = 0.0f;
+        int16_t packedDelta = 0;
+        std::memcpy(&baselineTranslation,
+                    baseline + kTranslationOffset + i * sizeof(float),
+                    sizeof(baselineTranslation));
+        std::memcpy(&packedDelta,
+                    residual + kResidualTranslationOffset + i * sizeof(int16_t),
+                    sizeof(packedDelta));
+        const float currentTranslation =
+            baselineTranslation +
+            static_cast<float>(packedDelta) / kMatrixResidualTranslationScale;
+        std::memcpy(current + kTranslationOffset + i * sizeof(float),
+                    &currentTranslation, sizeof(currentTranslation));
+    }
+}
+
+bool build_matrix_residual_slot_delta(const std::string& currentSlot,
+                                      const std::string& baselineSlot,
+                                      size_t matrixBytes, std::string& payload,
+                                      uint32_t& residualMatrices,
+                                      uint32_t& fullMatrices,
+                                      uint32_t& unchangedMatrices) {
+    residualMatrices = 0;
+    fullMatrices = 0;
+    unchangedMatrices = 0;
+    if (matrixBytes != 30 || currentSlot.size() < 6 || baselineSlot.size() < 6 ||
+        currentSlot.compare(0, 6, baselineSlot, 0, 6) != 0)
+    {
+        return false;
+    }
+
+    const size_t matrixCount = packed_slot_matrix_count(currentSlot, matrixBytes);
+    if (matrixCount == 0 || matrixCount != packed_slot_matrix_count(baselineSlot, matrixBytes) ||
+        matrixCount > 1024)
+    {
+        return false;
+    }
+
+    payload.clear();
+    payload.reserve(currentSlot.size());
+    payload.append(currentSlot.data(), 6);
+    const size_t modesOffset = payload.size();
+    payload.append(matrixCount, static_cast<char>(kMatrixResidualUnchanged));
+
+    constexpr size_t kSlotMatrixDataOffset = 6;
+    constexpr size_t kResidualBytes = 9 * sizeof(int8_t) + 3 * sizeof(int16_t);
+    for (size_t matrixIndex = 0; matrixIndex < matrixCount; ++matrixIndex) {
+        const size_t matrixOffset = kSlotMatrixDataOffset + matrixIndex * matrixBytes;
+        const char* currentMatrix = currentSlot.data() + matrixOffset;
+        const char* baselineMatrix = baselineSlot.data() + matrixOffset;
+        if (std::memcmp(currentMatrix, baselineMatrix, matrixBytes) == 0) {
+            ++unchangedMatrices;
+            continue;
+        }
+
+        std::string residual;
+        residual.reserve(kResidualBytes);
+        if (qrot_matrix_residual_payload(currentMatrix, baselineMatrix, residual) &&
+            residual.size() == kResidualBytes)
+        {
+            payload[modesOffset + matrixIndex] = static_cast<char>(kMatrixResidualSmall);
+            payload.append(residual);
+            ++residualMatrices;
+        } else {
+            payload[modesOffset + matrixIndex] = static_cast<char>(kMatrixResidualFull);
+            payload.append(currentMatrix, matrixBytes);
+            ++fullMatrices;
+        }
+    }
+
+    return (residualMatrices > 0 || fullMatrices > 0) && payload.size() < currentSlot.size();
+}
+
+bool apply_matrix_residual_slot_delta(const std::string& payload,
+                                      const std::string& baselineSlot,
+                                      size_t matrixBytes, std::string& currentSlot) {
+    if (matrixBytes != 30 || payload.size() < 6 || baselineSlot.size() < 6 ||
+        payload.compare(0, 6, baselineSlot, 0, 6) != 0)
+    {
+        return false;
+    }
+
+    const size_t matrixCount = packed_slot_matrix_count(baselineSlot, matrixBytes);
+    if (matrixCount == 0 || matrixCount > 1024) {
+        return false;
+    }
+
+    const size_t dataOffset = 6 + matrixCount;
+    if (payload.size() < dataOffset) {
+        return false;
+    }
+
+    currentSlot = baselineSlot;
+    size_t cursor = dataOffset;
+    constexpr size_t kSlotMatrixDataOffset = 6;
+    constexpr size_t kResidualBytes = 9 * sizeof(int8_t) + 3 * sizeof(int16_t);
+    for (size_t matrixIndex = 0; matrixIndex < matrixCount; ++matrixIndex) {
+        const uint8_t mode = static_cast<uint8_t>(payload[6 + matrixIndex]);
+        const size_t matrixOffset = kSlotMatrixDataOffset + matrixIndex * matrixBytes;
+        if (mode == kMatrixResidualUnchanged) {
+            continue;
+        }
+        if (mode == kMatrixResidualSmall) {
+            if (cursor > payload.size() || kResidualBytes > payload.size() - cursor) {
+                return false;
+            }
+            apply_qrot_matrix_residual(baselineSlot.data() + matrixOffset,
+                                       payload.data() + cursor,
+                                       currentSlot.data() + matrixOffset);
+            cursor += kResidualBytes;
+            continue;
+        }
+        if (mode == kMatrixResidualFull) {
+            if (cursor > payload.size() || matrixBytes > payload.size() - cursor) {
+                return false;
+            }
+            std::memcpy(currentSlot.data() + matrixOffset, payload.data() + cursor,
+                        matrixBytes);
+            cursor += matrixBytes;
+            continue;
+        }
+        return false;
+    }
+    return cursor == payload.size();
+}
+
+bool build_matrix_slot_delta(const std::string& format, const std::string& current,
+                             const std::string& baseline, uint32_t baselineSequence,
+                             std::string& delta, uint32_t& changedSlots,
+                             uint32_t& unchangedSlots, uint32_t& maskedSlots,
+                             uint32_t& changedMatricesTotal,
+                             uint32_t& unchangedMatricesTotal,
+                             uint32_t& residualMatricesTotal,
+                             uint32_t& fullMatricesTotal) {
+    const size_t matrixBytes = matrix_bytes_per_packed_matrix(format);
+    if (matrixBytes == 0) {
+        return false;
+    }
+
+    std::string currentHeader;
+    std::string baselineHeader;
+    std::vector<std::string> currentSlots;
+    std::vector<std::string> baselineSlots;
+    if (!split_packed_matrix_slots(format, current, currentHeader, currentSlots) ||
+        !split_packed_matrix_slots(format, baseline, baselineHeader, baselineSlots) ||
+        currentHeader != baselineHeader || currentSlots.size() != baselineSlots.size())
+    {
+        return false;
+    }
+
+    delta.clear();
+    delta.reserve(current.size());
+    delta.append("DMPD", 4);
+    append_pack_u8(delta, 1);
+    append_pack_u8(delta, static_cast<uint8_t>(currentSlots.size()));
+    append_pack_u32(delta, baselineSequence);
+    changedSlots = 0;
+    unchangedSlots = 0;
+    maskedSlots = 0;
+    changedMatricesTotal = 0;
+    unchangedMatricesTotal = 0;
+    residualMatricesTotal = 0;
+    fullMatricesTotal = 0;
+    for (size_t i = 0; i < currentSlots.size(); ++i) {
+        if (currentSlots[i] == baselineSlots[i]) {
+            append_pack_u8(delta, kMatrixDeltaSlotUnchanged);
+            ++unchangedSlots;
+            continue;
+        }
+
+        std::string matrixResidualPayload;
+        uint32_t residualMatrices = 0;
+        uint32_t residualFullMatrices = 0;
+        uint32_t residualUnchangedMatrices = 0;
+        if (build_matrix_residual_slot_delta(currentSlots[i], baselineSlots[i], matrixBytes,
+                                             matrixResidualPayload, residualMatrices,
+                                             residualFullMatrices, residualUnchangedMatrices))
+        {
+            if (matrixResidualPayload.size() > (std::numeric_limits<uint16_t>::max)()) {
+                return false;
+            }
+            append_pack_u8(delta, kMatrixDeltaSlotMatrixResidual);
+            append_pack_u16(delta, static_cast<uint16_t>(matrixResidualPayload.size()));
+            delta.append(matrixResidualPayload);
+            ++changedSlots;
+            ++maskedSlots;
+            changedMatricesTotal += residualMatrices + residualFullMatrices;
+            unchangedMatricesTotal += residualUnchangedMatrices;
+            residualMatricesTotal += residualMatrices;
+            fullMatricesTotal += residualFullMatrices;
+            continue;
+        }
+
+        std::string matrixMaskPayload;
+        uint32_t changedMatrices = 0;
+        uint32_t unchangedMatrices = 0;
+        if (build_matrix_mask_slot_delta(currentSlots[i], baselineSlots[i], matrixBytes,
+                                         matrixMaskPayload, changedMatrices,
+                                         unchangedMatrices) &&
+            matrixMaskPayload.size() + 3 < currentSlots[i].size() + 3)
+        {
+            if (matrixMaskPayload.size() > (std::numeric_limits<uint16_t>::max)()) {
+                return false;
+            }
+            append_pack_u8(delta, kMatrixDeltaSlotMatrixMask);
+            append_pack_u16(delta, static_cast<uint16_t>(matrixMaskPayload.size()));
+            delta.append(matrixMaskPayload);
+            ++changedSlots;
+            ++maskedSlots;
+            changedMatricesTotal += changedMatrices;
+            unchangedMatricesTotal += unchangedMatrices;
+            fullMatricesTotal += changedMatrices;
+            continue;
+        }
+
+        if (currentSlots[i].size() > (std::numeric_limits<uint16_t>::max)()) {
+            return false;
+        }
+        append_pack_u8(delta, kMatrixDeltaSlotFull);
+        append_pack_u16(delta, static_cast<uint16_t>(currentSlots[i].size()));
+        delta.append(currentSlots[i]);
+        ++changedSlots;
+        fullMatricesTotal += static_cast<uint32_t>(packed_slot_matrix_count(currentSlots[i],
+                                                                            matrixBytes));
+    }
+    return true;
+}
+
+bool apply_matrix_slot_delta(const std::string& format, const std::string& delta,
+                             const std::string& baseline, uint32_t expectedBaselineSequence,
+                             std::string& current) {
+    const std::optional<std::string> baseFormat = matrix_base_format_for_delta(format);
+    if (!baseFormat.has_value()) {
+        return false;
+    }
+    const size_t matrixBytes = matrix_bytes_per_packed_matrix(*baseFormat);
+    if (matrixBytes == 0) {
+        return false;
+    }
+
+    std::string baselineHeader;
+    std::vector<std::string> baselineSlots;
+    if (!split_packed_matrix_slots(*baseFormat, baseline, baselineHeader, baselineSlots)) {
+        return false;
+    }
+
+    size_t cursor = 0;
+    char magic[4]{};
+    uint8_t version = 0;
+    uint8_t slotCount = 0;
+    uint32_t baselineSequence = 0;
+    if (!read_pack_bytes(delta, cursor, magic, sizeof(magic)) ||
+        std::memcmp(magic, "DMPD", 4) != 0 ||
+        !read_pack_u8(delta, cursor, version) ||
+        !read_pack_u8(delta, cursor, slotCount) ||
+        !read_pack_u32(delta, cursor, baselineSequence) ||
+        version != 1 || baselineSequence != expectedBaselineSequence ||
+        slotCount != baselineSlots.size())
+    {
+        return false;
+    }
+
+    current = baselineHeader;
+    for (uint8_t slotIndex = 0; slotIndex < slotCount; ++slotIndex) {
+        uint8_t slotMode = 0;
+        if (!read_pack_u8(delta, cursor, slotMode)) {
+            return false;
+        }
+        if (slotMode == kMatrixDeltaSlotUnchanged) {
+            current.append(baselineSlots[slotIndex]);
+            continue;
+        }
+        if (slotMode != kMatrixDeltaSlotFull &&
+            slotMode != kMatrixDeltaSlotMatrixMask &&
+            slotMode != kMatrixDeltaSlotMatrixResidual)
+        {
+            return false;
+        }
+        uint16_t slotBytes = 0;
+        if (!read_pack_u16(delta, cursor, slotBytes) ||
+            cursor > delta.size() || slotBytes > delta.size() - cursor)
+        {
+            return false;
+        }
+        if (slotMode == kMatrixDeltaSlotFull) {
+            current.append(delta.data() + cursor, slotBytes);
+        } else if (slotMode == kMatrixDeltaSlotMatrixMask) {
+            std::string slot;
+            const std::string payload(delta.data() + cursor, slotBytes);
+            if (!apply_matrix_mask_slot_delta(payload, baselineSlots[slotIndex],
+                                              matrixBytes, slot))
+            {
+                return false;
+            }
+            current.append(slot);
+        } else {
+            std::string slot;
+            const std::string payload(delta.data() + cursor, slotBytes);
+            if (!apply_matrix_residual_slot_delta(payload, baselineSlots[slotIndex],
+                                                  matrixBytes, slot))
+            {
+                return false;
+            }
+            current.append(slot);
+        }
+        cursor += slotBytes;
+    }
+    return cursor == delta.size();
+}
+
+void remember_udp_matrix_baseline(const json& message, const std::string& senderId,
+                                  uint8_t packetType, uint32_t sequence) {
+    if (sequence == 0 ||
+        (packetType != kUdpPacketTypePoseMsgpack && packetType != kUdpPacketTypeMidnaMsgpack))
+    {
+        return;
+    }
+    const auto stateIt = message.find("state");
+    if (stateIt == message.end() || !stateIt->is_object()) {
+        return;
+    }
+    const auto matricesIt = stateIt->find("link_matrices");
+    if (matricesIt == stateIt->end() || !matricesIt->is_object()) {
+        return;
+    }
+    const std::string format = matricesIt->value("format", "");
+    if (!matrix_delta_format_for_base(format).has_value()) {
+        return;
+    }
+    std::string packed;
+    if (!matrix_json_packed_bytes(*matricesIt, packed)) {
+        return;
+    }
+
+    auto& history = sSession.udpMatrixBaselineHistory[matrix_history_key(senderId, packetType)];
+    history[sequence] = std::move(packed);
+    while (history.size() > kMatrixBaselineHistoryLimit) {
+        history.erase(history.begin());
+    }
+}
+
+void apply_udp_matrix_delta_for_receiver(json& message, const std::string& receiverId,
+                                         const std::string& senderId, uint8_t packetType,
+                                         uint32_t sequence) {
+    if (receiverId.empty() || sequence == 0 ||
+        (packetType != kUdpPacketTypePoseMsgpack && packetType != kUdpPacketTypeMidnaMsgpack))
+    {
+        return;
+    }
+    auto stateIt = message.find("state");
+    if (stateIt == message.end() || !stateIt->is_object()) {
+        return;
+    }
+    auto matricesIt = stateIt->find("link_matrices");
+    if (matricesIt == stateIt->end() || !matricesIt->is_object()) {
+        return;
+    }
+
+    const std::string format = matricesIt->value("format", "");
+    const std::optional<std::string> deltaFormat = matrix_delta_format_for_base(format);
+    if (!deltaFormat.has_value()) {
+        return;
+    }
+
+    const auto ackIt =
+        sSession.udpPoseAckedSequenceByReceiver.find(pose_ack_key(receiverId, senderId, packetType));
+    if (ackIt == sSession.udpPoseAckedSequenceByReceiver.end() || ackIt->second == 0) {
+        return;
+    }
+
+    const auto historyIt =
+        sSession.udpMatrixBaselineHistory.find(matrix_history_key(senderId, packetType));
+    if (historyIt == sSession.udpMatrixBaselineHistory.end()) {
+        return;
+    }
+    const auto baselineIt = historyIt->second.find(ackIt->second);
+    if (baselineIt == historyIt->second.end()) {
+        return;
+    }
+
+    std::string current;
+    if (!matrix_json_packed_bytes(*matricesIt, current)) {
+        return;
+    }
+
+    std::string delta;
+    uint32_t changedSlots = 0;
+    uint32_t unchangedSlots = 0;
+    uint32_t maskedSlots = 0;
+    uint32_t changedMatrices = 0;
+    uint32_t unchangedMatrices = 0;
+    uint32_t residualMatrices = 0;
+    uint32_t fullMatrices = 0;
+    if (!build_matrix_slot_delta(format, current, baselineIt->second, ackIt->second, delta,
+                                 changedSlots, unchangedSlots, maskedSlots, changedMatrices,
+                                 unchangedMatrices, residualMatrices, fullMatrices) ||
+        delta.size() >= current.size())
+    {
+        return;
+    }
+
+    (*matricesIt)["format"] = *deltaFormat;
+    (*matricesIt)["baseline_sequence"] = ackIt->second;
+    set_matrix_json_binary_data(*matricesIt, delta);
+
+    static uint32_t sMatrixDeltaTxLogCount = 0;
+    if (sMatrixDeltaTxLogCount < 80 || (sMatrixDeltaTxLogCount % 240) == 0) {
+        DuskLog.info("MP_MATRIX_DELTA_TX receiver={} sender={} type={} seq={} baseline={} "
+                     "full_bytes={} delta_bytes={} changed_slots={} unchanged_slots={} "
+                     "masked_slots={} changed_matrices={} unchanged_matrices={} "
+                     "residual_matrices={} full_matrices={}",
+                     receiverId, senderId, static_cast<int>(packetType), sequence, ackIt->second,
+                     current.size(), delta.size(), changedSlots, unchangedSlots, maskedSlots,
+                     changedMatrices, unchangedMatrices, residualMatrices, fullMatrices);
+    }
+    ++sMatrixDeltaTxLogCount;
+}
+
+bool expand_udp_matrix_delta_message(json& message, const std::string& senderId,
+                                     uint8_t packetType, uint32_t sequence) {
+    if (packetType != kUdpPacketTypePoseMsgpack && packetType != kUdpPacketTypeMidnaMsgpack) {
+        return true;
+    }
+    auto stateIt = message.find("state");
+    if (stateIt == message.end() || !stateIt->is_object()) {
+        return true;
+    }
+    auto matricesIt = stateIt->find("link_matrices");
+    if (matricesIt == stateIt->end() || !matricesIt->is_object()) {
+        return true;
+    }
+
+    const std::string format = matricesIt->value("format", "");
+    const std::optional<std::string> baseFormat = matrix_base_format_for_delta(format);
+    if (!baseFormat.has_value()) {
+        return true;
+    }
+
+    const uint32_t baselineSequence = matricesIt->value("baseline_sequence", 0U);
+    const auto historyIt =
+        sSession.udpMatrixBaselineHistory.find(matrix_history_key(senderId, packetType));
+    if (historyIt == sSession.udpMatrixBaselineHistory.end()) {
+        DuskLog.warn("Multiplayer matrix delta rx dropped sender={} type={} seq={} baseline={} "
+                     "reason=no_history",
+                     senderId, static_cast<int>(packetType), sequence, baselineSequence);
+        return false;
+    }
+    const auto baselineIt = historyIt->second.find(baselineSequence);
+    if (baselineIt == historyIt->second.end()) {
+        DuskLog.warn("Multiplayer matrix delta rx dropped sender={} type={} seq={} baseline={} "
+                     "reason=missing_baseline",
+                     senderId, static_cast<int>(packetType), sequence, baselineSequence);
+        return false;
+    }
+
+    std::string delta;
+    if (!matrix_json_packed_bytes(*matricesIt, delta)) {
+        return false;
+    }
+
+    std::string current;
+    if (!apply_matrix_slot_delta(format, delta, baselineIt->second, baselineSequence, current)) {
+        DuskLog.warn("Multiplayer matrix delta rx dropped sender={} type={} seq={} baseline={} "
+                     "reason=decode_failed",
+                     senderId, static_cast<int>(packetType), sequence, baselineSequence);
+        return false;
+    }
+
+    (*matricesIt)["format"] = *baseFormat;
+    matricesIt->erase("baseline_sequence");
+    set_matrix_json_binary_data(*matricesIt, current);
+
+    static uint32_t sMatrixDeltaRxLogCount = 0;
+    if (sMatrixDeltaRxLogCount < 80 || (sMatrixDeltaRxLogCount % 240) == 0) {
+        DuskLog.info("MP_MATRIX_DELTA_RX sender={} type={} seq={} baseline={} "
+                     "delta_bytes={} full_bytes={}",
+                     senderId, static_cast<int>(packetType), sequence, baselineSequence,
+                     delta.size(), current.size());
+    }
+    ++sMatrixDeltaRxLogCount;
+    return true;
+}
+
 bool parse_packed_model_matrices(const std::string& packed, size_t& cursor,
                                  RemoteModelMatrixSnapshot& snapshot, bool quantized,
-                                 bool safeQuantized) {
+                                 bool safeQuantized, bool weightOmitFormat) {
     snapshot = {};
 
     uint8_t present = 0;
@@ -4303,10 +5458,20 @@ bool parse_packed_model_matrices(const std::string& packed, size_t& cursor,
 
     snapshot.jointCount = jointCount;
     snapshot.weightCount = weightCount;
+    bool weightsIncluded = true;
+    if (weightOmitFormat) {
+        uint8_t flags = 0;
+        if (!read_pack_u8(packed, cursor, flags)) {
+            return false;
+        }
+        weightsIncluded = (flags & kPackedModelWeightsIncluded) != 0 || weightCount == 0;
+        snapshot.weightsOmitted = !weightsIncluded && weightCount > 0;
+    }
     if (safeQuantized) {
         if (!read_pack_safe_quantized_array(packed, cursor, snapshot.base) ||
             !read_pack_safe_quantized_vector(packed, cursor, jointCount, snapshot.joints) ||
-            !read_pack_safe_quantized_vector(packed, cursor, weightCount, snapshot.weights))
+            (weightsIncluded &&
+             !read_pack_safe_quantized_vector(packed, cursor, weightCount, snapshot.weights)))
         {
             snapshot = {};
             return false;
@@ -4314,7 +5479,8 @@ bool parse_packed_model_matrices(const std::string& packed, size_t& cursor,
     } else if (quantized) {
         if (!read_pack_quantized_array(packed, cursor, snapshot.base) ||
             !read_pack_quantized_vector(packed, cursor, jointCount, snapshot.joints) ||
-            !read_pack_quantized_vector(packed, cursor, weightCount, snapshot.weights))
+            (weightsIncluded &&
+             !read_pack_quantized_vector(packed, cursor, weightCount, snapshot.weights)))
         {
             snapshot = {};
             return false;
@@ -4323,8 +5489,9 @@ bool parse_packed_model_matrices(const std::string& packed, size_t& cursor,
         if (!read_pack_float_array(packed, cursor, snapshot.base) ||
             !read_pack_float_vector(packed, cursor, static_cast<size_t>(jointCount) * 12,
                                     snapshot.joints) ||
-            !read_pack_float_vector(packed, cursor, static_cast<size_t>(weightCount) * 12,
-                                    snapshot.weights))
+            (weightsIncluded &&
+             !read_pack_float_vector(packed, cursor, static_cast<size_t>(weightCount) * 12,
+                                     snapshot.weights)))
         {
             snapshot = {};
             return false;
@@ -4343,10 +5510,17 @@ RemoteLinkMatrixSnapshot parse_packed_link_matrices(const json& source) {
 
     const std::string format = source.value("format", "");
     const bool quantized =
-        format == "qrot16_trans32_v1" || format == "qrot16_trans32_bin_v1";
+        format == "qrot16_trans32_v1" || format == "qrot16_trans32_bin_v1" ||
+        format == "qrot16_trans32_womit_v1" || format == "qrot16_trans32_womit_bin_v1";
     const bool safeQuantized =
         format == "qbasis16_trans32_safe_v1" || format == "qbasis16_trans32_safe_bin_v1";
-    const bool floatPacked = format == "f32_pack_v1" || format == "f32_pack_bin_v1";
+    const bool floatPacked = format == "f32_pack_v1" || format == "f32_pack_bin_v1" ||
+                             format == "f32_pack_womit_v1" ||
+                             format == "f32_pack_womit_bin_v1";
+    const bool weightOmitFormat = format == "qrot16_trans32_womit_v1" ||
+                                  format == "qrot16_trans32_womit_bin_v1" ||
+                                  format == "f32_pack_womit_v1" ||
+                                  format == "f32_pack_womit_bin_v1";
     if (!safeQuantized && !quantized && !floatPacked) {
         return snapshot;
     }
@@ -4406,7 +5580,9 @@ RemoteLinkMatrixSnapshot parse_packed_link_matrices(const json& source) {
     };
 
     for (RemoteModelMatrixSnapshot* slot : slots) {
-        if (!parse_packed_model_matrices(packed, cursor, *slot, quantized, safeQuantized)) {
+        if (!parse_packed_model_matrices(packed, cursor, *slot, quantized, safeQuantized,
+                                         weightOmitFormat))
+        {
             return {};
         }
     }
@@ -4519,6 +5695,87 @@ RemoteLinkMatrixSnapshot parse_midna_link_matrices(const json& state) {
         snapshot.midnaHairShape = 0;
     }
     return snapshot;
+}
+
+bool hydrate_model_omitted_weights(RemoteModelMatrixSnapshot& model,
+                                   const RemoteModelMatrixSnapshot& previous) {
+    if (!model.valid || !model.weightsOmitted) {
+        return true;
+    }
+    if (!previous.valid || previous.weightCount != model.weightCount ||
+        previous.weights.size() != static_cast<size_t>(model.weightCount) * 12)
+    {
+        return false;
+    }
+
+    model.weights = previous.weights;
+    model.weightsOmitted = false;
+    return true;
+}
+
+void hydrate_link_matrix_omitted_weights(RemoteLinkMatrixSnapshot& matrices,
+                                         const RemoteLinkMatrixSnapshot& previous,
+                                         const std::string& peerId, uint32_t sequence) {
+    if (!matrices.valid && !matrices.midna.valid && !matrices.midnaMask.valid &&
+        !matrices.midnaHand.valid && !matrices.midnaHair.valid && !matrices.midnaGlow.valid)
+    {
+        return;
+    }
+
+    struct Slot {
+        const char* name;
+        RemoteModelMatrixSnapshot* current;
+        const RemoteModelMatrixSnapshot* previous;
+    };
+    Slot slots[] = {
+        {"body", &matrices.body, &previous.body},
+        {"hat", &matrices.hat, &previous.hat},
+        {"face", &matrices.face, &previous.face},
+        {"hand", &matrices.hand, &previous.hand},
+        {"sword", &matrices.sword, &previous.sword},
+        {"sheath", &matrices.sheath, &previous.sheath},
+        {"shield", &matrices.shield, &previous.shield},
+        {"held_item", &matrices.heldItem, &previous.heldItem},
+        {"hook_tip", &matrices.hookTip, &previous.hookTip},
+        {"hook_sub_item", &matrices.hookSubItem, &previous.hookSubItem},
+        {"hook_sub_tip", &matrices.hookSubTip, &previous.hookSubTip},
+        {"arrow", &matrices.arrow, &previous.arrow},
+        {"kantera", &matrices.kantera, &previous.kantera},
+        {"kantera_glow", &matrices.kanteraGlow, &previous.kanteraGlow},
+        {"item_actor", &matrices.itemActor, &previous.itemActor},
+        {"ride_actor", &matrices.rideActor, &previous.rideActor},
+        {"midna", &matrices.midna, &previous.midna},
+        {"midna_mask", &matrices.midnaMask, &previous.midnaMask},
+        {"midna_hand", &matrices.midnaHand, &previous.midnaHand},
+        {"midna_hair", &matrices.midnaHair, &previous.midnaHair},
+        {"midna_glow", &matrices.midnaGlow, &previous.midnaGlow},
+    };
+
+    uint32_t hydrated = 0;
+    uint32_t missing = 0;
+    for (Slot& slot : slots) {
+        if (slot.current == nullptr || !slot.current->weightsOmitted) {
+            continue;
+        }
+        if (hydrate_model_omitted_weights(*slot.current, *slot.previous)) {
+            ++hydrated;
+        } else {
+            ++missing;
+            static uint32_t sWeightHydrateMissLogCount = 0;
+            if (sWeightHydrateMissLogCount < 24) {
+                ++sWeightHydrateMissLogCount;
+                DuskLog.info("Multiplayer matrix weights hydrate miss peer={} seq={} slot={} "
+                             "weights={}",
+                             peerId, sequence, slot.name, slot.current->weightCount);
+            }
+        }
+    }
+
+    static uint32_t sWeightHydrateLogTicks = 0;
+    if ((hydrated != 0 || missing != 0) && (sWeightHydrateLogTicks++ % 120) == 0) {
+        DuskLog.info("Multiplayer matrix weights hydrate peer={} seq={} hydrated={} missing={}",
+                     peerId, sequence, hydrated, missing);
+    }
 }
 
 void apply_midna_matrices(RemoteLinkMatrixSnapshot& target,
@@ -5385,9 +6642,13 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         const uint32_t sequence = routedMessage.value("sequence", 0U);
         const json state = routedMessage.value("state", json::object());
         RemoteLinkMatrixSnapshot midnaMatrices = parse_midna_link_matrices(state);
+        auto existing = sSession.peerPoses.find(peerId);
+        if (existing != sSession.peerPoses.end() && existing->second.valid) {
+            hydrate_link_matrix_omitted_weights(midnaMatrices, existing->second.linkMatrices,
+                                                peerId, sequence);
+        }
         sSession.pendingMidnaMatrices[peerId] = {sequence, midnaMatrices};
 
-        auto existing = sSession.peerPoses.find(peerId);
         if (existing != sSession.peerPoses.end() && existing->second.valid &&
             sequence >= existing->second.sequence)
         {
@@ -5482,6 +6743,22 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         pose.itemActorBombFlash = state.value("item_actor_bomb_flash", -1);
         pose.rideActorKind = state.value("ride_actor_kind", REMOTE_RIDE_ACTOR_NONE);
         pose.linkMatrices = parse_link_matrices(state);
+        pose.linkMatricesFresh = pose.linkMatrices.valid;
+        if (existing != sSession.peerPoses.end() && existing->second.valid) {
+            if (pose.linkMatrices.valid) {
+                hydrate_link_matrix_omitted_weights(pose.linkMatrices,
+                                                    existing->second.linkMatrices, peerId,
+                                                    sequence);
+            } else {
+                pose.linkMatrices = existing->second.linkMatrices;
+            }
+        }
+        const bool wantsMidnaDraw = pose.midnaDraw || pose.midnaMaskDraw ||
+                                    pose.midnaHandDraw || pose.midnaHairDraw ||
+                                    pose.midnaShadowForm;
+        if (wantsMidnaDraw && existing != sSession.peerPoses.end() && existing->second.valid) {
+            apply_midna_matrices(pose.linkMatrices, existing->second.linkMatrices);
+        }
         auto pendingMidna = sSession.pendingMidnaMatrices.find(peerId);
         if (pendingMidna != sSession.pendingMidnaMatrices.end() &&
             pendingMidna->second.first >= sequence)
@@ -5500,8 +6777,8 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             if (logGap || (sDummyTraceRxCount++ % 30) == 0) {
                 DuskLog.info(
                     "Multiplayer dummy trace rx peer={} seq={} seq_delta={} prev_age={} "
-                    "stage={} room={} matrix={} proc={} under_bck={} under_frame={} "
-                    "under_delta={} upper_bck={} upper_frame={} upper_delta={}",
+                    "stage={} room={} matrix={} proc={} under_bck={} "
+                    "under_frame={} under_delta={} upper_bck={} upper_frame={} upper_delta={}",
                     peerId, pose.sequence, sequenceDelta,
                     hadExisting ? existing->second.ageTicks : 0, pose.stage, pose.room,
                     pose.linkMatrices.valid, pose.procId, pose.underBck0, pose.underFrame0,
@@ -5687,6 +6964,18 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                 }
             }
         }
+    } else if (type == "room_switch_bit") {
+        const int stage = message.value("stage", -1);
+        const int flag = message.value("flag", -1);
+        const int room = message.value("room", -1);
+        const int sourceActor = message.value("source_actor", -1);
+        const int sourceRoom = message.value("source_room", -128);
+        const uint32_t sourceParams = message.value("source_params", 0xFFFFFFFFU);
+        if (stage >= 0 && flag >= dSv_info_c::MEMORY_SWITCH && room >= 0) {
+            begin_flag_trace_window("remote_rx", "room_switch", stage, flag, true,
+                                    sourceActor, sourceRoom, sourceParams);
+            apply_remote_room_switch_bit(stage, flag, room, sourceActor);
+        }
     } else if (type == "item_bit") {
         const int stage = message.value("stage", -1);
         const int flag = message.value("flag", -1);
@@ -5725,6 +7014,20 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             execItemGet(static_cast<u8>(itemId));
             sApplyingRemoteSaveBit = false;
             DuskLog.info("Multiplayer applied remote item get item_id={}", itemId);
+        }
+    } else if (type == "item_first_bit") {
+        const int itemId = message.value("item_id", -1);
+        const bool owned = message.value("owned", true);
+        if (is_synced_reversible_item_first_bit(itemId)) {
+            sApplyingRemoteSaveBit = true;
+            if (owned) {
+                dComIfGs_onItemFirstBit(static_cast<u8>(itemId));
+            } else {
+                dComIfGs_offItemFirstBit(static_cast<u8>(itemId));
+            }
+            sApplyingRemoteSaveBit = false;
+            DuskLog.info("Multiplayer applied remote item first bit item_id={} owned={}",
+                         itemId, owned);
         }
     } else if (type == "collect_crystal") {
         const int item = message.value("item", -1);
@@ -5905,11 +7208,30 @@ void set_udp_header_sender(UdpPoseChunkHeader& header, const std::string& sender
                 std::min(senderId.size(), sizeof(header.senderId) - 1));
 }
 
+std::string pose_ack_sender_id_from_packet(const UdpPoseAckPacket& packet) {
+    size_t len = 0;
+    while (len < sizeof(packet.ackedSenderId) && packet.ackedSenderId[len] != '\0') {
+        ++len;
+    }
+    return std::string(packet.ackedSenderId, len);
+}
+
+void set_pose_ack_sender(UdpPoseAckPacket& packet, const std::string& senderId) {
+    std::memset(packet.ackedSenderId, 0, sizeof(packet.ackedSenderId));
+    std::memcpy(packet.ackedSenderId, senderId.data(),
+                std::min(senderId.size(), sizeof(packet.ackedSenderId) - 1));
+}
+
 std::string local_udp_pose_sender_id() {
     if (sSession.mode == NetworkMode::DirectJoin && !sSession.clientId.empty()) {
         return sSession.clientId;
     }
     return kDirectPeerId;
+}
+
+std::string pose_ack_key(const std::string& receiverId, const std::string& poseSenderId,
+                         uint8_t packetType) {
+    return receiverId + "\x1f" + poseSenderId + "\x1f" + std::to_string(packetType);
 }
 
 size_t compressed_size_for_diagnostics(const void* data, size_t size) {
@@ -5975,12 +7297,14 @@ json udp_pose_message_for_wire(const json& message) {
     }
 
     const std::string format = matricesIt->value("format", "");
-    if (format == "f32_pack_bin_v1" || format == "qrot16_trans32_bin_v1" ||
+    if (format == "f32_pack_bin_v1" || format == "f32_pack_womit_bin_v1" ||
+        format == "qrot16_trans32_bin_v1" || format == "qrot16_trans32_womit_bin_v1" ||
         format == "qbasis16_trans32_safe_bin_v1")
     {
         return wire;
     }
     if (format != "f32_pack_v1" && format != "qrot16_trans32_v1" &&
+        format != "f32_pack_womit_v1" && format != "qrot16_trans32_womit_v1" &&
         format != "qbasis16_trans32_safe_v1")
     {
         return wire;
@@ -6002,8 +7326,12 @@ json udp_pose_message_for_wire(const json& message) {
     std::vector<uint8_t> bytes(packed.begin(), packed.end());
     if (format == "f32_pack_v1") {
         (*matricesIt)["format"] = "f32_pack_bin_v1";
+    } else if (format == "f32_pack_womit_v1") {
+        (*matricesIt)["format"] = "f32_pack_womit_bin_v1";
     } else if (format == "qbasis16_trans32_safe_v1") {
         (*matricesIt)["format"] = "qbasis16_trans32_safe_bin_v1";
+    } else if (format == "qrot16_trans32_womit_v1") {
+        (*matricesIt)["format"] = "qrot16_trans32_womit_bin_v1";
     } else {
         (*matricesIt)["format"] = "qrot16_trans32_bin_v1";
     }
@@ -6012,10 +7340,13 @@ json udp_pose_message_for_wire(const json& message) {
 }
 
 bool open_udp_socket(const std::string& bindHost, int bindPort) {
+    stop_udp_tx_pacer();
     close_socket(sSession.udpSock);
     sSession.udpRemoteAddrKnown = false;
     sSession.udpPoseReassembly.clear();
     sSession.udpPoseLastProcessedSequence.clear();
+    sSession.udpPoseAckedSequenceByReceiver.clear();
+    sSession.udpMatrixBaselineHistory.clear();
 
     sSession.udpSock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sSession.udpSock == INVALID_SOCKET) {
@@ -6043,6 +7374,7 @@ bool open_udp_socket(const std::string& bindHost, int bindPort) {
         return false;
     }
 
+    start_udp_tx_pacer();
     DuskLog.info("Multiplayer direct UDP pose socket bound on {}:{}", bindHost, bindPort);
     return true;
 }
@@ -6066,12 +7398,20 @@ void setup_direct_join_udp() {
 }
 
 bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
-                           const std::string& senderId, uint8_t packetType = 2) {
+                           const std::string& senderId,
+                           uint8_t packetType = kUdpPacketTypePoseMsgpack,
+                           const std::string& receiverId = "") {
     if (sSession.udpSock == INVALID_SOCKET) {
         return false;
     }
 
-    const json wireMessage = udp_pose_message_for_wire(message);
+    json wireMessage = udp_pose_message_for_wire(message);
+    const uint32_t sequence = wireMessage.value("sequence", 0U);
+    remember_udp_matrix_baseline(wireMessage, senderId, packetType, sequence);
+    if (kUseAckedMatrixDeltas) {
+        apply_udp_matrix_delta_for_receiver(wireMessage, receiverId, senderId, packetType,
+                                            sequence);
+    }
     const std::vector<uint8_t> raw = json::to_msgpack(wireMessage);
     const size_t bound = ZSTD_compressBound(raw.size());
     std::vector<uint8_t> compressed(bound);
@@ -6098,13 +7438,19 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
         return false;
     }
 
-    const uint32_t sequence = wireMessage.value("sequence", 0U);
     trace_udp_pose_packet_tx(wireMessage, raw.size(), compressed.size(), chunkCount);
-    std::array<uint8_t, sizeof(UdpPoseChunkHeader) + kUdpPoseChunkPayloadBytes> packet{};
+    std::vector<UdpTxDatagram> txDatagrams;
+    txDatagrams.reserve(static_cast<size_t>(chunkCount) + (chunkCount > 1 ? 1 : 0));
+    std::array<uint8_t, kUdpPoseChunkPayloadBytes> parity{};
     for (uint16_t chunkIndex = 0; chunkIndex < chunkCount; ++chunkIndex) {
         const size_t offset = static_cast<size_t>(chunkIndex) * kUdpPoseChunkPayloadBytes;
         const size_t payloadSize =
             std::min(kUdpPoseChunkPayloadBytes, compressed.size() - offset);
+        for (size_t i = 0; i < kUdpPoseChunkPayloadBytes; ++i) {
+            const size_t sourceOffset = offset + i;
+            const uint8_t value = sourceOffset < compressed.size() ? compressed[sourceOffset] : 0;
+            parity[i] ^= value;
+        }
 
         UdpPoseChunkHeader header{};
         header.magic[0] = 'D';
@@ -6122,31 +7468,50 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
         header.payloadSize = static_cast<uint16_t>(payloadSize);
         set_udp_header_sender(header, senderId);
 
-        std::memcpy(packet.data(), &header, sizeof(header));
-        std::memcpy(packet.data() + sizeof(header), compressed.data() + offset, payloadSize);
-        const int packetSize = static_cast<int>(sizeof(header) + payloadSize);
-        const int sent =
-            sendto(sSession.udpSock, reinterpret_cast<const char*>(packet.data()),
-                   packetSize, 0, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
-        if (sent < 0) {
-            static uint32_t sUdpPoseSendWouldBlockLogCount = 0;
-            if (would_block()) {
-                if (sUdpPoseSendWouldBlockLogCount < 20 ||
-                    (sUdpPoseSendWouldBlockLogCount % 120) == 0)
-                {
-                    DuskLog.warn("Multiplayer direct UDP pose send would block seq={} chunk={}/{}",
-                                 sequence, chunkIndex + 1, chunkCount);
-                }
-                ++sUdpPoseSendWouldBlockLogCount;
-            }
-            return false;
-        }
-        if (sent != packetSize) {
-            DuskLog.warn("Multiplayer direct UDP pose partial datagram send seq={} chunk={}/{} "
-                         "sent={} expected={}",
-                         sequence, chunkIndex + 1, chunkCount, sent, packetSize);
-            return false;
-        }
+        UdpTxDatagram datagram;
+        datagram.addr = addr;
+        datagram.sequence = sequence;
+        datagram.packetType = packetType;
+        datagram.chunkIndex = chunkIndex;
+        datagram.chunkCount = chunkCount;
+        datagram.bytes.resize(sizeof(header) + payloadSize);
+        std::memcpy(datagram.bytes.data(), &header, sizeof(header));
+        std::memcpy(datagram.bytes.data() + sizeof(header), compressed.data() + offset,
+                    payloadSize);
+        txDatagrams.push_back(std::move(datagram));
+    }
+    if (chunkCount > 1) {
+        UdpPoseChunkHeader header{};
+        header.magic[0] = 'D';
+        header.magic[1] = 'M';
+        header.magic[2] = 'P';
+        header.magic[3] = 'U';
+        header.version = 1;
+        header.type = packetType;
+        header.headerSize = sizeof(UdpPoseChunkHeader);
+        header.sequence = sequence;
+        header.chunkIndex = chunkCount;
+        header.chunkCount = chunkCount;
+        header.uncompressedSize = static_cast<uint32_t>(raw.size());
+        header.compressedSize = static_cast<uint32_t>(compressed.size());
+        header.payloadSize = static_cast<uint16_t>(parity.size());
+        set_udp_header_sender(header, senderId);
+
+        UdpTxDatagram datagram;
+        datagram.addr = addr;
+        datagram.sequence = sequence;
+        datagram.packetType = packetType;
+        datagram.chunkIndex = chunkCount;
+        datagram.chunkCount = chunkCount;
+        datagram.bytes.resize(sizeof(header) + parity.size());
+        std::memcpy(datagram.bytes.data(), &header, sizeof(header));
+        std::memcpy(datagram.bytes.data() + sizeof(header), parity.data(), parity.size());
+        txDatagrams.push_back(std::move(datagram));
+    }
+
+    const std::string queueKey = udp_tx_queue_key(addr, senderId, packetType, receiverId);
+    if (!enqueue_udp_tx_datagrams(std::move(txDatagrams), queueKey, sequence, packetType)) {
+        return false;
     }
 
     static uint32_t sUdpPoseTxLogTicks = 0;
@@ -6230,6 +7595,52 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
             groupDelta(animKeys, std::size(animKeys)),
             groupDelta(transformKeys, std::size(transformKeys)),
             groupDelta(visualKeys, std::size(visualKeys)));
+    }
+    return true;
+}
+
+bool send_udp_pose_ack_to_addr(const sockaddr_in& addr, const std::string& poseSenderId,
+                               uint8_t packetType, uint32_t sequence) {
+    if (sSession.udpSock == INVALID_SOCKET || sequence == 0) {
+        return false;
+    }
+
+    UdpPoseAckPacket ack{};
+    ack.sequence = sequence;
+    ack.ackedType = packetType;
+    set_pose_ack_sender(ack, poseSenderId);
+
+    std::array<uint8_t, sizeof(UdpPoseChunkHeader) + sizeof(UdpPoseAckPacket)> packet{};
+    UdpPoseChunkHeader header{};
+    header.magic[0] = 'D';
+    header.magic[1] = 'M';
+    header.magic[2] = 'P';
+    header.magic[3] = 'U';
+    header.version = 1;
+    header.type = kUdpPacketTypePoseAck;
+    header.headerSize = sizeof(UdpPoseChunkHeader);
+    header.sequence = sequence;
+    header.chunkIndex = 0;
+    header.chunkCount = 1;
+    header.uncompressedSize = sizeof(UdpPoseAckPacket);
+    header.compressedSize = sizeof(UdpPoseAckPacket);
+    header.payloadSize = sizeof(UdpPoseAckPacket);
+    set_udp_header_sender(header, local_udp_pose_sender_id());
+
+    std::memcpy(packet.data(), &header, sizeof(header));
+    std::memcpy(packet.data() + sizeof(header), &ack, sizeof(ack));
+    const int packetSize = static_cast<int>(sizeof(header) + sizeof(ack));
+    const int sent =
+        sendto(sSession.udpSock, reinterpret_cast<const char*>(packet.data()), packetSize, 0,
+               reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+    if (sent < 0) {
+        return false;
+    }
+    if (sent != packetSize) {
+        DuskLog.warn("Multiplayer direct UDP pose ack partial send sender={} seq={} sent={} "
+                     "expected={}",
+                     poseSenderId, sequence, sent, packetSize);
+        return false;
     }
     return true;
 }
@@ -6426,7 +7837,8 @@ bool send_udp_pose_to_peer(DirectPeer& peer, const json& message, const std::str
     if (!should_send_visual_pose_to_peer(peer, message, senderId)) {
         return false;
     }
-    return send_udp_pose_to_addr(peer.udpAddr, message, senderId);
+    return send_udp_pose_to_addr(peer.udpAddr, message, senderId,
+                                 kUdpPacketTypePoseMsgpack, peer.id);
 }
 
 bool send_udp_midna_to_peer(DirectPeer& peer, const json& message, const std::string& senderId) {
@@ -6436,7 +7848,8 @@ bool send_udp_midna_to_peer(DirectPeer& peer, const json& message, const std::st
     if (!should_send_visual_pose_to_peer(peer, message, senderId)) {
         return false;
     }
-    return send_udp_pose_to_addr(peer.udpAddr, message, senderId, 4);
+    return send_udp_pose_to_addr(peer.udpAddr, message, senderId,
+                                 kUdpPacketTypeMidnaMsgpack, peer.id);
 }
 
 bool broadcast_udp_pose_to_direct_peers(const json& message, const std::string& senderId,
@@ -6461,7 +7874,8 @@ bool send_direct_pose_udp(const json& message) {
         sSession.udpRemoteAddrKnown &&
         !sSession.clientId.empty())
     {
-        return send_udp_pose_to_addr(sSession.udpRemoteAddr, message, local_udp_pose_sender_id());
+        return send_udp_pose_to_addr(sSession.udpRemoteAddr, message, local_udp_pose_sender_id(),
+                                     kUdpPacketTypePoseMsgpack, kDirectPeerId);
     }
 
     return false;
@@ -6482,7 +7896,8 @@ bool send_direct_midna_udp(const json& message) {
         sSession.udpRemoteAddrKnown && !sSession.clientId.empty())
     {
         return send_udp_pose_to_addr(sSession.udpRemoteAddr, message,
-                                     local_udp_pose_sender_id(), 4);
+                                     local_udp_pose_sender_id(),
+                                     kUdpPacketTypeMidnaMsgpack, kDirectPeerId);
     }
 
     return false;
@@ -6598,12 +8013,122 @@ void process_udp_remote_object_packet(const UdpRemoteObjectPacket& object,
     }
 }
 
+void process_udp_pose_ack_packet(const UdpPoseAckPacket& ack, const std::string& receiverId) {
+    if (ack.ackedType != kUdpPacketTypePoseMsgpack &&
+        ack.ackedType != kUdpPacketTypeMidnaMsgpack)
+    {
+        return;
+    }
+
+    std::string poseSenderId = pose_ack_sender_id_from_packet(ack);
+    if (poseSenderId.empty()) {
+        poseSenderId = kDirectPeerId;
+    }
+
+    const std::string key = pose_ack_key(receiverId, poseSenderId, ack.ackedType);
+    uint32_t& previous = sSession.udpPoseAckedSequenceByReceiver[key];
+    if (ack.sequence <= previous) {
+        return;
+    }
+
+    const uint32_t old = previous;
+    previous = ack.sequence;
+
+    static uint32_t sUdpPoseAckRxLogCount = 0;
+    if (sUdpPoseAckRxLogCount < 80 || (sUdpPoseAckRxLogCount % 240) == 0) {
+        DuskLog.info("Multiplayer direct UDP pose ack rx receiver={} sender={} type={} seq={} "
+                     "previous={}",
+                     receiverId, poseSenderId, static_cast<int>(ack.ackedType), ack.sequence,
+                     old);
+    }
+    ++sUdpPoseAckRxLogCount;
+}
+
+std::string udp_pose_rx_stats_key(const std::string& senderId, uint8_t packetType) {
+    return senderId + "\x1f" + std::to_string(packetType);
+}
+
+const char* udp_pose_packet_type_name(uint8_t packetType) {
+    switch (packetType) {
+    case kUdpPacketTypePoseJson: return "pose_json";
+    case kUdpPacketTypePoseMsgpack: return "pose";
+    case kUdpPacketTypeRemoteObject: return "object";
+    case kUdpPacketTypeMidnaMsgpack: return "midna";
+    case kUdpPacketTypePoseAck: return "ack";
+    default: return "unknown";
+    }
+}
+
+UdpPoseRxStats& udp_pose_rx_stats(const std::string& senderId, uint8_t packetType) {
+    return sUdpPoseRxStats[udp_pose_rx_stats_key(senderId, packetType)];
+}
+
+void maybe_log_udp_pose_rx_summary(const std::string& senderId, uint8_t packetType,
+                                   UdpPoseRxStats& stats, bool force = false) {
+    constexpr uint64_t kUdpPoseRxSummaryDatagramInterval = 600;
+    if (!force &&
+        stats.datagrams < stats.lastSummaryDatagrams + kUdpPoseRxSummaryDatagramInterval)
+    {
+        return;
+    }
+    stats.lastSummaryDatagrams = stats.datagrams;
+
+    const double avgExpectedChunks =
+        stats.newSequences != 0
+            ? static_cast<double>(stats.expectedDataChunks) /
+                  static_cast<double>(stats.newSequences)
+            : 0.0;
+    const double avgCompletedChunks =
+        stats.completedSequences != 0
+            ? static_cast<double>(stats.completedDataChunks) /
+                  static_cast<double>(stats.completedSequences)
+            : 0.0;
+
+    DuskLog.info("MP_UDP_RX_SUMMARY sender={} type={} datagrams={} data_chunks={} "
+                 "parity_chunks={} old_chunks={} duplicate_chunks={} new_sequences={} "
+                 "completed={} evicted={} parity_recovered={} decompress_fail={} "
+                 "decode_fail={} delta_fail={} seq_gaps={} missing_sequences={} max_gap={} "
+                 "avg_expected_chunks={} avg_completed_chunks={} max_inflight={} "
+                 "max_missing_chunks_on_evict={}",
+                 senderId, udp_pose_packet_type_name(packetType), stats.datagrams,
+                 stats.dataChunks, stats.parityChunks, stats.oldChunks,
+                 stats.duplicateChunks, stats.newSequences, stats.completedSequences,
+                 stats.evictedSequences, stats.parityRecoveries, stats.decompressionFailures,
+                 stats.decodeFailures, stats.deltaFailures, stats.sequenceGaps,
+                 stats.missingSequences, stats.maxGap, avgExpectedChunks, avgCompletedChunks,
+                 stats.maxInflight, stats.maxMissingChunksOnEvict);
+}
+
+std::string missing_udp_chunks_summary(const UdpPoseReassembly& reassembly) {
+    std::string out;
+    uint16_t written = 0;
+    for (uint16_t i = 0; i < reassembly.chunkCount; ++i) {
+        if (i < reassembly.received.size() && reassembly.received[i]) {
+            continue;
+        }
+        if (!out.empty()) {
+            out += ",";
+        }
+        out += std::to_string(i + 1);
+        ++written;
+        if (written >= 16 && i + 1 < reassembly.chunkCount) {
+            out += ",...";
+            break;
+        }
+    }
+    return out.empty() ? "-" : out;
+}
+
 void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payload,
                            const sockaddr_in& fromAddr) {
     if (std::memcmp(header.magic, "DMPU", 4) != 0 || header.version != 1 ||
-        (header.type != 1 && header.type != 2 && header.type != 3 && header.type != 4) ||
+        (header.type != kUdpPacketTypePoseJson &&
+         header.type != kUdpPacketTypePoseMsgpack &&
+         header.type != kUdpPacketTypeRemoteObject &&
+         header.type != kUdpPacketTypeMidnaMsgpack &&
+         header.type != kUdpPacketTypePoseAck) ||
         header.headerSize != sizeof(UdpPoseChunkHeader) || header.payloadSize == 0 ||
-        header.chunkCount == 0 || header.chunkIndex >= header.chunkCount ||
+        header.chunkCount == 0 || header.chunkIndex > header.chunkCount ||
         header.compressedSize == 0 || header.compressedSize > kUdpPoseMaxCompressedBytes ||
         header.uncompressedSize == 0 || header.uncompressedSize > kUdpPoseMaxUncompressedBytes)
     {
@@ -6616,6 +8141,15 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
     }
     const std::string reassemblySenderId =
         header.type == 4 ? senderId + "#midna" : senderId;
+    UdpPoseRxStats& rxStats = udp_pose_rx_stats(senderId, header.type);
+    ++rxStats.datagrams;
+    const bool headerIsParityChunk = header.chunkIndex == header.chunkCount;
+    if (headerIsParityChunk) {
+        ++rxStats.parityChunks;
+    } else {
+        ++rxStats.dataChunks;
+    }
+    maybe_log_udp_pose_rx_summary(senderId, header.type, rxStats);
 
     if (sSession.mode == NetworkMode::DirectHost) {
         auto peerIt = sSession.directPeers.find(senderId);
@@ -6628,7 +8162,21 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
         return;
     }
 
-    if (header.type == 3) {
+    if (header.type == kUdpPacketTypePoseAck) {
+        if (header.chunkIndex != 0 || header.chunkCount != 1 ||
+            header.payloadSize != sizeof(UdpPoseAckPacket) ||
+            header.uncompressedSize != sizeof(UdpPoseAckPacket) ||
+            header.compressedSize != sizeof(UdpPoseAckPacket))
+        {
+            return;
+        }
+        UdpPoseAckPacket ack{};
+        std::memcpy(&ack, payload, sizeof(ack));
+        process_udp_pose_ack_packet(ack, senderId);
+        return;
+    }
+
+    if (header.type == kUdpPacketTypeRemoteObject) {
         if (header.chunkIndex != 0 || header.chunkCount != 1 ||
             header.payloadSize != sizeof(UdpRemoteObjectPacket) ||
             header.uncompressedSize != sizeof(UdpRemoteObjectPacket) ||
@@ -6646,6 +8194,7 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
     if (lastProcessedIt != sSession.udpPoseLastProcessedSequence.end() &&
         header.sequence <= lastProcessedIt->second)
     {
+        ++rxStats.oldChunks;
         return;
     }
 
@@ -6653,6 +8202,29 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
     auto reassemblyIt = reassemblies.find(header.sequence);
     if (reassemblyIt == reassemblies.end()) {
         while (reassemblies.size() >= kUdpPoseMaxInflightSequences) {
+            const auto dropped = reassemblies.begin();
+            ++rxStats.evictedSequences;
+            const uint16_t missingChunks =
+                dropped->second.chunkCount >= dropped->second.receivedCount
+                    ? static_cast<uint16_t>(dropped->second.chunkCount -
+                                            dropped->second.receivedCount)
+                    : 0;
+            rxStats.maxMissingChunksOnEvict =
+                std::max(rxStats.maxMissingChunksOnEvict, missingChunks);
+            static uint32_t sUdpPoseReassemblyEvictLogCount = 0;
+            if (sUdpPoseReassemblyEvictLogCount < 80 ||
+                (sUdpPoseReassemblyEvictLogCount % 240) == 0)
+            {
+                DuskLog.warn("Multiplayer direct UDP pose reassembly evicted sender={} "
+                             "type={} seq={} received={}/{} missing={} missing_chunks={} "
+                             "parity={} newer_seq={}",
+                             senderId, static_cast<int>(header.type), dropped->first,
+                             dropped->second.receivedCount, dropped->second.chunkCount,
+                             missingChunks, missing_udp_chunks_summary(dropped->second),
+                             dropped->second.parityReceived, header.sequence);
+            }
+            ++sUdpPoseReassemblyEvictLogCount;
+            maybe_log_udp_pose_rx_summary(senderId, header.type, rxStats, true);
             reassemblies.erase(reassemblies.begin());
         }
         reassemblyIt = reassemblies.emplace(header.sequence, UdpPoseReassembly{}).first;
@@ -6663,6 +8235,11 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
         reassembly.compressedSize = header.compressedSize;
         reassembly.compressed.assign(header.compressedSize, 0);
         reassembly.received.assign(header.chunkCount, 0);
+        ++rxStats.newSequences;
+        rxStats.expectedDataChunks += header.chunkCount;
+        rxStats.maxInflight =
+            std::max<uint16_t>(rxStats.maxInflight,
+                               static_cast<uint16_t>(reassemblies.size()));
     }
 
     UdpPoseReassembly& reassembly = reassemblyIt->second;
@@ -6674,16 +8251,79 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
         return;
     }
 
-    const size_t offset = static_cast<size_t>(header.chunkIndex) * kUdpPoseChunkPayloadBytes;
-    if (offset + header.payloadSize > reassembly.compressed.size()) {
-        return;
+    const bool isParityChunk = header.chunkIndex == header.chunkCount;
+    if (isParityChunk) {
+        if (header.payloadSize != kUdpPoseChunkPayloadBytes) {
+            return;
+        }
+        reassembly.parity.assign(payload, payload + header.payloadSize);
+        reassembly.parityReceived = true;
+    } else {
+        const size_t offset = static_cast<size_t>(header.chunkIndex) * kUdpPoseChunkPayloadBytes;
+        if (offset + header.payloadSize > reassembly.compressed.size()) {
+            return;
+        }
+
+        if (!reassembly.received[header.chunkIndex]) {
+            reassembly.received[header.chunkIndex] = 1;
+            ++reassembly.receivedCount;
+        } else {
+            ++rxStats.duplicateChunks;
+        }
+        std::memcpy(reassembly.compressed.data() + offset, payload, header.payloadSize);
     }
 
-    if (!reassembly.received[header.chunkIndex]) {
-        reassembly.received[header.chunkIndex] = 1;
+    if (reassembly.receivedCount != reassembly.chunkCount) {
+        if (!reassembly.parityReceived || reassembly.receivedCount + 1 != reassembly.chunkCount) {
+            return;
+        }
+
+        uint16_t missingIndex = 0;
+        for (; missingIndex < reassembly.chunkCount; ++missingIndex) {
+            if (!reassembly.received[missingIndex]) {
+                break;
+            }
+        }
+        if (missingIndex >= reassembly.chunkCount) {
+            return;
+        }
+
+        std::array<uint8_t, kUdpPoseChunkPayloadBytes> recovered{};
+        std::copy(reassembly.parity.begin(), reassembly.parity.end(), recovered.begin());
+        for (uint16_t chunkIndex = 0; chunkIndex < reassembly.chunkCount; ++chunkIndex) {
+            if (chunkIndex == missingIndex) {
+                continue;
+            }
+            const size_t offset = static_cast<size_t>(chunkIndex) * kUdpPoseChunkPayloadBytes;
+            for (size_t i = 0; i < kUdpPoseChunkPayloadBytes; ++i) {
+                const size_t sourceOffset = offset + i;
+                const uint8_t value = sourceOffset < reassembly.compressed.size()
+                                          ? reassembly.compressed[sourceOffset]
+                                          : 0;
+                recovered[i] ^= value;
+            }
+        }
+
+        const size_t missingOffset =
+            static_cast<size_t>(missingIndex) * kUdpPoseChunkPayloadBytes;
+        const size_t missingPayloadSize =
+            std::min(kUdpPoseChunkPayloadBytes, reassembly.compressed.size() - missingOffset);
+        std::memcpy(reassembly.compressed.data() + missingOffset, recovered.data(),
+                    missingPayloadSize);
+        reassembly.received[missingIndex] = 1;
         ++reassembly.receivedCount;
+        ++rxStats.parityRecoveries;
+
+        static uint32_t sUdpPoseParityRecoverLogCount = 0;
+        if (sUdpPoseParityRecoverLogCount < 40 ||
+            (sUdpPoseParityRecoverLogCount % 120) == 0)
+        {
+            DuskLog.info("Multiplayer direct UDP pose parity recovered sender={} seq={} "
+                         "missing_chunk={}/{}",
+                         senderId, header.sequence, missingIndex + 1, reassembly.chunkCount);
+        }
+        ++sUdpPoseParityRecoverLogCount;
     }
-    std::memcpy(reassembly.compressed.data() + offset, payload, header.payloadSize);
 
     if (reassembly.receivedCount != reassembly.chunkCount) {
         return;
@@ -6694,6 +8334,8 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
         ZSTD_decompress(raw.data(), raw.size(), reassembly.compressed.data(),
                         reassembly.compressed.size());
     if (ZSTD_isError(decompressedSize) || decompressedSize != raw.size()) {
+        ++rxStats.decompressionFailures;
+        maybe_log_udp_pose_rx_summary(senderId, header.type, rxStats, true);
         DuskLog.warn("Multiplayer direct UDP pose decompression failed sender={} seq={} err={}",
                      senderId, header.sequence,
                      ZSTD_isError(decompressedSize) ? ZSTD_getErrorName(decompressedSize)
@@ -6702,17 +8344,55 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
     }
 
     try {
-        json message = (header.type == 2 || header.type == 4)
+        json message = (header.type == kUdpPacketTypePoseMsgpack ||
+                        header.type == kUdpPacketTypeMidnaMsgpack)
                            ? json::from_msgpack(raw)
                            : json::parse(std::string(reinterpret_cast<const char*>(raw.data()),
                                                      raw.size()));
+        if (!expand_udp_matrix_delta_message(message, senderId, header.type, header.sequence)) {
+            ++rxStats.deltaFailures;
+            maybe_log_udp_pose_rx_summary(senderId, header.type, rxStats, true);
+            return;
+        }
+        remember_udp_matrix_baseline(message, senderId, header.type, header.sequence);
         process_udp_pose_message(std::move(message), senderId);
+        auto previousProcessedIt =
+            sSession.udpPoseLastProcessedSequence.find(reassemblySenderId);
+        if (previousProcessedIt != sSession.udpPoseLastProcessedSequence.end() &&
+            header.sequence > previousProcessedIt->second + 1)
+        {
+            const uint32_t gap = header.sequence - previousProcessedIt->second;
+            ++rxStats.sequenceGaps;
+            rxStats.missingSequences += gap > 0 ? gap - 1 : 0;
+            rxStats.maxGap = std::max(rxStats.maxGap, gap);
+            static uint32_t sUdpPoseSequenceGapLogCount = 0;
+            if (sUdpPoseSequenceGapLogCount < 80 ||
+                (sUdpPoseSequenceGapLogCount % 240) == 0)
+            {
+                DuskLog.warn("Multiplayer direct UDP pose sequence gap sender={} type={} "
+                             "prev_seq={} seq={} gap={}",
+                             senderId, static_cast<int>(header.type),
+                             previousProcessedIt->second, header.sequence, gap);
+            }
+            ++sUdpPoseSequenceGapLogCount;
+            maybe_log_udp_pose_rx_summary(senderId, header.type, rxStats, true);
+        }
         sSession.udpPoseLastProcessedSequence[reassemblySenderId] = header.sequence;
+        ++rxStats.completedSequences;
+        rxStats.completedDataChunks += header.chunkCount;
+        if (header.type == kUdpPacketTypePoseMsgpack ||
+            header.type == kUdpPacketTypeMidnaMsgpack)
+        {
+            send_udp_pose_ack_to_addr(fromAddr, senderId, header.type, header.sequence);
+        }
         reassemblies.erase(header.sequence);
         while (!reassemblies.empty() && reassemblies.begin()->first <= header.sequence) {
             reassemblies.erase(reassemblies.begin());
         }
+        maybe_log_udp_pose_rx_summary(senderId, header.type, rxStats);
     } catch (const json::exception& e) {
+        ++rxStats.decodeFailures;
+        maybe_log_udp_pose_rx_summary(senderId, header.type, rxStats, true);
         DuskLog.warn("Multiplayer direct UDP pose decode failed sender={} seq={} type={} err={}",
                      senderId, header.sequence, header.type, e.what());
     }
@@ -7136,7 +8816,13 @@ void send_pose() {
     sLastMidnaMatrixPackedBytes = 0;
     sLastMidnaMatrixBase64Bytes = 0;
     sLastMidnaMatrixPresentSlots = 0;
-    if (isLink && !add_link_matrices(state, &midnaMatrices))
+    const uint32_t nextPoseSequence = sSession.poseSequence + 1;
+    const bool sendFullMatrices =
+        isLink &&
+        (nextPoseSequence <= 3 || isTransforming || sWasSendingTransform ||
+         kLinkMatrixFullPoseInterval <= 1 ||
+         ((nextPoseSequence - 1) % kLinkMatrixFullPoseInterval) == 0);
+    if (isLink && !add_link_matrices(state, &midnaMatrices, sendFullMatrices))
     {
         static uint32_t sMatrixPoseDropLogCount = 0;
         ++sMatrixPoseDropLogCount;
@@ -7163,11 +8849,13 @@ void send_pose() {
 
     if (sDummyTraceEnabled && (sSession.poseSequence % 30) == 0) {
         DuskLog.info(
-            "Multiplayer dummy trace tx seq_next={} stage={} room={} matrix={} proc={} "
+            "Multiplayer dummy trace tx seq_next={} stage={} room={} matrix={} "
+            "matrix_cadence={} proc={} "
             "under_bck={} under_frame={} under_rate={} upper_bck={} upper_frame={} upper_rate={}",
             sSession.poseSequence + 1, dComIfGp_getStartStageName(),
             static_cast<int>(fopAcM_GetRoomNo(player)), state.contains("link_matrices"),
-            link != nullptr ? link->mProcID : 0, state.value("under_bck0", 0),
+            kLinkMatrixFullPoseInterval, link != nullptr ? link->mProcID : 0,
+            state.value("under_bck0", 0),
             state.value("under_frame0", 0.0f), state.value("under_rate0", 1.0f),
             state.value("upper_bck2", 0), state.value("upper_frame2", 0.0f),
             state.value("upper_rate2", 1.0f));
@@ -9058,7 +10746,7 @@ void draw_debug_peer_marker() {
         log_transform_draw_gate("dummy_model_disabled");
         return;
     }
-    if (!has_recent_peer_pose(30)) {
+    if (!has_recent_peer_pose(90)) {
         log_transform_draw_gate("no_recent_peer_pose");
         return;
     }
@@ -9080,7 +10768,7 @@ void draw_debug_peer_marker() {
     // equality; open fields often display adjacent rooms at the same time.
     for (const auto& entry : sSession.peerPoses) {
         const PeerPoseSnapshot& pose = entry.second;
-        if (!pose.valid || pose.ageTicks > 30) {
+        if (!pose.valid || pose.ageTicks > 90) {
             if (pose.isTransforming && sTransformDrawGateLogCount < 40) {
                 ++sTransformDrawGateLogCount;
                 DuskLog.info(
@@ -9486,6 +11174,40 @@ void notify_local_item_get(int itemId) {
     DuskLog.info("Multiplayer sent local item get item_id={}", itemId);
 }
 
+void notify_local_item_first_bit_set(int itemId) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    if (!is_synced_reversible_item_first_bit(itemId)) {
+        return;
+    }
+
+    send_json({
+        {"type", "item_first_bit"},
+        {"item_id", itemId},
+        {"owned", true},
+    });
+    DuskLog.info("Multiplayer sent local item first bit item_id={} owned=true", itemId);
+}
+
+void notify_local_item_first_bit_cleared(int itemId) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    if (!is_synced_reversible_item_first_bit(itemId)) {
+        return;
+    }
+
+    send_json({
+        {"type", "item_first_bit"},
+        {"item_id", itemId},
+        {"owned", false},
+    });
+    DuskLog.info("Multiplayer sent local item first bit item_id={} owned=false", itemId);
+}
+
 void notify_local_memory_switch_set(int flag) {
     if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
@@ -9550,6 +11272,41 @@ void notify_local_memory_switch_set(int flag) {
     } else {
         DuskLog.info("Multiplayer sent local switch bit stage={} flag={}", stageNo, flag);
     }
+}
+
+void notify_local_room_switch_set(int flag, int room) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit ||
+        room < 0 || !sLocalSwitchActorContext.active || sLocalSwitchActorContext.flag != flag ||
+        !is_small_key_door_switch_actor(sLocalSwitchActorContext.actorName))
+    {
+        return;
+    }
+
+    stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+    if (stagInfo == nullptr) {
+        return;
+    }
+
+    const int stageNo = dStage_stagInfo_GetSaveTbl(stagInfo);
+    begin_flag_trace_window("local_send", "room_switch", stageNo, flag, true,
+                            sLocalSwitchActorContext.actorName,
+                            sLocalSwitchActorContext.room,
+                            sLocalSwitchActorContext.actorParams);
+
+    send_json({
+        {"type", "room_switch_bit"},
+        {"stage", stageNo},
+        {"flag", flag},
+        {"room", room},
+        {"source_actor", sLocalSwitchActorContext.actorName},
+        {"source_room", sLocalSwitchActorContext.room},
+        {"source_params", sLocalSwitchActorContext.actorParams},
+    });
+
+    DuskLog.info("Multiplayer sent local room switch bit stage={} flag={} room={} "
+                 "sourceActor={} sourceRoom={} sourceParams=0x{:08X}",
+                 stageNo, flag, room, sLocalSwitchActorContext.actorName,
+                 sLocalSwitchActorContext.room, sLocalSwitchActorContext.actorParams);
 }
 
 void notify_local_memory_switch_cleared(int flag) {

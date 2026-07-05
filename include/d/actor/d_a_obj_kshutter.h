@@ -39,6 +39,7 @@ public:
     BOOL adjustmentProc();
     BOOL keyUnlockInit();
     BOOL keyUnlock();
+    void syncRemoteKeyUnlock();
     BOOL openInit();
     BOOL openProc();
     BOOL openProc_type1();

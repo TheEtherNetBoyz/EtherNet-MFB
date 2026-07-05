@@ -55,6 +55,7 @@ const std::set<std::string> kStateBroadcastTypes = {
     "event_bit",
     "tbox_bit",
     "switch_bit",
+    "room_switch_bit",
     "item_bit",
     "dungeon_item_bit",
     "save_snapshot",
@@ -64,6 +65,7 @@ const std::set<std::string> kStateBroadcastTypes = {
     "bottle_slots",
     "rupee_count",
     "item_get",
+    "item_first_bit",
     "collect_crystal",
     "collect_mirror",
     "dark_clear_lv",
@@ -114,11 +116,12 @@ const char* packet_category(const std::string& type) {
         return "save_snapshot";
     }
     if (type == "event_bit" || type == "tbox_bit" || type == "switch_bit" ||
-        type == "item_bit" || type == "dungeon_item_bit")
+        type == "room_switch_bit" || type == "item_bit" || type == "dungeon_item_bit")
     {
         return "world_state";
     }
-    if (type == "item_get" || type == "collect_crystal" || type == "collect_mirror" ||
+    if (type == "item_get" || type == "item_first_bit" ||
+        type == "collect_crystal" || type == "collect_mirror" ||
         type == "dark_clear_lv" || type == "transform_lv" || type == "region_bit" ||
         type == "collect" || type == "visited_room" || type == "letter_get")
     {
