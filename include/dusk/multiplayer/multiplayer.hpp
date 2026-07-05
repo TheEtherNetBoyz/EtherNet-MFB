@@ -368,7 +368,7 @@ struct PlayerListEntry {
 
 void initialize();
 void update();
-void consume_progression_prompt_start_button();
+void consume_progression_prompt_accept_button();
 void shutdown();
 bool is_enabled();
 void record_local_link_audio_event(uint32_t soundId, bool level, uint32_t mapInfo = 0,

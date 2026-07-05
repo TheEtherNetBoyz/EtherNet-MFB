@@ -325,7 +325,7 @@ void main01(void) {
                     dusk::frame_interp::begin_sim_tick();
                     dusk::latency_trace::mark("mDoCPd_read_before");
                     mDoCPd_c::read();
-                    dusk::multiplayer::consume_progression_prompt_start_button();
+                    dusk::multiplayer::consume_progression_prompt_accept_button();
                     const u32 padHold = mDoCPd_c::getHold(PAD_1);
                     const u32 padTrig = mDoCPd_c::getTrig(PAD_1);
                     const float stickX = mDoCPd_c::getStickX(PAD_1);
@@ -377,7 +377,7 @@ void main01(void) {
             // Game Inputs
             dusk::latency_trace::mark("mDoCPd_read_before");
             mDoCPd_c::read();
-            dusk::multiplayer::consume_progression_prompt_start_button();
+            dusk::multiplayer::consume_progression_prompt_accept_button();
             dusk::latency_trace::pad_snapshot("mDoCPd_read_after", mDoCPd_c::getHold(PAD_1),
                                               mDoCPd_c::getTrig(PAD_1), mDoCPd_c::getStickX(PAD_1),
                                               mDoCPd_c::getStickY(PAD_1));

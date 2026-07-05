@@ -102,7 +102,7 @@
 namespace dusk::multiplayer {
 
 void flush_pending_progression_sync();
-void consume_progression_prompt_start_button();
+void consume_progression_prompt_accept_button();
 void apply_remote_link_model_enabled(bool enabled);
 void apply_sync_flags_enabled(bool enabled);
 void apply_sync_world_enabled(bool enabled);
@@ -786,7 +786,7 @@ PendingProgressionSync sPendingProgressionSync;
 std::vector<PendingProgressionCueArrival> sPendingProgressionCueArrivals;
 std::vector<PendingSyncReply> sPendingSyncReplies;
 std::map<std::string, PeerProgressionState> sPeerProgressionStates;
-bool sProgressionPromptExactStartHeld = false;
+bool sProgressionPromptAcceptHeld = false;
 std::set<std::string> sShownPoseProgressionCues;
 std::set<std::string> sHandledProgressionSyncCues;
 std::map<std::string, std::string> sPeerNames;
@@ -2458,7 +2458,7 @@ void maybe_show_progression_sync_prompt_for_switch(const std::string& peerId, in
     if (stage == kProgressionCueSewersStage && flag == kProgressionCueWakeUpInJailSwitch) {
         show_progression_sync_prompt(peerId, "sewers_wake_up_in_jail",
                                      display_name_for_peer(peerId) + " entered Hyrule Sewers",
-                                     "Hold START to sync and reload");
+                                     "Hold D-Pad Down to sync and reload");
     } else if (stage == kProgressionCueHyruleFieldStage &&
                flag == kProgressionCueEldinTwilightSwitch)
     {
@@ -2578,7 +2578,7 @@ void queue_progression_event_prompt(const std::string& peerId, const char* cueKe
                                     const char* action, const char* areaName) {
     queue_progression_cue_ready(peerId, cueKey,
                                 display_name_for_peer(peerId) + " " + action + " " + areaName,
-                                "Hold START to sync and reload");
+                                "Hold D-Pad Down to sync and reload");
 }
 
 void maybe_show_progression_sync_prompt_for_pose_stage(const std::string& peerId,
@@ -2600,19 +2600,19 @@ void maybe_show_progression_sync_prompt_for_pose_stage(const std::string& peerId
     queue_progression_cue_ready(peerId, cueKey,
                                 display_name_for_peer(peerId) +
                                     " reached the final Ganondorf fight",
-                                "Hold START to sync and reload");
+                                "Hold D-Pad Down to sync and reload");
 }
 
 void maybe_show_progression_sync_prompt_for_event_bit(const std::string& peerId, uint16_t flag) {
     if (flag == kProgressionCueSewersCompleteEventBit) {
         queue_progression_cue_arrival(peerId, "sewers_complete",
                                       display_name_for_peer(peerId) + " completed Sewers",
-                                      "Hold START to sync and reload",
+                                      "Hold D-Pad Down to sync and reload",
                                       kProgressionCueSewersCompleteDestStage);
     } else if (flag == kProgressionCueFaronTwilightEventBit) {
         queue_progression_cue_arrival(peerId, "faron_twilight_entered",
                                       display_name_for_peer(peerId) + " entered Faron Twilight",
-                                      "Hold START to sync and reload",
+                                      "Hold D-Pad Down to sync and reload",
                                       kProgressionCueFaronTwilightDestStage);
     } else {
         switch (flag) {
@@ -2632,7 +2632,7 @@ void maybe_show_progression_sync_prompt_for_event_bit(const std::string& peerId,
             queue_progression_cue_arrival(peerId, "temple_of_time_complete",
                                           display_name_for_peer(peerId) +
                                               " completed Temple of Time",
-                                          "Hold START to sync and reload",
+                                          "Hold D-Pad Down to sync and reload",
                                           kProgressionCueTempleOfTimeExitStage);
             break;
         default:
@@ -11110,16 +11110,16 @@ void flush_pending_progression_sync() {
     }
 }
 
-void consume_progression_prompt_start_button() {
-    sProgressionPromptExactStartHeld = false;
+void consume_progression_prompt_accept_button() {
+    sProgressionPromptAcceptHeld = false;
     if (!sProgressionSyncPrompt.active) {
         return;
     }
 
     interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
-    sProgressionPromptExactStartHeld = (pad.mButtonFlags & PAD_BUTTON_START) != 0;
-    pad.mButtonFlags &= ~PAD_BUTTON_START;
-    pad.mPressedButtonFlags &= ~PAD_BUTTON_START;
+    sProgressionPromptAcceptHeld = (pad.mButtonFlags & PAD_BUTTON_DOWN) != 0;
+    pad.mButtonFlags &= ~PAD_BUTTON_DOWN;
+    pad.mPressedButtonFlags &= ~PAD_BUTTON_DOWN;
 }
 
 void draw_progression_sync_prompt() {
@@ -11136,7 +11136,7 @@ void draw_progression_sync_prompt() {
         sProgressionSyncPrompt.ageSeconds += dt;
     }
 
-    if (!sProgressionSyncPrompt.waiting && sProgressionPromptExactStartHeld) {
+    if (!sProgressionSyncPrompt.waiting && sProgressionPromptAcceptHeld) {
         sProgressionSyncPrompt.holdSeconds =
             std::min(kProgressionSyncHoldDuration, sProgressionSyncPrompt.holdSeconds + dt);
     } else if (!sProgressionSyncPrompt.waiting) {
@@ -11228,9 +11228,10 @@ void draw_progression_sync_prompt() {
                                 -0.5f * kPi + 2.0f * kPi * holdRatio, 48);
             drawList->PathStroke(IM_COL32(255, 176, 38, 255), 0, 5.0f);
         }
-        drawList->AddText(ImVec2(ringCenter.x - (waiting ? 5.0f : 4.0f), ringCenter.y - 8.0f),
-                          IM_COL32(255, 255, 255, 245), waiting ? "..." : "S");
-
+        if (waiting) {
+            drawList->AddText(ImVec2(ringCenter.x - 5.0f, ringCenter.y - 8.0f),
+                              IM_COL32(255, 255, 255, 245), "...");
+        }
         if (!waiting) {
             const ImVec2 barMin(pos.x, pos.y + size.y - 3.0f);
             drawList->AddRectFilled(barMin,
