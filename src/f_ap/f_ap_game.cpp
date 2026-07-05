@@ -13,6 +13,7 @@
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_grass.h"
 #include "d/actor/d_a_midna.h"
+#include "d/d_msg_object.h"
 #include "d/d_model.h"
 #include "d/d_tresure.h"
 #include "dusk/achievements.h"
@@ -748,6 +749,12 @@ static bool fapGm_isZantDeathSkipVanillaLoad() {
            dComIfGp_getNextStageLayer() == 9;
 }
 
+static bool fapGm_hasActiveMessageScreen() {
+    dMsgObject_c* msgObject = dMsgObject_getMsgObjectClass();
+    return msgObject != NULL &&
+           (msgObject->getStatusLocal() != 1 || msgObject->getScrnDrawPtrLocal() != NULL);
+}
+
 static bool fapGm_isInstaLoadPumpAllowed(BOOL hadNextStage) {
     return hadNextStage &&
            dusk::getSettings().game.enableInstaLoads.getValue() &&
@@ -756,6 +763,7 @@ static bool fapGm_isInstaLoadPumpAllowed(BOOL hadNextStage) {
            !mDoRst::isShutdown() &&
            !fopScnRq_IsTitleToFileSelectVanillaFastLoad() &&
            !fapGm_isZantDeathSkipVanillaLoad() &&
+           !fapGm_hasActiveMessageScreen() &&
            fpcM_SearchByName(fpcNm_OPENING_SCENE_e) == NULL &&
            fpcM_SearchByName(fpcNm_NAME_SCENE_e) == NULL &&
            fpcM_SearchByName(fpcNm_TITLE_e) == NULL;
