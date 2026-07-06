@@ -535,6 +535,7 @@ void sync_remote_link_actor_dummies(const std::map<std::string, PeerPoseSnapshot
                 }
             }
         }
+        actor->syncRemoteActiveSounds(pose.activeAudioEvents);
         if (dummy.logCount < 5) {
             ++dummy.logCount;
             DuskLog.info("Multiplayer remote Link actor: updated peer={} id={} pos=({}, {}, {}) "

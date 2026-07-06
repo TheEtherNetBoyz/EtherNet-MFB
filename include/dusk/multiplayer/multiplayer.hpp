@@ -187,6 +187,7 @@ struct PeerPoseSnapshot {
     RemoteLinkMatrixSnapshot linkMatrices;
     bool linkMatricesFresh = false;
     std::vector<RemoteAudioEvent> audioEvents;
+    std::vector<RemoteAudioEvent> activeAudioEvents;
 };
 
 struct GanondorfMpTargetSnapshot {
@@ -373,6 +374,8 @@ void shutdown();
 bool is_enabled();
 void record_local_link_audio_event(uint32_t soundId, bool level, uint32_t mapInfo = 0,
                                    int reverb = -1, uint8_t sourceKind = 0);
+void record_local_link_active_audio_event(uint32_t soundId, uint32_t mapInfo = 0,
+                                          int reverb = -1, uint8_t sourceKind = 0);
 void notify_bomb_post_execute(daNbomb_c* bomb);
 void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo);
 void report_remote_link_pvp_target_hit(fopAc_ac_c* remoteLinkActor, fopAc_ac_c* attackActor,

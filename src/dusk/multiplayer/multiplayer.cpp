@@ -577,6 +577,28 @@ std::vector<RemoteAudioEvent> parse_audio_events(const json& state) {
     return events;
 }
 
+std::vector<RemoteAudioEvent> parse_active_audio_events(const json& state) {
+    std::vector<RemoteAudioEvent> events;
+    const json entries = state.value("active_audio_events", json::array());
+    for (const json& entry : entries) {
+        if (!entry.is_object() || events.size() >= 8) {
+            continue;
+        }
+
+        RemoteAudioEvent event;
+        event.sequence = entry.value("seq", 0U);
+        event.soundId = entry.value("sound_id", 0U);
+        event.mapInfo = entry.value("mapinfo", 0U);
+        event.reverb = static_cast<int8_t>(entry.value("reverb", -1));
+        event.sourceKind = static_cast<uint8_t>(entry.value("source", 0));
+        event.level = true;
+        if (event.soundId != 0) {
+            events.push_back(event);
+        }
+    }
+    return events;
+}
+
 struct DirectPeer {
     socket_t sock = INVALID_SOCKET;
     sockaddr_in udpAddr{};
@@ -794,6 +816,7 @@ std::map<std::string, uint8_t> sPeerColorSlots;
 uint8_t sLocalPlayerColorSlot = 0;
 bool sLocalPlayerColorSlotReserved = true;
 std::vector<RemoteAudioEvent> sPendingLocalAudioEvents;
+std::vector<RemoteAudioEvent> sActiveLocalAudioEvents;
 uint32_t sLocalAudioEventSequence = 0;
 bool sManualSyncReloadPending = false;
 std::optional<dSv_info_c> sPendingManualSyncInfo;
@@ -3334,6 +3357,7 @@ size_t pose_base_state_bytes(const json& state) {
     json base = state;
     base.erase("link_matrices");
     base.erase("audio_events");
+    base.erase("active_audio_events");
     return base.dump().size();
 }
 
@@ -3348,9 +3372,10 @@ void trace_packet_tx(const json& message, size_t bytes) {
         const json state = message.value("state", json::object());
         DuskLog.info(
             "MP_PACKET_TX category={} type={} bytes={} sequence={} base_state={} "
-            "link_matrices={} audio_events={}",
+            "link_matrices={} audio_events={} active_audio_events={}",
             category, type, bytes, message.value("sequence", 0U), pose_base_state_bytes(state),
-            json_field_bytes(state, "link_matrices"), json_field_bytes(state, "audio_events"));
+            json_field_bytes(state, "link_matrices"), json_field_bytes(state, "audio_events"),
+            json_field_bytes(state, "active_audio_events"));
         return;
     }
 
@@ -7092,6 +7117,7 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             apply_midna_matrices(pose.linkMatrices, pendingMidna->second.second);
         }
         pose.audioEvents = parse_audio_events(state);
+        pose.activeAudioEvents = parse_active_audio_events(state);
         if (sDummyTraceEnabled) {
             const bool hadExisting = existing != sSession.peerPoses.end() && existing->second.valid;
             const uint32_t previousSequence = hadExisting ? existing->second.sequence : 0;
@@ -7895,7 +7921,7 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
         const json* state =
             wireMessage.find("state") != wireMessage.end() ? &wireMessage["state"] : nullptr;
         static const char* const matrixKeys[] = {"link_matrices"};
-        static const char* const audioKeys[] = {"audio_events"};
+        static const char* const audioKeys[] = {"audio_events", "active_audio_events"};
         static const char* const worldKeys[] = {
             "stage", "room", "layer", "final_ganondorf_ready", "x", "y", "z", "angle_y",
             "manual_sync_ready",
@@ -8927,6 +8953,17 @@ std::vector<RemoteAudioEvent> drain_local_link_audio_events() {
     return events;
 }
 
+std::vector<RemoteAudioEvent> drain_local_link_active_audio_events() {
+    std::vector<RemoteAudioEvent> events;
+    const size_t count = std::min<size_t>(sActiveLocalAudioEvents.size(), 8);
+    events.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        events.push_back(sActiveLocalAudioEvents[i]);
+    }
+    sActiveLocalAudioEvents.clear();
+    return events;
+}
+
 void update_listening() {
     if (sSession.listenSock == INVALID_SOCKET) {
         return;
@@ -9032,11 +9069,13 @@ void send_presence() {
 
 void send_pose() {
     if (!sSession.welcomed) {
+        sActiveLocalAudioEvents.clear();
         return;
     }
 
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
     if (player == nullptr) {
+        sActiveLocalAudioEvents.clear();
         return;
     }
 
@@ -9085,6 +9124,7 @@ void send_pose() {
     if (!isTransforming && sVisualPoseSendInterval > 1 &&
         (++sVisualPoseSendTick % sVisualPoseSendInterval) != 0)
     {
+        sActiveLocalAudioEvents.clear();
         return;
     }
     static bool sLocalTransformObserved = false;
@@ -9120,12 +9160,14 @@ void send_pose() {
     sWasSendingTransform = isTransforming;
 
     std::vector<RemoteAudioEvent> audioEvents = drain_local_link_audio_events();
+    std::vector<RemoteAudioEvent> activeAudioEvents = drain_local_link_active_audio_events();
     static uint32_t sAudioTxLogCount = 0;
-    if (!audioEvents.empty() && sAudioTxLogCount < 20) {
+    if ((!audioEvents.empty() || !activeAudioEvents.empty()) && sAudioTxLogCount < 20) {
         ++sAudioTxLogCount;
-        DuskLog.info("Multiplayer audio tx count={} first_seq={} first_sound={:#x}",
-                     audioEvents.size(), audioEvents.front().sequence,
-                     audioEvents.front().soundId);
+        DuskLog.info("Multiplayer audio tx count={} active_count={} first_sound={:#x}",
+                     audioEvents.size(), activeAudioEvents.size(),
+                     !audioEvents.empty() ? audioEvents.front().soundId :
+                                            activeAudioEvents.front().soundId);
     }
 
     const LocalMidnaVisualState midnaVisual = detect_midna_visual_state(link, isWolf);
@@ -9143,6 +9185,7 @@ void send_pose() {
         !pose_float_is_finite("upper_frame2", upperFrame2) ||
         !pose_float_is_finite("upper_rate2", upperRate2))
     {
+        sActiveLocalAudioEvents.clear();
         return;
     }
 
@@ -9224,6 +9267,7 @@ void send_pose() {
         {"item_actor_kind", REMOTE_ITEM_ACTOR_NONE},
         {"ride_actor_kind", REMOTE_RIDE_ACTOR_NONE},
         {"audio_events", audio_events_to_json(audioEvents)},
+        {"active_audio_events", audio_events_to_json(activeAudioEvents)},
     };
     json midnaMatrices;
     sLastMidnaMatrixPackedBytes = 0;
@@ -9873,6 +9917,35 @@ void record_local_link_audio_event(uint32_t soundId, bool level, uint32_t mapInf
     DuskLog.info("Multiplayer audio enqueue seq={} sound={:#x} mapinfo={} reverb={} source={}",
                  event.sequence, event.soundId, event.mapInfo, static_cast<int>(event.reverb),
                  static_cast<int>(event.sourceKind));
+}
+
+void record_local_link_active_audio_event(uint32_t soundId, uint32_t mapInfo, int reverb,
+                                          uint8_t sourceKind) {
+    if (!sEnabled || !sSession.welcomed || soundId == 0) {
+        return;
+    }
+
+    for (RemoteAudioEvent& event : sActiveLocalAudioEvents) {
+        if (event.soundId == soundId && event.mapInfo == mapInfo &&
+            event.sourceKind == sourceKind)
+        {
+            event.reverb = static_cast<int8_t>(std::clamp(reverb, -1, 127));
+            return;
+        }
+    }
+
+    if (sActiveLocalAudioEvents.size() >= 8) {
+        return;
+    }
+
+    RemoteAudioEvent event;
+    event.sequence = sLocalAudioEventSequence;
+    event.soundId = soundId;
+    event.mapInfo = mapInfo;
+    event.reverb = static_cast<int8_t>(std::clamp(reverb, -1, 127));
+    event.sourceKind = sourceKind;
+    event.level = true;
+    sActiveLocalAudioEvents.push_back(event);
 }
 
 void initialize() {

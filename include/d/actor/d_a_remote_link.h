@@ -8,6 +8,7 @@
 #include "dusk/multiplayer/multiplayer.hpp"
 #include "f_op/f_op_actor_mng.h"
 #include "m_Do/m_Do_ext.h"
+#include "Z2AudioLib/Z2SoundObject.h"
 
 class mDoExt_bckAnm;
 class JKRExpHeap;
@@ -53,6 +54,7 @@ public:
     void applyRemoteBodyMatrixInterpolationForPresentation();
     bool getNameLabelPosition(cXyz* o_pos) const;
     void playRemoteSound(const dusk::multiplayer::RemoteAudioEvent& i_event);
+    void syncRemoteActiveSounds(const std::vector<dusk::multiplayer::RemoteAudioEvent>& i_events);
     int headModelCallBack(int i_jointNo);
 
     static int createHeapCallBack(fopAc_ac_c* i_this);
@@ -97,6 +99,12 @@ private:
         u32 modelFlags;
         u32 diffFlags;
         u16 brkResId;
+    };
+
+    struct ActiveRemoteSound {
+        dusk::multiplayer::RemoteAudioEvent event;
+        u8 ageTicks;
+        bool active;
     };
 
     struct OwnedArchiveSlot {
@@ -174,6 +182,7 @@ private:
     void spawnRemoteBombExplosion();
     void initPvpTargetCollision();
     void updatePvpTargetCollision();
+    void stopRemoteActiveSounds();
     void hideAllHandShapes();
     void setupDrawHands();
     void setupHeavyBootModels();
@@ -315,6 +324,8 @@ private:
     dCcD_Stts mPvpTargetStts;
     dCcD_Cyl mPvpTargetCyl;
     bool mPvpTargetCollisionInitialized;
+    Z2SoundObjSimple mActiveSoundObj;
+    std::array<ActiveRemoteSound, 8> mActiveSounds;
     /* 0xC24 */ int mMidnaHairShape;
     /* 0xC28 */ bool mSlotReserved;
 };

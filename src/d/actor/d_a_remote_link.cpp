@@ -705,6 +705,8 @@ daRemoteLink_c::daRemoteLink_c()
       mPvpTargetStts(),
       mPvpTargetCyl(),
       mPvpTargetCollisionInitialized(false),
+      mActiveSoundObj(),
+      mActiveSounds(),
       mMidnaHairShape(0),
       mSlotReserved(false) {
     mVisualState.form = FORM_HUMAN_KOKIRI;
@@ -729,6 +731,11 @@ daRemoteLink_c::daRemoteLink_c()
     mShadowMidnaHandInvModel.mpPackets = NULL;
     mShadowMidnaHairInvModel.mModel = NULL;
     mShadowMidnaHairInvModel.mpPackets = NULL;
+    mActiveSoundObj.init(&current.pos, 8);
+    for (ActiveRemoteSound& sound : mActiveSounds) {
+        sound.active = false;
+        sound.ageTicks = 0;
+    }
 }
 
 int daRemoteLink_c::createHeapCallBack(fopAc_ac_c* i_this) {
@@ -2484,6 +2491,7 @@ void daRemoteLink_c::calcModels() {
 
 int daRemoteLink_c::Execute() {
     if (isRemoteLinkSceneUnsafe()) {
+        stopRemoteActiveSounds();
         return TRUE;
     }
 
@@ -2506,6 +2514,16 @@ int daRemoteLink_c::Execute() {
     }
     updatePvpTargetCollision();
     updateRemoteBombActor();
+    mActiveSoundObj.framework(0, dComIfGp_getReverb(fopAcM_GetRoomNo(this)));
+    for (ActiveRemoteSound& sound : mActiveSounds) {
+        if (!sound.active) {
+            continue;
+        }
+        if (++sound.ageTicks > 8) {
+            mActiveSoundObj.stopSound(sound.event.soundId, 2);
+            sound.active = false;
+        }
+    }
     return TRUE;
 }
 
@@ -3802,6 +3820,53 @@ void daRemoteLink_c::playRemoteSound(const dusk::multiplayer::RemoteAudioEvent& 
     }
 }
 
+void daRemoteLink_c::syncRemoteActiveSounds(
+    const std::vector<dusk::multiplayer::RemoteAudioEvent>& i_events) {
+    for (const dusk::multiplayer::RemoteAudioEvent& event : i_events) {
+        if (event.soundId == 0) {
+            continue;
+        }
+
+        ActiveRemoteSound* slot = NULL;
+        ActiveRemoteSound* freeSlot = NULL;
+        for (ActiveRemoteSound& sound : mActiveSounds) {
+            if (sound.active && sound.event.soundId == event.soundId &&
+                sound.event.sourceKind == event.sourceKind && sound.event.mapInfo == event.mapInfo)
+            {
+                slot = &sound;
+                break;
+            }
+            if (!sound.active && freeSlot == NULL) {
+                freeSlot = &sound;
+            }
+        }
+
+        if (slot == NULL) {
+            slot = freeSlot;
+        }
+        if (slot == NULL) {
+            continue;
+        }
+
+        slot->event = event;
+        slot->event.level = true;
+        slot->ageTicks = 0;
+        slot->active = true;
+
+        const s8 reverb = event.reverb < 0 ? dComIfGp_getReverb(fopAcM_GetRoomNo(this)) :
+                                             event.reverb;
+        mActiveSoundObj.startLevelSound(event.soundId, event.mapInfo, reverb);
+    }
+}
+
+void daRemoteLink_c::stopRemoteActiveSounds() {
+    mActiveSoundObj.stopAllSounds(0);
+    for (ActiveRemoteSound& sound : mActiveSounds) {
+        sound.active = false;
+        sound.ageTicks = 0;
+    }
+}
+
 int daRemoteLink_c::Draw() {
     if (isRemoteLinkSceneUnsafe()) {
         return TRUE;
@@ -3933,6 +3998,7 @@ int daRemoteLink_c::Delete() {
         mpItemActorModel != NULL ? (void*)mpItemActorModel->getModelData() : NULL,
         (void*)mpArcHeap);
     stopRemoteBombActor(false);
+    stopRemoteActiveSounds();
     releaseSlot();
     destroyEquipmentModels();
     for (u32 i = 0; i < ARRAY_SIZE(mEquipmentArchives); ++i) {
