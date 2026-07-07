@@ -351,8 +351,15 @@ struct UdpPoseAckPacket {
     uint32_t sequence;
     uint8_t ackedType;
     char ackedSenderId[kUdpPoseSenderIdBytes];
+    uint8_t stressFlags;
 };
 #pragma pack(pop)
+
+enum UdpPoseAckStressFlags : uint8_t {
+    UDP_POSE_ACK_STRESS_PARITY_RECOVERED = 1 << 0,
+    UDP_POSE_ACK_STRESS_SEQUENCE_GAP = 1 << 1,
+    UDP_POSE_ACK_STRESS_REASSEMBLY_EVICTED = 1 << 2,
+};
 
 enum UdpObjectFlags : uint8_t {
     UDP_OBJECT_ACTIVE = 1 << 0,
@@ -388,6 +395,9 @@ struct UdpPoseRxStats {
     uint64_t missingSequences = 0;
     uint64_t expectedDataChunks = 0;
     uint64_t completedDataChunks = 0;
+    uint64_t ackedParityRecoveries = 0;
+    uint64_t ackedSequenceGaps = 0;
+    uint64_t ackedEvictedSequences = 0;
     uint32_t maxGap = 0;
     uint16_t maxInflight = 0;
     uint16_t maxMissingChunksOnEvict = 0;
@@ -665,6 +675,7 @@ struct Session {
     std::map<std::string, std::map<uint32_t, UdpPoseReassembly>> udpPoseReassembly;
     std::map<std::string, uint32_t> udpPoseLastProcessedSequence;
     std::map<std::string, uint32_t> udpPoseAckedSequenceByReceiver;
+    std::map<std::string, uint32_t> udpPoseAckStressUntilSequenceByReceiver;
     std::map<std::string, std::map<uint32_t, std::string>> udpMatrixBaselineHistory;
     std::map<std::string, std::pair<uint32_t, RemoteLinkMatrixSnapshot>> pendingMidnaMatrices;
     bool udpRemoteAddrKnown = false;
@@ -3302,6 +3313,7 @@ void reset_connection_state() {
     sSession.udpPoseReassembly.clear();
     sSession.udpPoseLastProcessedSequence.clear();
     sSession.udpPoseAckedSequenceByReceiver.clear();
+    sSession.udpPoseAckStressUntilSequenceByReceiver.clear();
     sSession.udpMatrixBaselineHistory.clear();
     sSession.pendingMidnaMatrices.clear();
     sSession.udpRemoteAddrKnown = false;
@@ -4387,6 +4399,7 @@ constexpr uint32_t kVisualPoseAckLagDownshiftThreshold = 12;
 constexpr uint32_t kVisualPoseAckLagUpshiftThreshold = 10;
 constexpr uint32_t kVisualPoseDownshiftSustainTicks = 45;
 constexpr uint32_t kVisualPoseUpshiftSustainTicks = 360;
+constexpr uint32_t kVisualPoseAckStressHoldSequences = 90;
 constexpr bool kUseAckedMatrixDeltas = true;
 constexpr size_t kMatrixBaselineHistoryLimit = 300;
 constexpr uint64_t kFnv1a64Offset = 14695981039346656037ull;
@@ -7758,6 +7771,29 @@ uint32_t max_local_pose_ack_lag(uint32_t currentSequence, bool* hasAckOut) {
     return maxLag;
 }
 
+bool local_pose_ack_loss_stressed(uint32_t currentSequence) {
+    const std::string senderId = local_udp_pose_sender_id();
+
+    auto receiverStressed = [&](const std::string& receiverId) {
+        const auto it = sSession.udpPoseAckStressUntilSequenceByReceiver.find(
+            pose_ack_key(receiverId, senderId, kUdpPacketTypePoseMsgpack));
+        return it != sSession.udpPoseAckStressUntilSequenceByReceiver.end() &&
+               currentSequence <= it->second;
+    };
+
+    if (sSession.mode == NetworkMode::DirectHost) {
+        for (const auto& entry : sSession.directPeers) {
+            if (receiverStressed(entry.second.id)) {
+                return true;
+            }
+        }
+    } else if (sSession.mode == NetworkMode::DirectJoin) {
+        return receiverStressed(kDirectPeerId);
+    }
+
+    return false;
+}
+
 size_t compressed_size_for_diagnostics(const void* data, size_t size) {
     const size_t bound = ZSTD_compressBound(size);
     std::vector<uint8_t> compressed(bound);
@@ -7870,6 +7906,7 @@ bool open_udp_socket(const std::string& bindHost, int bindPort) {
     sSession.udpPoseReassembly.clear();
     sSession.udpPoseLastProcessedSequence.clear();
     sSession.udpPoseAckedSequenceByReceiver.clear();
+    sSession.udpPoseAckStressUntilSequenceByReceiver.clear();
     sSession.udpMatrixBaselineHistory.clear();
 
     sSession.udpSock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -8124,7 +8161,7 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
 }
 
 bool send_udp_pose_ack_to_addr(const sockaddr_in& addr, const std::string& poseSenderId,
-                               uint8_t packetType, uint32_t sequence) {
+                               uint8_t packetType, uint32_t sequence, uint8_t stressFlags) {
     if (sSession.udpSock == INVALID_SOCKET || sequence == 0) {
         return false;
     }
@@ -8132,6 +8169,7 @@ bool send_udp_pose_ack_to_addr(const sockaddr_in& addr, const std::string& poseS
     UdpPoseAckPacket ack{};
     ack.sequence = sequence;
     ack.ackedType = packetType;
+    ack.stressFlags = stressFlags;
     set_pose_ack_sender(ack, poseSenderId);
 
     std::array<uint8_t, sizeof(UdpPoseChunkHeader) + sizeof(UdpPoseAckPacket)> packet{};
@@ -8557,13 +8595,19 @@ void process_udp_pose_ack_packet(const UdpPoseAckPacket& ack, const std::string&
 
     const uint32_t old = previous;
     previous = ack.sequence;
+    if (ack.ackedType == kUdpPacketTypePoseMsgpack && ack.stressFlags != 0) {
+        sSession.udpPoseAckStressUntilSequenceByReceiver[key] =
+            ack.sequence + kVisualPoseAckStressHoldSequences;
+    }
 
     static uint32_t sUdpPoseAckRxLogCount = 0;
-    if (sUdpPoseAckRxLogCount < 80 || (sUdpPoseAckRxLogCount % 240) == 0) {
+    if (sUdpPoseAckRxLogCount < 80 || ack.stressFlags != 0 ||
+        (sUdpPoseAckRxLogCount % 240) == 0)
+    {
         DuskLog.info("Multiplayer direct UDP pose ack rx receiver={} sender={} type={} seq={} "
-                     "previous={}",
+                     "previous={} stress_flags={}",
                      receiverId, poseSenderId, static_cast<int>(ack.ackedType), ack.sequence,
-                     old);
+                     old, static_cast<int>(ack.stressFlags));
     }
     ++sUdpPoseAckRxLogCount;
 }
@@ -8643,6 +8687,23 @@ std::string missing_udp_chunks_summary(const UdpPoseReassembly& reassembly) {
     return out.empty() ? "-" : out;
 }
 
+uint8_t udp_pose_ack_stress_flags(UdpPoseRxStats& stats) {
+    uint8_t flags = 0;
+    if (stats.parityRecoveries > stats.ackedParityRecoveries) {
+        flags |= UDP_POSE_ACK_STRESS_PARITY_RECOVERED;
+    }
+    if (stats.sequenceGaps > stats.ackedSequenceGaps) {
+        flags |= UDP_POSE_ACK_STRESS_SEQUENCE_GAP;
+    }
+    if (stats.evictedSequences > stats.ackedEvictedSequences) {
+        flags |= UDP_POSE_ACK_STRESS_REASSEMBLY_EVICTED;
+    }
+    stats.ackedParityRecoveries = stats.parityRecoveries;
+    stats.ackedSequenceGaps = stats.sequenceGaps;
+    stats.ackedEvictedSequences = stats.evictedSequences;
+    return flags;
+}
+
 void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payload,
                            const sockaddr_in& fromAddr) {
     if (std::memcmp(header.magic, "DMPU", 4) != 0 || header.version != 1 ||
@@ -8687,15 +8748,17 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
     }
 
     if (header.type == kUdpPacketTypePoseAck) {
+        const bool legacyAckSize = header.payloadSize == sizeof(UdpPoseAckPacket) - 1;
+        const bool currentAckSize = header.payloadSize == sizeof(UdpPoseAckPacket);
         if (header.chunkIndex != 0 || header.chunkCount != 1 ||
-            header.payloadSize != sizeof(UdpPoseAckPacket) ||
-            header.uncompressedSize != sizeof(UdpPoseAckPacket) ||
-            header.compressedSize != sizeof(UdpPoseAckPacket))
+            (!legacyAckSize && !currentAckSize) ||
+            header.uncompressedSize != header.payloadSize ||
+            header.compressedSize != header.payloadSize)
         {
             return;
         }
         UdpPoseAckPacket ack{};
-        std::memcpy(&ack, payload, sizeof(ack));
+        std::memcpy(&ack, payload, header.payloadSize);
         process_udp_pose_ack_packet(ack, senderId);
         return;
     }
@@ -8907,7 +8970,10 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
         if (header.type == kUdpPacketTypePoseMsgpack ||
             header.type == kUdpPacketTypeMidnaMsgpack)
         {
-            send_udp_pose_ack_to_addr(fromAddr, senderId, header.type, header.sequence);
+            const uint8_t stressFlags =
+                header.type == kUdpPacketTypePoseMsgpack ? udp_pose_ack_stress_flags(rxStats) : 0;
+            send_udp_pose_ack_to_addr(fromAddr, senderId, header.type, header.sequence,
+                                      stressFlags);
         }
         reassemblies.erase(header.sequence);
         while (!reassemblies.empty() && reassemblies.begin()->first <= header.sequence) {
@@ -9218,7 +9284,10 @@ void send_pose() {
     static uint32_t sVisualPoseHealthyTicks = 0;
     bool hasPoseAck = false;
     const uint32_t poseAckLag = max_local_pose_ack_lag(sSession.poseSequence, &hasPoseAck);
-    if (hasPoseAck && poseAckLag >= kVisualPoseAckLagDownshiftThreshold) {
+    const bool poseAckLossStressed = local_pose_ack_loss_stressed(sSession.poseSequence);
+    if ((hasPoseAck && poseAckLag >= kVisualPoseAckLagDownshiftThreshold) ||
+        poseAckLossStressed)
+    {
         ++sVisualPosePressureTicks;
         sVisualPoseHealthyTicks = 0;
     } else if (hasPoseAck && poseAckLag <= kVisualPoseAckLagUpshiftThreshold) {
@@ -9233,15 +9302,17 @@ void send_pose() {
     {
         sVisualPoseSendInterval = kVisualPoseReducedSendInterval;
         sVisualPosePressureTicks = 0;
-        DuskLog.info("MP_VISUAL_RATE mode=downshift interval={} ack_lag={} seq={}",
-                     sVisualPoseSendInterval, poseAckLag, sSession.poseSequence);
+        DuskLog.info("MP_VISUAL_RATE mode=downshift interval={} ack_lag={} loss_stress={} seq={}",
+                     sVisualPoseSendInterval, poseAckLag, poseAckLossStressed,
+                     sSession.poseSequence);
     } else if (sVisualPoseSendInterval == kVisualPoseReducedSendInterval &&
                sVisualPoseHealthyTicks >= kVisualPoseUpshiftSustainTicks)
     {
         sVisualPoseSendInterval = kVisualPoseNormalSendInterval;
         sVisualPoseHealthyTicks = 0;
-        DuskLog.info("MP_VISUAL_RATE mode=upshift interval={} ack_lag={} seq={}",
-                     sVisualPoseSendInterval, poseAckLag, sSession.poseSequence);
+        DuskLog.info("MP_VISUAL_RATE mode=upshift interval={} ack_lag={} loss_stress={} seq={}",
+                     sVisualPoseSendInterval, poseAckLag, poseAckLossStressed,
+                     sSession.poseSequence);
     }
     if (!isTransforming && sVisualPoseSendInterval > 1 &&
         (++sVisualPoseSendTick % sVisualPoseSendInterval) != 0)
