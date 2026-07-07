@@ -144,8 +144,7 @@ void draw_multiplayer_minimap_arrows(dMap_c* map, f32 drawX, f32 drawY, f32 draw
     const f32 scaleY = drawH / static_cast<f32>(map->getTexSizeY());
     const f32 cursorSize = map->getPlayerCursorSize();
     for (const auto& marker : markers) {
-        if (marker.room < 0 || marker.room >= 64 ||
-            !dComIfGp_roomControl_checkRoomDisp(marker.room)) {
+        if (marker.room < 0 || marker.room >= 64) {
             continue;
         }
         if (map->isCheckFloor() &&
