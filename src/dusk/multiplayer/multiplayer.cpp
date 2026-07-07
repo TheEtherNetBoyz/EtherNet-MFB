@@ -2413,27 +2413,8 @@ bool enqueue_udp_tx_datagrams(std::vector<UdpTxDatagram> datagrams,
             return false;
         }
 
-        std::map<uint32_t, size_t> queuedDatagramsBySequence;
-        std::map<uint32_t, size_t> expectedDatagramsBySequence;
-        for (const UdpTxDatagram& queued : sUdpTxPacerQueue) {
-            if (queued.queueKey != queueKey || queued.sequence >= sequence) {
-                continue;
-            }
-            ++queuedDatagramsBySequence[queued.sequence];
-            expectedDatagramsBySequence[queued.sequence] =
-                static_cast<size_t>(queued.chunkCount) + (queued.chunkCount > 1 ? 1 : 0);
-        }
-
         for (auto it = sUdpTxPacerQueue.begin(); it != sUdpTxPacerQueue.end();) {
-            const auto queuedCountIt = queuedDatagramsBySequence.find(it->sequence);
-            const auto expectedCountIt = expectedDatagramsBySequence.find(it->sequence);
-            const bool wholeSnapshotStillQueued =
-                queuedCountIt != queuedDatagramsBySequence.end() &&
-                expectedCountIt != expectedDatagramsBySequence.end() &&
-                queuedCountIt->second >= expectedCountIt->second;
-            if (it->queueKey == queueKey && it->sequence < sequence &&
-                wholeSnapshotStillQueued)
-            {
+            if (it->queueKey == queueKey && it->sequence < sequence) {
                 it = sUdpTxPacerQueue.erase(it);
                 ++droppedStale;
             } else {
