@@ -1165,6 +1165,19 @@ bool is_stage_load_unsafe_for_multiplayer() {
     return is_engine_stage_load_unsafe_for_multiplayer() || sManualSyncFullStateTransitionActive;
 }
 
+bool is_title_screen_active() {
+    return fpcM_SearchByName(fpcNm_TITLE_e) != nullptr;
+}
+
+bool is_manual_sync_request_safe() {
+    return is_title_screen_active() || !is_stage_load_unsafe_for_multiplayer();
+}
+
+bool is_manual_sync_full_state_message(const json& message) {
+    return message.value("type", "") == "save_snapshot" &&
+           message.value("manual_sync", false) && message.contains("full_state");
+}
+
 bool is_local_final_ganondorf_ready() {
     const char* stage = dComIfGp_getStartStageName();
     return stage != nullptr && std::strcmp(stage, "D_MN09B") == 0 && dComIfGs_isSaveDunSwitch(1);
@@ -6313,7 +6326,9 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         }
         return;
     }
-    if (is_stage_dependent_message_type(type) && is_stage_load_unsafe_for_multiplayer()) {
+    if (is_stage_dependent_message_type(type) && is_stage_load_unsafe_for_multiplayer() &&
+        !(is_manual_sync_full_state_message(routedMessage) && is_title_screen_active()))
+    {
         sPendingStageMessages.push_back(routedMessage);
         if (sender != nullptr && should_forward_peer_message(type) &&
             !(type == "save_snapshot" && routedMessage.value("manual_sync", false)))
@@ -11382,7 +11397,7 @@ void queue_progression_sync_for_peer(const ProgressionSyncPrompt& prompt) {
 }
 
 void flush_pending_progression_sync() {
-    if (!sPendingProgressionSync.active || is_stage_load_unsafe_for_multiplayer()) {
+    if (!sPendingProgressionSync.active || !is_manual_sync_request_safe()) {
         if (sPendingProgressionSync.active) {
             sPendingProgressionSync.stableReadyTicks = 0;
         }
