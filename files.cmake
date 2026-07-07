@@ -1448,6 +1448,8 @@ set(DUSK_FILES
         src/dusk/input_macro.cpp
         src/dusk/layout.cpp
         src/dusk/latency_trace.cpp
+        src/dusk/load_position_overlay.cpp
+        include/dusk/load_position_overlay.hpp
         src/dusk/logging.cpp
         src/dusk/settings.cpp
         src/dusk/speedrun.cpp

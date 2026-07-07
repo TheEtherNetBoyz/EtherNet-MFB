@@ -13,6 +13,9 @@
 void fapGm_After();
 void fapGm_Create();
 void fapGm_Execute();
+#if TARGET_PC
+void fapGm_ExecuteTurboLogicOnly();
+#endif
 
 class fapGm_HIO_c : public JORReflexible {
 public:

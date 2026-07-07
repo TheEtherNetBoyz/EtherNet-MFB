@@ -370,22 +370,30 @@ void main01(void) {
             dusk::frame_interp::begin_frame(false, true, 0.0f);
             dusk::frame_interp::set_ui_tick_pending(true);
 
-            // Game Inputs
-            dusk::latency_trace::mark("mDoCPd_read_before");
-            mDoCPd_c::read();
-            dusk::latency_trace::pad_snapshot("mDoCPd_read_after", mDoCPd_c::getHold(PAD_1),
-                                              mDoCPd_c::getTrig(PAD_1), mDoCPd_c::getStickX(PAD_1),
-                                              mDoCPd_c::getStickY(PAD_1));
-            dusk::mouse::read();
-            dusk::gyro::read(pacing.presentation_dt_seconds);
+            for (int sim_tick = 0; sim_tick < pacing.sim_ticks_to_run; ++sim_tick) {
+                dusk::frame_interp::begin_sim_tick();
 
-            // EXECUTE GAME LOGIC & RENDER
-            // This calls mDoGph_Painter -> JFWDisplay -> GX Functions
-            dusk::latency_trace::mark("fapGm_Execute_before");
-            fapGm_Execute();
-            dusk::latency_trace::mark("fapGm_Execute_after");
+                // Game Inputs
+                dusk::latency_trace::mark("mDoCPd_read_before");
+                mDoCPd_c::read();
+                dusk::latency_trace::pad_snapshot("mDoCPd_read_after", mDoCPd_c::getHold(PAD_1),
+                                                  mDoCPd_c::getTrig(PAD_1), mDoCPd_c::getStickX(PAD_1),
+                                                  mDoCPd_c::getStickY(PAD_1));
+                dusk::mouse::read();
+                dusk::gyro::read(pacing.sim_ticks_to_run > 1 ? pacing.sim_pace : pacing.presentation_dt_seconds);
 
-            mDoAud_Execute();
+                const bool render_tick = sim_tick + 1 == pacing.sim_ticks_to_run;
+                dusk::latency_trace::mark("fapGm_Execute_before");
+                if (render_tick) {
+                    // This calls mDoGph_Painter -> JFWDisplay -> GX Functions.
+                    fapGm_Execute();
+                } else {
+                    fapGm_ExecuteTurboLogicOnly();
+                }
+                dusk::latency_trace::mark("fapGm_Execute_after");
+
+                mDoAud_Execute();
+            }
         }
 
         dusk::latency_trace::mark("aurora_end_frame_before");

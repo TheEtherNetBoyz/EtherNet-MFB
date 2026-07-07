@@ -934,6 +934,41 @@ void fapGm_Execute() {
 #endif
 }
 
+#if TARGET_PC
+void fapGm_ExecuteTurboLogicOnly() {
+    ZoneScoped;
+
+    duskExecute();
+
+    if (!dPa_control_c::isStatus(1)) {
+        fpcDt_Handler();
+    } else {
+        dPa_control_c::offStatus(1);
+    }
+
+    if (!fpcPi_Handler()) {
+        JUT_ASSERT(936, FALSE);
+    }
+
+    if (!fpcCt_Handler()) {
+        JUT_ASSERT(940, FALSE);
+    }
+
+    fapGm_Before();
+
+    if (!fapGm_HIO_c::isCaptureScreen()) {
+        fpcEx_Handler((fpcLnIt_QueueFunc)fpcM_Execute);
+    }
+
+    fapGm_AfterRecord();
+
+    cCt_Counter(0);
+    dusk::speedrun::onGameFrame();
+    dusk::AchievementSystem::get().tick();
+    dusk::menu_pointer::end_game_frame();
+}
+#endif
+
 fapGm_HIO_c g_HIO;
 
 void fapGm_Create() {

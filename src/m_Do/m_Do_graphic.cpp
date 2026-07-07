@@ -55,6 +55,7 @@
 #include "dusk/frame_interpolation.h"
 #include "dusk/gx_helper.h"
 #include "dusk/imgui/ImGuiConsole.hpp"
+#include "dusk/load_position_overlay.hpp"
 #include "dusk/logging.h"
 #include "dusk/settings.h"
 #endif
@@ -256,6 +257,17 @@ static dDlst_duskPracticeMenu_c l_duskPracticeMenu;
 
 static void drawDuskPracticeMenu() {
     dComIfGd_set2DXlu(&l_duskPracticeMenu);
+}
+
+class dDlst_duskLoadPositionOverlay_c : public dDlst_base_c {
+public:
+    virtual void draw() { dusk::DrawLoadPositionOverlayNative(); }
+};
+
+static dDlst_duskLoadPositionOverlay_c l_duskLoadPositionOverlay;
+
+static void drawDuskLoadPositionOverlay() {
+    dComIfGd_set2DXlu(&l_duskLoadPositionOverlay);
 }
 #endif
 
@@ -2488,6 +2500,7 @@ int mDoGph_Painter() {
 
     #if TARGET_PC
     drawDuskPracticeMenu();
+    drawDuskLoadPositionOverlay();
     #endif
 
 #ifdef TARGET_PC

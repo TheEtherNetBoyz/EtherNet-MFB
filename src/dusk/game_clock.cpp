@@ -25,6 +25,7 @@ constexpr clock::duration kSimPeriodDuration =
     std::chrono::duration_cast<clock::duration>(std::chrono::duration<float>(sim_pace()));
 constexpr clock::duration kAbnormalGapResetThreshold = std::chrono::milliseconds(250);
 constexpr int kMaxSimTicksPerFrame = 2;
+constexpr int kTurboSimTicksPerFrame = 50;
 
 int selected_frame_rate_limit() {
     if (dusk::getTransientSettings().forceThirtyFpsLimit) {
@@ -92,7 +93,7 @@ MainLoopPacer advance_main_loop() {
 
     if (!should_interpolate) {
         s_current_snapshot_time = now;
-        out.sim_ticks_to_run = 1;
+        out.sim_ticks_to_run = dusk::getTransientSettings().skipFrameRateLimit ? kTurboSimTicksPerFrame : 1;
         return out;
     }
 
