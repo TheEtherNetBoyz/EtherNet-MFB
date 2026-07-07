@@ -251,6 +251,7 @@ std::string pose_ack_key(const std::string& receiverId, const std::string& poseS
 bool send_json(const json& message);
 void broadcast_to_direct_peers(const json& message, const std::string& excludePeerId = "");
 int angle_y_from_delta(float dx, float dz);
+void push_notification(std::string text, float durationSeconds);
 
 bool apply_ganondorf_remote_player_damage(const GanondorfRemotePlayerDamageEvent& damage) {
     daAlink_c* player = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
@@ -820,6 +821,9 @@ std::vector<RemoteAudioEvent> sActiveLocalAudioEvents;
 uint32_t sLocalAudioEventSequence = 0;
 bool sManualSyncReloadPending = false;
 bool sManualSyncFullStateTransitionActive = false;
+bool sOrdonDayBoundaryReloadPending = false;
+std::string sOrdonDayBoundaryReloadPeerId;
+uint16_t sOrdonDayBoundaryReloadFlag = 0;
 std::optional<dSv_info_c> sPendingManualSyncInfo;
 std::optional<u8> sPendingManualSyncVibration;
 // Set right before a manual-sync request goes out for a progression cue, so
@@ -1176,6 +1180,21 @@ bool is_manual_sync_request_safe() {
 bool is_manual_sync_full_state_message(const json& message) {
     return message.value("type", "") == "save_snapshot" &&
            message.value("manual_sync", false) && message.contains("full_state");
+}
+
+bool is_ordon_day_boundary_event_bit(uint16_t flag) {
+    switch (flag) {
+    case 0x4A20: // Finished Ordon Day 1 (Ordon Spring layer gate).
+    case 0x4A40: // Finished Ordon Day 1 (Ordon Village/Ranch layer gate).
+    case 0x4510: // Finished Ordon Day 2.
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool is_ordon_day_boundary_stage(std::string_view stage) {
+    return stage == "F_SP00" || stage == "F_SP103" || stage == "F_SP104";
 }
 
 bool is_local_final_ganondorf_ready() {
@@ -1615,6 +1634,60 @@ const char* remote_switch_policy_mode_name(RemoteSwitchPolicyMode mode) {
     case RemoteSwitchPolicyMode::SuppressRemote: return "suppress_remote";
     default: return "unknown";
     }
+}
+
+void queue_ordon_day_boundary_reload(const std::string& peerId, uint16_t flag) {
+    const char* stage = current_stage_name();
+    if (!is_ordon_day_boundary_stage(stage)) {
+        DuskLog.info("Multiplayer Ordon day boundary reload skipped peer={} flag={} stage={} "
+                     "reason=outside_ordon_boundary_stage",
+                     peerId, flag, stage);
+        return;
+    }
+
+    if (sOrdonDayBoundaryReloadPending) {
+        DuskLog.info("Multiplayer Ordon day boundary reload already pending peer={} flag={} "
+                     "existingPeer={} existingFlag={} stage={}",
+                     peerId, flag, sOrdonDayBoundaryReloadPeerId, sOrdonDayBoundaryReloadFlag,
+                     stage);
+        return;
+    }
+
+    sOrdonDayBoundaryReloadPending = true;
+    sOrdonDayBoundaryReloadPeerId = peerId;
+    sOrdonDayBoundaryReloadFlag = flag;
+    push_notification("Ordon state changed; reloading area", 4.0f);
+    DuskLog.info("Multiplayer Ordon day boundary reload queued peer={} flag={} stage={} room={} "
+                 "layer={}",
+                 peerId, flag, stage, dComIfGp_roomControl_getStayNo(),
+                 static_cast<int>(dComIfGp_getStartStageLayer()));
+}
+
+bool flush_ordon_day_boundary_reload() {
+    if (!sOrdonDayBoundaryReloadPending) {
+        return false;
+    }
+    if (!is_ordon_day_boundary_stage(current_stage_name())) {
+        DuskLog.info("Multiplayer Ordon day boundary reload cleared peer={} flag={} stage={} "
+                     "reason=left_ordon_boundary_stage",
+                     sOrdonDayBoundaryReloadPeerId, sOrdonDayBoundaryReloadFlag,
+                     current_stage_name());
+        sOrdonDayBoundaryReloadPending = false;
+        sOrdonDayBoundaryReloadPeerId.clear();
+        sOrdonDayBoundaryReloadFlag = 0;
+        return false;
+    }
+
+    DuskLog.info("Multiplayer Ordon day boundary reload restarting current room peer={} flag={} "
+                 "stage={} room={} layer={}",
+                 sOrdonDayBoundaryReloadPeerId, sOrdonDayBoundaryReloadFlag,
+                 current_stage_name(), dComIfGp_roomControl_getStayNo(),
+                 static_cast<int>(dComIfGp_getStartStageLayer()));
+    sOrdonDayBoundaryReloadPending = false;
+    sOrdonDayBoundaryReloadPeerId.clear();
+    sOrdonDayBoundaryReloadFlag = 0;
+    daPy_py_c::forceRestartRoom(0, 5, 0xC9);
+    return true;
 }
 
 const char* group2_lifecycle_actor_reason(int actorName) {
@@ -3201,6 +3274,9 @@ void reset_connection_state() {
     sSession.clientId.clear();
     sManualSyncReloadPending = false;
     sManualSyncFullStateTransitionActive = false;
+    sOrdonDayBoundaryReloadPending = false;
+    sOrdonDayBoundaryReloadPeerId.clear();
+    sOrdonDayBoundaryReloadFlag = 0;
     sPendingManualSyncInfo.reset();
     sPendingManualSyncVibration.reset();
     sPendingStageMessages.clear();
@@ -7226,6 +7302,9 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         }
         sApplyingRemoteSaveBit = false;
         DuskLog.info("Multiplayer applied remote event bit flag={} set={}", flag, set);
+        if (set && is_ordon_day_boundary_event_bit(flag)) {
+            queue_ordon_day_boundary_reload(resolve_peer_id(routedMessage), flag);
+        }
     } else if (type == "tbox_bit") {
         const int stage = routedMessage.value("stage", -1);
         const int flag = routedMessage.value("flag", -1);
@@ -9537,6 +9616,10 @@ void update_connected() {
             sManualSyncReloadPending = false;
             DuskLog.info("Multiplayer manual sync restarting current room");
             daPy_py_c::forceRestartRoom(0, 5, 0xC9);
+            return;
+        }
+        if (flush_ordon_day_boundary_reload()) {
+            return;
         }
 
         update_remote_switch_policy_room_state();
@@ -10499,6 +10582,9 @@ void apply_sync_flags_enabled(bool enabled) {
         sAwaitingManualSyncPeerId.clear();
         sManualSyncReloadPending = false;
         sManualSyncFullStateTransitionActive = false;
+        sOrdonDayBoundaryReloadPending = false;
+        sOrdonDayBoundaryReloadPeerId.clear();
+        sOrdonDayBoundaryReloadFlag = 0;
         sPendingManualSyncInfo.reset();
         sPendingManualSyncVibration.reset();
     }
