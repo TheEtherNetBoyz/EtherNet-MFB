@@ -9,6 +9,7 @@
 #include "SSystem/SComponent/c_math.h"
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_remote_link.h"
+#include "d/d_bg_s_acch.h"
 #include "d/d_com_inf_game.h"
 #include "dusk/logging.h"
 #include "f_op/f_op_overlap_mng.h"
@@ -59,6 +60,8 @@ constexpr f32 kRemoteWolfBodyHeight = 95.0f;
 constexpr f32 kRemoteWolfBodyHalfLength = 45.0f;
 constexpr f32 kLocalLinkBodyRadius = 35.0f;
 constexpr uint8_t kRemoteSpawnVisibleWarmupTicks = 3;
+constexpr f32 kRemotePushMaxCorrection = 20.0f;
+constexpr f32 kRemotePushMaxGroundDelta = 80.0f;
 
 bool dummy_trace_enabled() {
     const char* value = std::getenv("DUSK_MP_DUMMY_TRACE");
@@ -76,6 +79,39 @@ f32 clamp_f32(f32 value, f32 min, f32 max) {
         return max;
     }
     return value;
+}
+
+bool correct_remote_body_push_position(fopAc_ac_c* playerActor, const cXyz& originalPos,
+                                       cXyz* candidatePos, bool localIsWolf) {
+    if (playerActor == nullptr || candidatePos == nullptr) {
+        return false;
+    }
+
+    cXyz oldPos = originalPos;
+    cXyz speed(candidatePos->x - originalPos.x, candidatePos->y - originalPos.y,
+               candidatePos->z - originalPos.z);
+    dBgS_AcchCir acchCir;
+    dBgS_ObjAcch acch;
+    acchCir.SetWall(localIsWolf ? 75.0f : kRemoteHumanBodyHeight,
+                    localIsWolf ? kRemoteWolfBodyRadius : kLocalLinkBodyRadius);
+    acch.Set(candidatePos, &oldPos, playerActor, 1, &acchCir, &speed, NULL, NULL);
+    acch.CrrPos(dComIfG_Bgsp());
+
+    const f32 correctionX = candidatePos->x - (originalPos.x + speed.x);
+    const f32 correctionZ = candidatePos->z - (originalPos.z + speed.z);
+    const f32 correctionSq = correctionX * correctionX + correctionZ * correctionZ;
+    if (correctionSq > kRemotePushMaxCorrection * kRemotePushMaxCorrection) {
+        return false;
+    }
+
+    if (acch.ChkGroundHit() &&
+        std::fabs(acch.GetGroundH() - originalPos.y) <= kRemotePushMaxGroundDelta)
+    {
+        candidatePos->y = originalPos.y;
+        return true;
+    }
+
+    return !acch.ChkWallHit();
 }
 
 void get_body_segment(f32 x, f32 z, s16 angleY, bool isWolf, f32* outAx, f32* outAz,
@@ -195,8 +231,15 @@ void apply_remote_body_push(const PeerPoseSnapshot& pose, fopAc_ac_c* playerActo
     }
 
     const f32 push = combinedRadius - dist;
-    playerActor->current.pos.x += (dx / dist) * push;
-    playerActor->current.pos.z += (dz / dist) * push;
+    const cXyz originalPos = playerActor->current.pos;
+    cXyz candidatePos = originalPos;
+    candidatePos.x += (dx / dist) * push;
+    candidatePos.z += (dz / dist) * push;
+    if (correct_remote_body_push_position(playerActor, originalPos, &candidatePos,
+                                          localIsWolf))
+    {
+        playerActor->current.pos = candidatePos;
+    }
 }
 
 void update_actor_dummy_collision(const std::string& peerId, const PeerPoseSnapshot& pose) {
