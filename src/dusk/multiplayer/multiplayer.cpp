@@ -819,6 +819,7 @@ std::vector<RemoteAudioEvent> sPendingLocalAudioEvents;
 std::vector<RemoteAudioEvent> sActiveLocalAudioEvents;
 uint32_t sLocalAudioEventSequence = 0;
 bool sManualSyncReloadPending = false;
+bool sManualSyncFullStateTransitionActive = false;
 std::optional<dSv_info_c> sPendingManualSyncInfo;
 std::optional<u8> sPendingManualSyncVibration;
 // Set right before a manual-sync request goes out for a progression cue, so
@@ -1155,9 +1156,13 @@ bool is_sync_flags_message_type(const std::string& type) {
            type == "ganondorf_hit";
 }
 
-bool is_stage_load_unsafe_for_multiplayer() {
+bool is_engine_stage_load_unsafe_for_multiplayer() {
     return dComIfGp_getStageStagInfo() == nullptr || dComIfGp_event_runCheck() ||
            dComIfGp_isEnableNextStage() || fopOvlpM_IsPeek() || fopOvlpM_IsDoingReq();
+}
+
+bool is_stage_load_unsafe_for_multiplayer() {
+    return is_engine_stage_load_unsafe_for_multiplayer() || sManualSyncFullStateTransitionActive;
 }
 
 bool is_local_final_ganondorf_ready() {
@@ -3201,6 +3206,7 @@ void reset_connection_state() {
     sSession.snapshotPending = false;
     sSession.clientId.clear();
     sManualSyncReloadPending = false;
+    sManualSyncFullStateTransitionActive = false;
     sPendingManualSyncInfo.reset();
     sPendingManualSyncVibration.reset();
     sPendingStageMessages.clear();
@@ -3769,7 +3775,40 @@ bool is_local_state_ready_for_cue(const std::string& cueKey) {
     return true;
 }
 
+bool is_valid_manual_sync_packet(const ManualSyncStatePacket& packet) {
+    if (packet.stageName[0] == '\0') {
+        DuskLog.warn("Multiplayer manual sync full state rejected: empty stage");
+        return false;
+    }
+    if (packet.roomNo < 0 || packet.roomNo >= 64) {
+        DuskLog.warn("Multiplayer manual sync full state rejected: invalid room={}",
+                     static_cast<int>(packet.roomNo));
+        return false;
+    }
+    if (packet.layer < -1 || packet.layer >= 15) {
+        DuskLog.warn("Multiplayer manual sync full state rejected: invalid layer={}",
+                     static_cast<int>(packet.layer));
+        return false;
+    }
+    if (packet.startPoint < -4 || packet.startPoint > 255) {
+        DuskLog.warn("Multiplayer manual sync full state rejected: invalid point={}",
+                     static_cast<int>(packet.startPoint));
+        return false;
+    }
+    return true;
+}
+
 bool apply_manual_sync_full_state(const std::string& encoded) {
+    if (sManualSyncFullStateTransitionActive || sPendingManualSyncInfo.has_value() ||
+        sManualSyncReloadPending)
+    {
+        DuskLog.warn("Multiplayer manual sync full state rejected: transition already active "
+                     "full_state={} pending_info={} reload={}",
+                     sManualSyncFullStateTransitionActive, sPendingManualSyncInfo.has_value(),
+                     sManualSyncReloadPending);
+        return false;
+    }
+
     std::string decoded;
     if (!absl::Base64Unescape(encoded, &decoded)) {
         DuskLog.warn("Multiplayer manual sync full state rejected: invalid base64");
@@ -3790,12 +3829,16 @@ bool apply_manual_sync_full_state(const std::string& encoded) {
                      ZSTD_getErrorName(result));
         return false;
     }
+    if (result != raw.size()) {
+        DuskLog.warn("Multiplayer manual sync full state rejected: decompressed size={} expected={}",
+                     result, raw.size());
+        return false;
+    }
 
     ManualSyncStatePacket packet = {};
     std::memcpy(&packet, raw.data(), sizeof(packet));
     packet.stageName[sizeof(packet.stageName) - 1] = '\0';
-    if (packet.stageName[0] == '\0') {
-        DuskLog.warn("Multiplayer manual sync full state rejected: empty stage");
+    if (!is_valid_manual_sync_packet(packet)) {
         return false;
     }
 
@@ -3811,6 +3854,9 @@ bool apply_manual_sync_full_state(const std::string& encoded) {
         packet.roomNo = descriptor->warpRoom;
         packet.layer = descriptor->warpLayer;
         packet.startPoint = descriptor->warpStartPoint;
+        if (!is_valid_manual_sync_packet(packet)) {
+            return false;
+        }
     }
     const std::string handledCueKey = sAwaitingManualSyncCueKey;
     sAwaitingManualSyncCueKey.clear();
@@ -3827,6 +3873,7 @@ bool apply_manual_sync_full_state(const std::string& encoded) {
     g_dComIfG_gameInfo.info.getPlayer().getConfig().setVibration(vibration);
     sPendingManualSyncInfo = g_dComIfG_gameInfo.info;
     sPendingManualSyncVibration = vibration;
+    sManualSyncFullStateTransitionActive = true;
 
     const s16 spawnPoint = packet.startPoint == -4 ? -1 : packet.startPoint;
     if (spawnPoint == -1) {
@@ -9409,12 +9456,13 @@ void tick_pending_manual_sync_apply() {
     if (!sPendingManualSyncInfo.has_value()) {
         return;
     }
-    if (is_stage_load_unsafe_for_multiplayer()) {
+    if (is_engine_stage_load_unsafe_for_multiplayer()) {
         return;
     }
 
     g_dComIfG_gameInfo.info = *sPendingManualSyncInfo;
     sPendingManualSyncInfo.reset();
+    sManualSyncFullStateTransitionActive = false;
     if (sPendingManualSyncVibration.has_value()) {
         dComIfGs_setOptVibration(*sPendingManualSyncVibration);
         dComIfGp_setNowVibration(*sPendingManualSyncVibration);
@@ -10454,6 +10502,9 @@ void apply_sync_flags_enabled(bool enabled) {
         sAwaitingManualSyncCueKey.clear();
         sAwaitingManualSyncPeerId.clear();
         sManualSyncReloadPending = false;
+        sManualSyncFullStateTransitionActive = false;
+        sPendingManualSyncInfo.reset();
+        sPendingManualSyncVibration.reset();
     }
 }
 
