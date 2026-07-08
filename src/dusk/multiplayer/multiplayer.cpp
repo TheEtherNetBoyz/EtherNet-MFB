@@ -908,6 +908,7 @@ constexpr uint32_t kPendingSyncReplyTimeoutTicks = 1800;
 // pickup in the catch-up snapshot even if vanilla has not committed the
 // current stage memory back into the savedata table yet.
 std::map<int, std::set<int>> sObservedMemoryItems;
+std::set<int> sObservedKeyItems;
 
 struct BombBagSlotSyncState {
     u8 item = dItemNo_NONE_e;
@@ -1582,6 +1583,52 @@ bool is_synced_key_item(int itemId) {
 
 bool is_synced_reversible_item_first_bit(int itemId) {
     return itemId >= dItemNo_M_BEETLE_e && itemId <= dItemNo_F_MAYFLY_e;
+}
+
+void remember_synced_key_item(int itemId) {
+    if (is_synced_key_item(itemId)) {
+        sObservedKeyItems.insert(itemId);
+    }
+}
+
+void repair_synced_key_item_state(const char* reason) {
+    bool repaired = false;
+    const bool wasApplyingRemoteSaveBit = sApplyingRemoteSaveBit;
+    sApplyingRemoteSaveBit = true;
+
+    for (const int itemId : sObservedKeyItems) {
+        if (!is_synced_key_item(itemId)) {
+            continue;
+        }
+        if (!dComIfGs_isItemFirstBit(static_cast<u8>(itemId))) {
+            execItemGet(static_cast<u8>(itemId));
+            DuskLog.info("Multiplayer repaired synced key item get item_id={} reason={}",
+                         itemId, reason);
+            repaired = true;
+        }
+    }
+
+    if (dComIfGs_isItemFirstBit(dItemNo_KANTERA_e)) {
+        remember_synced_key_item(dItemNo_KANTERA_e);
+        if (dComIfGs_getItem(SLOT_1, true) != dItemNo_KANTERA_e) {
+            dComIfGs_setItem(SLOT_1, dItemNo_KANTERA_e);
+            DuskLog.info("Multiplayer repaired lantern inventory slot reason={}", reason);
+            repaired = true;
+        }
+        if (dComIfGs_getMaxOil() == 0) {
+            dComIfGs_setMaxOil(21600);
+            DuskLog.info("Multiplayer repaired lantern max oil reason={}", reason);
+            repaired = true;
+        }
+        if (dComIfGs_getOil() == 0) {
+            dComIfGs_setOil(dComIfGs_getMaxOil());
+            DuskLog.info("Multiplayer repaired lantern oil reason={}", reason);
+            repaired = true;
+        }
+    }
+
+    sApplyingRemoteSaveBit = wasApplyingRemoteSaveBit;
+    (void)repaired;
 }
 
 void remember_memory_item_bit(int stageNo, int flag) {
@@ -3953,6 +4000,7 @@ bool apply_manual_sync_full_state(const std::string& encoded) {
     const u8 vibration = dComIfGs_getOptVibration();
     std::memcpy(&g_dComIfG_gameInfo.info, raw.data() + sizeof(packet), sizeof(dSv_info_c));
     g_dComIfG_gameInfo.info.getPlayer().getConfig().setVibration(vibration);
+    repair_synced_key_item_state("manual_full_state_decode");
     sPendingManualSyncInfo = g_dComIfG_gameInfo.info;
     sPendingManualSyncVibration = vibration;
     sManualSyncFullStateTransitionActive = true;
@@ -3984,6 +4032,8 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
         DuskLog.info("Multiplayer save snapshot skipped because sync flags are disabled");
         return;
     }
+
+    repair_synced_key_item_state(manualSync ? "manual_snapshot_encode" : "snapshot_encode");
 
     json eventFlags = json::array();
     for (int i = 0; i < 256 * 8; ++i) {
@@ -4079,6 +4129,7 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
     json keyItems = json::array();
     for (int i = 0; i < 256; ++i) {
         if (is_synced_key_item(i) && dComIfGs_isItemFirstBit(static_cast<u8>(i))) {
+            remember_synced_key_item(i);
             keyItems.push_back(i);
         }
     }
@@ -6745,11 +6796,15 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         }
         for (const json& idEntry : message.value("key_items", json::array())) {
             const int itemId = idEntry.get<int>();
+            if (is_synced_key_item(itemId)) {
+                remember_synced_key_item(itemId);
+            }
             if (is_synced_key_item(itemId) && !dComIfGs_isItemFirstBit(static_cast<u8>(itemId))) {
                 execItemGet(static_cast<u8>(itemId));
                 DuskLog.info("Multiplayer snapshot key item item_id={}", itemId);
             }
         }
+        repair_synced_key_item_state("snapshot_apply");
         for (const json& entry : message.value("bomb_bag_slots", json::array())) {
             apply_remote_bomb_bag_slot(entry.value("bag", -1), entry.value("item", -1),
                                        entry.value("count", -1), "snapshot");
@@ -7496,12 +7551,16 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         // (e.g. from a resent snapshot) would silently reassign that slot
         // back to the original item, reverting any slot swap the local
         // player made since first picking it up.
+        if (is_synced_key_item(itemId)) {
+            remember_synced_key_item(itemId);
+        }
         if (is_synced_key_item(itemId) && !dComIfGs_isItemFirstBit(static_cast<u8>(itemId))) {
             sApplyingRemoteSaveBit = true;
             execItemGet(static_cast<u8>(itemId));
             sApplyingRemoteSaveBit = false;
             DuskLog.info("Multiplayer applied remote item get item_id={}", itemId);
         }
+        repair_synced_key_item_state("live_item_get");
     } else if (type == "bomb_bag_slot") {
         apply_remote_bomb_bag_slot(message.value("bag", -1), message.value("item", -1),
                                    message.value("count", -1), "live");
@@ -9609,6 +9668,7 @@ void tick_pending_manual_sync_apply() {
     g_dComIfG_gameInfo.info = *sPendingManualSyncInfo;
     sPendingManualSyncInfo.reset();
     sManualSyncFullStateTransitionActive = false;
+    repair_synced_key_item_state("manual_full_state_reapply");
     if (sPendingManualSyncVibration.has_value()) {
         dComIfGs_setOptVibration(*sPendingManualSyncVibration);
         dComIfGp_setNowVibration(*sPendingManualSyncVibration);
@@ -11852,6 +11912,7 @@ void notify_local_item_get(int itemId) {
         return;
     }
 
+    remember_synced_key_item(itemId);
     send_json({
         {"type", "item_get"},
         {"item_id", itemId},
