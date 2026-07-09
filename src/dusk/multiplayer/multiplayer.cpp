@@ -187,6 +187,7 @@ constexpr size_t kUdpTxPacerBaseDestinationBytesPerSecond = 512 * 1024;
 constexpr size_t kUdpTxPacerVisualFlowBytesPerSecond = 256 * 1024;
 constexpr auto kUdpTxPacerFlowActiveWindow = std::chrono::seconds(2);
 constexpr auto kUdpTxPacerMinDatagramGap = std::chrono::milliseconds(1);
+constexpr size_t kTcpRxBufferMaxBytes = 2 * 1024 * 1024;
 constexpr size_t kTcpTxBufferMaxBytes = 256 * 1024;
 constexpr uint8_t kUdpPacketTypePoseJson = 1;
 constexpr uint8_t kUdpPacketTypePoseMsgpack = 2;
@@ -879,6 +880,23 @@ std::string sAwaitingManualSyncPeerId;
 // its notify_local_*_set() hook and re-send it to the peer that just sent it
 // to us.
 bool sApplyingRemoteSaveBit = false;
+
+class ScopedRemoteSaveBitApplication {
+public:
+    ScopedRemoteSaveBitApplication() : mPrevious(sApplyingRemoteSaveBit) {
+        sApplyingRemoteSaveBit = true;
+    }
+
+    ~ScopedRemoteSaveBitApplication() {
+        sApplyingRemoteSaveBit = mPrevious;
+    }
+
+    ScopedRemoteSaveBitApplication(const ScopedRemoteSaveBitApplication&) = delete;
+    ScopedRemoteSaveBitApplication& operator=(const ScopedRemoteSaveBitApplication&) = delete;
+
+private:
+    bool mPrevious;
+};
 
 constexpr int kProgressionCueSewersStage = dStage_SaveTbl_PRISON;
 constexpr int kProgressionCueWakeUpInJailSwitch = 27; // ImGui flag 08:08 / "wake up in jail cs".
@@ -3639,6 +3657,7 @@ void reset_connection_state() {
     sLocalSwitchActorContext = {};
     sFlagTraceActorWindowTicks = 0;
     sSession.rxBuffer.clear();
+    sSession.txBuffer.clear();
     sSession.reconnectTicks = 0;
     sSession.pingTicks = 0;
     sSession.progressionStateTicks = 0;
@@ -6640,6 +6659,9 @@ void remove_direct_peer(const std::string& peerId, const char* reason) {
     close_socket(it->second.sock);
     sSession.directPeers.erase(it);
     forget_peer_state(peerId);
+    sSession.welcomed = std::any_of(
+        sSession.directPeers.begin(), sSession.directPeers.end(),
+        [](const auto& entry) { return entry.second.welcomed; });
 
     json left = {{"type", "peer_left"}, {"client_id", peerId}};
     for (auto& entry : sSession.directPeers) {
@@ -6986,7 +7008,8 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             return;
         }
 
-        sApplyingRemoteSaveBit = true;
+        std::optional<ScopedRemoteSaveBitApplication> applyingRemoteSaveBit;
+        applyingRemoteSaveBit.emplace();
         for (const json& flag : message.value("event_flags", json::array())) {
             const uint16_t flagValue = static_cast<uint16_t>(flag.get<int>());
             if (is_unsynced_event_bit(flagValue)) {
@@ -7142,7 +7165,7 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         for (const json& entry : message.value("letter_get_flags", json::array())) {
             dComIfGs_onLetterGetFlag(entry.get<int>());
         }
-        sApplyingRemoteSaveBit = false;
+        applyingRemoteSaveBit.reset();
         const int remoteMaxLife = message.value("max_life", 0);
         if (remoteMaxLife > dComIfGs_getMaxLife() && remoteMaxLife <= 100) {
             dComIfGs_setMaxLife(static_cast<u8>(remoteMaxLife));
@@ -8010,6 +8033,11 @@ bool pump_receive_from_socket(socket_t sock, std::string& rxBuffer, DirectPeer* 
         const int read = recv(sock, buffer.data(), static_cast<int>(buffer.size()), 0);
         if (read > 0) {
             rxBuffer.append(buffer.data(), static_cast<size_t>(read));
+            if (rxBuffer.size() > kTcpRxBufferMaxBytes) {
+                DuskLog.warn("Multiplayer TCP rx buffer overflow queued={} max={}",
+                             rxBuffer.size(), kTcpRxBufferMaxBytes);
+                return false;
+            }
 
             size_t newline = std::string::npos;
             while ((newline = rxBuffer.find('\n')) != std::string::npos) {
@@ -9645,6 +9673,7 @@ void send_presence() {
 
 void send_pose() {
     if (!sSession.welcomed) {
+        sPendingLocalAudioEvents.clear();
         sActiveLocalAudioEvents.clear();
         return;
     }
