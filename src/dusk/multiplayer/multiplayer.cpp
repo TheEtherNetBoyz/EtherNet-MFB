@@ -173,16 +173,19 @@ struct ManualSyncStatePacket {
 constexpr size_t kManualSyncStatePacketSize =
     sizeof(ManualSyncStatePacket) + sizeof(dSv_info_c);
 
-// Keep UDP datagrams below the common 1500-byte MTU while avoiding extra
-// chunks. Header is 58 bytes, so payload 1350 is about 1436 bytes with IP/UDP.
-constexpr size_t kUdpPoseChunkPayloadBytes = 1350;
+// Keep the inner IPv4/UDP packet below 1200 bytes so VPN encapsulation does not
+// force IP fragmentation. Header is 58 bytes, so 1100 bytes of matrix data
+// produces a 1186-byte IPv4/UDP packet before the VPN's outer headers.
+constexpr size_t kUdpPoseChunkPayloadBytes = 1100;
 constexpr size_t kUdpPoseSenderIdBytes = 32;
 constexpr size_t kUdpPoseMaxCompressedBytes = 256 * 1024;
 constexpr size_t kUdpPoseMaxUncompressedBytes = 512 * 1024;
 constexpr size_t kUdpPoseMaxInflightSequences = 8;
 constexpr int kUdpPoseSocketBufferBytes = 1024 * 1024;
 constexpr size_t kUdpTxPacerMaxQueuedDatagrams = 512;
-constexpr size_t kUdpTxPacerTargetBytesPerSecond = 512 * 1024;
+constexpr size_t kUdpTxPacerBaseDestinationBytesPerSecond = 512 * 1024;
+constexpr size_t kUdpTxPacerVisualFlowBytesPerSecond = 256 * 1024;
+constexpr auto kUdpTxPacerFlowActiveWindow = std::chrono::seconds(2);
 constexpr auto kUdpTxPacerMinDatagramGap = std::chrono::milliseconds(1);
 constexpr size_t kTcpTxBufferMaxBytes = 256 * 1024;
 constexpr uint8_t kUdpPacketTypePoseJson = 1;
@@ -701,6 +704,11 @@ std::deque<UdpTxDatagram> sUdpTxPacerQueue;
 std::thread sUdpTxPacerThread;
 bool sUdpTxPacerStop = false;
 bool sUdpTxPacerRunning = false;
+// Each recipient gets an independent pacing lane. This matches the eventual
+// relay model: one outbound budget per connected client, not one room-wide cap.
+std::map<std::string, std::chrono::steady_clock::time_point> sUdpTxPacerNextSendByDestination;
+std::map<std::string, std::map<std::string, std::chrono::steady_clock::time_point>>
+    sUdpTxPacerVisualFlowsByDestination;
 uint64_t sUdpTxPacerEnqueued = 0;
 uint64_t sUdpTxPacerSent = 0;
 uint64_t sUdpTxPacerDropped = 0;
@@ -718,6 +726,8 @@ bool sSyncFlagsEnabled = true;
 // can skip the separate Midna-matrix lane for clients that do not want it.
 // Relay still needs relay-side routing support before it can avoid forwarding
 // Midna to only the users who opted out.
+// Keep the separate Midna lane out of the current network test build.
+constexpr bool kStreamRemoteMidnaMatrices = false;
 bool sDisplayRemoteMidnaEnabled = true;
 // Receive-side policy for remote-player collision. Today this gates the simple
 // pose-based body push; future engine-backed collision should use the same
@@ -733,7 +743,8 @@ bool wants_remote_puppet_matrices() {
 }
 
 bool wants_remote_midna_matrices() {
-    return wants_remote_puppet_matrices() && sDisplayRemoteMidnaEnabled;
+    return kStreamRemoteMidnaMatrices && wants_remote_puppet_matrices() &&
+           sDisplayRemoteMidnaEnabled;
 }
 
 // DarkClearLV/TransformLV (Twilight-clear / wolf-transform region levels)
@@ -2444,10 +2455,39 @@ bool send_udp_tx_datagram_now(const UdpTxDatagram& datagram) {
     return true;
 }
 
-std::chrono::microseconds udp_tx_pacer_gap_for_datagram(const UdpTxDatagram& datagram) {
+bool udp_tx_pacer_is_visual_packet_type(uint8_t packetType) {
+    return packetType == kUdpPacketTypePoseMsgpack || packetType == kUdpPacketTypeMidnaMsgpack;
+}
+
+size_t udp_tx_pacer_target_bytes_per_second_locked(const std::string& destinationKey,
+                                                    std::chrono::steady_clock::time_point now) {
+    auto destinationIt = sUdpTxPacerVisualFlowsByDestination.find(destinationKey);
+    if (destinationIt == sUdpTxPacerVisualFlowsByDestination.end()) {
+        return kUdpTxPacerBaseDestinationBytesPerSecond;
+    }
+
+    auto& flows = destinationIt->second;
+    for (auto it = flows.begin(); it != flows.end();) {
+        if (now - it->second > kUdpTxPacerFlowActiveWindow) {
+            it = flows.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    if (flows.empty()) {
+        sUdpTxPacerVisualFlowsByDestination.erase(destinationIt);
+        return kUdpTxPacerBaseDestinationBytesPerSecond;
+    }
+
+    return std::max(kUdpTxPacerBaseDestinationBytesPerSecond,
+                    flows.size() * kUdpTxPacerVisualFlowBytesPerSecond);
+}
+
+std::chrono::microseconds udp_tx_pacer_gap_for_datagram(
+    const UdpTxDatagram& datagram, size_t targetBytesPerSecond) {
     const size_t bytes = std::max<size_t>(datagram.bytes.size(), 1);
     const auto byteRateGap = std::chrono::microseconds(
-        static_cast<int64_t>((bytes * 1000000ull) / kUdpTxPacerTargetBytesPerSecond));
+        static_cast<int64_t>((bytes * 1000000ull) / targetBytesPerSecond));
     return std::max(std::chrono::duration_cast<std::chrono::microseconds>(
                         kUdpTxPacerMinDatagramGap),
                     byteRateGap);
@@ -2456,18 +2496,50 @@ std::chrono::microseconds udp_tx_pacer_gap_for_datagram(const UdpTxDatagram& dat
 void udp_tx_pacer_thread_main() {
     for (;;) {
         UdpTxDatagram datagram;
+        std::string destinationKey;
+        size_t destinationTargetBytesPerSecond = kUdpTxPacerBaseDestinationBytesPerSecond;
         {
             std::unique_lock<std::mutex> lock(sUdpTxPacerMutex);
             sUdpTxPacerCv.wait(lock, [] {
                 return sUdpTxPacerStop || !sUdpTxPacerQueue.empty();
             });
-            if (sUdpTxPacerStop) {
-                break;
+
+            for (;;) {
+                if (sUdpTxPacerStop) {
+                    return;
+                }
+
+                const auto now = std::chrono::steady_clock::now();
+                auto ready = sUdpTxPacerQueue.end();
+                auto nextReady = std::chrono::steady_clock::time_point::max();
+                for (auto it = sUdpTxPacerQueue.begin(); it != sUdpTxPacerQueue.end(); ++it) {
+                    const std::string key = udp_tx_addr_key(it->addr);
+                    const auto laneIt = sUdpTxPacerNextSendByDestination.find(key);
+                    const auto eligibleAt = laneIt == sUdpTxPacerNextSendByDestination.end()
+                                                ? now
+                                                : laneIt->second;
+                    if (eligibleAt <= now) {
+                        ready = it;
+                        break;
+                    }
+                    nextReady = std::min(nextReady, eligibleAt);
+                }
+
+                if (ready != sUdpTxPacerQueue.end()) {
+                    destinationKey = udp_tx_addr_key(ready->addr);
+                    destinationTargetBytesPerSecond =
+                        udp_tx_pacer_target_bytes_per_second_locked(destinationKey, now);
+                    datagram = std::move(*ready);
+                    sUdpTxPacerQueue.erase(ready);
+                    break;
+                }
+
+                sUdpTxPacerCv.wait_until(lock, nextReady);
             }
-            datagram = std::move(sUdpTxPacerQueue.front());
-            sUdpTxPacerQueue.pop_front();
         }
 
+        const auto gap =
+            udp_tx_pacer_gap_for_datagram(datagram, destinationTargetBytesPerSecond);
         if (!send_udp_tx_datagram_now(datagram)) {
             if (would_block()) {
                 size_t queued = 0;
@@ -2477,6 +2549,8 @@ void udp_tx_pacer_thread_main() {
                     if (!sUdpTxPacerStop) {
                         sUdpTxPacerQueue.push_front(std::move(datagram));
                     }
+                    sUdpTxPacerNextSendByDestination[destinationKey] =
+                        std::chrono::steady_clock::now() + gap * 2;
                     ++sUdpTxPacerWouldBlock;
                     wouldBlockCount = sUdpTxPacerWouldBlock;
                     queued = sUdpTxPacerQueue.size();
@@ -2485,15 +2559,14 @@ void udp_tx_pacer_thread_main() {
                     DuskLog.warn("Multiplayer direct UDP tx pacer would block count={} queued={}",
                                  wouldBlockCount, queued);
                 }
-                std::this_thread::sleep_for(udp_tx_pacer_gap_for_datagram(datagram) * 2);
                 continue;
             }
         } else {
             std::lock_guard<std::mutex> lock(sUdpTxPacerMutex);
             ++sUdpTxPacerSent;
+            sUdpTxPacerNextSendByDestination[destinationKey] =
+                std::chrono::steady_clock::now() + gap;
         }
-
-        std::this_thread::sleep_for(udp_tx_pacer_gap_for_datagram(datagram));
     }
 }
 
@@ -2502,10 +2575,14 @@ void stop_udp_tx_pacer() {
         std::lock_guard<std::mutex> lock(sUdpTxPacerMutex);
         if (!sUdpTxPacerRunning) {
             sUdpTxPacerQueue.clear();
+            sUdpTxPacerNextSendByDestination.clear();
+            sUdpTxPacerVisualFlowsByDestination.clear();
             return;
         }
         sUdpTxPacerStop = true;
         sUdpTxPacerQueue.clear();
+        sUdpTxPacerNextSendByDestination.clear();
+        sUdpTxPacerVisualFlowsByDestination.clear();
     }
     sUdpTxPacerCv.notify_all();
     if (sUdpTxPacerThread.joinable()) {
@@ -2514,6 +2591,8 @@ void stop_udp_tx_pacer() {
     {
         std::lock_guard<std::mutex> lock(sUdpTxPacerMutex);
         sUdpTxPacerQueue.clear();
+        sUdpTxPacerNextSendByDestination.clear();
+        sUdpTxPacerVisualFlowsByDestination.clear();
         sUdpTxPacerStop = false;
         sUdpTxPacerRunning = false;
     }
@@ -2525,6 +2604,8 @@ void start_udp_tx_pacer() {
         return;
     }
     sUdpTxPacerQueue.clear();
+    sUdpTxPacerNextSendByDestination.clear();
+    sUdpTxPacerVisualFlowsByDestination.clear();
     sUdpTxPacerStop = false;
     sUdpTxPacerRunning = true;
     sUdpTxPacerThread = std::thread(udp_tx_pacer_thread_main);
@@ -2538,14 +2619,40 @@ bool enqueue_udp_tx_datagrams(std::vector<UdpTxDatagram> datagrams,
     }
 
     size_t droppedStale = 0;
+    size_t keptPartial = 0;
     {
         std::lock_guard<std::mutex> lock(sUdpTxPacerMutex);
         if (!sUdpTxPacerRunning) {
             return false;
         }
 
+        const std::string destinationKey = udp_tx_addr_key(datagrams.front().addr);
+        const auto now = std::chrono::steady_clock::now();
+        if (udp_tx_pacer_is_visual_packet_type(packetType)) {
+            sUdpTxPacerVisualFlowsByDestination[destinationKey][queueKey] = now;
+        }
+        const size_t laneTargetBytesPerSecond =
+            udp_tx_pacer_target_bytes_per_second_locked(destinationKey, now);
+        const auto laneFlowsIt = sUdpTxPacerVisualFlowsByDestination.find(destinationKey);
+        const size_t laneVisualFlows = laneFlowsIt == sUdpTxPacerVisualFlowsByDestination.end()
+                                           ? 0
+                                           : laneFlowsIt->second.size();
+
+        std::set<uint32_t> fullyQueuedStaleSequences;
+        std::set<uint32_t> partialStaleSequences;
+        for (const UdpTxDatagram& queued : sUdpTxPacerQueue) {
+            if (queued.queueKey != queueKey || queued.sequence >= sequence) {
+                continue;
+            }
+            if (queued.chunkIndex == 0) {
+                fullyQueuedStaleSequences.insert(queued.sequence);
+            } else {
+                partialStaleSequences.insert(queued.sequence);
+            }
+        }
         for (auto it = sUdpTxPacerQueue.begin(); it != sUdpTxPacerQueue.end();) {
-            if (it->queueKey == queueKey && it->sequence < sequence) {
+            if (it->queueKey == queueKey &&
+                fullyQueuedStaleSequences.count(it->sequence) != 0) {
                 it = sUdpTxPacerQueue.erase(it);
                 ++droppedStale;
             } else {
@@ -2553,6 +2660,11 @@ bool enqueue_udp_tx_datagrams(std::vector<UdpTxDatagram> datagrams,
             }
         }
 
+        for (uint32_t staleSequence : partialStaleSequences) {
+            if (fullyQueuedStaleSequences.count(staleSequence) == 0) {
+                ++keptPartial;
+            }
+        }
         for (UdpTxDatagram& datagram : datagrams) {
             datagram.queueKey = queueKey;
             sUdpTxPacerQueue.push_back(std::move(datagram));
@@ -2560,16 +2672,35 @@ bool enqueue_udp_tx_datagrams(std::vector<UdpTxDatagram> datagrams,
         }
 
         while (sUdpTxPacerQueue.size() > kUdpTxPacerMaxQueuedDatagrams) {
-            sUdpTxPacerQueue.pop_front();
-            ++sUdpTxPacerDropped;
+            auto completeSnapshot = std::find_if(
+                sUdpTxPacerQueue.begin(), sUdpTxPacerQueue.end(),
+                [](const UdpTxDatagram& queued) { return queued.chunkIndex == 0; });
+            if (completeSnapshot == sUdpTxPacerQueue.end()) {
+                // Never cut the tail off an in-flight snapshot merely to satisfy
+                // the queue bound. The next enqueue will discard newer full poses.
+                break;
+            }
+
+            const std::string droppedQueueKey = completeSnapshot->queueKey;
+            const uint32_t droppedSequence = completeSnapshot->sequence;
+            for (auto it = sUdpTxPacerQueue.begin(); it != sUdpTxPacerQueue.end();) {
+                if (it->queueKey == droppedQueueKey && it->sequence == droppedSequence) {
+                    it = sUdpTxPacerQueue.erase(it);
+                    ++sUdpTxPacerDropped;
+                } else {
+                    ++it;
+                }
+            }
         }
 
-        if (droppedStale != 0 || (sUdpTxPacerEnqueued % 900) == 0) {
+        if (droppedStale != 0 || keptPartial != 0 || (sUdpTxPacerEnqueued % 900) == 0) {
             DuskLog.info("MP_UDP_TX_PACER type={} seq={} enqueued={} queued={} "
-                         "dropped_stale={} dropped_overflow={} sent={} would_block={}",
+                         "dropped_stale={} kept_partial={} dropped_overflow={} sent={} "
+                         "would_block={} lane_visual_flows={} lane_target_kbps={}",
                          packetType, sequence, sUdpTxPacerEnqueued, sUdpTxPacerQueue.size(),
-                         droppedStale, sUdpTxPacerDropped, sUdpTxPacerSent,
-                         sUdpTxPacerWouldBlock);
+                         droppedStale, keptPartial, sUdpTxPacerDropped, sUdpTxPacerSent,
+                         sUdpTxPacerWouldBlock, laneVisualFlows,
+                         laneTargetBytesPerSecond / 1024);
         }
     }
     sUdpTxPacerCv.notify_one();
@@ -8654,7 +8785,12 @@ void process_udp_pose_ack_packet(const UdpPoseAckPacket& ack, const std::string&
 
     const uint32_t old = previous;
     previous = ack.sequence;
-    if (ack.ackedType == kUdpPacketTypePoseMsgpack && ack.stressFlags != 0) {
+    // A parity-recovered snapshot was complete and can render normally. Only
+    // unrecovered gaps or abandoned reassemblies justify reducing visual rate.
+    constexpr uint8_t kVisualRateStressFlags =
+        UDP_POSE_ACK_STRESS_SEQUENCE_GAP | UDP_POSE_ACK_STRESS_REASSEMBLY_EVICTED;
+    if (ack.ackedType == kUdpPacketTypePoseMsgpack &&
+        (ack.stressFlags & kVisualRateStressFlags) != 0) {
         sSession.udpPoseAckStressUntilSequenceByReceiver[key] =
             ack.sequence + kVisualPoseAckStressHoldSequences;
     }
