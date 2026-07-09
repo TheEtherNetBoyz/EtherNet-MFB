@@ -1181,12 +1181,13 @@ int detect_shield_variant() {
 bool is_stage_dependent_message_type(const std::string& type) {
     // key_num touches the same per-stage savedata accessor as tbox_bit/
     // switch_bit/item_bit, so it carries the same risk if applied before a
-    // stage is loaded. light_drop_num does not -- it writes directly to
-    // player-level save data with no per-stage lookup, same exemption as
-    // event_bit.
+    // stage is loaded. light_drop_num and rupee_count do not -- they write
+    // directly to player-level save data with no per-stage lookup, same
+    // exemption as event_bit. Deferring rupee_count can lose a pickup that
+    // arrives during a cutscene if a later stage transition supersedes it.
     return type == "save_snapshot" || type == "tbox_bit" || type == "switch_bit" ||
            type == "room_switch_bit" || type == "item_bit" || type == "dungeon_item_bit" ||
-           type == "key_num" || type == "visited_room" || type == "rupee_count";
+           type == "key_num" || type == "visited_room";
 }
 
 bool is_sync_flags_message_type(const std::string& type) {
