@@ -1834,9 +1834,10 @@ inline bool dComIfGs_isCollectMirror(u8 i_item) {
 }
 
 inline void dComIfGs_setLightDropNum(u8 i_level, u8 i_num) {
+    const u8 previous_num = g_dComIfG_gameInfo.info.getPlayer().getLightDrop().getLightDropNum(i_level);
     g_dComIfG_gameInfo.info.getPlayer().getLightDrop().setLightDropNum(i_level, i_num);
 #if TARGET_PC
-    dusk::multiplayer::notify_local_light_drop_num_set(i_level, i_num);
+    dusk::multiplayer::notify_local_light_drop_num_set(i_level, previous_num, i_num);
 #endif
 }
 

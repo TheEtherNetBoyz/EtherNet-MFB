@@ -108,7 +108,7 @@ void notify_local_key_num_set(uint8_t keyNum);
 // actor, so it works regardless of where the receiving player currently
 // is. The receiver also re-checks the 15-tear threshold event bit after
 // applying the value (idempotent if already set).
-void notify_local_light_drop_num_set(uint8_t area, uint8_t num);
+void notify_local_light_drop_num_set(uint8_t area, uint8_t previousNum, uint8_t num);
 
 // Vessel-of-light ownership bit, per dark-twilight area
 // (dSv_light_drop_c::mLightDropGetFlag). This is separate from the event flag

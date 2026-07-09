@@ -758,6 +758,16 @@ bool wants_remote_midna_matrices() {
 // Off by default; opt in with DUSK_MP_LAYER_SYNC=1 once that audit is done,
 // or for testing with both peers in the same room at the same time.
 bool sLayerRiskSyncEnabled = false;
+
+struct LocalLightDropTboxContext {
+    int stage = -1;
+    int flag = -1;
+    std::chrono::steady_clock::time_point setAt{};
+};
+
+LocalLightDropTboxContext sLastLocalLightDropTbox;
+std::set<std::string> sAppliedRemoteLightDropTearEvents;
+constexpr auto kLightDropTboxAssociationWindow = std::chrono::seconds(2);
 bool sNetworkStackStarted = false;
 
 struct Notification {
@@ -823,6 +833,8 @@ struct PeerProgressionState {
     int layer = -1;
     bool manualSyncReady = false;
     bool finalGanondorfReady = false;
+    bool hasFaronCageSequenceState = false;
+    bool faronCageSequenceActive = false;
 };
 
 std::vector<Notification> sNotifications;
@@ -846,6 +858,13 @@ bool sManualSyncFullStateTransitionActive = false;
 bool sOrdonDayBoundaryReloadPending = false;
 std::string sOrdonDayBoundaryReloadPeerId;
 uint16_t sOrdonDayBoundaryReloadFlag = 0;
+bool sMirrorCompleteReloadPending = false;
+std::string sMirrorCompleteReloadPeerId;
+uint16_t sMirrorCompleteReloadFlag = 0;
+std::set<uint16_t> sDeferredFaronDayBoundaryBroadcasts;
+std::vector<json> sDeferredFaronDayBoundaryEvents;
+bool sLocalFaronCageSequenceActive = false;
+uint32_t sDeferredFaronDayBoundaryBroadcastHoldTicks = 0;
 std::optional<dSv_info_c> sPendingManualSyncInfo;
 std::optional<u8> sPendingManualSyncVibration;
 // Set right before a manual-sync request goes out for a progression cue, so
@@ -906,6 +925,7 @@ constexpr float kProgressionSyncHoldDuration = 1.0f;
 constexpr uint32_t kProgressionSyncStableReadyTicks = 1;
 constexpr uint32_t kProgressionStateSendTicks = 15;
 constexpr uint32_t kProgressionStateReadyMaxAgeTicks = 90;
+constexpr uint32_t kFaronDayBoundaryBroadcastFenceTicks = 60;
 constexpr uint32_t kFlagTraceActorWindowTicks = 180;
 // Generous cap on how long a deferred sync_request reply waits for this
 // client's own state to satisfy the cue's readiness condition before giving
@@ -1218,6 +1238,56 @@ bool is_ordon_day_boundary_event_bit(uint16_t flag) {
 
 bool is_ordon_day_boundary_stage(std::string_view stage) {
     return stage == "F_SP00" || stage == "F_SP103" || stage == "F_SP104";
+}
+
+// The rescue cutscene takes place in Faron Woods (twilight). A peer is a
+// participant only while it is in that stage and vanilla says its state is
+// unsafe; being elsewhere in Faron must not hold the day transition hostage.
+bool is_faron_cage_sequence_active_state(std::string_view stage, bool ready) {
+    return stage == kProgressionCueFaronTwilightDestStage && !ready;
+}
+
+bool is_local_faron_cage_sequence_active() {
+    const char* stage = dComIfGp_getStartStageName();
+    return stage != nullptr && is_faron_cage_sequence_active_state(
+        stage, !is_stage_load_unsafe_for_multiplayer());
+}
+
+bool has_active_faron_cage_sequence_peer() {
+    for (const auto& entry : sPeerProgressionStates) {
+        const PeerProgressionState& state = entry.second;
+        if (!state.valid || state.ageTicks > kProgressionStateReadyMaxAgeTicks) {
+            continue;
+        }
+        // New clients report the sequence edge immediately. Retain the old
+        // stage/unsafe inference for a mixed-version session.
+        if (state.hasFaronCageSequenceState ? state.faronCageSequenceActive :
+                                             is_faron_cage_sequence_active_state(
+                                                 state.stage, state.manualSyncReady))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void send_progression_state(bool force);
+
+void update_local_faron_cage_sequence_state() {
+    const bool active = is_local_faron_cage_sequence_active();
+    if (active == sLocalFaronCageSequenceActive) {
+        return;
+    }
+
+    sLocalFaronCageSequenceActive = active;
+    DuskLog.info("Multiplayer Faron cage sequence local participant active={}", active);
+    // Do not wait for the regular 15-tick progression packet: this is the
+    // acknowledgement that holds the global day flags at the other clients.
+    send_progression_state(true);
+}
+
+bool is_mirror_complete_reload_stage(std::string_view stage) {
+    return stage == "F_SP118" || stage == "F_SP125";
 }
 
 bool is_local_final_ganondorf_ready() {
@@ -1757,6 +1827,86 @@ bool flush_ordon_day_boundary_reload() {
     sOrdonDayBoundaryReloadFlag = 0;
     daPy_py_c::forceRestartRoom(0, 5, 0xC9);
     return true;
+}
+void apply_remote_event_bit(uint16_t flag, bool set) {
+    sApplyingRemoteSaveBit = true;
+    if (set) {
+        dComIfGs_onEventBit(flag);
+    } else {
+        dComIfGs_offEventBit(flag);
+    }
+    sApplyingRemoteSaveBit = false;
+    DuskLog.info("Multiplayer applied remote event bit flag={} set={}", flag, set);
+}
+
+void queue_mirror_complete_reload(const std::string& peerId, uint16_t flag) {
+    if (sMirrorCompleteReloadPending) {
+        return;
+    }
+    sMirrorCompleteReloadPending = true;
+    sMirrorCompleteReloadPeerId = peerId;
+    sMirrorCompleteReloadFlag = flag;
+    push_notification("Mirror state changed; reloading area", 4.0f);
+    DuskLog.info("Multiplayer Mirror completion reload queued peer={} flag={} stage={} room={}",
+                 peerId, flag, current_stage_name(), dComIfGp_roomControl_getStayNo());
+}
+
+bool flush_mirror_complete_reload() {
+    if (!sMirrorCompleteReloadPending) {
+        return false;
+    }
+
+    const uint16_t flag = sMirrorCompleteReloadFlag;
+    const std::string peerId = sMirrorCompleteReloadPeerId;
+    sMirrorCompleteReloadPending = false;
+    sMirrorCompleteReloadPeerId.clear();
+    sMirrorCompleteReloadFlag = 0;
+    apply_remote_event_bit(flag, true);
+
+    if (!is_mirror_complete_reload_stage(current_stage_name())) {
+        DuskLog.info("Multiplayer Mirror completion applied without reload peer={} flag={} "
+                     "stage={} reason=left_affected_stage", peerId, flag, current_stage_name());
+        return false;
+    }
+
+    DuskLog.info("Multiplayer Mirror completion restarting current room peer={} flag={} "
+                 "stage={} room={}", peerId, flag, current_stage_name(),
+                 dComIfGp_roomControl_getStayNo());
+    daPy_py_c::forceRestartRoom(0, 5, 0xC9);
+    return true;
+}
+
+void handle_message(const json& message, DirectPeer* sender);
+
+void flush_deferred_faron_day_boundary_events() {
+    if (sDeferredFaronDayBoundaryEvents.empty() && sDeferredFaronDayBoundaryBroadcasts.empty()) {
+        return;
+    }
+    if (sDeferredFaronDayBoundaryBroadcastHoldTicks != 0) {
+        --sDeferredFaronDayBoundaryBroadcastHoldTicks;
+        return;
+    }
+    if (is_local_faron_cage_sequence_active() || has_active_faron_cage_sequence_peer()) {
+        return;
+    }
+
+    std::vector<json> pending = std::move(sDeferredFaronDayBoundaryEvents);
+    sDeferredFaronDayBoundaryEvents.clear();
+    DuskLog.info("Multiplayer Faron cage sequence complete; applying {} deferred day event(s)",
+                 pending.size());
+    for (const json& event : pending) {
+        handle_message(event, nullptr);
+    }
+
+    for (uint16_t flag : sDeferredFaronDayBoundaryBroadcasts) {
+        send_json({
+            {"type", "event_bit"},
+            {"flag", flag},
+            {"set", true},
+        });
+        DuskLog.info("Multiplayer sent deferred local Ordon day event flag={}", flag);
+    }
+    sDeferredFaronDayBoundaryBroadcasts.clear();
 }
 
 const char* group2_lifecycle_actor_reason(int actorName) {
@@ -3466,6 +3616,13 @@ void reset_connection_state() {
     sOrdonDayBoundaryReloadPending = false;
     sOrdonDayBoundaryReloadPeerId.clear();
     sOrdonDayBoundaryReloadFlag = 0;
+    sMirrorCompleteReloadPending = false;
+    sMirrorCompleteReloadPeerId.clear();
+    sMirrorCompleteReloadFlag = 0;
+    sDeferredFaronDayBoundaryBroadcasts.clear();
+    sDeferredFaronDayBoundaryEvents.clear();
+    sLocalFaronCageSequenceActive = false;
+    sDeferredFaronDayBoundaryBroadcastHoldTicks = 0;
     sPendingManualSyncInfo.reset();
     sPendingManualSyncVibration.reset();
     sPendingStageMessages.clear();
@@ -3910,6 +4067,7 @@ void send_progression_state(bool force = false) {
         {"layer", static_cast<int>(dComIfGp_getStartStageLayer())},
         {"manual_sync_ready", !is_stage_load_unsafe_for_multiplayer()},
         {"final_ganondorf_ready", is_local_final_ganondorf_ready()},
+        {"faron_cage_sequence_active", sLocalFaronCageSequenceActive},
     });
 }
 
@@ -6742,6 +6900,8 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             state.layer = routedMessage.value("layer", -1);
             state.manualSyncReady = routedMessage.value("manual_sync_ready", false);
             state.finalGanondorfReady = routedMessage.value("final_ganondorf_ready", false);
+            state.hasFaronCageSequenceState = routedMessage.contains("faron_cage_sequence_active");
+            state.faronCageSequenceActive = routedMessage.value("faron_cage_sequence_active", false);
             sPeerProgressionStates[peerId] = state;
             DuskLog.info("Multiplayer progression state rx peer={} stage={} room={} layer={} "
                          "ready={} final_ganondorf={} owner={}",
@@ -7485,24 +7645,30 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
     } else if (type == "event_bit") {
         const uint16_t flag = routedMessage.value("flag", 0U);
         const bool set = routedMessage.value("set", true);
+        const std::string peerId = resolve_peer_id(routedMessage);
         if (is_unsynced_event_bit(flag)) {
             DuskLog.info("Multiplayer ignored unsynced remote event bit flag={} set={}", flag,
                          set);
             return;
         }
         if (set) {
-            maybe_show_progression_sync_prompt_for_event_bit(resolve_peer_id(routedMessage), flag);
+            maybe_show_progression_sync_prompt_for_event_bit(peerId, flag);
         }
-        sApplyingRemoteSaveBit = true;
-        if (set) {
-            dComIfGs_onEventBit(flag);
-        } else {
-            dComIfGs_offEventBit(flag);
+        if (set && flag == 0x2B08 && is_mirror_complete_reload_stage(current_stage_name())) {
+            queue_mirror_complete_reload(peerId, flag);
+            return;
         }
-        sApplyingRemoteSaveBit = false;
-        DuskLog.info("Multiplayer applied remote event bit flag={} set={}", flag, set);
+        if (set && is_ordon_day_boundary_event_bit(flag) &&
+            is_local_faron_cage_sequence_active())
+        {
+            sDeferredFaronDayBoundaryEvents.push_back(routedMessage);
+            DuskLog.info("Multiplayer deferred remote Ordon day event peer={} flag={} "
+                         "reason=local_faron_cage_sequence", peerId, flag);
+            return;
+        }
+        apply_remote_event_bit(flag, set);
         if (set && is_ordon_day_boundary_event_bit(flag)) {
-            queue_ordon_day_boundary_reload(resolve_peer_id(routedMessage), flag);
+            queue_ordon_day_boundary_reload(peerId, flag);
         }
     } else if (type == "tbox_bit") {
         const int stage = routedMessage.value("stage", -1);
@@ -7546,20 +7712,46 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             DuskLog.info("Multiplayer applied remote key num stage={} count={}", stage, count);
         }
     } else if (type == "light_drop_num") {
-        // Same absolute-overwrite model as key_num. Light Drop counts are
-        // stored per dark-twilight area, not per-stage, so no stage lookup
-        // is needed at all.
+        // A bare count is legacy last-write-wins data. New clients also attach
+        // the preceding Tbox bit and the sender's pre-pickup count. That lets
+        // us preserve two different pickups made from the same old count.
         const int area = message.value("area", -1);
         const int count = message.value("count", -1);
+        const int previousCount = message.value("previous_count", -1);
+        const int tearStage = message.value("tear_stage", -1);
+        const int tearFlag = message.value("tear_flag", -1);
         if (area >= 0 && area <= 0xFF && count >= 0 && count <= 0xFF) {
+            const int currentCount = dComIfGs_getLightDropNum(static_cast<u8>(area));
+            int mergedCount = std::max(currentCount, count);
+            bool mergedConcurrentPickup = false;
+
+            if (previousCount >= 0 && previousCount <= 0xFF && tearStage >= 0 && tearFlag >= 0 &&
+                count == previousCount + 1)
+            {
+                const std::string tearKey = fmt::format("{}:{}:{}:{}", resolve_peer_id(routedMessage),
+                                                        area, tearStage, tearFlag);
+                if (sAppliedRemoteLightDropTearEvents.insert(tearKey).second &&
+                    currentCount > previousCount && currentCount < 0xFF)
+                {
+                    // The remote tear advanced its sender from N to N+1, but
+                    // this client has already advanced beyond N independently.
+                    // Keep both pickups rather than overwriting with N+1.
+                    mergedCount = currentCount + 1;
+                    mergedConcurrentPickup = true;
+                }
+            }
+
             sApplyingRemoteSaveBit = true;
-            dComIfGs_setLightDropNum(static_cast<u8>(area), static_cast<u8>(count));
-            if (area == 2 && count == 15) {
+            dComIfGs_setLightDropNum(static_cast<u8>(area), static_cast<u8>(mergedCount));
+            if (area == 2 && mergedCount == 15) {
                 /* dSv_event_flag_c::F_0005 - Misc. - Gathered 14 Tears of Light in area 4 */
                 dComIfGs_onEventBit(dSv_event_flag_c::saveBitLabels[9]);
             }
             sApplyingRemoteSaveBit = false;
-            DuskLog.info("Multiplayer applied remote light drop num area={} count={}", area, count);
+            DuskLog.info("Multiplayer applied remote light drop num area={} previous_count={} "
+                         "count={} merged_count={} tear_stage={} tear_flag={} concurrent_merge={}",
+                         area, previousCount, count, mergedCount, tearStage, tearFlag,
+                         mergedConcurrentPickup);
         }
     } else if (type == "light_drop_get_flag") {
         const int area = message.value("area", -1);
@@ -9842,7 +10034,9 @@ void update_connected() {
         return;
     }
 
+    update_local_faron_cage_sequence_state();
     send_progression_state();
+    flush_deferred_faron_day_boundary_events();
     update_pending_progression_cue_arrivals();
     flush_pending_progression_sync();
     update_pending_sync_replies();
@@ -9883,6 +10077,9 @@ void update_connected() {
             sManualSyncReloadPending = false;
             DuskLog.info("Multiplayer manual sync restarting current room");
             daPy_py_c::forceRestartRoom(0, 5, 0xC9);
+            return;
+        }
+        if (flush_mirror_complete_reload()) {
             return;
         }
         if (flush_ordon_day_boundary_reload()) {
@@ -11975,6 +12172,15 @@ void notify_local_event_bit_set(uint16_t flag) {
         DuskLog.info("Multiplayer skipped unsynced local event bit flag={}", flag);
         return;
     }
+    if (is_ordon_day_boundary_event_bit(flag)) {
+        sDeferredFaronDayBoundaryBroadcasts.insert(flag);
+        sDeferredFaronDayBoundaryBroadcastHoldTicks = std::max(
+            sDeferredFaronDayBoundaryBroadcastHoldTicks, kFaronDayBoundaryBroadcastFenceTicks);
+        DuskLog.info("Multiplayer deferred local Ordon day event flag={} "
+                     "reason=faron_participant_fence ticks={}", flag,
+                     sDeferredFaronDayBoundaryBroadcastHoldTicks);
+        return;
+    }
 
     send_json({
         {"type", "event_bit"},
@@ -12012,6 +12218,7 @@ void notify_local_tbox_set(int flag) {
     }
 
     const int stageNo = dStage_stagInfo_GetSaveTbl(stagInfo);
+    sLastLocalLightDropTbox = {stageNo, flag, std::chrono::steady_clock::now()};
     send_json({
         {"type", "tbox_bit"},
         {"stage", stageNo},
@@ -12463,17 +12670,32 @@ void notify_local_key_num_set(uint8_t keyNum) {
     DuskLog.info("Multiplayer sent local key num stage={} count={}", stageNo, keyNum);
 }
 
-void notify_local_light_drop_num_set(uint8_t area, uint8_t num) {
+void notify_local_light_drop_num_set(uint8_t area, uint8_t previousNum, uint8_t num) {
     if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
 
-    send_json({
+    json message = {
         {"type", "light_drop_num"},
         {"area", area},
+        {"previous_count", previousNum},
         {"count", num},
-    });
-    DuskLog.info("Multiplayer sent local light drop num area={} count={}", area, num);
+    };
+
+    const auto now = std::chrono::steady_clock::now();
+    if (sLastLocalLightDropTbox.stage >= 0 && sLastLocalLightDropTbox.flag >= 0 &&
+        now - sLastLocalLightDropTbox.setAt <= kLightDropTboxAssociationWindow)
+    {
+        message["tear_stage"] = sLastLocalLightDropTbox.stage;
+        message["tear_flag"] = sLastLocalLightDropTbox.flag;
+    }
+    sLastLocalLightDropTbox = {};
+
+    send_json(message);
+    DuskLog.info("Multiplayer sent local light drop num area={} previous_count={} count={} "
+                 "tear_stage={} tear_flag={}",
+                 area, previousNum, num, message.value("tear_stage", -1),
+                 message.value("tear_flag", -1));
 }
 
 void notify_local_light_drop_get_flag_set(uint8_t area) {
