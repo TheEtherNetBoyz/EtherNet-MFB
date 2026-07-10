@@ -824,6 +824,7 @@ struct PendingSyncReply {
     std::string peerKey;        // DirectPeer id, re-resolved at flush time.
     std::string targetClientId; // Relay mode requester id.
     std::string cueKey;
+    bool flagsOnly = false;
     uint32_t waitTicks = 0;
 };
 
@@ -884,6 +885,7 @@ enum class PendingRemoteDarkClear : uint8_t {
 // restoration sequence; everybody else can accept the clear immediately.
 std::array<PendingRemoteDarkClear, 3> sPendingRemoteDarkClears{};
 std::optional<dSv_info_c> sPendingManualSyncInfo;
+std::optional<dSv_save_c> sPendingManualFlagsSyncSave;
 std::optional<u8> sPendingManualSyncVibration;
 // Set right before a manual-sync request goes out for a progression cue, so
 // that when the peer's full-state reply lands, apply_manual_sync_full_state
@@ -1266,7 +1268,14 @@ bool is_manual_sync_request_safe() {
 
 bool is_manual_sync_full_state_message(const json& message) {
     return message.value("type", "") == "save_snapshot" &&
-           message.value("manual_sync", false) && message.contains("full_state");
+           message.value("manual_sync", false) && message.contains("full_state") &&
+           message.value("manual_sync_mode", "warp") != "flags";
+}
+
+bool is_manual_flags_sync_message(const json& message) {
+    return message.value("type", "") == "save_snapshot" &&
+           message.value("manual_sync", false) && message.contains("full_state") &&
+           message.value("manual_sync_mode", "warp") == "flags";
 }
 
 bool is_ordon_day_boundary_event_bit(uint16_t flag) {
@@ -3855,6 +3864,7 @@ void reset_connection_state() {
     sLocalFaronWarpSequenceActive = false;
     sPendingRemoteDarkClears.fill(PendingRemoteDarkClear::None);
     sPendingManualSyncInfo.reset();
+    sPendingManualFlagsSyncSave.reset();
     sPendingManualSyncVibration.reset();
     sPendingStageMessages.clear();
     sDeferredRemoteSwitches.clear();
@@ -4333,9 +4343,22 @@ std::string encode_manual_sync_full_state() {
     // the sender's original entrance index from an older scene load.
     packet.startPoint = -1;
 
+    // The live stage's newest switches/items live in mMemory until vanilla commits
+    // them during a scene change. Fold that memory into the payload's durable stage
+    // table so a flags-only receiver does not miss changes merely because the sender
+    // has not left their current area yet.
+    dSv_info_c snapshotInfo = g_dComIfG_gameInfo.info;
+    stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+    if (stagInfo != nullptr) {
+        const int stage = dStage_stagInfo_GetSaveTbl(stagInfo);
+        if (stage >= 0 && stage < dSv_save_c::STAGE_MAX) {
+            snapshotInfo.getSavedata().putSave(stage, snapshotInfo.getMemory());
+        }
+    }
+
     std::string raw(kManualSyncStatePacketSize, '\0');
     std::memcpy(raw.data(), &packet, sizeof(packet));
-    std::memcpy(raw.data() + sizeof(packet), &g_dComIfG_gameInfo.info, sizeof(dSv_info_c));
+    std::memcpy(raw.data() + sizeof(packet), &snapshotInfo, sizeof(dSv_info_c));
 
     const size_t bound = ZSTD_compressBound(raw.size());
     std::string compressed(bound, '\0');
@@ -4540,6 +4563,106 @@ bool apply_manual_sync_full_state(const std::string& encoded) {
     return true;
 }
 
+bool decode_manual_sync_info(const std::string& encoded, ManualSyncStatePacket* packetOut,
+                             dSv_info_c* infoOut) {
+    std::string decoded;
+    if (!absl::Base64Unescape(encoded, &decoded)) {
+        DuskLog.warn("Multiplayer manual flags sync rejected: invalid base64");
+        return false;
+    }
+
+    const unsigned long long decodedSize =
+        ZSTD_getFrameContentSize(decoded.data(), decoded.size());
+    if (decodedSize != kManualSyncStatePacketSize) {
+        DuskLog.warn("Multiplayer manual flags sync rejected: size={}", decodedSize);
+        return false;
+    }
+
+    std::string raw(static_cast<size_t>(decodedSize), '\0');
+    const size_t result = ZSTD_decompress(raw.data(), raw.size(), decoded.data(), decoded.size());
+    if (ZSTD_isError(result)) {
+        DuskLog.warn("Multiplayer manual flags sync decompression failed: {}",
+                     ZSTD_getErrorName(result));
+        return false;
+    }
+    if (result != raw.size()) {
+        DuskLog.warn("Multiplayer manual flags sync rejected: decompressed size={} expected={}",
+                     result, raw.size());
+        return false;
+    }
+
+    ManualSyncStatePacket packet = {};
+    std::memcpy(&packet, raw.data(), sizeof(packet));
+    packet.stageName[sizeof(packet.stageName) - 1] = '\0';
+    if (!is_valid_manual_sync_packet(packet)) {
+        return false;
+    }
+
+    std::memcpy(infoOut, raw.data() + sizeof(packet), sizeof(dSv_info_c));
+    *packetOut = packet;
+    return true;
+}
+
+bool apply_manual_flags_sync_full_state(const std::string& encoded) {
+    if (is_title_screen_active() || is_stage_load_unsafe_for_multiplayer()) {
+        DuskLog.warn("Multiplayer manual flags sync rejected without a stable loaded save");
+        return false;
+    }
+    if (sManualSyncFullStateTransitionActive || sPendingManualSyncInfo.has_value() ||
+        sPendingManualFlagsSyncSave.has_value() || sManualSyncReloadPending)
+    {
+        DuskLog.warn("Multiplayer manual flags sync rejected: transition already active");
+        return false;
+    }
+
+    ManualSyncStatePacket packet = {};
+    dSv_info_c peerInfo = {};
+    if (!decode_manual_sync_info(encoded, &packet, &peerInfo)) {
+        return false;
+    }
+
+    stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+    if (stagInfo == nullptr) {
+        DuskLog.warn("Multiplayer manual flags sync rejected: current stage has no save table");
+        return false;
+    }
+    const int currentStage = dStage_stagInfo_GetSaveTbl(stagInfo);
+    if (currentStage < 0 || currentStage >= dSv_save_c::STAGE_MAX) {
+        DuskLog.warn("Multiplayer manual flags sync rejected: invalid current save table={}",
+                     currentStage);
+        return false;
+    }
+
+    // Sync the complete durable save, including Link's inventory/equipment and every
+    // stage's progression, but retain fields that describe this client's current
+    // placement and personal control settings. Live room/dungeon scratch data is
+    // deliberately not copied from a peer who may be in an unrelated stage.
+    dSv_player_c& localPlayer = g_dComIfG_gameInfo.info.getPlayer();
+    const dSv_player_return_place_c localReturnPlace = localPlayer.getPlayerReturnPlace();
+    const dSv_player_field_last_stay_info_c localLastStay =
+        localPlayer.getPlayerFieldLastStayInfo();
+    const dSv_player_config_c localConfig = localPlayer.getConfig();
+
+    dSv_save_c syncedSave = peerInfo.getSavedata();
+    syncedSave.getPlayer().getPlayerReturnPlace() = localReturnPlace;
+    syncedSave.getPlayer().getPlayerFieldLastStayInfo() = localLastStay;
+    syncedSave.getPlayer().getConfig() = localConfig;
+
+    toggleAutoSave(false);
+    g_dComIfG_gameInfo.info.setSavedata(syncedSave);
+    dSv_memory_c currentMemory = syncedSave.getSave(currentStage);
+    g_dComIfG_gameInfo.info.setMemory(currentMemory);
+    repair_synced_key_item_state("manual_flags_sync_decode");
+
+    // Keep a durable-only copy for a second application after the room reload. This
+    // prevents scene teardown/load code from restoring stale pre-sync save data.
+    sPendingManualFlagsSyncSave = syncedSave;
+    sManualSyncReloadPending = true;
+    DuskLog.info("Multiplayer applied manual flags sync from stage={} room={}; queued room restart",
+                 packet.stageName, static_cast<int>(packet.roomNo));
+    return true;
+}
+
 // Sent once, immediately after this side becomes "welcomed", so a peer that
 // joined or reconnected mid-session catches up on durable state it missed
 // instead of only receiving bits set after it connected. Lists only
@@ -4549,7 +4672,7 @@ bool apply_manual_sync_full_state(const std::string& encoded) {
 // arrives is naturally preserved -- these are all monotonic OR-merges, so
 // receiving a bit twice or in any order is harmless.
 void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetClientId = "",
-                        bool manualSync = false) {
+                        bool manualSync = false, bool manualFlagsOnly = false) {
     if (!sSyncFlagsEnabled) {
         DuskLog.info("Multiplayer save snapshot skipped because sync flags are disabled");
         return;
@@ -4720,6 +4843,7 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
     }
     if (manualSync) {
         snapshot["manual_sync"] = true;
+        snapshot["manual_sync_mode"] = manualFlagsOnly ? "flags" : "warp";
         const std::string fullState = encode_manual_sync_full_state();
         if (!fullState.empty()) {
             snapshot["full_state"] = fullState;
@@ -4805,7 +4929,7 @@ void update_pending_sync_replies() {
             if (peerIt != sSession.directPeers.end()) {
                 mark_progression_sync_cue_handled(it->peerKey, it->cueKey,
                                                   "deferred_sync_reply");
-                send_save_snapshot(&peerIt->second, "", true);
+                send_save_snapshot(&peerIt->second, "", true, it->flagsOnly);
                 DuskLog.info(
                     "Multiplayer replied to deferred direct manual sync request peer={} cue={}",
                     it->peerKey, it->cueKey);
@@ -4816,11 +4940,11 @@ void update_pending_sync_replies() {
         {
             mark_progression_sync_cue_handled(it->targetClientId, it->cueKey,
                                               "deferred_sync_reply");
-            send_save_snapshot(nullptr, it->targetClientId, true);
+            send_save_snapshot(nullptr, it->targetClientId, true, it->flagsOnly);
             DuskLog.info("Multiplayer replied to deferred routed manual sync request peer={} cue={}",
                          it->targetClientId, it->cueKey);
         } else {
-            send_save_snapshot(nullptr, "", true);
+            send_save_snapshot(nullptr, "", true, it->flagsOnly);
             DuskLog.info("Multiplayer replied to deferred manual sync request cue={}", it->cueKey);
         }
         it = sPendingSyncReplies.erase(it);
@@ -6975,6 +7099,10 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         }
         return;
     }
+    if (is_manual_flags_sync_message(routedMessage) && is_title_screen_active()) {
+        DuskLog.warn("Multiplayer manual flags sync discarded on the title screen");
+        return;
+    }
     if (is_stage_dependent_message_type(type) && is_stage_load_unsafe_for_multiplayer() &&
         !(is_manual_sync_full_state_message(routedMessage) && is_title_screen_active()))
     {
@@ -7219,9 +7347,14 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         push_notification(peerName + " left");
     } else if (type == "save_snapshot") {
         if (message.value("manual_sync", false) && message.contains("full_state")) {
-            if (apply_manual_sync_full_state(message.value("full_state", ""))) {
+            const bool flagsOnly = message.value("manual_sync_mode", "warp") == "flags";
+            if (flagsOnly) {
+                if (apply_manual_flags_sync_full_state(message.value("full_state", ""))) {
+                    DuskLog.info("Multiplayer applied manual flags-only snapshot from peer");
+                }
+            } else if (apply_manual_sync_full_state(message.value("full_state", ""))) {
                 sManualSyncReloadPending = false;
-                DuskLog.info("Multiplayer applied manual sync full-state snapshot from peer");
+                DuskLog.info("Multiplayer applied manual sync-and-warp snapshot from peer");
             }
             return;
         }
@@ -7408,6 +7541,7 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         DuskLog.info("Multiplayer applied save snapshot from peer");
     } else if (type == "sync_request") {
         const std::string cueKey = routedMessage.value("cue_key", "");
+        const bool flagsOnly = routedMessage.value("manual_sync_mode", "warp") == "flags";
         if (dComIfGp_getStageStagInfo() == nullptr || dComIfGp_event_runCheck()) {
             DuskLog.warn("Multiplayer manual sync request ignored while stage/event is not ready");
         } else {
@@ -7424,6 +7558,7 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                 PendingSyncReply pending;
                 pending.active = true;
                 pending.cueKey = cueKey;
+                pending.flagsOnly = flagsOnly;
                 if (sender != nullptr) {
                     pending.isDirectPeer = true;
                     pending.peerKey = sender->id;
@@ -7432,7 +7567,7 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                 }
                 sPendingSyncReplies.push_back(std::move(pending));
             } else if (sender != nullptr) {
-                send_save_snapshot(sender, "", true);
+                send_save_snapshot(sender, "", true, flagsOnly);
                 DuskLog.info("Multiplayer replied to direct manual sync request peer={}", sender->id);
             } else {
                 const std::string requesterId = routedMessage.value("client_id", "");
@@ -7440,11 +7575,11 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                      sSession.mode == NetworkMode::DirectJoin) &&
                     !requesterId.empty())
                 {
-                    send_save_snapshot(nullptr, requesterId, true);
+                    send_save_snapshot(nullptr, requesterId, true, flagsOnly);
                     DuskLog.info("Multiplayer replied to routed manual sync request peer={}",
                                  requesterId);
                 } else {
-                    send_save_snapshot(nullptr, "", true);
+                    send_save_snapshot(nullptr, "", true, flagsOnly);
                     DuskLog.info("Multiplayer replied to manual sync request");
                 }
             }
@@ -10220,26 +10355,39 @@ void repair_current_stage_collectibles() {
 }
 
 void tick_pending_manual_sync_apply() {
-    if (!sPendingManualSyncInfo.has_value()) {
+    if (!sPendingManualSyncInfo.has_value() && !sPendingManualFlagsSyncSave.has_value()) {
+        return;
+    }
+    // A flags-only sync is first applied live, then held here until the guarded room
+    // restart has actually been issued. Otherwise this tick would consume the backup
+    // one frame before the reload that it exists to survive.
+    if (sPendingManualFlagsSyncSave.has_value() && sManualSyncReloadPending) {
         return;
     }
     if (is_engine_stage_load_unsafe_for_multiplayer()) {
         return;
     }
 
-    g_dComIfG_gameInfo.info = *sPendingManualSyncInfo;
-    sPendingManualSyncInfo.reset();
-    sManualSyncFullStateTransitionActive = false;
-    repair_synced_key_item_state("manual_full_state_reapply");
-    if (sPendingManualSyncVibration.has_value()) {
-        dComIfGs_setOptVibration(*sPendingManualSyncVibration);
-        dComIfGp_setNowVibration(*sPendingManualSyncVibration);
-        sPendingManualSyncVibration.reset();
+    if (sPendingManualSyncInfo.has_value()) {
+        g_dComIfG_gameInfo.info = *sPendingManualSyncInfo;
+        sPendingManualSyncInfo.reset();
+        repair_synced_key_item_state("manual_full_state_reapply");
+        if (sPendingManualSyncVibration.has_value()) {
+            dComIfGs_setOptVibration(*sPendingManualSyncVibration);
+            dComIfGp_setNowVibration(*sPendingManualSyncVibration);
+            sPendingManualSyncVibration.reset();
+        }
+        dComIfGp_offOxygenShowFlag();
+        dComIfGp_setMaxOxygen(600);
+        dComIfGp_setOxygen(600);
+        DuskLog.info("Multiplayer manual sync full-state save info reapplied after stage load");
+    } else {
+        g_dComIfG_gameInfo.info.setSavedata(*sPendingManualFlagsSyncSave);
+        sPendingManualFlagsSyncSave.reset();
+        repair_synced_key_item_state("manual_flags_sync_reapply");
+        DuskLog.info("Multiplayer manual flags save data reapplied after room reload");
     }
-    dComIfGp_offOxygenShowFlag();
-    dComIfGp_setMaxOxygen(600);
-    dComIfGp_setOxygen(600);
-    DuskLog.info("Multiplayer manual sync full-state save info reapplied after stage load");
+    sManualSyncFullStateTransitionActive = false;
 }
 
 void update_connected() {
@@ -10311,6 +10459,9 @@ void update_connected() {
 
         if (sManualSyncReloadPending && !is_stage_load_unsafe_for_multiplayer()) {
             sManualSyncReloadPending = false;
+            if (sPendingManualFlagsSyncSave.has_value()) {
+                sManualSyncFullStateTransitionActive = true;
+            }
             DuskLog.info("Multiplayer manual sync restarting current room");
             daPy_py_c::forceRestartRoom(0, 5, 0xC9);
             return;
@@ -11101,7 +11252,8 @@ void disconnect_session() {
     sSession.mode = NetworkMode::Disabled;
 }
 
-bool request_manual_sync(const std::string& peerId, std::string* errorOut) {
+bool request_manual_sync_impl(const std::string& peerId, bool flagsOnly,
+                              std::string* errorOut) {
     if (!sEnabled || !sSession.welcomed) {
         if (errorOut != nullptr) {
             *errorOut = "Not connected.";
@@ -11116,6 +11268,13 @@ bool request_manual_sync(const std::string& peerId, std::string* errorOut) {
         return false;
     }
 
+    if (flagsOnly && (is_title_screen_active() || is_stage_load_unsafe_for_multiplayer())) {
+        if (errorOut != nullptr) {
+            *errorOut = "Load a save and wait for the current scene to finish before syncing flags.";
+        }
+        return false;
+    }
+
     if (peerId.empty() || peerId == "local") {
         if (errorOut != nullptr) {
             *errorOut = "Choose a peer to sync from.";
@@ -11126,8 +11285,9 @@ bool request_manual_sync(const std::string& peerId, std::string* errorOut) {
     json request = {
         {"type", "sync_request"},
         {"target_client_id", peerId},
+        {"manual_sync_mode", flagsOnly ? "flags" : "warp"},
     };
-    if (!sAwaitingManualSyncCueKey.empty()) {
+    if (!flagsOnly && !sAwaitingManualSyncCueKey.empty()) {
         request["cue_key"] = sAwaitingManualSyncCueKey;
     }
 
@@ -11154,6 +11314,14 @@ bool request_manual_sync(const std::string& peerId, std::string* errorOut) {
     }
 
     return true;
+}
+
+bool request_manual_sync(const std::string& peerId, std::string* errorOut) {
+    return request_manual_sync_impl(peerId, false, errorOut);
+}
+
+bool request_manual_flags_sync(const std::string& peerId, std::string* errorOut) {
+    return request_manual_sync_impl(peerId, true, errorOut);
 }
 
 SessionStatus get_session_status() {
@@ -11287,6 +11455,7 @@ void apply_sync_flags_enabled(bool enabled) {
         sOrdonDayBoundaryReloadPeerId.clear();
         sOrdonDayBoundaryReloadFlag = 0;
         sPendingManualSyncInfo.reset();
+        sPendingManualFlagsSyncSave.reset();
         sPendingManualSyncVibration.reset();
     }
 }

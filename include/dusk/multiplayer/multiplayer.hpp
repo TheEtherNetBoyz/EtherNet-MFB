@@ -390,6 +390,7 @@ bool join_direct(const DirectJoinOptions& options, std::string* errorOut = nullp
 bool join_relay(const RelayJoinOptions& options, std::string* errorOut = nullptr);
 void disconnect_session();
 bool request_manual_sync(const std::string& peerId, std::string* errorOut = nullptr);
+bool request_manual_flags_sync(const std::string& peerId, std::string* errorOut = nullptr);
 SessionStatus get_session_status();
 std::vector<PlayerListEntry> get_player_list();
 void set_name_labels_enabled(bool enabled);

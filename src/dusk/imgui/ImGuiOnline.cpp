@@ -198,15 +198,27 @@ void ImGuiOnline::draw(bool& open) {
         ImGui::SetNextItemWidth(190.0f);
         ImGui::Combo("Sync From", &m_syncPeerIndex, syncPeerLabels.data(),
                      static_cast<int>(syncPeerLabels.size()));
-        ImGui::SameLine();
-        if (ImGui::Button("Sync")) {
+        if (ImGui::Button("Sync + Warp")) {
             std::string error;
             const std::string peerId = syncPeers[m_syncPeerIndex]->id;
             const std::string peerName = syncPeers[m_syncPeerIndex]->name;
             if (multiplayer::request_manual_sync(peerId, &error)) {
-                m_statusMessage = error.empty() ? "Sync requested from " + peerName + "." : error;
+                m_statusMessage =
+                    error.empty() ? "Sync + warp requested from " + peerName + "." : error;
             } else {
-                m_statusMessage = "Sync failed: " + error;
+                m_statusMessage = "Sync + warp failed: " + error;
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Sync Flags")) {
+            std::string error;
+            const std::string peerId = syncPeers[m_syncPeerIndex]->id;
+            const std::string peerName = syncPeers[m_syncPeerIndex]->name;
+            if (multiplayer::request_manual_flags_sync(peerId, &error)) {
+                m_statusMessage =
+                    error.empty() ? "Flag sync requested from " + peerName + "." : error;
+            } else {
+                m_statusMessage = "Flag sync failed: " + error;
             }
         }
         if (syncPeers.empty()) {
