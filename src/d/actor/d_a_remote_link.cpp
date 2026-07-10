@@ -3178,7 +3178,15 @@ void daRemoteLink_c::applyInterpolatedRemoteAttachments() {
 
     applyInterpolatedRemoteModelMatrices(mpFaceModel, mFaceMatrixInterp, "face");
     applyInterpolatedRemoteModelMatrices(mpHandModel, mHandMatrixInterp, "hand");
-    if (mVisualState.form != FORM_WOLF) {
+    if (mVisualState.form == FORM_WOLF) {
+        // Wolf equipment is attached to the back joint by a fixed local
+        // offset. Rebuild it after the wolf body has been interpolated so the
+        // sword, sheath, and shield follow the render-frame body pose instead
+        // of remaining at their last simulation-frame matrices.
+        if (dusk::frame_interp::is_enabled()) {
+            applyWolfEquipmentMatrices();
+        }
+    } else {
         applyInterpolatedRemoteModelMatrices(mpSwordModel, mSwordMatrixInterp, "sword");
         applyInterpolatedRemoteModelMatrices(mpSheathModel, mSheathMatrixInterp, "sheath");
         applyInterpolatedRemoteModelMatrices(mpShieldModel, mShieldMatrixInterp, "shield");
