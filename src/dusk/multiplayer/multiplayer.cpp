@@ -173,6 +173,12 @@ struct ManualSyncStatePacket {
 constexpr size_t kManualSyncStatePacketSize =
     sizeof(ManualSyncStatePacket) + sizeof(dSv_info_c);
 
+// dEvent_exception_c's stage-independent DEFAULT_START event. A manual sync
+// uses restart point -1 so the engine takes Link's actor parameters from the
+// restart record instead of a stage spawn. Leaving the event byte at zero
+// would order map event 0 (the credits sequence in Ordon Village).
+constexpr int kManualSyncDefaultStartEvent = 0xCA;
+
 // Keep the inner IPv4/UDP packet below 1200 bytes so VPN encapsulation does not
 // force IP fragmentation. Header is 58 bytes, so 1100 bytes of matrix data
 // produces a 1186-byte IPv4/UDP packet before the VPN's outer headers.
@@ -4583,7 +4589,17 @@ bool apply_manual_sync_full_state(const std::string& encoded) {
 
     const s16 spawnPoint = packet.startPoint == -4 ? -1 : packet.startPoint;
     if (spawnPoint == -1) {
-        dComIfGs_setRestartRoomParam(packet.roomNo & 0x3F);
+        // Keep the received restart position/angle and destination room, but
+        // give this one arrival a stage-independent start event. This mirrors
+        // vanilla's arbitrary-position warp setup and prevents the room-only
+        // parameter from being decoded as stage map event 0.
+        const u32 restartParam =
+            daPy_py_c::setParamData(packet.roomNo, 0, kManualSyncDefaultStartEvent, 0);
+        dComIfGs_setRestartRoomParam(restartParam);
+        DuskLog.info("Multiplayer manual sync restart params room={} start_mode=0 "
+                     "start_event={} packed={:#010x}",
+                     static_cast<int>(packet.roomNo), kManualSyncDefaultStartEvent,
+                     restartParam);
     }
 
     DuskLog.info("Multiplayer applying manual sync full state stage={} room={} layer={} point={}",
