@@ -328,6 +328,24 @@ bool apply_pvp_player_damage(int attackClass, bool ironBallLaunch, float sourceX
     return false;
 }
 
+bool apply_pvp_player_shield_block(int attackClass, float sourceX, float sourceZ) {
+    daAlink_c* player = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
+    if (player == nullptr || player->checkWolf()) {
+        return false;
+    }
+
+    const s16 hitAngle =
+        static_cast<s16>(angle_y_from_delta(player->current.pos.x - sourceX,
+                                            player->current.pos.z - sourceZ));
+    cXyz damageVec(cM_ssin(hitAngle) * 10.0f, 0.0f, cM_scos(hitAngle) * 10.0f);
+    const int atSpl = attackClass == kPvpAttackHeavy ? 1 : 0;
+    const int vibration =
+        attackClass == kPvpAttackHeavy ? VIBMODE_S_POWER4 : VIBMODE_S_POWER3;
+    dComIfGp_getVibration().StartShock(vibration, 1, cXyz(0.0f, 1.0f, 0.0f));
+    player->setPvpGuardSe();
+    return player->procGuardSlipInit(atSpl, nullptr, &damageVec) != 0;
+}
+
 bool pose_float_is_finite(const char* name, f32 value) {
     if (std::isfinite(value)) {
         return true;
@@ -5630,6 +5648,9 @@ bool add_link_matrices(json& state, json* midnaMatrices = nullptr, bool includeL
     state["clothes_variant"] = detect_clothes_variant();
     state["sword_draw"] = static_cast<bool>(link->checkSwordDraw());
     state["shield_draw"] = static_cast<bool>(link->checkShieldDraw());
+    state["shield_guard_active"] =
+        !isWolf && static_cast<bool>(link->checkShieldDraw()) &&
+        static_cast<bool>(link->checkNoResetFlg2(daPy_py_c::FLG2_UNK_8000000));
     state["sword_out"] = !isWolf && link->mEquipItem == 0x103;
     state["midna_draw"] = midnaVisual.body;
     state["midna_mask_draw"] = midnaVisual.mask;
@@ -7361,14 +7382,18 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             const bool ironBallLaunch =
                 attackClass == kPvpAttackHeavy &&
                 state.value("reaction", std::string()) == kPvpReactionIronBallLaunch;
+            const bool blocked = !ironBallLaunch && state.value("blocked", false);
             const float sourceX = state.value("source_x", 0.0f);
             const float sourceZ = state.value("source_z", 0.0f);
-            const bool appliedReaction =
-                apply_pvp_player_damage(attackClass, ironBallLaunch, sourceX, sourceZ);
+            const bool appliedReaction = blocked
+                                             ? apply_pvp_player_shield_block(attackClass, sourceX,
+                                                                             sourceZ)
+                                             : apply_pvp_player_damage(attackClass, ironBallLaunch,
+                                                                       sourceX, sourceZ);
             sPvpRemoteHitLastSequenceByPeer[peerId] = sequence;
             DuskLog.info("Multiplayer PvP hit rx peer={} seq={} class={} iron_ball_launch={} "
-                         "reaction={}",
-                         peerId, sequence, attackClass, ironBallLaunch, appliedReaction);
+                         "blocked={} reaction={}",
+                         peerId, sequence, attackClass, ironBallLaunch, blocked, appliedReaction);
         }
     } else if (type == "peer_left") {
         const std::string leftPeerId = resolve_peer_id(routedMessage);
@@ -7963,6 +7988,7 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         pose.clothesVariant = state.value("clothes_variant", REMOTE_CLOTHES_HERO);
         pose.swordDraw = state.value("sword_draw", false);
         pose.shieldDraw = state.value("shield_draw", false);
+        pose.shieldGuardActive = state.value("shield_guard_active", false);
         pose.swordOut = state.value("sword_out", false);
         pose.midnaDraw = state.value("midna_draw", false);
         pose.midnaMaskDraw = state.value("midna_mask_draw", false);
@@ -8894,7 +8920,7 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
         };
         static const char* const visualKeys[] = {
             "equip_item", "sword_variant", "shield_variant", "clothes_variant", "sword_draw",
-            "shield_draw", "sword_out", "midna_draw", "midna_mask_draw", "midna_hand_draw",
+            "shield_draw", "shield_guard_active", "sword_out", "midna_draw", "midna_mask_draw", "midna_hand_draw",
             "midna_hair_draw", "midna_shadow_form", "heavy_boots", "item_draw",
             "kantera_draw", "item_actor_kind", "item_actor_bomb_ex_time",
             "item_actor_bomb_flash", "ride_actor_kind",
@@ -10231,6 +10257,10 @@ void send_pose() {
         {"clothes_variant", detect_clothes_variant()},
         {"sword_draw", link != nullptr && static_cast<bool>(link->checkSwordDraw())},
         {"shield_draw", link != nullptr && static_cast<bool>(link->checkShieldDraw())},
+        {"shield_guard_active",
+         link != nullptr && !isWolf && static_cast<bool>(link->checkShieldDraw()) &&
+             static_cast<bool>(
+                 link->checkNoResetFlg2(daPy_py_c::FLG2_UNK_8000000))},
         {"sword_out", link != nullptr && !isWolf && link->mEquipItem == 0x103},
         {"midna_draw", midnaVisual.body},
         {"midna_mask_draw", midnaVisual.mask},
@@ -10862,17 +10892,20 @@ void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo) {
         return;
     }
 
-    const auto invincibilityIt = sPvpRemoteInvincibilityTicksByPeer.find(targetPeerId);
-    if (invincibilityIt != sPvpRemoteInvincibilityTicksByPeer.end() &&
-        invincibilityIt->second != 0)
-    {
-        return;
-    }
-    sPvpRemoteInvincibilityTicksByPeer[targetPeerId] = kPvpRemoteInvincibilityTicks;
-
-    const uint32_t sequence = ++sLocalPvpHitSequence;
     const int attackClass = classify_pvp_attack(attackInfo);
     const bool ironBallLaunch = attackInfo->ChkAtType(AT_TYPE_IRON_BALL);
+    const bool blocked = !ironBallLaunch && attackInfo->ChkAtShieldHit();
+    if (!blocked) {
+        const auto invincibilityIt = sPvpRemoteInvincibilityTicksByPeer.find(targetPeerId);
+        if (invincibilityIt != sPvpRemoteInvincibilityTicksByPeer.end() &&
+            invincibilityIt->second != 0)
+        {
+            return;
+        }
+        sPvpRemoteInvincibilityTicksByPeer[targetPeerId] = kPvpRemoteInvincibilityTicks;
+    }
+
+    const uint32_t sequence = ++sLocalPvpHitSequence;
     const cXyz* sourcePos = &link->current.pos;
     if (ironBallLaunch) {
         const cXyz* ironBallPos = link->getIronBallCenterPos();
@@ -10886,6 +10919,7 @@ void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo) {
         {"stage", dComIfGp_getStartStageName()},
         {"room", static_cast<int>(dComIfGp_roomControl_getStayNo())},
         {"attack_class", attackClass},
+        {"blocked", blocked},
         {"source_x", sourcePos->x},
         {"source_y", sourcePos->y},
         {"source_z", sourcePos->z},
@@ -10900,9 +10934,9 @@ void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo) {
         {"state", state},
     });
     DuskLog.info("Multiplayer PvP hit tx target={} seq={} class={} iron_ball_launch={} "
-                 "at_type={:#x} at_spl={}",
-                 targetPeerId, sequence, attackClass, ironBallLaunch, attackInfo->GetAtType(),
-                 static_cast<int>(attackInfo->GetAtSpl()));
+                 "blocked={} at_type={:#x} at_spl={}",
+                 targetPeerId, sequence, attackClass, ironBallLaunch, blocked,
+                 attackInfo->GetAtType(), static_cast<int>(attackInfo->GetAtSpl()));
 }
 
 void report_remote_link_pvp_target_hit(fopAc_ac_c* remoteLinkActor, fopAc_ac_c* attackActor,

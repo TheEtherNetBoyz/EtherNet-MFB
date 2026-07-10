@@ -41,7 +41,8 @@ public:
                               u16 i_underBck0, f32 i_underFrame0, f32 i_underRate0,
                               u16 i_upperBck2, f32 i_upperFrame2, f32 i_upperRate2,
                               u16 i_equipItem, int i_swordVariant, int i_shieldVariant,
-                              bool i_swordDraw, bool i_shieldDraw, bool i_swordOut,
+                              bool i_swordDraw, bool i_shieldDraw, bool i_shieldGuardActive,
+                              bool i_swordOut,
                               bool i_heavyBoots, bool i_itemDraw, bool i_kanteraDraw,
                               bool i_midnaDraw, bool i_midnaMaskDraw, bool i_midnaHandDraw,
                               bool i_midnaHairDraw, bool i_midnaShadowForm, int i_itemActorKind,
@@ -267,6 +268,7 @@ private:
     /* 0xBEC */ u16 mLoadedHeldItem;
     /* 0xBEE */ bool mRemoteSwordDraw;
     /* 0xBEF */ bool mRemoteShieldDraw;
+    bool mRemoteShieldGuardActive;
     /* 0xBF0 */ bool mRemoteSwordOut;
     /* 0xBF1 */ bool mRemoteHeavyBoots;
     /* 0xBF2 */ bool mRemoteMidnaDraw;
@@ -326,6 +328,7 @@ private:
     dCcD_Stts mPvpTargetStts;
     dCcD_Cyl mPvpTargetCyl;
     bool mPvpTargetCollisionInitialized;
+    s16 mPvpShieldFrontAngle;
     std::array<u32, 3> mPvpMidnaBindIds;
     bool mPvpMidnaBindActive;
     Z2SoundObjSimple mActiveSoundObj;

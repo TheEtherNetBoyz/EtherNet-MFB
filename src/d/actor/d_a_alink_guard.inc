@@ -222,6 +222,13 @@ void daAlink_c::setGuardSe(dCcD_GObjInf* i_objinf) {
     mZ2Link.startCollisionSE(hit_se, var_r31);
 }
 
+void daAlink_c::setPvpGuardSe() {
+    const int mapInfo = checkWoodShieldEquipNotIronBall() && !checkMagicArmorNoDamage()
+                            ? 0x29
+                            : 0x28;
+    mZ2Link.startCollisionSE(Z2SE_HIT_METAL_WEAPON, mapInfo);
+}
+
 void daAlink_c::setSmallGuard(dCcD_GObjInf* i_objinf) {
     setUpperAnimeBase(dRes_ID_ALANM_BCK_ATDEFS_e);
     cXyz* dmg_vec = getDamageVec(i_objinf);
@@ -238,7 +245,8 @@ void daAlink_c::setSmallGuard(dCcD_GObjInf* i_objinf) {
     mBodyAngle.x = cLib_minMaxLimit<s16>(cM_atan2s(dmg_vec->y, dmg_vec->absXZ()), -mpHIO->mGuard.m.mSmallGuardFBAngleMax, mpHIO->mGuard.m.mSmallGuardFBAngleMax);
 }
 
-int daAlink_c::procGuardSlipInit(int i_atSpl, dCcD_GObjInf* i_objinf) {
+int daAlink_c::procGuardSlipInit(int i_atSpl, dCcD_GObjInf* i_objinf,
+                                 const cXyz* i_syntheticDamageVec) {
     if (mProcID == PROC_GUARD_SLIP) {
         return 0;
     }
@@ -252,7 +260,9 @@ int daAlink_c::procGuardSlipInit(int i_atSpl, dCcD_GObjInf* i_objinf) {
     commonProcInit(PROC_GUARD_SLIP);
     field_0x2fd4 = 3;
     
-    cXyz* dmg_vec = getDamageVec(i_objinf);
+    cXyz* dmg_vec = i_syntheticDamageVec != NULL
+                        ? const_cast<cXyz*>(i_syntheticDamageVec)
+                        : getDamageVec(i_objinf);
     current.angle.y = dmg_vec->atan2sX_Z();
 
     const daAlinkHIO_anm_c* anmParams;

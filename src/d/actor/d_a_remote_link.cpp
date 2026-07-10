@@ -658,6 +658,7 @@ daRemoteLink_c::daRemoteLink_c()
       mLoadedHeldItem(0xFFFF),
       mRemoteSwordDraw(false),
       mRemoteShieldDraw(false),
+      mRemoteShieldGuardActive(false),
       mRemoteSwordOut(false),
       mRemoteHeavyBoots(false),
       mRemoteMidnaDraw(false),
@@ -717,6 +718,7 @@ daRemoteLink_c::daRemoteLink_c()
       mPvpTargetStts(),
       mPvpTargetCyl(),
       mPvpTargetCollisionInitialized(false),
+      mPvpShieldFrontAngle(0),
       mPvpMidnaBindIds(),
       mPvpMidnaBindActive(false),
       mActiveSoundObj(),
@@ -2207,6 +2209,8 @@ void daRemoteLink_c::initPvpTargetCollision() {
     mPvpTargetCyl.Set(l_pvpTargetCylSrc);
     mPvpTargetCyl.SetStts(&mPvpTargetStts);
     mPvpTargetCyl.SetTgGrp(0x1E);
+    mPvpTargetCyl.OnTgNoConHit();
+    mPvpTargetCyl.SetTgShieldFrontRangeYAngle(&mPvpShieldFrontAngle);
     mPvpTargetCyl.SetTgHitCallback(daRemoteLink_pvpTargetHitCallback);
     mPvpTargetCyl.OffAtSetBit();
     mPvpTargetCyl.OffCoSetBit();
@@ -2280,6 +2284,21 @@ void daRemoteLink_c::updatePvpTargetCollision() {
     mPvpTargetCyl.SetC(center);
     mPvpTargetCyl.SetH(height);
     mPvpTargetCyl.SetR(radius);
+    cXyz shieldForward;
+    if (mRemoteShieldGuardActive && mVisualState.form != FORM_WOLF && mpShieldModel != NULL) {
+        mDoMtx_multVecSR(mpShieldModel->getBaseTRMtx(), &cXyz::BaseZ, &shieldForward);
+        if (shieldForward.absXZ() > 0.01f) {
+            mPvpShieldFrontAngle = shieldForward.atan2sX_Z();
+        } else {
+            mPvpShieldFrontAngle = shape_angle.y;
+        }
+        mPvpTargetCyl.OnTgShield();
+        mPvpTargetCyl.OnTgShieldFrontRange();
+    } else {
+        mPvpShieldFrontAngle = shape_angle.y;
+        mPvpTargetCyl.OffTgShield();
+        mPvpTargetCyl.OffTgShieldFrontRange();
+    }
     mPvpTargetCyl.OnTgSetBit();
     mPvpTargetCyl.OffAtSetBit();
     mPvpTargetCyl.OffCoSetBit();
@@ -2661,7 +2680,8 @@ void daRemoteLink_c::setRemoteActionState(int i_procId, int i_procVar0, int i_pr
                                           f32 i_underRate0, u16 i_upperBck2, f32 i_upperFrame2,
                                           f32 i_upperRate2, u16 i_equipItem,
                                           int i_swordVariant, int i_shieldVariant,
-                                          bool i_swordDraw, bool i_shieldDraw, bool i_swordOut,
+                                          bool i_swordDraw, bool i_shieldDraw,
+                                          bool i_shieldGuardActive, bool i_swordOut,
                                           bool i_heavyBoots, bool i_itemDraw, bool i_kanteraDraw,
                                           bool i_midnaDraw, bool i_midnaMaskDraw,
                                           bool i_midnaHandDraw, bool i_midnaHairDraw,
@@ -2686,6 +2706,7 @@ void daRemoteLink_c::setRemoteActionState(int i_procId, int i_procVar0, int i_pr
     mRemoteShieldVariant = i_shieldVariant;
     mRemoteSwordDraw = i_swordDraw;
     mRemoteShieldDraw = i_shieldDraw;
+    mRemoteShieldGuardActive = i_shieldGuardActive;
     mRemoteSwordOut = i_swordOut;
     mRemoteHeavyBoots = i_heavyBoots;
     mRemoteItemDraw = i_itemDraw;

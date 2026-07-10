@@ -171,6 +171,7 @@ struct PeerPoseSnapshot {
     int clothesVariant = 0;
     bool swordDraw = false;
     bool shieldDraw = false;
+    bool shieldGuardActive = false;
     bool swordOut = false;
     bool midnaDraw = false;
     bool midnaMaskDraw = false;
