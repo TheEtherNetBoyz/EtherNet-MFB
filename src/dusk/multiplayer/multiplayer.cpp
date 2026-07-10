@@ -757,7 +757,8 @@ bool wants_remote_midna_matrices() {
 // Ganon's Tower collapse timer) -- the full extent of which TP stage/room
 // functions also select layers from these values was never enumerated.
 // Off by default; opt in with DUSK_MP_LAYER_SYNC=1 once that audit is done,
-// or for testing with both peers in the same room at the same time.
+// or for testing with both peers in the same room at the same time. Province
+// DarkClearLV 0-2 are exempt: they use participant-aware routing below.
 bool sLayerRiskSyncEnabled = false;
 
 struct LocalLightDropTboxContext {
@@ -871,6 +872,17 @@ uint32_t sDeferredFaronDayBoundaryBroadcastHoldTicks = 0;
 std::vector<json> sDeferredFaronWarpSequenceEvents;
 std::vector<json> sDeferredFaronWarpSequenceBroadcasts;
 bool sLocalFaronWarpSequenceActive = false;
+
+enum class PendingRemoteDarkClear : uint8_t {
+    None,
+    AwaitLocalRestoration,
+    AwaitSewersExit,
+};
+
+// Route Faron/Eldin/Lanayru completion per receiver. A player already inside
+// the matching twilight keeps its clear bit off so vanilla can run the
+// restoration sequence; everybody else can accept the clear immediately.
+std::array<PendingRemoteDarkClear, 3> sPendingRemoteDarkClears{};
 std::optional<dSv_info_c> sPendingManualSyncInfo;
 std::optional<u8> sPendingManualSyncVibration;
 // Set right before a manual-sync request goes out for a progression cue, so
@@ -1218,7 +1230,7 @@ bool is_stage_dependent_message_type(const std::string& type) {
     // arrives during a cutscene if a later stage transition supersedes it.
     return type == "save_snapshot" || type == "tbox_bit" || type == "switch_bit" ||
            type == "room_switch_bit" || type == "item_bit" || type == "dungeon_item_bit" ||
-           type == "key_num" || type == "visited_room";
+           type == "key_num" || type == "visited_room" || type == "dark_clear_lv";
 }
 
 bool is_sync_flags_message_type(const std::string& type) {
@@ -1818,6 +1830,119 @@ void reapply_observed_memory_items_for_stage(int stageNo) {
 const char* current_stage_name() {
     const char* stage = dComIfGp_getStartStageName();
     return stage != nullptr ? stage : "";
+}
+
+int twilight_completion_level_for_stage(const char* stage, int room) {
+    if (stage == nullptr || stage[0] == '\0') {
+        return -1;
+    }
+
+    if (std::strcmp(stage, "F_SP108") == 0 || std::strcmp(stage, "R_SP108") == 0 ||
+        std::strcmp(stage, "D_SB10") == 0 || std::strcmp(stage, "F_SP105") == 0)
+    {
+        return 0;
+    }
+
+    // Hyrule Field is split between Eldin, Lanayru, and non-twilight rooms.
+    if (std::strcmp(stage, "F_SP121") == 0) {
+        if (room == 0 || (room >= 2 && room <= 5) || room == 7) {
+            return 1;
+        }
+        if (room >= 9 && room <= 14) {
+            return 2;
+        }
+        return -1;
+    }
+
+    if (std::strcmp(stage, "F_SP109") == 0 || std::strcmp(stage, "F_SP110") == 0 ||
+        std::strcmp(stage, "R_SP109") == 0 || std::strcmp(stage, "F_SP111") == 0 ||
+        std::strcmp(stage, "R_SP209") == 0)
+    {
+        return 1;
+    }
+
+    if (std::strcmp(stage, "F_SP112") == 0 || std::strcmp(stage, "F_SP113") == 0 ||
+        std::strcmp(stage, "F_SP115") == 0 || std::strcmp(stage, "F_SP116") == 0 ||
+        std::strcmp(stage, "F_SP122") == 0 || std::strcmp(stage, "F_SP126") == 0 ||
+        std::strcmp(stage, "R_SP116") == 0)
+    {
+        return 2;
+    }
+
+    // R_SP107 is tagged as Lanayru by vanilla's table, but is the early
+    // Castle Sewers branch. apply_remote_dark_clear() holds it separately.
+    return -1;
+}
+
+bool is_local_twilight_completion_participant(int no) {
+    if (no < 0 || no >= static_cast<int>(sPendingRemoteDarkClears.size()) ||
+        !dKy_darkworld_check())
+    {
+        return false;
+    }
+
+    return twilight_completion_level_for_stage(
+               current_stage_name(), dComIfGp_roomControl_getStayNo()) == no;
+}
+
+void apply_remote_dark_clear(int no, const char* source) {
+    const bool sharedProvinceClear = no >= 0 && no < 3;
+    if ((!sharedProvinceClear && !sLayerRiskSyncEnabled) || no < 0 || no >= 8) {
+        return;
+    }
+
+    if (dComIfGs_isDarkClearLV(no)) {
+        if (sharedProvinceClear) {
+            sPendingRemoteDarkClears[no] = PendingRemoteDarkClear::None;
+        }
+        DuskLog.info("Multiplayer remote dark clear already set source={} no={}", source, no);
+        return;
+    }
+
+    const char* stage = current_stage_name();
+    const int room = dComIfGp_roomControl_getStayNo();
+
+    if (no == 2 && std::strcmp(stage, "R_SP107") == 0) {
+        sPendingRemoteDarkClears[no] = PendingRemoteDarkClear::AwaitSewersExit;
+        DuskLog.info("Multiplayer deferred remote dark clear source={} no={} stage={} room={} "
+                     "reason=castle_sewers",
+                     source, no, stage, room);
+        return;
+    }
+
+    if (sharedProvinceClear && is_local_twilight_completion_participant(no)) {
+        sPendingRemoteDarkClears[no] = PendingRemoteDarkClear::AwaitLocalRestoration;
+        DuskLog.info("Multiplayer deferred remote dark clear source={} no={} stage={} room={} "
+                     "reason=local_twilight_participant",
+                     source, no, stage, room);
+        return;
+    }
+
+    if (sharedProvinceClear) {
+        sPendingRemoteDarkClears[no] = PendingRemoteDarkClear::None;
+    }
+    ScopedRemoteSaveBitApplication applyingRemoteSaveBit;
+    dComIfGs_onDarkClearLV(no);
+    DuskLog.info("Multiplayer applied remote dark clear source={} no={} stage={} room={}",
+                 source, no, stage, room);
+}
+
+void flush_pending_remote_dark_clears() {
+    for (int no = 0; no < static_cast<int>(sPendingRemoteDarkClears.size()); ++no) {
+        if (sPendingRemoteDarkClears[no] == PendingRemoteDarkClear::None) {
+            continue;
+        }
+        if (dComIfGs_isDarkClearLV(no)) {
+            sPendingRemoteDarkClears[no] = PendingRemoteDarkClear::None;
+            DuskLog.info("Multiplayer deferred remote dark clear satisfied locally no={}", no);
+            continue;
+        }
+        if (sPendingRemoteDarkClears[no] == PendingRemoteDarkClear::AwaitSewersExit &&
+            std::strcmp(current_stage_name(), "R_SP107") != 0)
+        {
+            apply_remote_dark_clear(no, "sewers_exit");
+        }
+    }
 }
 
 void begin_flag_trace_window(const char* source, const char* lane, int stage, int flag, bool set,
@@ -3728,6 +3853,7 @@ void reset_connection_state() {
     sDeferredFaronWarpSequenceEvents.clear();
     sDeferredFaronWarpSequenceBroadcasts.clear();
     sLocalFaronWarpSequenceActive = false;
+    sPendingRemoteDarkClears.fill(PendingRemoteDarkClear::None);
     sPendingManualSyncInfo.reset();
     sPendingManualSyncVibration.reset();
     sPendingStageMessages.clear();
@@ -4539,8 +4665,11 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
     for (int i = 0; i < 8; ++i) {
         if (dComIfGs_isCollectCrystal(static_cast<u8>(i))) crystals.push_back(i);
         if (dComIfGs_isCollectMirror(static_cast<u8>(i))) mirrors.push_back(i);
-        // Gated by DUSK_MP_LAYER_SYNC -- see sLayerRiskSyncEnabled.
-        if (sLayerRiskSyncEnabled && dComIfGs_isDarkClearLV(i)) darkClearLevels.push_back(i);
+        // Province clears are safe-routed per receiver. Other layer-risk
+        // levels remain behind DUSK_MP_LAYER_SYNC.
+        if ((i < 3 || sLayerRiskSyncEnabled) && dComIfGs_isDarkClearLV(i)) {
+            darkClearLevels.push_back(i);
+        }
         if (sLayerRiskSyncEnabled && dComIfGs_isTransformLV(i)) transformLevels.push_back(i);
         if (dComIfGs_isRegionBit(i)) regionBits.push_back(i);
     }
@@ -7219,16 +7348,13 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         for (const json& entry : message.value("mirrors", json::array())) {
             dComIfGs_onCollectMirror(static_cast<u8>(entry.get<int>()));
         }
-        // Gated by DUSK_MP_LAYER_SYNC -- see sLayerRiskSyncEnabled. A peer
-        // with the flag off must not apply these even if a flag-on sender
-        // included them in its snapshot.
-        if (sLayerRiskSyncEnabled) {
-            for (const json& entry : message.value("dark_clear_levels", json::array())) {
-                const int no = entry.get<int>();
-                if (no >= 0 && no < 8) {
-                    dComIfGs_onDarkClearLV(no);
-                }
+        for (const json& entry : message.value("dark_clear_levels", json::array())) {
+            const int no = entry.get<int>();
+            if ((no >= 0 && no < 3) || (sLayerRiskSyncEnabled && no >= 3 && no < 8)) {
+                apply_remote_dark_clear(no, "snapshot");
             }
+        }
+        if (sLayerRiskSyncEnabled) {
             for (const json& entry : message.value("transform_levels", json::array())) {
                 const int no = entry.get<int>();
                 if (no >= 0 && no < 8) {
@@ -8045,16 +8171,7 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         }
     } else if (type == "dark_clear_lv") {
         const int no = message.value("no", -1);
-        // Gated by DUSK_MP_LAYER_SYNC: this value also selects room layers
-        // in some stages (see sLayerRiskSyncEnabled's declaration comment).
-        // A peer with the flag off must not apply it even if a flag-on peer
-        // sends it.
-        if (sLayerRiskSyncEnabled && no >= 0 && no < 8) {
-            sApplyingRemoteSaveBit = true;
-            dComIfGs_onDarkClearLV(no);
-            sApplyingRemoteSaveBit = false;
-            DuskLog.info("Multiplayer applied remote dark clear lv no={}", no);
-        }
+        apply_remote_dark_clear(no, "live");
     } else if (type == "transform_lv") {
         const int no = message.value("no", -1);
         if (sLayerRiskSyncEnabled && no >= 0 && no < 8) {
@@ -10176,6 +10293,7 @@ void update_connected() {
     update_local_bomb_bag_slot_sync();
 
     if (!is_stage_load_unsafe_for_multiplayer()) {
+        flush_pending_remote_dark_clears();
         if (sSession.snapshotPending) {
             // The network handshake can complete within milliseconds, well
             // before the game has finished booting to a loaded stage (still
@@ -11171,6 +11289,7 @@ void apply_sync_flags_enabled(bool enabled) {
     DuskLog.info("Multiplayer sync flags {}", sSyncFlagsEnabled ? "enabled" : "disabled");
     if (!sSyncFlagsEnabled) {
         sPendingStageMessages.clear();
+        sPendingRemoteDarkClears.fill(PendingRemoteDarkClear::None);
         sPendingProgressionCueArrivals.clear();
         sPendingSyncReplies.clear();
         sProgressionSyncPrompt = {};
@@ -12734,8 +12853,19 @@ void notify_local_collect_mirror_set(int item) {
 }
 
 void notify_local_dark_clear_lv_set(int no) {
-    if (!sync_flags_enabled() || !sLayerRiskSyncEnabled || !sSession.welcomed ||
-        sApplyingRemoteSaveBit)
+    if (no < 0 || no >= 8) {
+        return;
+    }
+
+    if (no >= 0 && no < static_cast<int>(sPendingRemoteDarkClears.size()) &&
+        sPendingRemoteDarkClears[no] != PendingRemoteDarkClear::None)
+    {
+        sPendingRemoteDarkClears[no] = PendingRemoteDarkClear::None;
+        DuskLog.info("Multiplayer local restoration satisfied deferred dark clear no={}", no);
+    }
+
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit ||
+        (no >= 3 && !sLayerRiskSyncEnabled))
     {
         return;
     }
