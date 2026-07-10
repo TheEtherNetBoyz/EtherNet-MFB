@@ -836,6 +836,8 @@ struct PeerProgressionState {
     bool finalGanondorfReady = false;
     bool hasFaronCageSequenceState = false;
     bool faronCageSequenceActive = false;
+    bool hasFaronWarpSequenceState = false;
+    bool faronWarpSequenceActive = false;
 };
 
 std::vector<Notification> sNotifications;
@@ -866,6 +868,9 @@ std::set<uint16_t> sDeferredFaronDayBoundaryBroadcasts;
 std::vector<json> sDeferredFaronDayBoundaryEvents;
 bool sLocalFaronCageSequenceActive = false;
 uint32_t sDeferredFaronDayBoundaryBroadcastHoldTicks = 0;
+std::vector<json> sDeferredFaronWarpSequenceEvents;
+std::vector<json> sDeferredFaronWarpSequenceBroadcasts;
+bool sLocalFaronWarpSequenceActive = false;
 std::optional<dSv_info_c> sPendingManualSyncInfo;
 std::optional<u8> sPendingManualSyncVibration;
 // Set right before a manual-sync request goes out for a progression cue, so
@@ -905,6 +910,14 @@ constexpr int kProgressionCueFaronBothCageBokoblinsKilledSwitch = 45; // Faron a
 constexpr int kProgressionCueFaronMonkeyCageBrokenSwitch = 46; // Faron area flag 0E:40.
 constexpr int kProgressionCueFaronLeftCageBokoblinKilledSwitch = 47; // Faron area flag 0E:80.
 constexpr int kProgressionCueFaronRightCageBokoblinKilledSwitch = 48; // Faron area flag 0D:01.
+constexpr int kFaronWarpSequenceStartSwitch = 72; // S Faron warp shadow beasts spawned.
+constexpr int kFaronWarpSequenceFenceSwitch = 27; // S Faron warp twilight fences fall.
+constexpr int kFaronWarpSequenceBeastsKilledSwitch = 64; // S Faron warp shadow beasts killed.
+constexpr int kFaronWarpSequenceReviveSwitch = 14; // S Faron warp shadow beast revive cutscene.
+constexpr int kFaronWarpSequenceReturnSwitch = 15; // Returned to the S Faron warp fight.
+constexpr int kFaronWarpSequenceCompleteSwitch = 71; // Last local switch in the warp sequence.
+constexpr uint16_t kFaronWarpSequenceNightStalkerEventBit = 0x1202;
+constexpr uint16_t kFaronWarpSequenceMidnaChargeEventBit = 0x0501;
 constexpr uint16_t kProgressionCueSewersCompleteEventBit = 0x6140; // offset 0x61 bit 64 - "remove midna from z (temporary flag after sewers)".
 constexpr uint16_t kProgressionCueFaronTwilightEventBit = 0x0640; // offset 0x06 bit 64 - "watched faron twilight intro cutscene".
 constexpr int kUnsyncedSwitchOrdonStage = dStage_SaveTbl_ORDON;
@@ -1291,6 +1304,53 @@ bool has_active_faron_cage_sequence_peer() {
 }
 
 void send_progression_state(bool force);
+
+bool is_faron_warp_sequence_switch(int stage, int flag) {
+    if (stage != kProgressionCueFaronCageStage) {
+        return false;
+    }
+    switch (flag) {
+    case kFaronWarpSequenceStartSwitch:
+    case kFaronWarpSequenceFenceSwitch:
+    case kFaronWarpSequenceBeastsKilledSwitch:
+    case kFaronWarpSequenceReviveSwitch:
+    case kFaronWarpSequenceReturnSwitch:
+    case kFaronWarpSequenceCompleteSwitch:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool is_faron_warp_sequence_event_bit(uint16_t flag) {
+    return flag == kFaronWarpSequenceNightStalkerEventBit ||
+           flag == kFaronWarpSequenceMidnaChargeEventBit;
+}
+
+bool has_active_faron_warp_sequence_peer() {
+    for (const auto& entry : sPeerProgressionStates) {
+        const PeerProgressionState& state = entry.second;
+        if (state.valid && state.ageTicks <= kProgressionStateReadyMaxAgeTicks &&
+            state.hasFaronWarpSequenceState && state.faronWarpSequenceActive)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool should_defer_faron_warp_sequence() {
+    return sLocalFaronWarpSequenceActive || has_active_faron_warp_sequence_peer();
+}
+
+void set_local_faron_warp_sequence_active(bool active) {
+    if (sLocalFaronWarpSequenceActive == active) {
+        return;
+    }
+    sLocalFaronWarpSequenceActive = active;
+    DuskLog.info("Multiplayer Faron warp sequence local participant active={}", active);
+    send_progression_state(true);
+}
 
 void update_local_faron_cage_sequence_state() {
     const bool active = is_local_faron_cage_sequence_active();
@@ -1926,6 +1986,29 @@ void flush_deferred_faron_day_boundary_events() {
         DuskLog.info("Multiplayer sent deferred local Ordon day event flag={}", flag);
     }
     sDeferredFaronDayBoundaryBroadcasts.clear();
+}
+
+void flush_deferred_faron_warp_sequence_messages() {
+    if (sDeferredFaronWarpSequenceEvents.empty() && sDeferredFaronWarpSequenceBroadcasts.empty()) {
+        return;
+    }
+    if (should_defer_faron_warp_sequence()) {
+        return;
+    }
+
+    std::vector<json> pendingEvents = std::move(sDeferredFaronWarpSequenceEvents);
+    sDeferredFaronWarpSequenceEvents.clear();
+    for (const json& event : pendingEvents) {
+        handle_message(event, nullptr);
+    }
+
+    std::vector<json> pendingBroadcasts = std::move(sDeferredFaronWarpSequenceBroadcasts);
+    sDeferredFaronWarpSequenceBroadcasts.clear();
+    for (const json& message : pendingBroadcasts) {
+        send_json(message);
+    }
+    DuskLog.info("Multiplayer Faron warp sequence complete; released inbound={} outbound={}",
+                 pendingEvents.size(), pendingBroadcasts.size());
 }
 
 const char* group2_lifecycle_actor_reason(int actorName) {
@@ -3642,6 +3725,9 @@ void reset_connection_state() {
     sDeferredFaronDayBoundaryEvents.clear();
     sLocalFaronCageSequenceActive = false;
     sDeferredFaronDayBoundaryBroadcastHoldTicks = 0;
+    sDeferredFaronWarpSequenceEvents.clear();
+    sDeferredFaronWarpSequenceBroadcasts.clear();
+    sLocalFaronWarpSequenceActive = false;
     sPendingManualSyncInfo.reset();
     sPendingManualSyncVibration.reset();
     sPendingStageMessages.clear();
@@ -4088,6 +4174,7 @@ void send_progression_state(bool force = false) {
         {"manual_sync_ready", !is_stage_load_unsafe_for_multiplayer()},
         {"final_ganondorf_ready", is_local_final_ganondorf_ready()},
         {"faron_cage_sequence_active", sLocalFaronCageSequenceActive},
+        {"faron_warp_sequence_active", sLocalFaronWarpSequenceActive},
     });
 }
 
@@ -6925,6 +7012,8 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             state.finalGanondorfReady = routedMessage.value("final_ganondorf_ready", false);
             state.hasFaronCageSequenceState = routedMessage.contains("faron_cage_sequence_active");
             state.faronCageSequenceActive = routedMessage.value("faron_cage_sequence_active", false);
+            state.hasFaronWarpSequenceState = routedMessage.contains("faron_warp_sequence_active");
+            state.faronWarpSequenceActive = routedMessage.value("faron_warp_sequence_active", false);
             sPeerProgressionStates[peerId] = state;
             DuskLog.info("Multiplayer progression state rx peer={} stage={} room={} layer={} "
                          "ready={} final_ganondorf={} owner={}",
@@ -7690,6 +7779,12 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                          "reason=local_faron_cage_sequence", peerId, flag);
             return;
         }
+        if (is_faron_warp_sequence_event_bit(flag) && should_defer_faron_warp_sequence()) {
+            sDeferredFaronWarpSequenceEvents.push_back(routedMessage);
+            DuskLog.info("Multiplayer deferred remote Faron warp event peer={} flag={}", peerId,
+                         flag);
+            return;
+        }
         apply_remote_event_bit(flag, set);
         if (set && is_ordon_day_boundary_event_bit(flag)) {
             queue_ordon_day_boundary_reload(peerId, flag);
@@ -7835,6 +7930,13 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             }
             begin_flag_trace_window("remote_rx", "switch", stage, flag, set, sourceActor,
                                     sourceRoom, sourceParams);
+            if (is_faron_warp_sequence_switch(stage, flag) && should_defer_faron_warp_sequence()) {
+                sDeferredFaronWarpSequenceEvents.push_back(routedMessage);
+                DuskLog.info("Multiplayer deferred remote Faron warp switch peer={} stage={} "
+                             "flag={} set={}",
+                             resolve_peer_id(routedMessage), stage, flag, set);
+                return;
+            }
             if (stage == kProgressionCueSewersStage && (flag == 10 || flag == 17)) {
                 DuskLog.info("Multiplayer received sewers box/progression switch flag={} set={} "
                              "sourceActor={} sourceRoom={} "
@@ -10067,6 +10169,7 @@ void update_connected() {
     update_local_faron_cage_sequence_state();
     send_progression_state();
     flush_deferred_faron_day_boundary_events();
+    flush_deferred_faron_warp_sequence_messages();
     update_pending_progression_cue_arrivals();
     flush_pending_progression_sync();
     update_pending_sync_replies();
@@ -12202,6 +12305,15 @@ void notify_local_event_bit_set(uint16_t flag) {
         DuskLog.info("Multiplayer skipped unsynced local event bit flag={}", flag);
         return;
     }
+    if (is_faron_warp_sequence_event_bit(flag) && should_defer_faron_warp_sequence()) {
+        sDeferredFaronWarpSequenceBroadcasts.push_back({
+            {"type", "event_bit"},
+            {"flag", flag},
+            {"set", true},
+        });
+        DuskLog.info("Multiplayer deferred local Faron warp event flag={}", flag);
+        return;
+    }
     if (is_ordon_day_boundary_event_bit(flag)) {
         sDeferredFaronDayBoundaryBroadcasts.insert(flag);
         sDeferredFaronDayBoundaryBroadcastHoldTicks = std::max(
@@ -12338,6 +12450,9 @@ void notify_local_memory_switch_set(int flag) {
     }
 
     const int stageNo = dStage_stagInfo_GetSaveTbl(stagInfo);
+    if (stageNo == kProgressionCueFaronCageStage && flag == kFaronWarpSequenceStartSwitch) {
+        set_local_faron_warp_sequence_active(true);
+    }
     const bool hasActorContext = sLocalSwitchActorContext.active &&
         sLocalSwitchActorContext.flag == flag;
 
@@ -12380,6 +12495,19 @@ void notify_local_memory_switch_set(int flag) {
         message["source_actor"] = sLocalSwitchActorContext.actorName;
         message["source_room"] = sLocalSwitchActorContext.room;
         message["source_params"] = sLocalSwitchActorContext.actorParams;
+    }
+
+    if (is_faron_warp_sequence_switch(stageNo, flag) && should_defer_faron_warp_sequence()) {
+        sDeferredFaronWarpSequenceBroadcasts.push_back(std::move(message));
+        if (flag == kFaronWarpSequenceCompleteSwitch) {
+            set_local_faron_warp_sequence_active(false);
+        }
+        DuskLog.info("Multiplayer deferred local Faron warp switch set stage={} flag={}",
+                     stageNo, flag);
+        return;
+    }
+    if (stageNo == kProgressionCueFaronCageStage && flag == kFaronWarpSequenceCompleteSwitch) {
+        set_local_faron_warp_sequence_active(false);
     }
 
     send_json(message);
@@ -12481,6 +12609,13 @@ void notify_local_memory_switch_cleared(int flag) {
         message["source_actor"] = sLocalSwitchActorContext.actorName;
         message["source_room"] = sLocalSwitchActorContext.room;
         message["source_params"] = sLocalSwitchActorContext.actorParams;
+    }
+
+    if (is_faron_warp_sequence_switch(stageNo, flag) && should_defer_faron_warp_sequence()) {
+        sDeferredFaronWarpSequenceBroadcasts.push_back(std::move(message));
+        DuskLog.info("Multiplayer deferred local Faron warp switch clear stage={} flag={}",
+                     stageNo, flag);
+        return;
     }
 
     send_json(message);
