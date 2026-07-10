@@ -25,11 +25,13 @@
 #include "JSystem/JKernel/JKRMemArchive.h"
 #include "SSystem/SComponent/c_math.h"
 #include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_midna.h"
 #include "d/actor/d_a_nbomb.h"
 #include "d/d_bomb.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_item_data.h"
 #include "d/d_particle.h"
+#include "d/d_s_play.h"
 #include "f_op/f_op_overlap_mng.h"
 #include "f_pc/f_pc_draw_priority.h"
 #include "m_Do/m_Do_ext.h"
@@ -715,6 +717,8 @@ daRemoteLink_c::daRemoteLink_c()
       mPvpTargetStts(),
       mPvpTargetCyl(),
       mPvpTargetCollisionInitialized(false),
+      mPvpMidnaBindIds(),
+      mPvpMidnaBindActive(false),
       mActiveSoundObj(),
       mActiveSounds(),
       mMidnaHairShape(0),
@@ -2292,6 +2296,95 @@ void daRemoteLink_c::updatePvpTargetCollision() {
     }
 }
 
+void daRemoteLink_c::updatePvpAttentionTarget() {
+    if (mpBodyModel != NULL && mpBodyModel->getModelData() != NULL &&
+        mpBodyModel->getModelData()->getJointNum() > 4)
+    {
+        MtxP neckMtx = mpBodyModel->getAnmMtx(4);
+        Mtx interpNeckMtx;
+        if (dusk::frame_interp::lookup_replacement(neckMtx, interpNeckMtx)) {
+            neckMtx = interpNeckMtx;
+        }
+        eyePos.set(neckMtx[0][3], neckMtx[1][3], neckMtx[2][3]);
+    } else {
+        eyePos = current.pos;
+        eyePos.y += mVisualState.form == FORM_WOLF ? 46.0f : 82.0f;
+    }
+
+    attention_info.position = eyePos;
+    attention_info.position.y += mVisualState.form == FORM_WOLF ? 22.0f : 50.0f;
+    attention_info.field_0xa = 30;
+    // Match ordinary ground enemies such as Bulblins and ReDeads instead of the
+    // very long-range preset previously used here.
+    attention_info.distances[fopAc_attn_BATTLE_e] = 3;
+
+    if (mHasRemotePose && dusk::multiplayer::pvp_enabled() && !isRemoteLinkSceneUnsafe()) {
+        attention_info.flags = fopAc_AttnFlag_BATTLE_e;
+    } else {
+        attention_info.flags = 0;
+    }
+}
+
+void daRemoteLink_c::updatePvpMidnaBindEffect() {
+    daPy_py_c* player = daPy_getPlayerActorClass();
+    daMidna_c* midna = player != NULL ? player->getMidnaActor() : NULL;
+    const bool isLocked = mHasRemotePose && dusk::multiplayer::pvp_enabled() &&
+                          !isRemoteLinkSceneUnsafe() && midna != NULL &&
+                          player->checkWolfLock(this);
+    if (!isLocked) {
+        mPvpMidnaBindActive = false;
+        return;
+    }
+
+    static const GXColor primColors[] = {
+        {0xFF, 0x78, 0x00, 0x00},
+        {0xFF, 0x64, 0x78, 0x00},
+    };
+    static const GXColor envColors[] = {
+        {0x5A, 0x2D, 0x2D, 0x00},
+        {0x3C, 0x1E, 0x1E, 0x00},
+    };
+    static const u16 bindEffectIds[] = {0x29D, 0x29E, 0x29F};
+
+    const int colorIndex = dKy_darkworld_check() ? 1 : 0;
+    cXyz effectPos = eyePos;
+    cXyz effectScale(1.0f, 1.0f, 1.0f);
+
+    if (!mPvpMidnaBindActive) {
+        csXyz effectAngle;
+        cXyz hairPos;
+        MTXCopy(midna->getMtxHairTop(), mDoMtx_stack_c::get());
+        cXyz hairOffset(nREG_F(8) + 100.0f, nREG_F(9), nREG_F(10));
+        mDoMtx_stack_c::multVec(&hairOffset, &hairPos);
+
+        cXyz direction = hairPos - effectPos;
+        effectAngle.y = cM_atan2s(direction.x, direction.z);
+        effectAngle.x =
+            -cM_atan2s(direction.y,
+                       JMAFastSqrt(direction.x * direction.x + direction.z * direction.z));
+        effectAngle.z = 0;
+
+        JPABaseEmitter* emitter = dComIfGp_particle_set(
+            0x29B, &effectPos, &tevStr, &effectAngle, &effectScale, 0xFF, NULL,
+            fopAcM_GetRoomNo(this), &primColors[colorIndex], &envColors[colorIndex], NULL);
+        if (emitter != NULL) {
+            emitter->setGlobalParticleHeightScale((JREG_F(7) + 0.01f) * direction.abs());
+        }
+
+        dComIfGp_particle_set(0x29C, &effectPos, &tevStr, &shape_angle, &effectScale, 0xFF,
+                              NULL, fopAcM_GetRoomNo(this), &primColors[colorIndex],
+                              &envColors[colorIndex], NULL);
+        mPvpMidnaBindActive = true;
+    }
+
+    for (int i = 0; i < 3; ++i) {
+        mPvpMidnaBindIds[i] = dComIfGp_particle_set(
+            mPvpMidnaBindIds[i], bindEffectIds[i], &effectPos, &tevStr, &shape_angle,
+            &effectScale, 0xFF, NULL, fopAcM_GetRoomNo(this), &primColors[colorIndex],
+            &envColors[colorIndex], NULL);
+    }
+}
+
 void daRemoteLink_c::setupDrawHands() {
     if (mpHandModel == NULL || mpBodyModel == NULL) {
         return;
@@ -2502,7 +2595,9 @@ void daRemoteLink_c::calcModels() {
 }
 
 int daRemoteLink_c::Execute() {
+    updatePvpAttentionTarget();
     if (isRemoteLinkSceneUnsafe()) {
+        mPvpMidnaBindActive = false;
         stopRemoteActiveSounds();
         return TRUE;
     }
@@ -2525,6 +2620,7 @@ int daRemoteLink_c::Execute() {
         calcModels();
     }
     updatePvpTargetCollision();
+    updatePvpMidnaBindEffect();
     updateRemoteBombActor();
     mActiveSoundObj.framework(0, dComIfGp_getReverb(fopAcM_GetRoomNo(this)));
     for (ActiveRemoteSound& sound : mActiveSounds) {

@@ -182,6 +182,8 @@ private:
     void spawnRemoteBombExplosion();
     void initPvpTargetCollision();
     void updatePvpTargetCollision();
+    void updatePvpAttentionTarget();
+    void updatePvpMidnaBindEffect();
     void stopRemoteActiveSounds();
     void hideAllHandShapes();
     void setupDrawHands();
@@ -324,6 +326,8 @@ private:
     dCcD_Stts mPvpTargetStts;
     dCcD_Cyl mPvpTargetCyl;
     bool mPvpTargetCollisionInitialized;
+    std::array<u32, 3> mPvpMidnaBindIds;
+    bool mPvpMidnaBindActive;
     Z2SoundObjSimple mActiveSoundObj;
     std::array<ActiveRemoteSound, 8> mActiveSounds;
     /* 0xC24 */ int mMidnaHairShape;

@@ -9868,7 +9868,9 @@ void daAlink_c::setAtnList() {
 
     u8 var_r30;
     if (mTargetedActor != NULL) {
-        if (fopAcM_GetGroup(mTargetedActor) == fopAc_ENEMY_e) {
+        if (fopAcM_GetGroup(mTargetedActor) == fopAc_ENEMY_e ||
+            fopAcM_GetName(mTargetedActor) == fpcNm_REMOTE_LINK_e)
+        {
             var_r30 = 3;
         } else {
             var_r30 = 2;

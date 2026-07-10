@@ -6983,8 +6983,13 @@ void daAlink_c::searchWolfLockEnemy(fopAc_ac_c* i_actor, void* i_data) {
         }
     }
 
-    if (fopAcM_GetGroup(i_actor) == fopAc_ENEMY_e && i_actor->attention_info.flags & (fopAc_AttnFlag_BATTLE_e | fopAc_AttnFlag_LOCK_e) &&
-        !((fopEn_enemy_c*)i_actor)->checkWolfNoLock())
+    const bool is_remote_link = fopAcM_GetName(i_actor) == fpcNm_REMOTE_LINK_e;
+    const bool can_wolf_lock =
+        is_remote_link ||
+        (fopAcM_GetGroup(i_actor) == fopAc_ENEMY_e &&
+         !static_cast<fopEn_enemy_c*>(i_actor)->checkWolfNoLock());
+    if (can_wolf_lock &&
+        i_actor->attention_info.flags & (fopAc_AttnFlag_BATTLE_e | fopAc_AttnFlag_LOCK_e))
     {
         f32 enemy_dist2 = current.pos.abs2(i_actor->eyePos);
 

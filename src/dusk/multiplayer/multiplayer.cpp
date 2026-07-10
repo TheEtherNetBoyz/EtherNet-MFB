@@ -10813,7 +10813,8 @@ int classify_pvp_attack(dCcD_GObjInf* attackInfo) {
     }
 
     if (attackInfo->GetAtSpl() != dCcG_At_Spl_UNK_0 ||
-        attackInfo->ChkAtType(AT_TYPE_IRON_BALL | AT_TYPE_WOLF_CUT_TURN))
+        attackInfo->ChkAtType(AT_TYPE_IRON_BALL | AT_TYPE_WOLF_CUT_TURN |
+                              AT_TYPE_MIDNA_LOCK))
     {
         return kPvpAttackHeavy;
     }

@@ -10,7 +10,9 @@
 
 BOOL daAlink_c::checkEnemyGroup(fopAc_ac_c* i_actor) {
     return i_actor != NULL
-            && (fopAcM_GetGroup(i_actor) == fopAc_ENEMY_e || fopAcM_GetName(i_actor) == fpcNm_E_ZH_e || checkSpecialNpc(i_actor));
+            && (fopAcM_GetGroup(i_actor) == fopAc_ENEMY_e ||
+                fopAcM_GetName(i_actor) == fpcNm_REMOTE_LINK_e ||
+                fopAcM_GetName(i_actor) == fpcNm_E_ZH_e || checkSpecialNpc(i_actor));
 }
 
 BOOL daAlink_c::checkSpecialNpc(fopAc_ac_c* i_actor) {
