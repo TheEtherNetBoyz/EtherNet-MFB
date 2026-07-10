@@ -87,9 +87,19 @@ static void daRemoteLink_pvpTargetHitCallback(fopAc_ac_c* i_targetActor,
                                               dCcD_GObjInf* i_targetObj,
                                               fopAc_ac_c* i_attackActor,
                                               dCcD_GObjInf* i_attackObj) {
-    (void)i_targetObj;
+    if (dusk::multiplayer::remote_link_pvp_target_invincible(i_targetActor)) {
+        i_targetObj->OffTgSetBit();
+        i_targetObj->ResetTgHit();
+        return;
+    }
+
     dusk::multiplayer::report_remote_link_pvp_target_hit(i_targetActor, i_attackActor,
                                                          i_attackObj);
+    if (dusk::multiplayer::remote_link_pvp_target_invincible(i_targetActor)) {
+        // Stop additional attack objects from the same heavy move from hitting this peer in
+        // the current collision pass. The first hit keeps its normal feedback.
+        i_targetObj->OffTgSetBit();
+    }
 }
 
 static bool isValidRemoteBck(u16 i_resId) {
@@ -2251,7 +2261,9 @@ void daRemoteLink_c::updatePvpTargetCollision() {
         return;
     }
 
-    if (!dusk::multiplayer::pvp_enabled() || isRemoteLinkSceneUnsafe()) {
+    if (!dusk::multiplayer::pvp_enabled() || isRemoteLinkSceneUnsafe() ||
+        dusk::multiplayer::remote_link_pvp_target_invincible(this))
+    {
         mPvpTargetCyl.OffTgSetBit();
         mPvpTargetCyl.ResetTgHit();
         return;

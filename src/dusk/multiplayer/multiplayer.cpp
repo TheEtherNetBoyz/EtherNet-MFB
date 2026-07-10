@@ -206,7 +206,7 @@ constexpr uint32_t kGanondorfRemotePlayerDamageMaxAgeTicks = 20;
 constexpr uint32_t kGanondorfRemoteReactionMaxAgeTicks = 12;
 constexpr float kGanondorfRemoteReactionRange = 700.0f;
 constexpr uint32_t kGanondorfSyncSnapshotMaxAgeTicks = 45;
-constexpr uint8_t kPvpLocalHitCooldownTicks = 18;
+constexpr uint8_t kPvpRemoteInvincibilityTicks = 30;
 constexpr int kPvpAttackLight = 1;
 constexpr int kPvpAttackHeavy = 2;
 constexpr int kPvpLightDamage = 2;
@@ -231,7 +231,7 @@ uint32_t sLastGanondorfOwnerBroadcastTick = 0;
 uint8_t sGanondorfLocalPlayerDamageHandledTicks = 0;
 uint32_t sLocalPvpHitSequence = 0;
 std::map<std::string, uint32_t> sPvpRemoteHitLastSequenceByPeer;
-std::map<std::string, uint8_t> sPvpLocalHitCooldownByPeer;
+std::map<std::string, uint8_t> sPvpRemoteInvincibilityTicksByPeer;
 uint32_t sPvpLocalHitProbeLogCount = 0;
 uint32_t sPvpLocalHitSkipLogCount = 0;
 
@@ -264,6 +264,9 @@ bool apply_ganondorf_remote_player_damage(const GanondorfRemotePlayerDamageEvent
         daPy_py_c::setPlayerDamage(damage.damageAmount, TRUE);
         return false;
     }
+    if (player->getDamageWaitTimer() != 0) {
+        return false;
+    }
 
     const s16 hitAngle =
         static_cast<s16>(angle_y_from_delta(damage.x - player->current.pos.x,
@@ -285,24 +288,32 @@ bool apply_ganondorf_remote_player_damage(const GanondorfRemotePlayerDamageEvent
 bool apply_pvp_player_damage(int attackClass, bool ironBallLaunch, float sourceX, float sourceZ) {
     daAlink_c* player = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
     if (player != nullptr) {
+        if (player->getDamageWaitTimer() != 0) {
+            return false;
+        }
+
         const s16 hitAngle =
             static_cast<s16>(angle_y_from_delta(player->current.pos.x - sourceX,
                                                 player->current.pos.z - sourceZ));
+        const int damageAmount =
+            attackClass == kPvpAttackHeavy ? kPvpHeavyDamage : kPvpLightDamage;
+        player->setDamagePointNormal(damageAmount);
+
         if (ironBallLaunch) {
             // Darkhammer's ball uses attack-special 0xE, which Link handles as a huge attack.
             // Recreate that path without a local collision object: the hit angle replaces
             // getDamageVec(), while FALSE selects the vanilla huge-damage launch tuning.
             player->current.angle.y = hitAngle;
-            player->setDamagePointNormal(kPvpHeavyDamage);
             return player->procCoLargeDamageInit(-1, FALSE, 0, 0, nullptr, 0) != 0;
         }
 
         if (attackClass == kPvpAttackHeavy) {
-            player->setThrowDamage(hitAngle, 35.0f, 22.0f, kPvpHeavyDamage, 1, 0);
+            // Damage and i-frames were applied above for every attack class. Keep the existing
+            // throw reaction, but give its initializer zero damage so it cannot apply them twice.
+            player->setThrowDamage(hitAngle, 35.0f, 22.0f, 0, 1, 0);
             return player->procCoLargeDamageInit(-3, TRUE, 0, 0, nullptr, 0) != 0;
         }
 
-        player->setDamagePointNormal(kPvpLightDamage);
         player->field_0x3102 = static_cast<s16>(hitAngle - 0x8000);
         return player->procDamageInit(nullptr, 1) != 0;
     }
@@ -6971,7 +6982,7 @@ void forget_peer_state(const std::string& peerId) {
     sGanondorfRemotePlayerDamageLastSequenceByPeer.erase(peerId);
     sGanondorfRemotePlayerDamageCooldownByPeer.erase(peerId);
     sPvpRemoteHitLastSequenceByPeer.erase(peerId);
-    sPvpLocalHitCooldownByPeer.erase(peerId);
+    sPvpRemoteInvincibilityTicksByPeer.erase(peerId);
     sPendingGanondorfRemoteHitEvents.erase(
         std::remove_if(sPendingGanondorfRemoteHitEvents.begin(),
                        sPendingGanondorfRemoteHitEvents.end(),
@@ -10535,9 +10546,11 @@ void update_connected() {
         }
     }
 
-    for (auto it = sPvpLocalHitCooldownByPeer.begin(); it != sPvpLocalHitCooldownByPeer.end();) {
+    for (auto it = sPvpRemoteInvincibilityTicksByPeer.begin();
+         it != sPvpRemoteInvincibilityTicksByPeer.end();)
+    {
         if (it->second == 0 || --it->second == 0) {
-            it = sPvpLocalHitCooldownByPeer.erase(it);
+            it = sPvpRemoteInvincibilityTicksByPeer.erase(it);
         } else {
             ++it;
         }
@@ -10843,10 +10856,13 @@ void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo) {
         return;
     }
 
-    const auto cooldownIt = sPvpLocalHitCooldownByPeer.find(targetPeerId);
-    if (cooldownIt != sPvpLocalHitCooldownByPeer.end() && cooldownIt->second != 0) {
+    const auto invincibilityIt = sPvpRemoteInvincibilityTicksByPeer.find(targetPeerId);
+    if (invincibilityIt != sPvpRemoteInvincibilityTicksByPeer.end() &&
+        invincibilityIt->second != 0)
+    {
         return;
     }
+    sPvpRemoteInvincibilityTicksByPeer[targetPeerId] = kPvpRemoteInvincibilityTicks;
 
     const uint32_t sequence = ++sLocalPvpHitSequence;
     const int attackClass = classify_pvp_attack(attackInfo);
@@ -10877,7 +10893,6 @@ void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo) {
         {"sequence", sequence},
         {"state", state},
     });
-    sPvpLocalHitCooldownByPeer[targetPeerId] = kPvpLocalHitCooldownTicks;
     DuskLog.info("Multiplayer PvP hit tx target={} seq={} class={} iron_ball_launch={} "
                  "at_type={:#x} at_spl={}",
                  targetPeerId, sequence, attackClass, ironBallLaunch, attackInfo->GetAtType(),
@@ -10893,6 +10908,16 @@ void report_remote_link_pvp_target_hit(fopAc_ac_c* remoteLinkActor, fopAc_ac_c* 
     }
 
     report_local_pvp_attack_hit(static_cast<daAlink_c*>(attackActor), attackInfo);
+}
+
+bool remote_link_pvp_target_invincible(fopAc_ac_c* remoteLinkActor) {
+    std::string peerId;
+    if (!get_remote_link_dummy_peer_id_for_actor(remoteLinkActor, &peerId)) {
+        return false;
+    }
+
+    const auto it = sPvpRemoteInvincibilityTicksByPeer.find(peerId);
+    return it != sPvpRemoteInvincibilityTicksByPeer.end() && it->second != 0;
 }
 
 void record_local_link_audio_event(uint32_t soundId, bool level, uint32_t mapInfo, int reverb,

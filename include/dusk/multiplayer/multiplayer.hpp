@@ -380,6 +380,7 @@ void notify_bomb_post_execute(daNbomb_c* bomb);
 void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo);
 void report_remote_link_pvp_target_hit(fopAc_ac_c* remoteLinkActor, fopAc_ac_c* attackActor,
                                        dCcD_GObjInf* attackInfo);
+bool remote_link_pvp_target_invincible(fopAc_ac_c* remoteLinkActor);
 void register_remote_bomb_actor(daNbomb_c* bomb);
 void register_remote_bomb_actor_id(int32_t actorId);
 void unregister_remote_bomb_actor_id(int32_t actorId);
