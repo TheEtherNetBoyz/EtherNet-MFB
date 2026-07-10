@@ -314,6 +314,11 @@ bool apply_pvp_player_damage(int attackClass, bool ironBallLaunch, float sourceX
             return player->procCoLargeDamageInit(-3, TRUE, 0, 0, nullptr, 0) != 0;
         }
 
+        if (player->checkWolf()) {
+            player->field_0x311e = hitAngle;
+            return player->procWolfDamageInit(nullptr, true) != 0;
+        }
+
         player->field_0x3102 = static_cast<s16>(hitAngle - 0x8000);
         return player->procDamageInit(nullptr, 1) != 0;
     }

@@ -3036,7 +3036,7 @@ public:
     int procWolfHangFallStartInit(cM3dGPla* i_tripla);
     int procWolfHangFallStart();
     void setWolfHeadDamage();
-    int procWolfDamageInit(dCcD_GObjInf* i_hitObj);
+    int procWolfDamageInit(dCcD_GObjInf* i_hitObj, bool i_syntheticNormalHit = false);
     int procWolfDamage();
     int procWolfLargeDamageUpInit(int, int, s16, s16);
     int procWolfLargeDamageUp();

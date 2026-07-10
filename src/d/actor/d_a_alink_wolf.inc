@@ -5687,7 +5687,7 @@ void daAlink_c::setWolfHeadDamage() {
     voiceStart(Z2SE_WL_V_DAMAGE);
 }
 
-int daAlink_c::procWolfDamageInit(dCcD_GObjInf* i_hitObj) {
+int daAlink_c::procWolfDamageInit(dCcD_GObjInf* i_hitObj, bool i_syntheticNormalHit) {
     commonProcInit(PROC_WOLF_DAMAGE);
 
     cXyz sp14;
@@ -5731,7 +5731,11 @@ int daAlink_c::procWolfDamageInit(dCcD_GObjInf* i_hitObj) {
 
     field_0x3588 = l_wolfBaseAnime;
 
-    if (i_hitObj == NULL || (i_hitObj->GetTgHitGObj() != NULL && i_hitObj->GetTgHitGObj()->GetAtMtrl() == dCcD_MTRL_ICE)) {
+    if (!i_syntheticNormalHit &&
+        (i_hitObj == NULL ||
+         (i_hitObj->GetTgHitGObj() != NULL &&
+          i_hitObj->GetTgHitGObj()->GetAtMtrl() == dCcD_MTRL_ICE)))
+    {
         mUnderFrameCtrl[0].setRate(mpHIO->mWolf.mWlDamage.mNormal.m.mIceDamageAnmSpeed);
         mUnderFrameCtrl[0].setEnd(3);
         mNormalSpeed = 0.0f;
