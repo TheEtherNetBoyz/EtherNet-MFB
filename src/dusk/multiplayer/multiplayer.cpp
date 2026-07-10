@@ -9001,27 +9001,6 @@ bool should_send_visual_pose_to_peer(const DirectPeer& peer, const json& message
     return shouldSend;
 }
 
-bool should_send_visual_pose_to_direct_host(const json& message) {
-    if (!sDirectRemoteWantsPuppet) {
-        return false;
-    }
-
-    const std::string sourceStage = stage_from_pose_message(message, local_udp_pose_sender_id());
-    const std::string hostStage = known_peer_stage(kDirectPeerId);
-    const bool shouldSend = stages_match_or_unknown(sourceStage, hostStage);
-    if (!shouldSend) {
-        static uint32_t sHostStageSkipLogCount = 0;
-        ++sHostStageSkipLogCount;
-        if (sHostStageSkipLogCount <= 30 || (sHostStageSkipLogCount % 300) == 0) {
-            DuskLog.info(
-                "Multiplayer visual pose tx skipped target=host reason=stage_mismatch "
-                "source_stage={} target_stage={}",
-                sourceStage, hostStage);
-        }
-    }
-    return shouldSend;
-}
-
 bool send_udp_pose_to_peer(DirectPeer& peer, const json& message, const std::string& senderId) {
     if (!peer.wantsPuppet || !peer.welcomed || !peer.udpAddrKnown) {
         return false;
@@ -9062,8 +9041,13 @@ bool send_direct_pose_udp(const json& message) {
         return broadcast_udp_pose_to_direct_peers(message, local_udp_pose_sender_id());
     }
 
-    if (sSession.mode == NetworkMode::DirectJoin && should_send_visual_pose_to_direct_host(message) &&
-        sSession.udpRemoteAddrKnown &&
+    // A joiner sends every pose upstream. The direct host is acting as the
+    // room router here, not merely as a possible renderer: it must receive a
+    // pose even when the host is in another stage so it can forward that pose
+    // to other peers in the sender's stage. The future dedicated relay should
+    // use the same topology -- stage/subscription filtering belongs at each
+    // router-to-recipient edge, never at sender-to-router ingress.
+    if (sSession.mode == NetworkMode::DirectJoin && sSession.udpRemoteAddrKnown &&
         !sSession.clientId.empty())
     {
         return send_udp_pose_to_addr(sSession.udpRemoteAddr, message, local_udp_pose_sender_id(),
@@ -9083,9 +9067,10 @@ bool send_direct_midna_udp(const json& message) {
         return sentAny || sSession.directPeers.empty();
     }
 
-    if (sSession.mode == NetworkMode::DirectJoin && sDirectRemoteWantsMidna &&
-        should_send_visual_pose_to_direct_host(message) &&
-        sSession.udpRemoteAddrKnown && !sSession.clientId.empty())
+    // Midna uses the same upstream-router rule as Link poses. Per-recipient
+    // wantsMidna and stage checks remain in send_udp_midna_to_peer().
+    if (sSession.mode == NetworkMode::DirectJoin && sSession.udpRemoteAddrKnown &&
+        !sSession.clientId.empty())
     {
         return send_udp_pose_to_addr(sSession.udpRemoteAddr, message,
                                      local_udp_pose_sender_id(),
