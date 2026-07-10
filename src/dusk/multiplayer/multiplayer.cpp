@@ -211,6 +211,7 @@ constexpr int kPvpAttackLight = 1;
 constexpr int kPvpAttackHeavy = 2;
 constexpr int kPvpLightDamage = 2;
 constexpr int kPvpHeavyDamage = 4;
+constexpr const char* kPvpReactionIronBallLaunch = "iron_ball_launch";
 
 std::map<std::string, uint32_t> sGanondorfRemoteHitLastSequenceByPeer;
 std::map<std::string, uint32_t> sGanondorfRemoteReactionLastSequenceByPeer;
@@ -281,12 +282,21 @@ bool apply_ganondorf_remote_player_damage(const GanondorfRemotePlayerDamageEvent
     return false;
 }
 
-bool apply_pvp_player_damage(int attackClass, float sourceX, float sourceZ) {
+bool apply_pvp_player_damage(int attackClass, bool ironBallLaunch, float sourceX, float sourceZ) {
     daAlink_c* player = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
     if (player != nullptr) {
         const s16 hitAngle =
             static_cast<s16>(angle_y_from_delta(player->current.pos.x - sourceX,
                                                 player->current.pos.z - sourceZ));
+        if (ironBallLaunch) {
+            // Darkhammer's ball uses attack-special 0xE, which Link handles as a huge attack.
+            // Recreate that path without a local collision object: the hit angle replaces
+            // getDamageVec(), while FALSE selects the vanilla huge-damage launch tuning.
+            player->current.angle.y = hitAngle;
+            player->setDamagePointNormal(kPvpHeavyDamage);
+            return player->procCoLargeDamageInit(-1, FALSE, 0, 0, nullptr, 0) != 0;
+        }
+
         if (attackClass == kPvpAttackHeavy) {
             player->setThrowDamage(hitAngle, 35.0f, 22.0f, kPvpHeavyDamage, 1, 0);
             return player->procCoLargeDamageInit(-3, TRUE, 0, 0, nullptr, 0) != 0;
@@ -7332,12 +7342,17 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                 return;
             }
 
+            const bool ironBallLaunch =
+                attackClass == kPvpAttackHeavy &&
+                state.value("reaction", std::string()) == kPvpReactionIronBallLaunch;
             const float sourceX = state.value("source_x", 0.0f);
             const float sourceZ = state.value("source_z", 0.0f);
-            const bool appliedReaction = apply_pvp_player_damage(attackClass, sourceX, sourceZ);
+            const bool appliedReaction =
+                apply_pvp_player_damage(attackClass, ironBallLaunch, sourceX, sourceZ);
             sPvpRemoteHitLastSequenceByPeer[peerId] = sequence;
-            DuskLog.info("Multiplayer PvP hit rx peer={} seq={} class={} reaction={}",
-                         peerId, sequence, attackClass, appliedReaction);
+            DuskLog.info("Multiplayer PvP hit rx peer={} seq={} class={} iron_ball_launch={} "
+                         "reaction={}",
+                         peerId, sequence, attackClass, ironBallLaunch, appliedReaction);
         }
     } else if (type == "peer_left") {
         const std::string leftPeerId = resolve_peer_id(routedMessage);
@@ -10835,15 +10850,27 @@ void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo) {
 
     const uint32_t sequence = ++sLocalPvpHitSequence;
     const int attackClass = classify_pvp_attack(attackInfo);
+    const bool ironBallLaunch = attackInfo->ChkAtType(AT_TYPE_IRON_BALL);
+    const cXyz* sourcePos = &link->current.pos;
+    if (ironBallLaunch) {
+        const cXyz* ironBallPos = link->getIronBallCenterPos();
+        if (ironBallPos != nullptr) {
+            sourcePos = ironBallPos;
+        }
+    }
+
     json state = {
         {"target_peer_id", targetPeerId},
         {"stage", dComIfGp_getStartStageName()},
         {"room", static_cast<int>(dComIfGp_roomControl_getStayNo())},
         {"attack_class", attackClass},
-        {"source_x", link->current.pos.x},
-        {"source_y", link->current.pos.y},
-        {"source_z", link->current.pos.z},
+        {"source_x", sourcePos->x},
+        {"source_y", sourcePos->y},
+        {"source_z", sourcePos->z},
     };
+    if (ironBallLaunch) {
+        state["reaction"] = kPvpReactionIronBallLaunch;
+    }
 
     send_json({
         {"type", "pvp_hit"},
@@ -10851,8 +10878,9 @@ void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo) {
         {"state", state},
     });
     sPvpLocalHitCooldownByPeer[targetPeerId] = kPvpLocalHitCooldownTicks;
-    DuskLog.info("Multiplayer PvP hit tx target={} seq={} class={} at_type={:#x} at_spl={}",
-                 targetPeerId, sequence, attackClass, attackInfo->GetAtType(),
+    DuskLog.info("Multiplayer PvP hit tx target={} seq={} class={} iron_ball_launch={} "
+                 "at_type={:#x} at_spl={}",
+                 targetPeerId, sequence, attackClass, ironBallLaunch, attackInfo->GetAtType(),
                  static_cast<int>(attackInfo->GetAtSpl()));
 }
 
