@@ -221,6 +221,7 @@ constexpr int kPvpSpecialTechniqueDamage = 12;
 constexpr const char* kPvpReactionIronBallLaunch = "iron_ball_launch";
 constexpr const char* kPvpReactionMortalDraw = "mortal_draw";
 constexpr const char* kPvpReactionGreatSpin = "great_spin";
+constexpr const char* kPvpReactionShieldBash = "shield_bash";
 
 std::map<std::string, uint32_t> sGanondorfRemoteHitLastSequenceByPeer;
 std::map<std::string, uint32_t> sGanondorfRemoteReactionLastSequenceByPeer;
@@ -345,6 +346,26 @@ bool apply_pvp_player_shield_block(int attackClass, float sourceX, float sourceZ
     dComIfGp_getVibration().StartShock(vibration, 1, cXyz(0.0f, 1.0f, 0.0f));
     player->setPvpGuardSe();
     return player->procGuardSlipInit(atSpl, nullptr, &damageVec) != 0;
+}
+
+bool apply_pvp_player_shield_bash(float sourceX, float sourceZ) {
+    daAlink_c* player = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
+    if (player == nullptr) {
+        return false;
+    }
+
+    // AT_TYPE_SHIELD_ATTACK is classified as HIT_TYPE_STUN against vanilla enemies.
+    // Human Link uses his zero-damage guard-break stagger. Wolf Link cannot safely run that
+    // human-only procedure, so use the native wolf large-damage knockdown with zero damage.
+    if (player->checkWolf()) {
+        const s16 hitAngle =
+            static_cast<s16>(angle_y_from_delta(player->current.pos.x - sourceX,
+                                                player->current.pos.z - sourceZ));
+        player->setThrowDamage(hitAngle, 35.0f, 22.0f, 0, 1, 0);
+        return player->procCoLargeDamageInit(-3, TRUE, 0, 0, nullptr, 0) != 0;
+    }
+
+    return player->procGuardBreakInit() != 0;
 }
 
 bool pose_float_is_finite(const char* name, f32 value) {
@@ -7401,13 +7422,16 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             const bool specialTechnique =
                 attackClass == kPvpAttackHeavy &&
                 (reaction == kPvpReactionMortalDraw || reaction == kPvpReactionGreatSpin);
-            const int damage = ironBallLaunch
-                                   ? kPvpIronBallDamage
-                                   : (specialTechnique
-                                          ? kPvpSpecialTechniqueDamage
-                                          : (attackClass == kPvpAttackHeavy ? kPvpHeavyDamage
-                                                                            : kPvpLightDamage));
-            const bool blocked = !ironBallLaunch && state.value("blocked", false);
+            const bool shieldBash = reaction == kPvpReactionShieldBash;
+            int damage = attackClass == kPvpAttackHeavy ? kPvpHeavyDamage : kPvpLightDamage;
+            if (ironBallLaunch) {
+                damage = kPvpIronBallDamage;
+            } else if (shieldBash) {
+                damage = 0;
+            } else if (specialTechnique) {
+                damage = kPvpSpecialTechniqueDamage;
+            }
+            const bool blocked = !ironBallLaunch && !shieldBash && state.value("blocked", false);
             const float sourceX = state.value("source_x", 0.0f);
             const float sourceZ = state.value("source_z", 0.0f);
             daAlink_c* player = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
@@ -7421,11 +7445,12 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                              peerId, sequence, static_cast<int>(player->mProcID));
                 return;
             }
-            const bool appliedReaction = blocked
-                                             ? apply_pvp_player_shield_block(attackClass, sourceX,
-                                                                             sourceZ)
-                                             : apply_pvp_player_damage(attackClass, ironBallLaunch,
-                                                                       damage, sourceX, sourceZ);
+            const bool appliedReaction =
+                shieldBash
+                    ? apply_pvp_player_shield_bash(sourceX, sourceZ)
+                    : (blocked ? apply_pvp_player_shield_block(attackClass, sourceX, sourceZ)
+                               : apply_pvp_player_damage(attackClass, ironBallLaunch, damage,
+                                                         sourceX, sourceZ));
             sPvpRemoteHitLastSequenceByPeer[peerId] = sequence;
             DuskLog.info("Multiplayer PvP hit rx peer={} seq={} class={} reaction_kind={} "
                          "damage={} blocked={} reaction={}",
@@ -10931,10 +10956,13 @@ void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo) {
 
     const int attackClass = classify_pvp_attack(attackInfo);
     const bool ironBallLaunch = attackInfo->ChkAtType(AT_TYPE_IRON_BALL);
+    const bool shieldBash = attackInfo->ChkAtType(AT_TYPE_SHIELD_ATTACK);
     const int cutType = static_cast<int>(link->getCutType());
     const char* reaction = nullptr;
     if (ironBallLaunch) {
         reaction = kPvpReactionIronBallLaunch;
+    } else if (shieldBash) {
+        reaction = kPvpReactionShieldBash;
     } else if (cutType == daPy_py_c::CUT_TYPE_MORTAL_DRAW_A ||
                cutType == daPy_py_c::CUT_TYPE_MORTAL_DRAW_B)
     {
@@ -10944,7 +10972,7 @@ void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo) {
     {
         reaction = kPvpReactionGreatSpin;
     }
-    const bool blocked = !ironBallLaunch && attackInfo->ChkAtShieldHit();
+    const bool blocked = !ironBallLaunch && !shieldBash && attackInfo->ChkAtShieldHit();
 
     const uint32_t sequence = ++sLocalPvpHitSequence;
     const cXyz* sourcePos = &link->current.pos;
