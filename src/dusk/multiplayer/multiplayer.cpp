@@ -973,6 +973,7 @@ constexpr uint16_t kProgressionCueSewersCompleteEventBit = 0x6140; // offset 0x6
 constexpr uint16_t kProgressionCueFaronTwilightEventBit = 0x0640; // offset 0x06 bit 64 - "watched faron twilight intro cutscene".
 constexpr int kUnsyncedSwitchOrdonStage = dStage_SaveTbl_ORDON;
 constexpr int kUnsyncedSwitchOrdonKingBulblinCs = 0x68; // Ordon area flag 16:01 - "King Bulblin cs".
+constexpr int kUnsyncedSwitchOrdonPostSewersMidnaText = 0x2F; // Ordon area flag 06:80 - post-sewers Midna text.
 constexpr int kUnsyncedSwitchSewersStage = dStage_SaveTbl_PRISON;
 constexpr int kUnsyncedSwitchSewersTwilightFinalCs = 0x1F; // Sewers area flag 08:80 - "twilight final cs".
 constexpr int kUnsyncedSwitchLanayruStage = dStage_SaveTbl_LANAYRU;
@@ -980,6 +981,7 @@ constexpr int kUnsyncedSwitchLanayruLakeHyliaIntroTwilightCs = 0x1E; // Lanayru 
 constexpr uint16_t kUnsyncedEventBitOrdonSpringMonsterAttack = 0x0580;
 constexpr uint16_t kUnsyncedEventBitFaronCaptureWolfCutscene = 0x4D08;
 constexpr uint16_t kUnsyncedEventBitSewersWarpedFromCastleByMidna = 0x0502;
+constexpr uint16_t kUnsyncedEventBitPostSewersMidnaUnavailable = 0x6140;
 constexpr int kProgressionCueHyruleFieldStage = dStage_SaveTbl_FIELD;
 constexpr int kProgressionCueEldinTwilightSwitch = 0x0C; // Hyrule Field area flag 0A:10 - "entered Eldin twilight cs".
 constexpr int kProgressionCueLanayruTwilightSwitch = 0x0D; // Hyrule Field area flag 0A:20 - "entered Lanayru twilight cs".
@@ -1114,6 +1116,7 @@ bool is_unsynced_event_bit(uint16_t flag) {
     case kUnsyncedEventBitOrdonSpringMonsterAttack:
     case kUnsyncedEventBitFaronCaptureWolfCutscene:
     case kUnsyncedEventBitSewersWarpedFromCastleByMidna:
+    case kUnsyncedEventBitPostSewersMidnaUnavailable:
         return true;
     default:
         return false;
@@ -1122,7 +1125,8 @@ bool is_unsynced_event_bit(uint16_t flag) {
 
 bool is_unsynced_switch_bit(int stage, int flag) {
     return (stage == kUnsyncedSwitchOrdonStage &&
-            flag == kUnsyncedSwitchOrdonKingBulblinCs) ||
+            (flag == kUnsyncedSwitchOrdonKingBulblinCs ||
+             flag == kUnsyncedSwitchOrdonPostSewersMidnaText)) ||
            (stage == kUnsyncedSwitchSewersStage &&
             flag == kUnsyncedSwitchSewersTwilightFinalCs) ||
            (stage == kUnsyncedSwitchLanayruStage &&
