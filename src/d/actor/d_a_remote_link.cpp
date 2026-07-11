@@ -201,6 +201,10 @@ static bool isRemotePvpKnockdownProc(int i_procId) {
            i_procId == daAlink_c::PROC_WOLF_LARGE_DAMAGE_UP;
 }
 
+static bool isRemoteDeadProc(int i_procId) {
+    return i_procId == daAlink_c::PROC_DEAD;
+}
+
 static bool isRemoteLinkSceneUnsafe() {
     return dComIfGp_isEnableNextStage() || fopOvlpM_IsPeek() || fopOvlpM_IsDoingReq() ||
            dComIfGp_event_runCheck();
@@ -2267,7 +2271,7 @@ void daRemoteLink_c::updatePvpTargetCollision() {
     }
 
     if (!dusk::multiplayer::pvp_enabled() || isRemoteLinkSceneUnsafe() ||
-        isRemotePvpKnockdownProc(mRemoteProcId))
+        isRemotePvpKnockdownProc(mRemoteProcId) || isRemoteDeadProc(mRemoteProcId))
     {
         mPvpTargetCyl.OffTgSetBit();
         mPvpTargetCyl.ResetTgHit();
@@ -2334,7 +2338,9 @@ void daRemoteLink_c::updatePvpAttentionTarget() {
     // very long-range preset previously used here.
     attention_info.distances[fopAc_attn_BATTLE_e] = 3;
 
-    if (mHasRemotePose && dusk::multiplayer::pvp_enabled() && !isRemoteLinkSceneUnsafe()) {
+    if (mHasRemotePose && dusk::multiplayer::pvp_enabled() && !isRemoteLinkSceneUnsafe() &&
+        !isRemoteDeadProc(mRemoteProcId))
+    {
         attention_info.flags = fopAc_AttnFlag_BATTLE_e;
     } else {
         attention_info.flags = 0;
