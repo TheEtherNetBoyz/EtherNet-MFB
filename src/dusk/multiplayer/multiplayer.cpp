@@ -217,7 +217,10 @@ constexpr int kPvpAttackHeavy = 2;
 constexpr int kPvpLightDamage = 2;
 constexpr int kPvpHeavyDamage = 4;
 constexpr int kPvpIronBallDamage = 12;
+constexpr int kPvpSpecialTechniqueDamage = 12;
 constexpr const char* kPvpReactionIronBallLaunch = "iron_ball_launch";
+constexpr const char* kPvpReactionMortalDraw = "mortal_draw";
+constexpr const char* kPvpReactionGreatSpin = "great_spin";
 
 std::map<std::string, uint32_t> sGanondorfRemoteHitLastSequenceByPeer;
 std::map<std::string, uint32_t> sGanondorfRemoteReactionLastSequenceByPeer;
@@ -286,7 +289,8 @@ bool apply_ganondorf_remote_player_damage(const GanondorfRemotePlayerDamageEvent
     return false;
 }
 
-bool apply_pvp_player_damage(int attackClass, bool ironBallLaunch, float sourceX, float sourceZ) {
+bool apply_pvp_player_damage(int attackClass, bool ironBallLaunch, int damage, float sourceX,
+                             float sourceZ) {
     daAlink_c* player = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
     if (player != nullptr) {
         const s16 hitAngle =
@@ -298,7 +302,7 @@ bool apply_pvp_player_damage(int attackClass, bool ironBallLaunch, float sourceX
             // Recreate that path without a local collision object: the hit angle replaces
             // getDamageVec(), while FALSE selects the vanilla huge-damage launch tuning.
             player->current.angle.y = hitAngle;
-            player->setDamagePointNormal(kPvpIronBallDamage);
+            player->setDamagePointNormal(damage);
             return player->procCoLargeDamageInit(-1, FALSE, 0, 0, nullptr, 0) != 0;
         }
 
@@ -307,13 +311,11 @@ bool apply_pvp_player_damage(int attackClass, bool ironBallLaunch, float sourceX
         // reaction so an airborne light hit still deals light damage.
         if (attackClass == kPvpAttackHeavy ||
             player->checkModeFlg(daAlink_c::MODE_PLAYER_FLY)) {
-            const int damage =
-                attackClass == kPvpAttackHeavy ? kPvpHeavyDamage : kPvpLightDamage;
             player->setThrowDamage(hitAngle, 35.0f, 22.0f, damage, 1, 0);
             return player->procCoLargeDamageInit(-3, TRUE, 0, 0, nullptr, 0) != 0;
         }
 
-        player->setDamagePointNormal(kPvpLightDamage);
+        player->setDamagePointNormal(damage);
         if (player->checkWolf()) {
             player->field_0x311e = hitAngle;
             return player->procWolfDamageInit(nullptr, true) != 0;
@@ -323,9 +325,6 @@ bool apply_pvp_player_damage(int attackClass, bool ironBallLaunch, float sourceX
         return player->procDamageInit(nullptr, 1) != 0;
     }
 
-    const int damage = ironBallLaunch
-                           ? kPvpIronBallDamage
-                           : (attackClass == kPvpAttackHeavy ? kPvpHeavyDamage : kPvpLightDamage);
     daPy_py_c::setPlayerDamage(damage, TRUE);
     return false;
 }
@@ -7396,9 +7395,18 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                 return;
             }
 
-            const bool ironBallLaunch =
+            const std::string reaction = state.value("reaction", std::string());
+            const bool ironBallLaunch = attackClass == kPvpAttackHeavy &&
+                                        reaction == kPvpReactionIronBallLaunch;
+            const bool specialTechnique =
                 attackClass == kPvpAttackHeavy &&
-                state.value("reaction", std::string()) == kPvpReactionIronBallLaunch;
+                (reaction == kPvpReactionMortalDraw || reaction == kPvpReactionGreatSpin);
+            const int damage = ironBallLaunch
+                                   ? kPvpIronBallDamage
+                                   : (specialTechnique
+                                          ? kPvpSpecialTechniqueDamage
+                                          : (attackClass == kPvpAttackHeavy ? kPvpHeavyDamage
+                                                                            : kPvpLightDamage));
             const bool blocked = !ironBallLaunch && state.value("blocked", false);
             const float sourceX = state.value("source_x", 0.0f);
             const float sourceZ = state.value("source_z", 0.0f);
@@ -7406,11 +7414,12 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                                              ? apply_pvp_player_shield_block(attackClass, sourceX,
                                                                              sourceZ)
                                              : apply_pvp_player_damage(attackClass, ironBallLaunch,
-                                                                       sourceX, sourceZ);
+                                                                       damage, sourceX, sourceZ);
             sPvpRemoteHitLastSequenceByPeer[peerId] = sequence;
-            DuskLog.info("Multiplayer PvP hit rx peer={} seq={} class={} iron_ball_launch={} "
-                         "blocked={} reaction={}",
-                         peerId, sequence, attackClass, ironBallLaunch, blocked, appliedReaction);
+            DuskLog.info("Multiplayer PvP hit rx peer={} seq={} class={} reaction_kind={} "
+                         "damage={} blocked={} reaction={}",
+                         peerId, sequence, attackClass, reaction, damage, blocked,
+                         appliedReaction);
         }
     } else if (type == "peer_left") {
         const std::string leftPeerId = resolve_peer_id(routedMessage);
@@ -10911,6 +10920,19 @@ void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo) {
 
     const int attackClass = classify_pvp_attack(attackInfo);
     const bool ironBallLaunch = attackInfo->ChkAtType(AT_TYPE_IRON_BALL);
+    const int cutType = static_cast<int>(link->getCutType());
+    const char* reaction = nullptr;
+    if (ironBallLaunch) {
+        reaction = kPvpReactionIronBallLaunch;
+    } else if (cutType == daPy_py_c::CUT_TYPE_MORTAL_DRAW_A ||
+               cutType == daPy_py_c::CUT_TYPE_MORTAL_DRAW_B)
+    {
+        reaction = kPvpReactionMortalDraw;
+    } else if (cutType == daPy_py_c::CUT_TYPE_LARGE_TURN_LEFT ||
+               cutType == daPy_py_c::CUT_TYPE_LARGE_TURN_RIGHT)
+    {
+        reaction = kPvpReactionGreatSpin;
+    }
     const bool blocked = !ironBallLaunch && attackInfo->ChkAtShieldHit();
 
     const uint32_t sequence = ++sLocalPvpHitSequence;
@@ -10932,8 +10954,8 @@ void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo) {
         {"source_y", sourcePos->y},
         {"source_z", sourcePos->z},
     };
-    if (ironBallLaunch) {
-        state["reaction"] = kPvpReactionIronBallLaunch;
+    if (reaction != nullptr) {
+        state["reaction"] = reaction;
     }
 
     send_json({
@@ -10941,10 +10963,11 @@ void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo) {
         {"sequence", sequence},
         {"state", state},
     });
-    DuskLog.info("Multiplayer PvP hit tx target={} seq={} class={} iron_ball_launch={} "
-                 "blocked={} at_type={:#x} at_spl={}",
-                 targetPeerId, sequence, attackClass, ironBallLaunch, blocked,
-                 attackInfo->GetAtType(), static_cast<int>(attackInfo->GetAtSpl()));
+    DuskLog.info("Multiplayer PvP hit tx target={} seq={} class={} reaction_kind={} "
+                 "blocked={} cut_type={} at_type={:#x} at_spl={}",
+                 targetPeerId, sequence, attackClass,
+                 reaction != nullptr ? reaction : "", blocked, cutType, attackInfo->GetAtType(),
+                 static_cast<int>(attackInfo->GetAtSpl()));
 }
 
 void report_remote_link_pvp_target_hit(fopAc_ac_c* remoteLinkActor, fopAc_ac_c* attackActor,
