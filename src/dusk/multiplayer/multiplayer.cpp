@@ -10919,7 +10919,8 @@ int classify_pvp_attack(dCcD_GObjInf* attackInfo) {
     return kPvpAttackLight;
 }
 
-void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo) {
+void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo,
+                                 fopAc_ac_c* sourceActor, bool allowSwordReaction) {
     if (link == nullptr || attackInfo == nullptr || !attackInfo->ChkAtHit()) {
         return;
     }
@@ -10957,7 +10958,8 @@ void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo) {
     const int attackClass = classify_pvp_attack(attackInfo);
     const bool ironBallLaunch = attackInfo->ChkAtType(AT_TYPE_IRON_BALL);
     const bool shieldBash = attackInfo->ChkAtType(AT_TYPE_SHIELD_ATTACK);
-    const int cutType = static_cast<int>(link->getCutType());
+    const int cutType = allowSwordReaction ? static_cast<int>(link->getCutType()) :
+                                             static_cast<int>(daPy_py_c::CUT_TYPE_NONE);
     const char* reaction = nullptr;
     if (ironBallLaunch) {
         reaction = kPvpReactionIronBallLaunch;
@@ -10975,7 +10977,8 @@ void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo) {
     const bool blocked = !ironBallLaunch && !shieldBash && attackInfo->ChkAtShieldHit();
 
     const uint32_t sequence = ++sLocalPvpHitSequence;
-    const cXyz* sourcePos = &link->current.pos;
+    const cXyz* sourcePos = sourceActor != nullptr ? &sourceActor->current.pos :
+                                                    &link->current.pos;
     if (ironBallLaunch) {
         const cXyz* ironBallPos = link->getIronBallCenterPos();
         if (ironBallPos != nullptr) {
@@ -11011,13 +11014,18 @@ void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo) {
 
 void report_remote_link_pvp_target_hit(fopAc_ac_c* remoteLinkActor, fopAc_ac_c* attackActor,
                                        dCcD_GObjInf* attackInfo) {
-    if (remoteLinkActor == nullptr || attackActor == nullptr || attackInfo == nullptr ||
-        fopAcM_GetName(attackActor) != fpcNm_ALINK_e)
+    if (remoteLinkActor == nullptr || attackActor == nullptr || attackInfo == nullptr)
     {
         return;
     }
 
-    report_local_pvp_attack_hit(static_cast<daAlink_c*>(attackActor), attackInfo);
+    const int attackActorName = fopAcM_GetName(attackActor);
+    if (attackActorName == fpcNm_ALINK_e) {
+        report_local_pvp_attack_hit(static_cast<daAlink_c*>(attackActor), attackInfo);
+    } else if (attackActorName == fpcNm_ARROW_e) {
+        daAlink_c* link = daAlink_getAlinkActorClass();
+        report_local_pvp_attack_hit(link, attackInfo, attackActor, false);
+    }
 }
 
 void record_local_link_audio_event(uint32_t soundId, bool level, uint32_t mapInfo, int reverb,
