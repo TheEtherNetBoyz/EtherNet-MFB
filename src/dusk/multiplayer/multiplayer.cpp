@@ -7410,6 +7410,17 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             const bool blocked = !ironBallLaunch && state.value("blocked", false);
             const float sourceX = state.value("source_x", 0.0f);
             const float sourceZ = state.value("source_z", 0.0f);
+            daAlink_c* player = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
+            if (player != nullptr && player->checkCameraLargeDamage()) {
+                // Vanilla knockdown enemies remain untargetable until their get-up state ends.
+                // Link's large-damage procedure family covers the complete knockdown and
+                // get-up lifecycle, so reject all PvP hits while any of those procedures run.
+                sPvpRemoteHitLastSequenceByPeer[peerId] = sequence;
+                DuskLog.info("Multiplayer PvP hit ignored during knockdown peer={} seq={} "
+                             "proc={}",
+                             peerId, sequence, static_cast<int>(player->mProcID));
+                return;
+            }
             const bool appliedReaction = blocked
                                              ? apply_pvp_player_shield_block(attackClass, sourceX,
                                                                              sourceZ)

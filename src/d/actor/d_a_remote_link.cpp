@@ -194,6 +194,13 @@ static bool isRemoteTransformProc(int i_procId) {
            i_procId == daAlink_c::PROC_METAMORPHOSE_ONLY;
 }
 
+static bool isRemotePvpKnockdownProc(int i_procId) {
+    return i_procId == daAlink_c::PROC_LARGE_DAMAGE ||
+           i_procId == daAlink_c::PROC_LARGE_DAMAGE_WALL ||
+           i_procId == daAlink_c::PROC_LARGE_DAMAGE_UP ||
+           i_procId == daAlink_c::PROC_WOLF_LARGE_DAMAGE_UP;
+}
+
 static bool isRemoteLinkSceneUnsafe() {
     return dComIfGp_isEnableNextStage() || fopOvlpM_IsPeek() || fopOvlpM_IsDoingReq() ||
            dComIfGp_event_runCheck();
@@ -2259,7 +2266,9 @@ void daRemoteLink_c::updatePvpTargetCollision() {
         return;
     }
 
-    if (!dusk::multiplayer::pvp_enabled() || isRemoteLinkSceneUnsafe()) {
+    if (!dusk::multiplayer::pvp_enabled() || isRemoteLinkSceneUnsafe() ||
+        isRemotePvpKnockdownProc(mRemoteProcId))
+    {
         mPvpTargetCyl.OffTgSetBit();
         mPvpTargetCyl.ResetTgHit();
         return;
