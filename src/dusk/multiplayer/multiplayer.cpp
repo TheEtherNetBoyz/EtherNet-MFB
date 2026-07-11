@@ -216,6 +216,7 @@ constexpr int kPvpAttackLight = 1;
 constexpr int kPvpAttackHeavy = 2;
 constexpr int kPvpLightDamage = 2;
 constexpr int kPvpHeavyDamage = 4;
+constexpr int kPvpIronBallDamage = 12;
 constexpr const char* kPvpReactionIronBallLaunch = "iron_ball_launch";
 
 std::map<std::string, uint32_t> sGanondorfRemoteHitLastSequenceByPeer;
@@ -297,7 +298,7 @@ bool apply_pvp_player_damage(int attackClass, bool ironBallLaunch, float sourceX
             // Recreate that path without a local collision object: the hit angle replaces
             // getDamageVec(), while FALSE selects the vanilla huge-damage launch tuning.
             player->current.angle.y = hitAngle;
-            player->setDamagePointNormal(kPvpHeavyDamage);
+            player->setDamagePointNormal(kPvpIronBallDamage);
             return player->procCoLargeDamageInit(-1, FALSE, 0, 0, nullptr, 0) != 0;
         }
 
@@ -322,8 +323,10 @@ bool apply_pvp_player_damage(int attackClass, bool ironBallLaunch, float sourceX
         return player->procDamageInit(nullptr, 1) != 0;
     }
 
-    daPy_py_c::setPlayerDamage(attackClass == kPvpAttackHeavy ? kPvpHeavyDamage : kPvpLightDamage,
-                               TRUE);
+    const int damage = ironBallLaunch
+                           ? kPvpIronBallDamage
+                           : (attackClass == kPvpAttackHeavy ? kPvpHeavyDamage : kPvpLightDamage);
+    daPy_py_c::setPlayerDamage(damage, TRUE);
     return false;
 }
 
