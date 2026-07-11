@@ -1809,8 +1809,30 @@ void remember_synced_key_item(int itemId) {
     }
 }
 
+void repair_lantern_item_state(const char* reason) {
+    if (!dComIfGs_isItemFirstBit(dItemNo_KANTERA_e)) {
+        return;
+    }
+
+    const bool wasApplyingRemoteSaveBit = sApplyingRemoteSaveBit;
+    sApplyingRemoteSaveBit = true;
+    remember_synced_key_item(dItemNo_KANTERA_e);
+    if (dComIfGs_getItem(SLOT_1, true) != dItemNo_KANTERA_e) {
+        dComIfGs_setItem(SLOT_1, dItemNo_KANTERA_e);
+        DuskLog.info("Multiplayer repaired lantern inventory slot reason={}", reason);
+    }
+    if (dComIfGs_getMaxOil() == 0) {
+        dComIfGs_setMaxOil(21600);
+        DuskLog.info("Multiplayer repaired lantern max oil reason={}", reason);
+    }
+    if (dComIfGs_getOil() == 0) {
+        dComIfGs_setOil(dComIfGs_getMaxOil());
+        DuskLog.info("Multiplayer repaired lantern oil reason={}", reason);
+    }
+    sApplyingRemoteSaveBit = wasApplyingRemoteSaveBit;
+}
+
 void repair_synced_key_item_state(const char* reason) {
-    bool repaired = false;
     const bool wasApplyingRemoteSaveBit = sApplyingRemoteSaveBit;
     sApplyingRemoteSaveBit = true;
 
@@ -1822,31 +1844,11 @@ void repair_synced_key_item_state(const char* reason) {
             execItemGet(static_cast<u8>(itemId));
             DuskLog.info("Multiplayer repaired synced key item get item_id={} reason={}",
                          itemId, reason);
-            repaired = true;
         }
     }
 
-    if (dComIfGs_isItemFirstBit(dItemNo_KANTERA_e)) {
-        remember_synced_key_item(dItemNo_KANTERA_e);
-        if (dComIfGs_getItem(SLOT_1, true) != dItemNo_KANTERA_e) {
-            dComIfGs_setItem(SLOT_1, dItemNo_KANTERA_e);
-            DuskLog.info("Multiplayer repaired lantern inventory slot reason={}", reason);
-            repaired = true;
-        }
-        if (dComIfGs_getMaxOil() == 0) {
-            dComIfGs_setMaxOil(21600);
-            DuskLog.info("Multiplayer repaired lantern max oil reason={}", reason);
-            repaired = true;
-        }
-        if (dComIfGs_getOil() == 0) {
-            dComIfGs_setOil(dComIfGs_getMaxOil());
-            DuskLog.info("Multiplayer repaired lantern oil reason={}", reason);
-            repaired = true;
-        }
-    }
-
+    repair_lantern_item_state(reason);
     sApplyingRemoteSaveBit = wasApplyingRemoteSaveBit;
-    (void)repaired;
 }
 
 void remember_memory_item_bit(int stageNo, int flag) {
@@ -8329,7 +8331,17 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             sApplyingRemoteSaveBit = false;
             DuskLog.info("Multiplayer applied remote item get item_id={}", itemId);
         }
-        repair_synced_key_item_state("live_item_get");
+        // A live item event is authoritative only for this item. Do not use it as an
+        // opportunity to replay every item ever observed during the session: after a
+        // manual state replacement that historical set can contain intentionally absent
+        // items (notably BOMB_BAG_LV1), which would grant and re-broadcast unrelated gear.
+        if (itemId == dItemNo_KANTERA_e) {
+            repair_lantern_item_state("live_item_get");
+            DuskLog.info(
+                "Multiplayer remote lantern state first_bit={} slot={} max_oil={} oil={}",
+                dComIfGs_isItemFirstBit(dItemNo_KANTERA_e),
+                dComIfGs_getItem(SLOT_1, true), dComIfGs_getMaxOil(), dComIfGs_getOil());
+        }
     } else if (type == "bomb_bag_slot") {
         apply_remote_bomb_bag_slot(message.value("bag", -1), message.value("item", -1),
                                    message.value("count", -1), "live");
