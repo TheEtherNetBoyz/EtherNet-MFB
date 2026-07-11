@@ -2339,6 +2339,9 @@ void daRemoteLink_c::updatePvpMidnaBindEffect() {
                           !isRemoteLinkSceneUnsafe() && midna != NULL &&
                           player->checkWolfLock(this);
     if (!isLocked) {
+        if (mPvpMidnaBindActive) {
+            mActiveSoundObj.stopSound(Z2SE_MIDNA_BIND_LOCK_SUS, 2);
+        }
         mPvpMidnaBindActive = false;
         return;
     }
@@ -2381,8 +2384,13 @@ void daRemoteLink_c::updatePvpMidnaBindEffect() {
         dComIfGp_particle_set(0x29C, &effectPos, &tevStr, &shape_angle, &effectScale, 0xFF,
                               NULL, fopAcM_GetRoomNo(this), &primColors[colorIndex],
                               &envColors[colorIndex], NULL);
+        mActiveSoundObj.startSound(Z2SE_MIDNA_BIND_LOCK_ON, 0,
+                                   dComIfGp_getReverb(fopAcM_GetRoomNo(this)));
         mPvpMidnaBindActive = true;
     }
+
+    mActiveSoundObj.startLevelSound(Z2SE_MIDNA_BIND_LOCK_SUS, 0,
+                                    dComIfGp_getReverb(fopAcM_GetRoomNo(this)));
 
     for (int i = 0; i < 3; ++i) {
         mPvpMidnaBindIds[i] = dComIfGp_particle_set(
