@@ -301,8 +301,14 @@ bool apply_pvp_player_damage(int attackClass, bool ironBallLaunch, float sourceX
             return player->procCoLargeDamageInit(-1, FALSE, 0, 0, nullptr, 0) != 0;
         }
 
-        if (attackClass == kPvpAttackHeavy) {
-            player->setThrowDamage(hitAngle, 35.0f, 22.0f, kPvpHeavyDamage, 1, 0);
+        // Vanilla routes every airborne hit through its large-damage reaction, even when
+        // the attack itself is light. Keep the PvP damage class independent from that
+        // reaction so an airborne light hit still deals light damage.
+        if (attackClass == kPvpAttackHeavy ||
+            player->checkModeFlg(daAlink_c::MODE_PLAYER_FLY)) {
+            const int damage =
+                attackClass == kPvpAttackHeavy ? kPvpHeavyDamage : kPvpLightDamage;
+            player->setThrowDamage(hitAngle, 35.0f, 22.0f, damage, 1, 0);
             return player->procCoLargeDamageInit(-3, TRUE, 0, 0, nullptr, 0) != 0;
         }
 
