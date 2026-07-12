@@ -10,6 +10,7 @@ SpeedrunInfo m_speedrunInfo;
 void resetForSpeedrunMode() {
     mDoMain::developmentMode = -1;
 
+    getSettings().randomizer.enabled.setSpeedrunValue(false);
     getSettings().game.enableTurboKeybind.setSpeedrunValue(false);
 
     getSettings().game.damageMultiplier.setSpeedrunValue(1);

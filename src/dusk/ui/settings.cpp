@@ -621,6 +621,7 @@ AuroraBackend configured_backend() {
 void reset_for_speedrun_mode() {
     mDoMain::developmentMode = -1;
 
+    getSettings().randomizer.enabled.setSpeedrunValue(false);
     getSettings().game.enableTurboKeybind.setSpeedrunValue(false);
 
     getSettings().game.damageMultiplier.setSpeedrunValue(1);
@@ -1988,6 +1989,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                             }
                         }
                     },
+                .isDisabled = [] { return getSettings().game.speedrunMode; },
             });
         config_bool_select(leftPane, rightPane, getSettings().game.speedrunMode,
             {

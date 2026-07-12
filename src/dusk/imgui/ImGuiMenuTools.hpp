@@ -16,6 +16,7 @@ namespace dusk {
     public:
         ImGuiMenuTools();
         void draw();
+        void drawDebug();
         void afterDraw();
         void togglePracticeSaves();
         void drawPracticeSavesNative();

@@ -64,6 +64,7 @@ namespace dusk {
             auto& s = getSettings();
             mDoMain::developmentMode = -1;
 
+            s.randomizer.enabled.setSpeedrunValue(false);
             s.game.enableTurboKeybind.setSpeedrunValue(false);
 
             s.game.damageMultiplier.setSpeedrunValue(1);
@@ -544,7 +545,13 @@ namespace dusk {
             ImGui::MenuItem("Practice Saves", nullptr, &m_showPracticeSaves);
             ImGui::MenuItem("Input Macro", nullptr, &m_showInputMacro);
             ImGui::MenuItem("State Share", hotkeys::SHOW_STATE_SHARE, &m_showStateShare);
+
+            ImGui::EndDisabled();
+
             ImGui::MenuItem("Online", nullptr, &m_showOnline);
+
+            ImGui::BeginDisabled(getSettings().game.speedrunMode);
+
             MenuCheckbox("Move Link", getSettings().game.moveLink);
 
             ImGui::EndDisabled();
@@ -572,7 +579,9 @@ namespace dusk {
 
             ImGui::EndMenu();
         }
+    }
 
+    void ImGuiMenuTools::drawDebug() {
         if (ImGui::BeginMenu("Debug")) {
             ImGui::BeginDisabled(getSettings().game.speedrunMode);
 

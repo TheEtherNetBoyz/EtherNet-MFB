@@ -65,7 +65,7 @@ namespace dusk {
     ImGuiMenuRandomizer::ImGuiMenuRandomizer() {}
 
     void ImGuiMenuRandomizer::draw() {
-        if (ImGui::BeginMenu("Randomizer")) {
+        if (ImGui::BeginMenu("Randomizer", !getSettings().game.speedrunMode)) {
             if (ImGui::BeginMenu("Generate")) {
                 if (ImGui::MenuItem("Generate Seed", nullptr, false, !generatingSeed)) {
 
