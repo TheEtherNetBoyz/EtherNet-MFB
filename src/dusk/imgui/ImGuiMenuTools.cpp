@@ -400,7 +400,7 @@ namespace dusk {
             }
             if (ImGui::BeginMenu("Input")) {
                 MenuCheckbox("Allow Background Input", s.game.allowBackgroundInput);
-                SliderIntItem("Input Lag (ms)", s.game.inputLagMs, 0, 150);
+                SliderIntItem("Video Latency (ms)", s.game.inputLagMs, 0, 150);
                 ImGui::Separator();
                 MenuCheckbox("Free Camera", s.game.freeCamera);
                 MenuCheckbox("Custom Camera Speeds", s.game.enableCameraSpeedControls);

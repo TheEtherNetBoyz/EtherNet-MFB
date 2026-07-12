@@ -64,6 +64,7 @@
 #include "dusk/imgui/ImGuiEngine.hpp"
 #include "dusk/iso_validate.hpp"
 #include "dusk/latency_trace.h"
+#include "dusk/video_latency.h"
 #include "dusk/logging.h"
 #include "dusk/main.h"
 #include "dusk/ui/menu_bar.hpp"
@@ -389,6 +390,7 @@ void main01(void) {
         }
 
         dusk::latency_trace::mark("aurora_end_frame_before");
+        dusk::video_latency::process();
         aurora_end_frame();
         dusk::latency_trace::presented();
         dusk::latency_trace::mark("finish_main_loop_before");

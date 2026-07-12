@@ -1417,6 +1417,7 @@ set(DUSK_FILES
         include/dusk/dvd_asset.hpp
         include/dusk/input_macro.h
         include/dusk/latency_trace.h
+        include/dusk/video_latency.h
         include/dusk/scope_guard.hpp
         src/dusk/dvd_asset.cpp
         src/d/actor/d_a_alink_dusk.cpp
@@ -1448,6 +1449,7 @@ set(DUSK_FILES
         src/dusk/input_macro.cpp
         src/dusk/layout.cpp
         src/dusk/latency_trace.cpp
+        src/dusk/video_latency.cpp
         src/dusk/logging.cpp
         src/dusk/settings.cpp
         src/dusk/speedrun.cpp
