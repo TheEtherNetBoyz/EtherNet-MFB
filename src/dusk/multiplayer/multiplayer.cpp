@@ -971,6 +971,12 @@ std::string sAwaitingManualSyncPeerId;
 // its notify_local_*_set() hook and re-send it to the peer that just sent it
 // to us.
 bool sApplyingRemoteSaveBit = false;
+// Item rewards are committed by dMeter2 one frame after execItemGet queues
+// them. If another peer reports the exact projected value first, that report
+// already represents the same shared reward. Let the local meter finish its
+// animation/side effects, but suppress its resulting duplicate publication.
+std::optional<uint16_t> sPendingRupeeCountPublicationToSuppress;
+std::optional<uint8_t> sPendingMaxLifePublicationToSuppress;
 
 class ScopedRemoteSaveBitApplication {
 public:
@@ -1752,7 +1758,8 @@ void fill_ganondorf_remote_hit_from_pose(const std::string& peerId, const PeerPo
 }
 
 // Key items / progression unlocks that are safe to apply on a remote peer by
-// simply re-running execItemGet(). Deliberately excludes: rupees/bombs/
+// simply re-running execItemGet(). Deliberately excludes: rupees, heart
+// pieces/containers, bombs/
 // arrows/magic-refill counts and bug catches (volatile consumables, matches
 // TP's existing merge rules); small keys, key pieces, and boss keys (small
 // keys are explicitly flagged as needing dungeon-scoped conflict handling in
@@ -1762,9 +1769,6 @@ void fill_ganondorf_remote_hit_from_pose(const std::string& peerId, const PeerPo
 // path, to avoid two mechanisms fighting over the same progression).
 bool is_synced_key_item(int itemId) {
     switch (itemId) {
-    // Heart pieces / heart containers (already-shipped baseline).
-    case dItemNo_KAKERA_HEART_e:
-    case dItemNo_UTAWA_HEART_e:
     // Tools.
     case dItemNo_HOOKSHOT_e:
     case dItemNo_W_HOOKSHOT_e:
@@ -1828,7 +1832,6 @@ bool is_synced_key_item(int itemId) {
     case dItemNo_ANCIENT_DOCUMENT_e:
     case dItemNo_ANCIENT_DOCUMENT2_e:
     case dItemNo_AIR_LETTER_e:
-    case dItemNo_LINKS_SAVINGS_e:
     case dItemNo_TOMATO_PUREE_e:
     case dItemNo_TASTE_e:
     case dItemNo_SURFBOARD_e:
@@ -1838,8 +1841,13 @@ bool is_synced_key_item(int itemId) {
     }
 }
 
-bool is_synced_reversible_item_first_bit(int itemId) {
-    return itemId >= dItemNo_M_BEETLE_e && itemId <= dItemNo_F_MAYFLY_e;
+bool is_synced_item_first_bit(int itemId) {
+    // Heart rewards and Link's Savings are synchronized as counter state, not
+    // by replaying execItemGet(), because their item functions enqueue an
+    // additive meter update. Preserve their first-get bookkeeping separately.
+    return itemId == dItemNo_KAKERA_HEART_e || itemId == dItemNo_UTAWA_HEART_e ||
+           itemId == dItemNo_LINKS_SAVINGS_e ||
+           (itemId >= dItemNo_M_BEETLE_e && itemId <= dItemNo_F_MAYFLY_e);
 }
 
 void remember_synced_key_item(int itemId) {
@@ -8323,7 +8331,13 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         // Monotonic max-merge, not last-write-wins: max life should never
         // decrease from a remote update, so only raise it, never lower it.
         const int value = message.value("value", -1);
-        if (value >= 0 && value <= 100 && value > dComIfGs_getMaxLife()) {
+        const int pending = dComIfGp_getItemMaxLifeCount();
+        const int projected = std::clamp<int>(dComIfGs_getMaxLife() + pending, 15, 100);
+        if (pending != 0 && value == projected) {
+            sPendingMaxLifePublicationToSuppress = static_cast<uint8_t>(value);
+            DuskLog.info("Multiplayer coalesced remote max life value={} pending_delta={}",
+                         value, pending);
+        } else if (value >= 0 && value <= 100 && value > dComIfGs_getMaxLife()) {
             sApplyingRemoteSaveBit = true;
             dComIfGs_setMaxLife(static_cast<u8>(value));
             sApplyingRemoteSaveBit = false;
@@ -8347,7 +8361,14 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         }
     } else if (type == "rupee_count") {
         const int value = message.value("value", -1);
-        if (value >= 0 && value <= dComIfGs_getRupeeMax()) {
+        const int pending = dComIfGp_getItemRupeeCount();
+        const int projected = std::clamp<int>(dComIfGs_getRupee() + pending, 0,
+                                              dComIfGs_getRupeeMax());
+        if (pending != 0 && value == projected) {
+            sPendingRupeeCountPublicationToSuppress = static_cast<uint16_t>(value);
+            DuskLog.info("Multiplayer coalesced remote rupee count value={} pending_delta={}",
+                         value, pending);
+        } else if (value >= 0 && value <= dComIfGs_getRupeeMax()) {
             sApplyingRemoteSaveBit = true;
             dComIfGs_setRupee(static_cast<u16>(value));
             sApplyingRemoteSaveBit = false;
@@ -8464,7 +8485,7 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
     } else if (type == "item_first_bit") {
         const int itemId = message.value("item_id", -1);
         const bool owned = message.value("owned", true);
-        if (is_synced_reversible_item_first_bit(itemId)) {
+        if (is_synced_item_first_bit(itemId)) {
             sApplyingRemoteSaveBit = true;
             if (owned) {
                 dComIfGs_onItemFirstBit(static_cast<u8>(itemId));
@@ -12923,7 +12944,7 @@ void notify_local_item_first_bit_set(int itemId) {
         return;
     }
 
-    if (!is_synced_reversible_item_first_bit(itemId)) {
+    if (!is_synced_item_first_bit(itemId)) {
         return;
     }
 
@@ -12940,7 +12961,7 @@ void notify_local_item_first_bit_cleared(int itemId) {
         return;
     }
 
-    if (!is_synced_reversible_item_first_bit(itemId)) {
+    if (!is_synced_item_first_bit(itemId)) {
         return;
     }
 
@@ -13405,6 +13426,15 @@ void notify_local_light_drop_get_flag_set(uint8_t area) {
 // light_drop_num, but merged as monotonic-max on receive since max life
 // should never decrease.
 void notify_local_max_life_set(uint8_t maxLife) {
+    if (sPendingMaxLifePublicationToSuppress.has_value()) {
+        const bool matches = *sPendingMaxLifePublicationToSuppress == maxLife;
+        sPendingMaxLifePublicationToSuppress.reset();
+        if (matches) {
+            DuskLog.info("Multiplayer suppressed coalesced local max life value={}", maxLife);
+            return;
+        }
+    }
+
     if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
@@ -13433,6 +13463,15 @@ void notify_local_bottle_slot_count_set(uint8_t count) {
 }
 
 void notify_local_rupee_count_set(uint16_t rupees) {
+    if (sPendingRupeeCountPublicationToSuppress.has_value()) {
+        const bool matches = *sPendingRupeeCountPublicationToSuppress == rupees;
+        sPendingRupeeCountPublicationToSuppress.reset();
+        if (matches) {
+            DuskLog.info("Multiplayer suppressed coalesced local rupee count value={}", rupees);
+            return;
+        }
+    }
+
     if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
         return;
     }
