@@ -65,6 +65,7 @@ const std::set<std::string> kStateBroadcastTypes = {
     "bottle_slots",
     "rupee_count",
     "item_get",
+    "rando_item_get",
     "item_first_bit",
     "collect_crystal",
     "collect_mirror",

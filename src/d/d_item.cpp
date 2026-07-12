@@ -9,6 +9,7 @@
 #include "d/d_com_inf_game.h"
 #include "d/d_meter2_info.h"
 #if TARGET_PC
+#include "dusk/multiplayer/event_sync.hpp"
 #include "dusk/randomizer/game/flags.h"
 #include "dusk/randomizer/game/tools.h"
 #include "dusk/randomizer/game/stages.h"
@@ -548,13 +549,19 @@ inline void getItemFunc(u8 i_itemNo) {
 
 void execItemGet(u8 i_itemNo) {
 #if TARGET_PC
-    if (randomizer_IsActive()) {
+    const bool randomizerActive = randomizer_IsActive();
+    if (randomizerActive) {
         i_itemNo = verifyProgressiveItem(i_itemNo);
         g_randomizerState.mUpdateTracker = true;
     }
 
 #endif
     getItemFunc(i_itemNo);
+#if TARGET_PC
+    if (randomizerActive) {
+        dusk::multiplayer::notify_local_randomizer_item_get(i_itemNo);
+    }
+#endif
 }
 
 static int (*item_getcheck_func_ptr[256])() = {

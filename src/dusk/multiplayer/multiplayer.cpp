@@ -30,6 +30,7 @@
 #include "dusk/multiplayer/event_sync.hpp"
 #include "dusk/multiplayer/invite_code.hpp"
 #include "dusk/multiplayer/remote_link_dummy.hpp"
+#include "dusk/randomizer/game/randomizer_context.hpp"
 #include "dusk/autosave.h"
 #include "f_op/f_op_actor_mng.h"
 #include "f_op/f_op_camera_mng.h"
@@ -1322,7 +1323,7 @@ bool is_sync_flags_message_type(const std::string& type) {
            type == "key_num" || type == "light_drop_num" ||
            type == "light_drop_get_flag" || type == "max_life_update" ||
            type == "bottle_slots" || type == "rupee_count" || type == "bomb_bag_slot" ||
-           type == "ganondorf_hit";
+           type == "ganondorf_hit" || type == "rando_item_get";
 }
 
 bool is_engine_stage_load_unsafe_for_multiplayer() {
@@ -8425,6 +8426,18 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                     stage, flag, repairedLife, repairedSword);
             }
         }
+    } else if (type == "rando_item_get") {
+        const int itemId = message.value("item_id", -1);
+        const std::string remoteSeed = message.value("rando_seed_hash", "");
+        const bool matchingSeed = !remoteSeed.empty() && remoteSeed == randomizer_GetContext().mHash;
+        if (randomizer_IsActive() && matchingSeed && itemId >= 0 && itemId <= 0xFF) {
+            ScopedRemoteSaveBitApplication applyingRemoteSaveBit;
+            execItemGet(static_cast<u8>(itemId));
+            DuskLog.info("Multiplayer applied randomizer item get item_id={}", itemId);
+        } else {
+            DuskLog.warn("Multiplayer ignored randomizer item get item_id={} active={} "
+                         "matching_seed={}", itemId, randomizer_IsActive(), matchingSeed);
+        }
     } else if (type == "item_get") {
         const int itemId = message.value("item_id", -1);
         // Guard against double-apply. Verified directly in d_item.cpp: every
@@ -12906,6 +12919,13 @@ void notify_local_item_get(int itemId) {
         return;
     }
 
+    // The randomizer lane below carries every resolved reward, including
+    // repeats and consumables. Sending this durable vanilla lane as well
+    // would execute key items twice on the receiving peer.
+    if (randomizer_IsActive()) {
+        return;
+    }
+
     if (!is_synced_key_item(itemId)) {
         return;
     }
@@ -12918,8 +12938,29 @@ void notify_local_item_get(int itemId) {
     DuskLog.info("Multiplayer sent local item get item_id={}", itemId);
 }
 
+void notify_local_randomizer_item_get(int itemId) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit ||
+        !randomizer_IsActive() || itemId < 0 || itemId > 0xFF)
+    {
+        return;
+    }
+
+    send_json({
+        {"type", "rando_item_get"},
+        {"item_id", itemId},
+        {"rando_seed_hash", randomizer_GetContext().mHash},
+    });
+    DuskLog.info("Multiplayer sent randomizer item get item_id={}", itemId);
+}
+
 void notify_local_item_first_bit_set(int itemId) {
     if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    // rando_item_get applies the reward and its first-bit mutation together.
+    // Sending the bit first can also make progressive resolution skip a tier.
+    if (randomizer_IsActive()) {
         return;
     }
 
