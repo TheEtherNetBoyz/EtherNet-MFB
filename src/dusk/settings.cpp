@@ -192,6 +192,11 @@ UserSettings g_userSettings = {
         .enableAdvancedSettings {"backend.enableAdvancedSettings", false},
     },
 
+    .online = {
+        .playerName {"online.playerName", "Player"},
+        .lobbyName {"online.lobbyName", "Lobby"},
+    },
+
     .hotkeys = {
         .toggleImGuiMenu = {
             ConfigVar<int>{"hotkeys.toggleImGuiMenu.key", SDL_SCANCODE_GRAVE},
@@ -491,6 +496,9 @@ void registerSettings() {
     Register(g_userSettings.backend.checkForUpdates);
     Register(g_userSettings.backend.cardFileType);
     Register(g_userSettings.backend.enableAdvancedSettings);
+
+    Register(g_userSettings.online.playerName);
+    Register(g_userSettings.online.lobbyName);
 
     Register(g_userSettings.hotkeys.toggleImGuiMenu.key);
     Register(g_userSettings.hotkeys.toggleImGuiMenu.modifiers);

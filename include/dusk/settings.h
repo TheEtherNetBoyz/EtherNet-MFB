@@ -359,6 +359,11 @@ struct UserSettings {
     } backend;
 
     struct {
+        ConfigVar<std::string> playerName;
+        ConfigVar<std::string> lobbyName;
+    } online;
+
+    struct {
         HotkeyBinding toggleImGuiMenu;
         HotkeyBinding toggleThirtyFps;
         HotkeyBinding turboSpeed;

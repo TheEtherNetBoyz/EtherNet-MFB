@@ -1,7 +1,9 @@
 #include "ImGuiOnline.hpp"
 
 #include "dusk/imgui/ImGuiConsole.hpp"
+#include "dusk/config.hpp"
 #include "dusk/multiplayer/multiplayer.hpp"
+#include "dusk/settings.h"
 #include "imgui.h"
 
 #include <algorithm>
@@ -29,9 +31,39 @@ void draw_status_row(const char* label, const std::string& value) {
 
 }  // namespace
 
+void ImGuiOnline::loadRememberedNames() {
+    const auto& settings = getSettings().online;
+    copy_string(m_hostName, sizeof(m_hostName), settings.playerName.getValue());
+    copy_string(m_joinName, sizeof(m_joinName), settings.playerName.getValue());
+    copy_string(m_relayName, sizeof(m_relayName), settings.playerName.getValue());
+    copy_string(m_room, sizeof(m_room), settings.lobbyName.getValue());
+    copy_string(m_relayRoom, sizeof(m_relayRoom), settings.lobbyName.getValue());
+    m_namesLoaded = true;
+}
+
+void ImGuiOnline::rememberPlayerName(const char* name) {
+    auto& playerName = getSettings().online.playerName;
+    playerName.setValue(name);
+    copy_string(m_hostName, sizeof(m_hostName), name);
+    copy_string(m_joinName, sizeof(m_joinName), name);
+    copy_string(m_relayName, sizeof(m_relayName), name);
+    config::Save();
+}
+
+void ImGuiOnline::rememberLobbyName(const char* name) {
+    auto& lobbyName = getSettings().online.lobbyName;
+    lobbyName.setValue(name);
+    copy_string(m_room, sizeof(m_room), name);
+    copy_string(m_relayRoom, sizeof(m_relayRoom), name);
+    config::Save();
+}
+
 void ImGuiOnline::draw(bool& open) {
     if (!open) {
         return;
+    }
+    if (!m_namesLoaded) {
+        loadRememberedNames();
     }
 
     ImGui::SetNextWindowSizeConstraints(ImVec2(460, 0), ImVec2(700, FLT_MAX));
@@ -249,8 +281,14 @@ void ImGuiOnline::draw(bool& open) {
             if (ImGui::CollapsingHeader("Host", ImGuiTreeNodeFlags_DefaultOpen)) {
                 ImGui::SetNextItemWidth(190.0f);
                 ImGui::InputText("Name##hostName", m_hostName, sizeof(m_hostName));
+                if (ImGui::IsItemDeactivatedAfterEdit()) {
+                    rememberPlayerName(m_hostName);
+                }
                 ImGui::SetNextItemWidth(190.0f);
                 ImGui::InputText("Room", m_room, sizeof(m_room));
+                if (ImGui::IsItemDeactivatedAfterEdit()) {
+                    rememberLobbyName(m_room);
+                }
                 ImGui::SetNextItemWidth(190.0f);
                 ImGui::InputText("Bind", m_bindHost, sizeof(m_bindHost));
                 ImGui::SetNextItemWidth(190.0f);
@@ -286,6 +324,9 @@ void ImGuiOnline::draw(bool& open) {
             if (ImGui::CollapsingHeader("Join", ImGuiTreeNodeFlags_DefaultOpen)) {
                 ImGui::SetNextItemWidth(190.0f);
                 ImGui::InputText("Name##joinName", m_joinName, sizeof(m_joinName));
+                if (ImGui::IsItemDeactivatedAfterEdit()) {
+                    rememberPlayerName(m_joinName);
+                }
                 ImGui::SetNextItemWidth(-1.0f);
                 ImGui::InputTextMultiline("Invite Code", m_inviteCode, sizeof(m_inviteCode), ImVec2(0.0f, ImGui::GetTextLineHeight() * 3.0f));
 
@@ -315,8 +356,14 @@ void ImGuiOnline::draw(bool& open) {
         if (ImGui::BeginTabItem("Relay")) {
             ImGui::SetNextItemWidth(190.0f);
             ImGui::InputText("Username##relayName", m_relayName, sizeof(m_relayName));
+            if (ImGui::IsItemDeactivatedAfterEdit()) {
+                rememberPlayerName(m_relayName);
+            }
             ImGui::SetNextItemWidth(190.0f);
             ImGui::InputText("Lobby", m_relayRoom, sizeof(m_relayRoom));
+            if (ImGui::IsItemDeactivatedAfterEdit()) {
+                rememberLobbyName(m_relayRoom);
+            }
             ImGui::SetNextItemWidth(190.0f);
             ImGui::InputText("Password", m_relayPassword, sizeof(m_relayPassword), ImGuiInputTextFlags_Password);
             ImGui::SetNextItemWidth(190.0f);
