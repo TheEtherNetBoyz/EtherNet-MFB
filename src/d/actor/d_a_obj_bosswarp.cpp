@@ -506,6 +506,13 @@ int daObjBossWarp_c::demoProc() {
             mDoMtx_stack_c::multVec(&mYstoneTargetPos, &mYstoneTargetPos);
             mYstonePos.x = mYstoneTargetPos.x;
             mYstonePos.z = mYstoneTargetPos.z;
+#if TARGET_PC
+            // Skip giving the vanilla dungeon reward in rando
+            if (randomizer_IsActive()) {
+                mCounter = 0;
+                break;
+            }
+#endif
             switch (getNowLevel()) {
             case 0:
                 dComIfGs_onCollectCrystal(0);

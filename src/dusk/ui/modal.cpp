@@ -1,5 +1,7 @@
 #include "modal.hpp"
 
+#include "string_button.hpp"
+
 namespace dusk::ui {
 
 Modal::Modal(Props props) : WindowSmall("modal", "modal-dialog"), mProps(std::move(props)) {
@@ -27,14 +29,7 @@ Modal::Modal(Props props) : WindowSmall("modal", "modal-dialog"), mProps(std::mo
     actions->SetClass("modal-actions", true);
 
     for (auto& action : mProps.actions) {
-        auto btn = std::make_unique<Button>(actions, action.label);
-        btn->root()->SetClass("modal-btn", true);
-        btn->on_pressed([this, callback = std::move(action.onPressed)] {
-            if (callback) {
-                callback(*this);
-            }
-        });
-        mButtons.push_back(std::move(btn));
+        add_action(action);
     }
 
     mDoAud_seStartMenu(kSoundWindowOpen);
@@ -45,6 +40,28 @@ bool Modal::focus() {
         return mButtons.front()->focus();
     }
     return false;
+}
+
+void Modal::add_action(ModalAction action) {
+    auto actions = mDialog->QuerySelector(".modal-actions");
+    auto btn = std::make_unique<Button>(actions, action.label);
+    btn->root()->SetClass("modal-btn", true);
+    btn->on_pressed([this, callback = std::move(action.onPressed)] {
+        if (callback) {
+            callback(*this);
+        }
+    });
+    mButtons.push_back(std::move(btn));
+}
+
+void Modal::set_body(const Rml::String& bodyRml) {
+    auto body = mDialog->QuerySelector(".modal-body");
+    body->SetInnerRML(bodyRml);
+}
+
+void Modal::set_icon(const Rml::String& iconStr) {
+    auto icon = mDialog->QuerySelector("icon");
+    icon->SetClassNames({iconStr});
 }
 
 void Modal::dismiss() {
@@ -83,6 +100,37 @@ bool Modal::handle_nav_command(Rml::Event& event, NavCommand cmd) {
         }
     }
     return false;
+}
+
+TextInputModal::TextInputModal(Props props) : Modal(props) {
+    auto modalBody = mDialog->QuerySelector(".modal-body");
+
+    mInput = std::make_unique<StringButton>(modalBody, StringButton::Props{
+        .getValue = [this]{return mInputText;},
+        .setValue = [this](Rml::String value) { mInputText = value; },
+    });
+
+    mInput->start_editing();
+}
+
+bool TextInputModal::handle_nav_command(Rml::Event& event, NavCommand cmd) {
+    auto retVal = Modal::handle_nav_command(event, cmd);
+    if (!retVal) {
+        if (mInput->root()->IsPseudoClassSet("focus") && cmd == NavCommand::Down) {
+            mButtons[0]->focus();
+            retVal = true;
+        } else if (!mInput->root()->IsPseudoClassSet("focus") && cmd == NavCommand::Up) {
+            mInput->focus();
+            retVal = true;
+        }
+    }
+
+    return retVal;
+}
+
+void TextInputModal::update() {
+    mInput->update();
+    Document::update();
 }
 
 }  // namespace dusk::ui

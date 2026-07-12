@@ -22,6 +22,7 @@
 #include "f_op/f_op_msg_mng.h"
 
 #if TARGET_PC
+#include "dusk/config.hpp"
 #include "dusk/frame_interpolation.h"
 #include "dusk/menu_pointer.h"
 #include "dusk/settings.h"
@@ -1355,6 +1356,15 @@ void dMenu_save_c::dataWrite() {
     dComIfGs_putSave(stageNo);
     dComIfGs_setMemoryToCard(mSaveBuffer, mSelectedFile);
     mDoMemCdRWm_SetCheckSumGameData(mSaveBuffer, mSelectedFile);
+
+#if TARGET_PC
+    // Save randomizer hash
+    dusk::getSettings().randomizer.seedHashes[mSelectedFile].setValue(randomizer_GetContext().mHash);
+    dusk::config::Save();
+    if (randomizer_IsActive()) {
+        g_randomizerState.mFileNum = mSelectedFile;
+    }
+#endif
 
     u8* save = mSaveBuffer;
     for (int i = 0; i < 3; i++) {

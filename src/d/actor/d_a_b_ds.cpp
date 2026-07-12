@@ -4179,6 +4179,15 @@ void daB_DS_c::executeBattle2Dead() {
             camera->mCamera.SetTrimSize(0);
             dComIfGp_event_reset();
             dComIfGs_onStageBossEnemy(0x13);
+#if TARGET_PC
+            if (randomizer_IsActive()) {
+                // Give the boss item
+                u8 agDungeonReward = randomizer_getItemAtLocation("Arbiters Grounds Dungeon Reward");
+                g_randomizerState.addItemToEventQueue(agDungeonReward);
+                // Set custom item flag
+                dComIfGs_onItem(0x9E, -1);
+            }
+#endif
             /* dSv_event_flag_c::F_0265 - Arbiter's Grounds - Arbiter's Grounds clear */
             dComIfGs_onEventBit(0x2010);
             fopAcM_delete(this);

@@ -156,6 +156,12 @@ int dGameover_c::_create() {
             if (!strcmp(dComIfGp_getLastPlayStageName(), "D_MN10A")) {
                 // Last stage was Stallord Arena
                 // Remove Ooccoo from inventory
+#if TARGET_PC
+                // In rando, only clear the Ooccoo slot if Ooccoo is in it
+                u8 ooccooSlot = dComIfGs_getItem(SLOT_18, false);
+                if (!randomizer_IsActive() || ooccooSlot == dItemNo_Randomizer_DUNGEON_EXIT_e ||
+                                              ooccooSlot == dItemNo_Randomizer_DUNGEON_EXIT_2_e)
+#endif
                 dComIfGs_setItem(SLOT_18, dItemNo_NONE_e);
                 dComIfGs_resetLastWarpAcceptStage();
             }

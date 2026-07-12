@@ -947,6 +947,9 @@ BOOL daNpc_ykM_c::isDelete() {
             return FALSE;
 
         case TYPE_COOK:
+#if TARGET_PC
+            if (randomizer_IsActive()) return false; // We don't want cooking Yeto to leave the dungeon, even if the BK is obtained.
+#endif
             return dComIfGs_isDungeonItemBossKey();
 
         case TYPE_2:

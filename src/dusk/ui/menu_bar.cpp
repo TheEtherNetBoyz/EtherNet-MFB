@@ -7,15 +7,17 @@
 
 #include "achievements.hpp"
 #include "aurora/rmlui.hpp"
-#include "dusk/speedrun.h"
+#include "cosmetics.hpp"
 #include "dusk/livesplit.h"
 #include "dusk/main.h"
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
 #include "editor.hpp"
 #include "f_pc/f_pc_manager.h"
 #include "f_pc/f_pc_name.h"
 #include "imgui.h"
 #include "modal.hpp"
+#include "rando_config.hpp"
 #include "settings.hpp"
 #include "ui.hpp"
 #include "warp.hpp"
@@ -23,6 +25,7 @@
 
 #include <chrono>
 #include <cmath>
+
 
 namespace dusk::ui {
 namespace {
@@ -59,6 +62,11 @@ MenuBar::MenuBar() : Document(kDocumentSource), mRoot(mDocument->GetElementById(
 
     mTabBar->add_tab("Achievements", [this] { push(std::make_unique<AchievementsWindow>()); });
 
+    if (getSettings().randomizer.enabled) {
+        mTabBar->add_tab("Randomizer", [this] { push(std::make_unique<RandomizerWindow>()); });
+    }
+
+    mTabBar->add_tab("Cosmetics", [this] {push(std::make_unique<CosmeticsWindow>());});
 
     mTabBar->add_tab("Reset", [this] {
         mTabBar->set_active_tab(-1);

@@ -497,6 +497,7 @@ namespace dusk {
         // so make the window bg fully transparent temporarily
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
         if (showMenu && ImGui::BeginMainMenuBar()) {
+            m_menuRandomizer.draw();
             m_menuTools.draw();
 
             ImGui::EndMainMenuBar();
@@ -576,6 +577,7 @@ namespace dusk {
         }
 
         m_menuTools.ShowInputViewer();
+        m_menuTools.ShowCustomMusic();
 
         if (dusk::IsGameLaunched && !dusk::getSettings().game.speedrunMode) {
             m_menuTools.ShowDebugOverlay();
@@ -595,6 +597,9 @@ namespace dusk {
         }
         dusk::multiplayer::draw_notifications_overlay();
         draw_online_player_list_overlay();
+        m_menuRandomizer.windowRandoStats();
+        m_menuRandomizer.windowRandoGeneration();
+        m_menuRandomizer.windowRandoTracker();
 
     }
 

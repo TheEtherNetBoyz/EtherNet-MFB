@@ -1,0 +1,72 @@
+# Patches for NPC text flows
+
+# NOTE: All data is expressed in little endian
+
+0: # zel_00.bmg
+  # Change Talk to Midna options to use custom event 44
+  # which changes the time of day
+  - index: 0x18F
+    type: event
+    event: 44
+    parameters: 0x00000000
+    next node index: 0x116
+
+  - index: 0x192
+    type: event
+    event: 44
+    parameters: 0x00000000
+    next node index: 0x110
+
+#1: # zel_01.bmg
+2: # zel_02.bmg
+  # Patch Barnes branch to see if you can buy the bomb bag to use
+  # query 54 (custom event check) instead of query 22 (how many bomb bags the player has)
+  - index: 0x47C
+    type: branch
+    num results: 2
+    query: 53
+    parameters: 0x004D
+    next node index: 0x340
+
+#3: # zel_03.bmg
+4: # zel_04.bmg - Castle Town
+  # Patch Charlo to check for 100 rupees instead of 30
+  - index: 0x34A
+    type: branch
+    num results: 2
+    query: 6
+    parameters: 0x0064
+    next node index: 0x222
+  # Patch Charlo to take 100 rupees from Link instead of 30
+  - index: 0x34E
+    type: event
+    event: 41
+    parameters: 0x00000064
+    next node index: 0x226
+  # Patch Charlo to add 100 rupees to his counter instead of 30
+  - index: 0x357
+    type: event
+    event: 3
+    parameters: 0x00000064
+    next node index: 0x22B
+  # Patch Malo Mart door person to not check for time of day.
+  # Change from branch node that checks time of day to event node
+  # that does nothing.
+  - index: 0x1A5
+    type: event
+    event: 42
+    parameters: 0x00000000
+    next node index: 0x10C
+
+5: # zel_05.bmg
+  # Patch Gor Liggs to not set the flag for the third key shard
+  # Change event index 17 to event index 42 which does nothing
+  - index: 0x258
+    type: event
+    event: 42
+    parameters: 0x00000000
+    next node index: 0x1AC
+
+#6: # zel_06.bmg
+#7: # zel_07.bmg
+#8: # zel_08.bmg

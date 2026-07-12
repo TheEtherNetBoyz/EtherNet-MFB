@@ -1,4 +1,7 @@
 #include "Z2AudioLib/Z2SeqMgr.h"
+#if TARGET_PC
+#include "Z2AudioLib/DuskMusicResolver.h"
+#endif
 #include "Z2AudioLib/Z2LinkMgr.h"
 #include "Z2AudioLib/Z2Param.h"
 #include "Z2AudioLib/Z2SceneMgr.h"
@@ -12,6 +15,106 @@
 #include "os_report.h"
 
 #include "dusk/audio.h"
+
+#if TARGET_PC
+static u32 duskLogicalSubBgmID(u32 bgmID) {
+    if (!dusk::music::CustomAudioActive()) {
+        return bgmID;
+    }
+    return static_cast<u32>(
+        dusk::music::LogicalOriginalForPlayback(dusk::music::Route::Sub, JAISoundID(bgmID)));
+}
+
+struct DuskPendingTrackNormalize {
+    JAISoundHandle* handle = nullptr;
+    u8 frames = 0;
+};
+
+static DuskPendingTrackNormalize sDuskPendingTrackNormalizes[3];
+
+static bool duskWasResolved(dusk::music::Route route, JAISoundID bgmID) {
+    if (!dusk::music::CustomAudioActive()) {
+        return false;
+    }
+    return dusk::music::HasPlaybackMatch(route, bgmID);
+}
+
+static void duskNormalizeChildTracks(JAISoundHandle* handle) {
+    if (!dusk::music::CustomAudioActive()) {
+        return;
+    }
+    if (handle == nullptr || !*handle) {
+        return;
+    }
+
+    for (int track = 0; track < 16; ++track) {
+        Z2GetSeqMgr()->setChildTrackVolume(handle, track, 1.0f, 0, -1.0f, -1.0f);
+    }
+}
+
+static void duskQueueTrackNormalize(JAISoundHandle* handle) {
+    if (!dusk::music::CustomAudioActive()) {
+        return;
+    }
+    if (handle == nullptr) {
+        return;
+    }
+
+    duskNormalizeChildTracks(handle);
+    for (DuskPendingTrackNormalize& pending : sDuskPendingTrackNormalizes) {
+        if (pending.handle == handle || pending.handle == nullptr || pending.frames == 0) {
+            pending.handle = handle;
+            pending.frames = 8;
+            return;
+        }
+    }
+
+    sDuskPendingTrackNormalizes[0] = {handle, 8};
+}
+
+static void duskProcessTrackNormalizes() {
+    if (!dusk::music::CustomAudioActive()) {
+        return;
+    }
+    for (DuskPendingTrackNormalize& pending : sDuskPendingTrackNormalizes) {
+        if (pending.handle == nullptr || pending.frames == 0) {
+            continue;
+        }
+
+        duskNormalizeChildTracks(pending.handle);
+        --pending.frames;
+        if (pending.frames == 0 || !*pending.handle) {
+            pending.handle = nullptr;
+            pending.frames = 0;
+        }
+    }
+}
+
+// Cancel the pending all-tracks-to-full normalize for a handle. The normalize
+// is only a fallback to clear residual child-track volumes left over from a
+// previous song on a reused handle. Once the game issues an explicit
+// changeBgmStatus for the playing song, that song's intended per-track mix
+// (e.g. a default-muted dynamic layer like the Sacred Grove trumpet) must win,
+// so the lingering 8-frame normalize is stopped here to avoid clobbering it.
+static void duskCancelTrackNormalize(JAISoundHandle* handle) {
+    if (!dusk::music::CustomAudioActive()) {
+        return;
+    }
+    if (handle == nullptr) {
+        return;
+    }
+    for (DuskPendingTrackNormalize& pending : sDuskPendingTrackNormalizes) {
+        if (pending.handle == handle) {
+            pending.handle = nullptr;
+            pending.frames = 0;
+        }
+    }
+}
+#else
+static u32 duskLogicalSubBgmID(u32 bgmID) {
+    return bgmID;
+}
+#endif
 
 Z2SeqMgr::Z2SeqMgr() : JASGlobalInstance<Z2SeqMgr>(true) {
     mMainBgmMaster.forceIn();
@@ -73,7 +176,22 @@ void Z2SeqMgr::bgmStart(u32 bgmID, u32 fadeTime, s32 param_2) {
         setBattleBgmOff(true);
         Z2GetSoundMgr()->getSeqMgr()->stop(0);
         Z2GetSoundMgr()->getStreamMgr()->stop(0);
+#if TARGET_PC
+        {
+            const bool duskResolved = duskWasResolved(dusk::music::Route::Main, bgmID);
+            Z2GetSoundMgr()->startSound(
+                dusk::music::CustomAudioActive()
+                    ? dusk::music::ResolvePlaybackAndLock(
+                        dusk::music::Route::Main, bgmID, dusk::music::LockSlot::Main)
+                    : JAISoundID(bgmID),
+                &mMainBgmHandle, NULL);
+            if (duskResolved) {
+                duskQueueTrackNormalize(&mMainBgmHandle);
+            }
+        }
+#else
         Z2GetSoundMgr()->startSound(bgmID, &mMainBgmHandle, NULL);
+#endif
         mBgmStatus = 0xff;
         return;
     case Z2BGM_LAKE:
@@ -113,10 +231,38 @@ void Z2SeqMgr::bgmStart(u32 bgmID, u32 fadeTime, s32 param_2) {
         bgmStop(0, param_2);
     }
 
-    if (bgmID == Z2BGM_FIELD_LINK_DAY || bgmID == Z2BGM_FIELD_LINK_NIGHT) {
+    const bool isFieldBgm = bgmID == Z2BGM_FIELD_LINK_DAY || bgmID == Z2BGM_FIELD_LINK_NIGHT;
+#if TARGET_PC
+    const bool resolvedFieldReplacement =
+        dusk::music::CustomAudioActive()
+        && isFieldBgm && dusk::music::IsResolvedPlayback(dusk::music::Route::Scene, bgmID)
+        && !mFlags.mFieldBgmPlay;
+#else
+    const bool resolvedFieldReplacement = false;
+#endif
+
+    if (isFieldBgm && !resolvedFieldReplacement) {
         fieldBgmStart();
     } else {
+#if TARGET_PC
+        {
+            const bool duskMainResolved = duskWasResolved(dusk::music::Route::Main, bgmID);
+            const bool duskSceneResolved =
+                dusk::music::CustomAudioActive()
+                && dusk::music::IsResolvedPlayback(dusk::music::Route::Scene, bgmID);
+            Z2GetSoundMgr()->startSound(
+                dusk::music::CustomAudioActive()
+                    ? dusk::music::ResolvePlaybackAndLock(
+                        dusk::music::Route::Main, bgmID, dusk::music::LockSlot::Main)
+                    : JAISoundID(bgmID),
+                &mMainBgmHandle, NULL);
+            if (duskMainResolved || duskSceneResolved) {
+                duskQueueTrackNormalize(&mMainBgmHandle);
+            }
+        }
+#else
         Z2GetSoundMgr()->startSound(bgmID, &mMainBgmHandle, NULL);
+#endif
         mBgmStatus = 0xff;
     }
 
@@ -151,6 +297,11 @@ void Z2SeqMgr::bgmStart(u32 bgmID, u32 fadeTime, s32 param_2) {
 }
 
 void Z2SeqMgr::bgmStop(u32 fadeTime, s32 param_1) {
+#if TARGET_PC
+    if (dusk::music::CustomAudioActive()) {
+        dusk::music::ClearBgmWaveLock(dusk::music::LockSlot::Main);
+    }
+#endif
     if (mMainBgmHandle) {
         mMainBgmHandle->stop(fadeTime);
     }
@@ -160,6 +311,11 @@ void Z2SeqMgr::bgmStop(u32 fadeTime, s32 param_1) {
     }
 
     if (param_1 == 0) {
+#if TARGET_PC
+        if (dusk::music::CustomAudioActive()) {
+            dusk::music::ClearBgmWaveLock(dusk::music::LockSlot::Sub);
+        }
+#endif
         if (mSubBgmHandle) {
             mSubBgmHandle->stop(fadeTime);
         }
@@ -205,7 +361,7 @@ void Z2SeqMgr::subBgmStart(u32 bgmID) {
     case Z2BGM_ITEM_GET_POU:
     case Z2BGM_ITEM_GET_ME_S:
     case Z2BGM_KOMONJO_GET_INTRO:
-        if (getSubBgmID() == Z2BGM_OBACHAN) {
+        if (duskLogicalSubBgmID(getSubBgmID()) == Z2BGM_OBACHAN) {
             subBgmStop();
         }
         mFanfareID = bgmID;
@@ -309,7 +465,7 @@ void Z2SeqMgr::subBgmStart(u32 bgmID) {
         break;
     }
 
-    if (bgmID == getSubBgmID()) {
+    if (bgmID == duskLogicalSubBgmID(getSubBgmID())) {
         if (bgmID == Z2BGM_SUMO
 #if PLATFORM_GCN
             || bgmID == Z2BGM_COWBOY_GAME
@@ -317,6 +473,11 @@ void Z2SeqMgr::subBgmStart(u32 bgmID) {
         ) {
             mSubBgmHandle->stop(0);
             mSubBgmHandle.releaseSound();
+#if TARGET_PC
+            if (dusk::music::CustomAudioActive()) {
+                dusk::music::ClearBgmWaveLock(dusk::music::LockSlot::Sub);
+            }
+#endif
         } else {
             field_0xb8 = -1;
             return;
@@ -326,7 +487,22 @@ void Z2SeqMgr::subBgmStart(u32 bgmID) {
         subBgmStopInner();
     }
 
+#if TARGET_PC
+    {
+        const bool duskResolved = duskWasResolved(dusk::music::Route::Sub, bgmID);
+        Z2GetSoundMgr()->startSound(
+            dusk::music::CustomAudioActive()
+                ? dusk::music::ResolvePlaybackAndLock(
+                    dusk::music::Route::Sub, bgmID, dusk::music::LockSlot::Sub)
+                : JAISoundID(bgmID),
+            &mSubBgmHandle, NULL);
+        if (duskResolved) {
+            duskQueueTrackNormalize(&mSubBgmHandle);
+        }
+    }
+#else
     Z2GetSoundMgr()->startSound(bgmID, &mSubBgmHandle, NULL);
+#endif
     mSubBgmStatus = 0xff;
 
     switch (bgmID) {
@@ -373,7 +549,8 @@ void Z2SeqMgr::subBgmStart(u32 bgmID) {
 }
 
 void Z2SeqMgr::subBgmStop() {
-    switch (getSubBgmID()) {
+    const u32 logicalSubBgmID = duskLogicalSubBgmID(getSubBgmID());
+    switch (logicalSubBgmID) {
     case Z2BGM_ITEM_GET:
     case Z2BGM_ITEM_GET_MINI:
     case Z2BGM_OPEN_BOX:
@@ -460,7 +637,7 @@ void Z2SeqMgr::subBgmStop() {
     }
 
     #if DEBUG
-    if (getSubBgmID() == Z2BGM_HIDDEN_VIL_D1) {
+    if (logicalSubBgmID == Z2BGM_HIDDEN_VIL_D1) {
         OS_REPORT("[Z2SeqMgr::subBgmStop] HIDDEN_VIL_D01 stop\n");
     }
     #endif
@@ -476,7 +653,8 @@ void Z2SeqMgr::subBgmStopInner() {
     }
 
     int fadeTime = Z2Param::BGM_CROSS_FADEOUT_TIME;
-    switch (getSubBgmID()) {
+    const u32 logicalSubBgmID = duskLogicalSubBgmID(getSubBgmID());
+    switch (logicalSubBgmID) {
     case Z2BGM_MAGNE_GORON:
     case Z2BGM_MAGNE_GORON_D01:
     case Z2BGM_DEKUTOAD:
@@ -502,6 +680,12 @@ void Z2SeqMgr::subBgmStopInner() {
 
     mSubBgmHandle->stop(fadeTime);
     mSubBgmHandle.releaseSound();
+#if TARGET_PC
+    if (dusk::music::CustomAudioActive()) {
+        dusk::music::ClearBgmWaveLock(dusk::music::LockSlot::Sub);
+        dusk::music::RestoreEvictedMainBgmWaves();
+    }
+#endif
     mMainBgmMaster.fadeIn(Z2Param::BGM_CROSS_FADEOUT_TIME);
     field_0xb8 = -1;
 }
@@ -606,6 +790,12 @@ void Z2SeqMgr::bgmStreamStop(u32 fadeTime) {
 }
 
 void Z2SeqMgr::changeBgmStatus(s32 status) {
+#if TARGET_PC
+    // The song is about to receive its intended per-track mix; let it win over
+    // the fallback all-tracks normalize that runs for a few frames after a
+    // resolved (substituted) song starts.
+    duskCancelTrackNormalize(&mMainBgmHandle);
+#endif
     if (mMainBgmHandle) {
         u32 moveTime = 0;
         bool mute;
@@ -1311,13 +1501,31 @@ void Z2SeqMgr::fanfareFramework() {
         mFanfareCount = 150;
         // fallthrough
     case Z2BGM_KOMONJO_GET_INTRO:
+#if TARGET_PC
+        Z2GetSoundMgr()->startSound(dusk::music::CustomAudioActive()
+                                        ? dusk::music::ResolvePlaybackAndLock(
+                                            dusk::music::Route::Fanfare, mFanfareID,
+                                            dusk::music::LockSlot::Fanfare)
+                                        : JAISoundID(mFanfareID),
+                                    &mFanfareHandle, 0);
+#else
         Z2GetSoundMgr()->startSound(mFanfareID, &mFanfareHandle, 0);
+#endif
         mFanfareMute.fadeOut(1);
         mFanfareID.setAnonymous();
         break;
     case Z2BGM_ITEM_GET_ME:
         if (mFanfareCount == 0) {
+#if TARGET_PC
+            Z2GetSoundMgr()->startSound(dusk::music::CustomAudioActive()
+                                            ? dusk::music::ResolvePlaybackAndLock(
+                                                dusk::music::Route::Fanfare, mFanfareID,
+                                                dusk::music::LockSlot::Fanfare)
+                                            : JAISoundID(mFanfareID),
+                                        &mFanfareHandle, 0);
+#else
             Z2GetSoundMgr()->startSound(mFanfareID, &mFanfareHandle, 0);
+#endif
             mFanfareCount = 25;
         }
         if (mFanfareCount == 1) {
@@ -1341,7 +1549,16 @@ void Z2SeqMgr::fanfareFramework() {
     case Z2BGM_ITEM_GET_ME_S:
         r30 = mFanfareCount;
         if (mFanfareCount == 0) {
+#if TARGET_PC
+            Z2GetSoundMgr()->startSound(dusk::music::CustomAudioActive()
+                                            ? dusk::music::ResolvePlaybackAndLock(
+                                                dusk::music::Route::Fanfare, mFanfareID,
+                                                dusk::music::LockSlot::Fanfare)
+                                            : JAISoundID(mFanfareID),
+                                        &mFanfareHandle, 0);
+#else
             Z2GetSoundMgr()->startSound(mFanfareID, &mFanfareHandle, 0);
+#endif
             mFanfareMute.fadeOut(1);
             mFanfareID.setAnonymous();
         }
@@ -1365,7 +1582,16 @@ void Z2SeqMgr::fanfareFramework() {
             mFanfareCount = 50;
             mFanfareMute.fadeOut(30);
         } else if (mFanfareCount == 1) {
+#if TARGET_PC
+            Z2GetSoundMgr()->startSound(dusk::music::CustomAudioActive()
+                                            ? dusk::music::ResolvePlaybackAndLock(
+                                                dusk::music::Route::Fanfare, mFanfareID,
+                                                dusk::music::LockSlot::Fanfare)
+                                            : JAISoundID(mFanfareID),
+                                        &mFanfareHandle, 0);
+#else
             Z2GetSoundMgr()->startSound(mFanfareID, &mFanfareHandle, 0);
+#endif
             mFanfareID.setAnonymous();
         }
         break;
@@ -1419,6 +1645,11 @@ void Z2SeqMgr::stopWolfHowlSong() {
         case Z2BGM_NEW_03_HOWL:
         case Z2BGM_NEW_03_DUO:
             mFanfareHandle->stop(30);
+#if TARGET_PC
+            if (dusk::music::CustomAudioActive()) {
+                dusk::music::ClearBgmWaveLock(dusk::music::LockSlot::Fanfare);
+            }
+#endif
         }
     }
 }
@@ -1445,6 +1676,9 @@ void Z2SeqMgr::processBgmFramework() {
     battleBgmFramework();
     mbossBgmMuteProcess();
     fieldBgmFramework();
+#if TARGET_PC
+    duskProcessTrackNormalizes();
+#endif
 
     if (!mStreamBgmHandle && mStreamBgmMaster.getDest() != 1.0f) {
         mStreamBgmMaster.fadeIn(Z2Param::BGM_CROSS_FADEIN_TIME);
@@ -1739,6 +1973,11 @@ void Z2SeqMgr::setBattleDistState(u8 state) {
             {
                 mSubBgmHandle->stop(30);
                 mSubBgmHandle->releaseHandle();
+#if TARGET_PC
+                if (dusk::music::CustomAudioActive()) {
+                    dusk::music::ClearBgmWaveLock(dusk::music::LockSlot::Sub);
+                }
+#endif
             }
 #endif
 
@@ -1923,7 +2162,24 @@ void Z2SeqMgr::startBattleBgm(bool isFadeIn) {
     u8 fadeinTime, fadeoutTime;
     if (subBgmID != bgm_id) {
         mBattleSeqState = 1;
-        if (Z2GetSoundMgr()->startSound(bgm_id, &mSubBgmHandle, NULL)) {
+#if TARGET_PC
+        const bool duskResolved = duskWasResolved(dusk::music::Route::Sub, bgm_id);
+#endif
+        if (Z2GetSoundMgr()->startSound(
+#if TARGET_PC
+                dusk::music::CustomAudioActive()
+                    ? dusk::music::ResolvePlaybackAndLock(
+                        dusk::music::Route::Sub, bgm_id, dusk::music::LockSlot::Sub)
+                    : bgm_id,
+#else
+                bgm_id,
+#endif
+                &mSubBgmHandle, NULL)) {
+#if TARGET_PC
+            if (duskResolved) {
+                duskQueueTrackNormalize(&mSubBgmHandle);
+            }
+#endif
             Z2GetSoundObjMgr()->setBattleInit();
             mSubBgmStatus = 0xff;
 
@@ -2013,7 +2269,23 @@ void Z2SeqMgr::stopBattleBgm(u8 subFadeoutTime, u8 mainFadeinTime) {
 void Z2SeqMgr::fieldBgmStart() {
     if (Z2GetSceneMgr()->isSceneExist() && mFlags.mFieldBgmPlay) {
         if (Z2GetStatusMgr()->checkDayTime()) {
+#if TARGET_PC
+            {
+                const bool duskResolved = duskWasResolved(dusk::music::Route::Scene, Z2BGM_FIELD_LINK_DAY);
+                Z2GetSoundMgr()->startSound(
+                    dusk::music::CustomAudioActive()
+                        ? dusk::music::ResolvePlaybackAndLock(
+                            dusk::music::Route::Scene, Z2BGM_FIELD_LINK_DAY,
+                            dusk::music::LockSlot::Main)
+                        : JAISoundID(Z2BGM_FIELD_LINK_DAY),
+                    &mMainBgmHandle, NULL);
+                if (duskResolved) {
+                    duskQueueTrackNormalize(&mMainBgmHandle);
+                }
+            }
+#else
             Z2GetSoundMgr()->startSound(Z2BGM_FIELD_LINK_DAY, &mMainBgmHandle, NULL);
+#endif
             changeBgmStatus(0);
             field_0xc4 = 0;
 
@@ -2027,7 +2299,23 @@ void Z2SeqMgr::fieldBgmStart() {
                 fieldRidingMute();
             }
         } else {
+#if TARGET_PC
+            {
+                const bool duskResolved = duskWasResolved(dusk::music::Route::Scene, Z2BGM_FIELD_LINK_NIGHT);
+                Z2GetSoundMgr()->startSound(
+                    dusk::music::CustomAudioActive()
+                        ? dusk::music::ResolvePlaybackAndLock(
+                            dusk::music::Route::Scene, Z2BGM_FIELD_LINK_NIGHT,
+                            dusk::music::LockSlot::Main)
+                        : JAISoundID(Z2BGM_FIELD_LINK_NIGHT),
+                    &mMainBgmHandle, NULL);
+                if (duskResolved) {
+                    duskQueueTrackNormalize(&mMainBgmHandle);
+                }
+            }
+#else
             Z2GetSoundMgr()->startSound(Z2BGM_FIELD_LINK_NIGHT, &mMainBgmHandle, NULL);
+#endif
             mBgmStatus = 0;
         }
     }
@@ -2197,6 +2485,11 @@ void Z2SeqMgr::fieldBgmFramework() {
                     if (field_0xc4 >= 7 && field_0xc4 <= 15 && Z2GetStatusMgr()->getHour() >= 20) {
                         mMainBgmHandle->stop(60);
                         mMainBgmHandle.releaseSound();
+#if TARGET_PC
+                        if (dusk::music::CustomAudioActive()) {
+                            dusk::music::ClearBgmWaveLock(dusk::music::LockSlot::Main);
+                        }
+#endif
                     } else {
                         switch (field_0xc4) {
                         case 2:
@@ -2221,17 +2514,56 @@ void Z2SeqMgr::fieldBgmFramework() {
                 if (hour >= 5 && hour < 20) {
                     mMainBgmHandle->stop(60);
                     mMainBgmHandle.releaseSound();
+#if TARGET_PC
+                    if (dusk::music::CustomAudioActive()) {
+                        dusk::music::ClearBgmWaveLock(dusk::music::LockSlot::Main);
+                    }
+#endif
                 }
             }
         } else if (getMainBgmID() == -1 && !Z2GetStatusMgr()->isPaused() && mBattleSeqState == 0) {
             u8 hour = Z2GetStatusMgr()->getHour();
             if (hour >= 6 && hour < 19) {
                 if (hour >= 8) {
+#if TARGET_PC
+                    {
+                        const bool duskResolved =
+                            duskWasResolved(dusk::music::Route::Scene, Z2BGM_FIELD_LINK_DAY);
+                        Z2GetSoundMgr()->startSound(
+                            dusk::music::CustomAudioActive()
+                                ? dusk::music::ResolvePlaybackAndLock(
+                                    dusk::music::Route::Scene, Z2BGM_FIELD_LINK_DAY,
+                                    dusk::music::LockSlot::Main)
+                                : JAISoundID(Z2BGM_FIELD_LINK_DAY),
+                            &mMainBgmHandle, NULL);
+                        if (duskResolved) {
+                            duskQueueTrackNormalize(&mMainBgmHandle);
+                        }
+                    }
+#else
                     Z2GetSoundMgr()->startSound(Z2BGM_FIELD_LINK_DAY, &mMainBgmHandle, NULL);
+#endif
                     changeBgmStatus(9);
                     field_0xc4 = 24;
                 } else {
+#if TARGET_PC
+                    {
+                        const bool duskResolved =
+                            duskWasResolved(dusk::music::Route::Scene, Z2BGM_FIELD_LINK_DAY);
+                        Z2GetSoundMgr()->startSound(
+                            dusk::music::CustomAudioActive()
+                                ? dusk::music::ResolvePlaybackAndLock(
+                                    dusk::music::Route::Scene, Z2BGM_FIELD_LINK_DAY,
+                                    dusk::music::LockSlot::Main)
+                                : JAISoundID(Z2BGM_FIELD_LINK_DAY),
+                            &mMainBgmHandle, NULL);
+                        if (duskResolved) {
+                            duskQueueTrackNormalize(&mMainBgmHandle);
+                        }
+                    }
+#else
                     Z2GetSoundMgr()->startSound(Z2BGM_FIELD_LINK_DAY, &mMainBgmHandle, NULL);
+#endif
                     changeBgmStatus(8);
                     field_0xc4 = 23;
                 }
@@ -2246,7 +2578,24 @@ void Z2SeqMgr::fieldBgmFramework() {
                     fieldRidingMute();
                 }
             } else if (hour >= 20 || hour < 5) {
+#if TARGET_PC
+                {
+                    const bool duskResolved =
+                        duskWasResolved(dusk::music::Route::Scene, Z2BGM_FIELD_LINK_NIGHT);
+                    Z2GetSoundMgr()->startSound(
+                        dusk::music::CustomAudioActive()
+                            ? dusk::music::ResolvePlaybackAndLock(
+                                dusk::music::Route::Scene, Z2BGM_FIELD_LINK_NIGHT,
+                                dusk::music::LockSlot::Main)
+                            : JAISoundID(Z2BGM_FIELD_LINK_NIGHT),
+                        &mMainBgmHandle, NULL);
+                    if (duskResolved) {
+                        duskQueueTrackNormalize(&mMainBgmHandle);
+                    }
+                }
+#else
                 Z2GetSoundMgr()->startSound(Z2BGM_FIELD_LINK_NIGHT, &mMainBgmHandle, NULL);
+#endif
             }
         }
     }

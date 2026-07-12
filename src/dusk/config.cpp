@@ -309,44 +309,28 @@ void ConfigImpl<FrameInterpMode>::loadFromJson(
     ConfigVar<FrameInterpMode>& cVar, const json& jsonValue) {
     if (jsonValue.is_boolean()) {
         const bool b = jsonValue.get<bool>();
-
         const FrameInterpMode mode = b ? FrameInterpMode::Unlimited : FrameInterpMode::Off;
-
         cVar.setValue(sanitizeEnumValue(cVar, mode), false);
         return;
     }
-
     cVar.setValue(sanitizeEnumValue(cVar, jsonValue.get<FrameInterpMode>()), false);
 }
 
 template <>
 void ConfigImpl<ui::ControlLayout>::loadFromJson(
     ConfigVar<ui::ControlLayout>& cVar, const json& jsonValue) {
-    if (!jsonValue.is_object()) {
-        return;
-    }
-
+    if (!jsonValue.is_object()) { return; }
     const int version = jsonValue.value("version", 0);
-    if (version != ui::ControlLayout::Version) {
-        return;
-    }
-
+    if (version != ui::ControlLayout::Version) { return; }
     const auto controlsIter = jsonValue.find("controls");
-    if (controlsIter == jsonValue.end() || !controlsIter->is_object()) {
-        return;
-    }
-
+    if (controlsIter == jsonValue.end() || !controlsIter->is_object()) { return; }
     ui::ControlLayout layout{.version = version};
     for (const auto& control : controlsIter->items()) {
-        if (!ui::is_control_layout_id(control.key())) {
-            continue;
-        }
-
+        if (!ui::is_control_layout_id(control.key())) { continue; }
         if (const auto props = parse_control_props(control.value())) {
             layout.controls[control.key()] = *props;
         }
     }
-
     cVar.setValue(std::move(layout), false);
 }
 
@@ -361,20 +345,9 @@ nlohmann::json ConfigImpl<ui::ControlLayout>::dumpToJson(const ConfigVar<ui::Con
     const auto& layout = cVar.getValueForSave();
     json controls = json::object();
     for (const auto& [id, props] : layout.controls) {
-        controls[id] = {
-            {"x", props.x},
-            {"y", props.y},
-            {"w", props.w},
-            {"h", props.h},
-            {"scale", props.scale},
-            {"anchor", control_anchor_value(props.anchor)},
-        };
+        controls[id] = {{"x", props.x}, {"y", props.y}, {"w", props.w}, {"h", props.h}, {"scale", props.scale}, {"anchor", control_anchor_value(props.anchor)}};
     }
-
-    return {
-        {"version", ui::ControlLayout::Version},
-        {"controls", std::move(controls)},
-    };
+    return {{"version", ui::ControlLayout::Version}, {"controls", std::move(controls)}};
 }
 
 template class ConfigImpl<dusk::FrameInterpMode>;

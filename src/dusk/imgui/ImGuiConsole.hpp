@@ -8,6 +8,7 @@
 #include <aurora/aurora.h>
 
 #include "ImGuiMenuTools.hpp"
+#include "ImGuiMenuRandomizer.hpp"
 #include "dusk/main.h"
 #include "dusk/settings.h"
 #include "imgui.h"
@@ -47,6 +48,8 @@ private:
     ImGuiWindow* m_dragScrollWindow = nullptr;
     ImVec2 m_dragScrollLastMousePos = {};
     std::deque<Toast> m_toasts;
+
+    ImGuiMenuRandomizer m_menuRandomizer;
 
     // Keep always last
     ImGuiMenuTools m_menuTools;

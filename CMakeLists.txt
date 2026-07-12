@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.25)
+﻿cmake_minimum_required(VERSION 3.25)
 
 if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING
@@ -170,6 +170,14 @@ target_compile_options(aurora_mtx PRIVATE
 )
 
 add_subdirectory(libs/freeverb)
+
+option(DUSK_BUILD_CUSTOM_MUSIC_TESTS "Build embedded custom-music core tests" OFF)
+set(TPCM_BUILD_TESTS ${DUSK_BUILD_CUSTOM_MUSIC_TESTS} CACHE BOOL "Build embedded custom-music core tests" FORCE)
+if(DUSK_BUILD_CUSTOM_MUSIC_TESTS)
+    enable_testing()
+endif()
+add_subdirectory(libs/tpcm_core)
+add_library(dusk_custom_music_core ALIAS tpcm_core)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(DUSK_GFX_DEBUG_GROUPS_DEFAULT ON)
@@ -387,6 +395,8 @@ set(GAME_LIBS aurora::core aurora::gx aurora::gd aurora::si aurora::vi aurora::p
     aurora::card freeverb cxxopts::cxxopts absl::flat_hash_map nlohmann_json::nlohmann_json TracyClient fmt::fmt
     Threads::Threads zstd::libzstd)
 
+list(APPEND GAME_LIBS dusk_custom_music_core)
+
 if (DUSK_ENABLE_SENTRY_NATIVE)
     list(APPEND GAME_LIBS sentry)
     list(APPEND GAME_COMPILE_DEFS DUSK_ENABLE_SENTRY_NATIVE=1 SENTRY_BUILD_STATIC=1)
@@ -443,6 +453,8 @@ if (DUSK_MOVIE_SUPPORT)
     endif ()
     list(APPEND GAME_COMPILE_DEFS MOVIE_SUPPORT=1)
 endif ()
+
+include(src/dusk/randomizer/randomizer.cmake)
 
 set(DUSK_ENABLE_DISCORD_DEFAULT ON)
 if (DEFINED DUSK_ENABLE_DISCORD_RPC AND NOT DEFINED DUSK_ENABLE_DISCORD)
@@ -526,6 +538,24 @@ endif ()
 if (ENABLE_ASAN)
     target_sources(dusklight PRIVATE src/dusk/asan_options.c)
 endif ()
+
+# Add embedded data to target
+
+file(GLOB_RECURSE RANDOMIZER_DATA "src/dusk/randomizer/generator/data/*")
+file(GLOB_RECURSE RANDOMIZER_ASSETS "src/dusk/randomizer/assets/*")
+list(APPEND RANDOMIZER_DATA ${RANDOMIZER_ASSETS})
+set(RANDO_ROOT_DATA_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+
+foreach (RANDOMIZER_FILE IN LISTS RANDOMIZER_DATA)
+    file(RELATIVE_PATH REL_PATH ${RANDO_ROOT_DATA_DIR} ${RANDOMIZER_FILE})
+    if(REL_PATH MATCHES "^src/dusk/randomizer/generator/data/tests")
+        message(STATUS "Skipping Embed: ${REL_PATH}")
+        continue()
+    endif ()
+
+    message(STATUS "Embedding File: ${REL_PATH}")
+    b_embed(dusklight ${REL_PATH})
+endforeach ()
 
 target_compile_definitions(dusklight PRIVATE ${GAME_COMPILE_DEFS})
 target_include_directories(dusklight PRIVATE ${GAME_INCLUDE_DIRS})

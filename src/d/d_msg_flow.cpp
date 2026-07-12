@@ -15,6 +15,13 @@
 #include "SSystem/SComponent/c_math.h"
 #include <cstring>
 
+#if TARGET_PC
+#include "dusk/randomizer/game/flags.h"
+#include "dusk/randomizer/game/tools.h"
+#include "dusk/randomizer/game/stages.h"
+#include "dusk/randomizer/game/verify_item_functions.h"
+#endif
+
 dMsgFlow_c::dMsgFlow_c() {
     mNonStopJunpFlowFlag = 0;
     setInitValue(1);
@@ -109,6 +116,10 @@ int dMsgFlow_c::checkOpenDoor(fopAc_ac_c* i_speaker_p, int* param_2) {
     while ((nodeIdx != 0xFFFF && !var_r27) && !var_r25) {
         u8 type = mFlowNodeTBL[nodeIdx].message.type;
 
+#if TARGET_PC
+        randoPatchNodeType(type, nodeIdx);
+#endif
+
         switch(type) {
         case NODETYPE_MESSAGE_e: {
             msg_node = &mFlowNodeTBL[nodeIdx].message;
@@ -118,6 +129,10 @@ int dMsgFlow_c::checkOpenDoor(fopAc_ac_c* i_speaker_p, int* param_2) {
         }
         case NODETYPE_BRANCH_e: {
             branch_node = (mesg_flow_node_branch*)&mFlowNodeTBL[nodeIdx].branch;
+
+#if TARGET_PC
+            randoPatchBranchNode(branch_node, nodeIdx);
+#endif
 
             switch(branch_node->query_idx) {
             case 0:
@@ -137,6 +152,10 @@ int dMsgFlow_c::checkOpenDoor(fopAc_ac_c* i_speaker_p, int* param_2) {
         }
         case NODETYPE_EVENT_e: {
             event_node = &mFlowNodeTBL[nodeIdx].event;
+
+#if TARGET_PC
+            randoPatchEventNode(event_node, nodeIdx);
+#endif
 
             switch(event_node->event_idx) {
             case 12:
@@ -255,6 +274,12 @@ u16 dMsgFlow_c::getEventId(int* oItemId_p) {
     *oItemId_p = field_0x30;
     return mEventId;
 }
+
+#if TARGET_PC
+u16 dMsgFlow_c::getEventId() {
+    return mEventId;
+}
+#endif
 
 u32 dMsgFlow_c::getMsgNo() {
     return mMsgNo;
@@ -499,6 +524,25 @@ int dMsgFlow_c::setNormalMsg(mesg_flow_node* i_flowNode_p, fopAc_ac_c* i_speaker
     inf_p = (BE(u16)*)getMsgDataBlock("INF1");
     msg_no = (inf_p + (var_r29->msg_index) * 10)[10];
 
+#if TARGET_PC
+    if (randomizer_IsActive()) {
+        u32 key = (dMsgObject_getGroupID() << 16) | msg_no;
+        // Use group 0 if the msg_no is below 5000 regardless of current group
+        if (msg_no < 5000) {
+            key &= 0x0000FFFF;
+        }
+        auto& flowItemOverrides = randomizer_GetContext().mFlowItemMessageOverrides;
+        if (flowItemOverrides.contains(key)) {
+            u8 itemId = verifyProgressiveItem(flowItemOverrides[key].itemId);
+            msg_no = getItemMessageID(itemId);
+            // Store this itemId so that we can give the item when the textbox closes
+            g_randomizerState.mFlowMessageItemId = itemId;
+            // Set flag for tracker/AP
+            randomizer_setTempFlagForFLWOverride(key);
+        }
+    }
+#endif
+
     // "Message Set"
     OS_REPORT("\x1B[44;37mメッセ−ジセット　　　　　　　　　　\x1B[m|:");
 
@@ -624,6 +668,11 @@ int dMsgFlow_c::messageNodeProc(fopAc_ac_c* i_speaker_p, fopAc_ac_c** i_talkPart
 int dMsgFlow_c::branchNodeProc(fopAc_ac_c* i_speaker_p, fopAc_ac_c** i_talkPartners) {
     mesg_flow_node_branch* node = NULL;
     node = &mFlowNodeTBL[mNodeIdx].branch;
+
+#if TARGET_PC
+    randoPatchBranchNode(node, mNodeIdx);
+#endif
+
     u16 proc_status = (this->*mQueryList[node->query_idx])(node, i_speaker_p, 1);
 
     u16 var_r28 = node->next_node_idx + proc_status;
@@ -634,6 +683,9 @@ int dMsgFlow_c::branchNodeProc(fopAc_ac_c* i_speaker_p, fopAc_ac_c** i_talkPartn
 int dMsgFlow_c::eventNodeProc(fopAc_ac_c* i_speaker_p, fopAc_ac_c** i_talkPartners) {
     mesg_flow_node_event* node = NULL;
     node = &mFlowNodeTBL[mNodeIdx].event;
+#if TARGET_PC
+    randoPatchEventNode(node, mNodeIdx);
+#endif
     int proc_status = (this->*mEventList[node->event_idx])(node, i_speaker_p);
 
     switch (node->event_idx) {
@@ -706,6 +758,9 @@ int dMsgFlow_c::nodeProc(fopAc_ac_c* i_speaker_p, fopAc_ac_c** i_talkPartners) {
         }
 
         u8 type = mFlowNodeTBL[mNodeIdx].message.type;
+#if TARGET_PC
+        randoPatchNodeType(type, mNodeIdx);
+#endif
         switch (type) {
         case NODETYPE_MESSAGE_e:
             proc_status = messageNodeProc(aSpeaker_p, i_talkPartners);
@@ -745,7 +800,7 @@ int dMsgFlow_c::getParam(u8* params) {
     return *(BE(int)*)params;
 }
 
-queryFunc dMsgFlow_c::mQueryList[53] = {
+queryFunc dMsgFlow_c::mQueryList[DUSK_IF_ELSE(54, 53)] = {
     &dMsgFlow_c::query005, &dMsgFlow_c::query001, &dMsgFlow_c::query002, &dMsgFlow_c::query003,
     &dMsgFlow_c::query006, &dMsgFlow_c::query007, &dMsgFlow_c::query004, &dMsgFlow_c::query008,
     &dMsgFlow_c::query009, &dMsgFlow_c::query010, &dMsgFlow_c::query011, &dMsgFlow_c::query012,
@@ -760,6 +815,9 @@ queryFunc dMsgFlow_c::mQueryList[53] = {
     &dMsgFlow_c::query045, &dMsgFlow_c::query046, &dMsgFlow_c::query047, &dMsgFlow_c::query048,
     &dMsgFlow_c::query049, &dMsgFlow_c::query050, &dMsgFlow_c::query051, &dMsgFlow_c::query052,
     &dMsgFlow_c::query053,
+#if TARGET_PC
+    &dMsgFlow_c::query054,
+#endif
 };
 
 #if DEBUG
@@ -770,6 +828,22 @@ u16 dMsgFlow_c::query001(mesg_flow_node_branch* i_flowNode_p, fopAc_ac_c* i_spea
     const u16 prm0 = i_flowNode_p->param;
     u16 ret = dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[prm0]) == false;
 
+#if TARGET_PC
+    if (randomizer_IsActive()) {
+        switch (prm0) {
+        case 0xFA: // MDH Completed
+        {
+            // Check to see if currently in Jovani's house
+            if (playerIsInRoomStage(5, allStages[Castle_Town_Shops])) {
+                return 0; // Return 0 to be able to turn souls into Jovani pre MDH
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+#endif
     if (param_2 != 0) {
         // "Flag Check"
         OS_REPORT("\x1B[44;33mフラグチェック　　　　　　　　　　　\x1B[m|:");
@@ -1134,6 +1208,20 @@ u16 dMsgFlow_c::query022(mesg_flow_node_branch* i_flowNode_p, fopAc_ac_c* i_spea
     const u8 prm0 = i_flowNode_p->param;
     u16 ret = checkItemGet(prm0 & 0xFF, 1) ? 0 : 1;
 
+#if TARGET_PC
+    // Check to see if we're currently in one of the Ordon interiors
+    if (randomizer_IsActive() && daAlink_c::checkStageName(allStages[Ordon_Village_Interiors]))
+    {
+        // Check to see if checking for the Iron Boots
+        if (prm0 == dItemNo_Randomizer_HVY_BOOTS_e)
+        {
+            // Return false so that the door in Bo's house can be opened without having the
+            // Iron Boots
+            return 0;
+        }
+    }
+#endif
+
     if (param_2 != 0) {
         // "Get Check"
         OS_REPORT("\x1B[44;33m所持チェック　　　　　　　　　　　　\x1B[m|:");
@@ -1175,6 +1263,16 @@ u16 dMsgFlow_c::query024(mesg_flow_node_branch* i_flowNode_p, fopAc_ac_c* i_spea
 u16 dMsgFlow_c::query025(mesg_flow_node_branch* i_flowNode_p, fopAc_ac_c* i_speaker_p, int param_2) {
     const u8 prm0 = i_flowNode_p->param;
     u16 ret = dComIfGs_checkEmptyBottle() >= prm0 ? 0 : 1;
+
+#if TARGET_PC
+    // Check to see if currently in one of the Kakariko interiors and if the red potion item is randomized
+    if (randomizer_IsActive() && playerIsInRoomStage(3, allStages[Kakariko_Village_Interiors]) &&
+        randomizer_GetContext().mShopOverrides.contains(0x4461)) // 0x4461 is the key for the red potion item
+    {
+        // Return 0 so the player can buy the red potion item from the shop.
+        return 0;
+    }
+#endif
 
     if (param_2 != 0) {
         // "Empty Bottle Count Check"
@@ -1649,6 +1747,13 @@ u16 dMsgFlow_c::query049(mesg_flow_node_branch* i_flowNode_p, fopAc_ac_c* i_spea
         ret = 4;
     }
 
+#if TARGET_PC
+    // Split up getting both rewards in randomizer
+    if (randomizer_IsActive() && ret == 4 && !dComIfGs_isEventBit(GOT_BOTTLE_FROM_JOVANI)) {
+        ret = 3;
+    }
+#endif
+
     if (param_2 != 0) {
         // "Collected Souls count"
         OS_REPORT("\x1B[44;33m:集めた魂の数　　\x1B[m|:");
@@ -1730,7 +1835,21 @@ u16 dMsgFlow_c::query053(mesg_flow_node_branch* i_flowNode_p, fopAc_ac_c* i_spea
     return ret;
 }
 
-eventFunc dMsgFlow_c::mEventList[43] = {
+// Like query 1, but instead returns 1 if true, and 0 if false
+u16 dMsgFlow_c::query054(mesg_flow_node_branch* i_flowNode_p, fopAc_ac_c* i_speaker_p, int param_2) {
+    const u16 prm0 = i_flowNode_p->param;
+    u16 ret = dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[prm0]);
+
+    if (param_2 != 0) {
+        // "Flag Check"
+        OS_REPORT("\x1B[44;33mフラグチェック　　　　　　　　　　　\x1B[m|:");
+        OS_REPORT("flow:%d, ret:%d, prm0:%d\n", mFlow, ret, prm0);
+    }
+
+    return ret;
+}
+
+eventFunc dMsgFlow_c::mEventList[DUSK_IF_ELSE(45, 43)] = {
     &dMsgFlow_c::event000, &dMsgFlow_c::event001, &dMsgFlow_c::event002, &dMsgFlow_c::event003,
     &dMsgFlow_c::event004, &dMsgFlow_c::event005, &dMsgFlow_c::event006, &dMsgFlow_c::event007,
     &dMsgFlow_c::event008, &dMsgFlow_c::event009, &dMsgFlow_c::event010, &dMsgFlow_c::event011,
@@ -1742,6 +1861,9 @@ eventFunc dMsgFlow_c::mEventList[43] = {
     &dMsgFlow_c::event032, &dMsgFlow_c::event033, &dMsgFlow_c::event034, &dMsgFlow_c::event035,
     &dMsgFlow_c::event036, &dMsgFlow_c::event037, &dMsgFlow_c::event038, &dMsgFlow_c::event039,
     &dMsgFlow_c::event040, &dMsgFlow_c::event041, &dMsgFlow_c::event042,
+#if TARGET_PC
+    &dMsgFlow_c::event043, &dMsgFlow_c::event044,
+#endif
 };
 
 int dMsgFlow_c::event000(mesg_flow_node_event* i_flowNode_p, fopAc_ac_c* i_speaker_p) {
@@ -2476,8 +2598,15 @@ int dMsgFlow_c::event035(mesg_flow_node_event* i_flowNode_p, fopAc_ac_c* i_speak
     if (prm0 == dItemNo_TOMATO_PUREE_e || prm0 == dItemNo_TASTE_e) {
         dComIfGs_offItemFirstBit(prm0);
     } else if (prm0 == dItemNo_RAFRELS_MEMO_e || prm0 == dItemNo_ASHS_SCRIBBLING_e) {
+        // Only delete the item in rando if it's Ashei's sketch
+        IF_DUSK(if (!randomizer_IsActive() || prm0 == dItemNo_ASHS_SCRIBBLING_e))
         dComIfGs_setItem(SLOT_19, dItemNo_NONE_e);
     } else if (prm0 == dItemNo_LETTER_e || prm0 == dItemNo_BILL_e || prm0 == dItemNo_WOOD_STATUE_e || prm0 == dItemNo_IRIAS_PENDANT_e) {
+#if TARGET_PC
+        if (randomizer_IsActive())
+            offWarashibeItem(prm0);
+        else
+#endif
         dComIfGs_setWarashibeItem(dItemNo_NONE_e);
     }
 
@@ -2587,3 +2716,62 @@ int dMsgFlow_c::event041(mesg_flow_node_event* i_flowNode_p, fopAc_ac_c* i_speak
 int dMsgFlow_c::event042(mesg_flow_node_event* i_flowNode_p, fopAc_ac_c* i_speaker_p) {
     return 1;
 }
+
+#if TARGET_PC
+// rando events
+int dMsgFlow_c::event043(mesg_flow_node_event* i_flowNode_p, fopAc_ac_c* i_speaker_p) {
+    return 1;
+}
+
+int dMsgFlow_c::event044(mesg_flow_node_event* i_flowNode_p, fopAc_ac_c* i_speaker_p) {
+    if (daPy_py_c::checkNowWolf()) {
+        g_randomizerState.setHasPendingToDChange(true);
+    } else {
+        g_randomizerState.handleTimeOfDayChange();
+    }
+    return 1;
+}
+
+// Rando patch funcs
+void dMsgFlow_c::randoPatchNodeType(u8& type, u16 nodeIdx) {
+    // Overwrite the type if we have a patch for this index
+    if (randomizer_IsActive()) {
+        u32 key = (dMsgObject_getGroupID() << 16) | nodeIdx;
+        // Dirty check to see if this node is part of bmg 0
+        if (*(reinterpret_cast<u16*>(&mFlowNodeTBL[0])) == 0x0803) {
+            key &= 0x0000FFFF;
+        }
+        if (randomizer_GetContext().mFlowPatches.contains(key)) {
+            type = reinterpret_cast<mesg_flow_node*>(&randomizer_GetContext().mFlowPatches[key])->type;
+        }
+    }
+}
+
+void dMsgFlow_c::randoPatchBranchNode(mesg_flow_node_branch*& branch_node, u16 nodeIdx) {
+    // Overwrite this node if we have a patch for it
+    if (randomizer_IsActive()) {
+        u32 key = (dMsgObject_getGroupID() << 16) | nodeIdx;
+        // Dirty check to see if this node is part of bmg 0
+        if (*(reinterpret_cast<u16*>(&mFlowNodeTBL[0])) == 0x0803) {
+            key &= 0x0000FFFF;
+        }
+        if (randomizer_GetContext().mFlowPatches.contains(key)) {
+            branch_node = reinterpret_cast<mesg_flow_node_branch*>(&randomizer_GetContext().mFlowPatches[key]);
+        }
+    }
+}
+
+void dMsgFlow_c::randoPatchEventNode(mesg_flow_node_event*& event_node, u16 nodeIdx) {
+    // Overwrite this node if we have a patch for it
+    if (randomizer_IsActive()) {
+        u32 key = (dMsgObject_getGroupID() << 16) | nodeIdx;
+        // Dirty check to see if this node is part of bmg 0
+        if (*(reinterpret_cast<u16*>(&mFlowNodeTBL[0])) == 0x0803) {
+            key &= 0x0000FFFF;
+        }
+        if (randomizer_GetContext().mFlowPatches.contains(key)) {
+            event_node = reinterpret_cast<mesg_flow_node_event*>(&randomizer_GetContext().mFlowPatches[key]);
+        }
+    }
+}
+#endif

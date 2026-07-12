@@ -52,8 +52,10 @@
 #include "SSystem/SComponent/c_API.h"
 #include "dusk/android_frame_rate.hpp"
 #include "dusk/app_info.hpp"
+#include "dusk/cosmetics/midna_hair_color.hpp"
 #include "dusk/crash_handler.h"
 #include "dusk/crash_reporting.h"
+#include "dusk/custom_music/CustomMusicIsoTransaction.h"
 #include "dusk/data.hpp"
 #include "dusk/dusk.h"
 #include "dusk/frame_interpolation.h"
@@ -73,6 +75,7 @@
 #include "dusk/ui/preset.hpp"
 #include "dusk/ui/touch_controls.hpp"
 #include "dusk/ui/ui.hpp"
+#include "dusk/ui/rando_config.hpp"
 #include "version.h"
 
 #include <aurora/aurora.h>
@@ -106,6 +109,11 @@
 
 #if DUSK_ENABLE_SENTRY_NATIVE
 #include "dusk/ui/reporting.hpp"
+#endif
+
+#if RANDOMIZER_ONLY
+#include "dusk/randomizer/generator/randomizer.hpp"
+#include "dusk/randomizer/generator/test/test.hpp"
 #endif
 
 // --- GLOBALS ---
@@ -263,12 +271,12 @@ void main01(void) {
                 goto eventsDone;
             case AURORA_PAUSED:
                 dusk::audio::SetPaused(true);
-                dusk::mouse::onFocusLost();
+                dusk::mouse::on_focus_lost();
                 break;
             case AURORA_UNPAUSED:
                 dusk::audio::SetPaused(false);
                 dusk::game_clock::reset_frame_timer();
-                dusk::mouse::onFocusGained();
+                dusk::mouse::on_focus_gained();
                 break;
             case AURORA_SDL_EVENT:
                 dusk::latency_trace::on_sdl_event(event->sdl);
@@ -551,6 +559,17 @@ static void log_build_info() {
 // PC ENTRY POINT
 // =========================================================================
 int game_main(int argc, char* argv[]) {
+
+    #if RANDOMIZER_ONLY
+    #ifdef LOGIC_TESTS
+    randomizer::test::test::RunTests();
+    #else
+    randomizer::Randomizer rando{dusk::ui::GetRandomizerPath()};
+    rando.Generate();
+    #endif
+    exit(0);
+    #endif
+        
     // On iOS, when connected to an external monitor, SDLUIKitSceneDelegate scene:willConnectToSession:
     // can call our main function again. Explicitly guard against this reinitialization.
     if (mainCalled) {
@@ -602,6 +621,17 @@ int game_main(int argc, char* argv[]) {
     log_build_info();
 
     dusk::config::LoadFromUserPreferences();
+    {
+        const std::filesystem::path configuredIso = dusk::getSettings().backend.isoPath.getValue();
+        if (!configuredIso.empty()) {
+            const auto restore = dusk::custom_music::CustomMusicIsoTransaction::applyPendingRestore(configuredIso);
+            if (restore.success) {
+                DuskLog.info("{}", restore.message);
+            } else if (!restore.message.empty()) {
+                DuskLog.error("Could not apply pending ISO restore: {}", restore.message);
+            }
+        }
+    }
     if (dusk::getSettings().game.speedrunMode) {
         dusk::resetForSpeedrunMode();
     }
@@ -714,6 +744,8 @@ int game_main(int argc, char* argv[]) {
     }
 
     dusk::audio::ApplySettings();
+
+    dusk::cosmetics::set_all_midna_hair_colors();
 
     // Run ImGui UI loop if Aurora couldn't initialize a backend
     if (auroraInfo.backend == BACKEND_NULL) {

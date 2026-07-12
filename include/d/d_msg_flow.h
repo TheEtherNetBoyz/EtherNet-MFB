@@ -58,6 +58,9 @@ public:
     int checkEventRender(int*, int*, int*, int*);
     void remove();
     u16 getEventId(int*);
+#if TARGET_PC
+    u16 getEventId();
+#endif
     u32 getMsgNo();
     u32 getNowMsgNo();
     msg_class* getMsg();
@@ -128,6 +131,9 @@ public:
     u16 query051(mesg_flow_node_branch*, fopAc_ac_c*, int);
     u16 query052(mesg_flow_node_branch*, fopAc_ac_c*, int);
     u16 query053(mesg_flow_node_branch*, fopAc_ac_c*, int);
+#if TARGET_PC
+    u16 query054(mesg_flow_node_branch*, fopAc_ac_c*, int);
+#endif
     int event000(mesg_flow_node_event*, fopAc_ac_c*);
     int event001(mesg_flow_node_event*, fopAc_ac_c*);
     int event002(mesg_flow_node_event*, fopAc_ac_c*);
@@ -171,6 +177,11 @@ public:
     int event040(mesg_flow_node_event*, fopAc_ac_c*);
     int event041(mesg_flow_node_event*, fopAc_ac_c*);
     int event042(mesg_flow_node_event*, fopAc_ac_c*);
+#if TARGET_PC
+    // events for rando
+    int event043(mesg_flow_node_event*, fopAc_ac_c*);
+    int event044(mesg_flow_node_event*, fopAc_ac_c*);
+#endif
 
     void initWord(fopAc_ac_c*, const char*, u8, int, fopAc_ac_c**);
 
@@ -185,8 +196,15 @@ public:
     void setMsg(u32 msg) { mMsg = msg; }
     bool checkEndFlow() { return (u32)field_0x26 == 1; }
 
-    static queryFunc mQueryList[53];
-    static eventFunc mEventList[43];
+    static queryFunc mQueryList[DUSK_IF_ELSE(54, 53)];
+    static eventFunc mEventList[DUSK_IF_ELSE(45, 43)];
+
+#if TARGET_PC
+    // patch funcs for rando
+    void randoPatchNodeType(u8& type, u16 nodeIdx);
+    void randoPatchBranchNode(mesg_flow_node_branch*& branch_node, u16 nodeIdx);
+    void randoPatchEventNode(mesg_flow_node_event*& event_node, u16 nodeIdx);
+#endif
 
 private:
     /* 0x04 */ u8* mFlow_p;

@@ -10,6 +10,9 @@
 #include "SSystem/SComponent/c_math.h"
 #include "JSystem/J3DGraphBase/J3DMaterial.h"
 #include "Z2AudioLib/Z2Instances.h"
+#if TARGET_PC
+#include "dusk/randomizer/game/verify_item_functions.h"
+#endif
 
 enum Event_Cut_Nums {
     /* 0x2 */ NUM_EVT_CUTS_e = 0x2,
@@ -882,7 +885,11 @@ u8 daNpc_zrC_c::getTypeFromParam() {
 
 int daNpc_zrC_c::isDelete() {
     if (mType == 4 || mType == 0 || mType == 1 || (mType == 2 && daNpcF_chkEvtBit(0x108)
+#if TARGET_PC
+        && (!daNpcF_chkEvtBit(0x10A) || randomizer_IsActive())) || mType == 3)
+#else
         && !daNpcF_chkEvtBit(0x10A)) || mType == 3)
+#endif
     {
         return false;
     }
@@ -1681,6 +1688,12 @@ BOOL daNpc_zrC_c::ECut_earringGet(int i_staffID) {
         case 40: {
             int item_no = 0;
             if (mFlow.getEventId(&item_no) == 1) {
+#if TARGET_PC
+                if (randomizer_IsActive()) {
+                    item_no = verifyProgressiveItem(randomizer_getItemAtLocation("Gift From Ralis"));
+                    randomizer_setTempFlagForLocation("Gift From Ralis");
+                }
+#endif
                 mItemID = fopAcM_createItemForPresentDemo(&current.pos, item_no,
                                                           0, -1, -1, NULL, NULL);
             }

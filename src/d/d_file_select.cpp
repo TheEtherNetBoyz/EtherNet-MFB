@@ -24,8 +24,12 @@
 #include <cstring>
 
 #if TARGET_PC
+#include "dusk/config.hpp"
 #include "dusk/menu_pointer.h"
 #include "dusk/string.hpp"
+#include "dusk/ui/modal.hpp"
+#include "dusk/ui/rando_config.hpp"
+#include "dusk/ui/ui.hpp"
 
 namespace {
 constexpr u8 pointer_target(u8 group, u8 index) noexcept {
@@ -293,6 +297,9 @@ static DataSelProcFunc DataSelProc[] = {
     &dFile_select_c::dataSelectMoveAnime,
     &dFile_select_c::selectDataOpenMove,
     &dFile_select_c::selectDataNameMove,
+#if TARGET_PC
+    &dFile_select_c::selectDataPlayTypeMove,
+#endif
     &dFile_select_c::selectDataOpenEraseMove,
     &dFile_select_c::menuSelect,
     &dFile_select_c::menuSelectMoveAnm,
@@ -999,7 +1006,12 @@ void dFile_select_c::dataSelectStart() {
         mpName->initial();
         modoruTxtChange(1);
 
+#if TARGET_PC
+        mDataSelProc = DATASELPROC_SELECT_DATA_PLAY_MOVE;
+        mDusk.mStartNameAnm = false;
+#else
         mDataSelProc = DATASELPROC_SELECT_DATA_NAME_MOVE;
+#endif
     } else {
         #if PLATFORM_GCN
         dComIfGs_setNewFile(0);
@@ -1023,6 +1035,26 @@ void dFile_select_c::dataSelectStart() {
         menuMoveAnmInitSet(799, 809);
         selectWakuAlpahAnmInit(mSelectNum, 0xff, 0, g_fsHIO.select_box_appear_frames);
         makeRecInfo(mSelectNum);
+
+#if TARGET_PC
+        // Load the randomizer seed if one is tied to this file
+        auto curFileSeedHash = dusk::getSettings().randomizer.seedHashes.at(mSelectNum).getValue();
+        // When the randomizer is disabled, always play vanilla regardless of any stored seed
+        if (!dusk::getSettings().randomizer.enabled.getValue()) {
+            curFileSeedHash.clear();
+        }
+        // If this is a vanilla file, clear rando data structures
+        if (curFileSeedHash.empty()) {
+            g_randomizerState = RandomizerState();
+            randomizer_GetContext() = RandomizerContext();
+        }
+        // Reset randomizer state if we're switching to a different file
+        else if (curFileSeedHash != randomizer_GetContext().mHash || g_randomizerState.mFileNum != mSelectNum) {
+            g_randomizerState = RandomizerState();
+            randomizer_GetContext() = RandomizerContext();
+            randomizer_GetContext().LoadFromHash(curFileSeedHash);
+        }
+#endif
 
         mDataSelProc = DATASELPROC_SELECT_DATA_OPEN_MOVE;
     }
@@ -1312,6 +1344,105 @@ void dFile_select_c::selectDataNameMove() {
         mDataSelProc = DATASELPROC_NAME_INPUT_WAIT;
     }
 }
+
+#if TARGET_PC
+// Custom Proc to allow the player to select the play type and a randomizer seed
+// Initially copied and expanded upon from dFile_select_c::selectDataNameMove
+void dFile_select_c::selectDataPlayTypeMove() {
+    bool isHeaderTxtChange = headerTxtChangeAnm();
+    bool isFileRecScale = fileRecScaleAnm2();
+    bool isModoruTxtDisp = modoruTxtDispAnm();
+
+    // If we want to start bringing in the name input
+    if (mDusk.mStartNameAnm) {
+        // Only do so when no documents are visible
+        if (!dusk::ui::any_document_visible()) {
+            if (mDusk.mBackToFileSelect) {
+                // Code below copied from dFile_select_c::nameInput to initiate going back
+                // to the file selection
+                headerTxtSet(0x43, 1, 0);
+                fileRecScaleAnmInitSet2(0.0f, 1.0f);
+                nameMoveAnmInitSet(0xd29, 0xd1f);
+                modoruTxtDispAnmInit(0);
+                mDataSelProc = DATASELPROC_NAME_TO_DATA_SELECT_MOVE;
+            } else {
+                // Show the name pane if we went forward
+                field_0x0128 = true;
+                mNameBasePane->show();
+                if (mDusk.mPendingRmlCloseFrames > 0) {
+                    mDusk.mPendingRmlCloseFrames -= 1;
+                }
+                if (mDusk.mPendingRmlCloseFrames == 0 && nameMoveAnm()) {
+                    mDataSelProc = DATASELPROC_NAME_INPUT_WAIT;
+                    mDusk.mStartNameAnm = false;
+                }
+            }
+        }
+    }
+    // If the file select elements have disappeared, setup the play type modal
+    else if (isHeaderTxtChange == true && isFileRecScale == true &&
+        isModoruTxtDisp == true)
+    {
+        // If the randomizer is disabled entirely, skip the play-type prompt and go
+        // straight to vanilla name entry (same flow as choosing "Vanilla").
+        if (!dusk::getSettings().randomizer.enabled.getValue()) {
+            randomizer_GetContext() = RandomizerContext();
+            mDusk.mBackToFileSelect = false;
+            mDusk.mStartNameAnm = true;
+            mDusk.mPendingRmlCloseFrames = 0;
+            field_0x0128 = false;
+            mNameBasePane->hide();
+            return;
+        }
+
+        // Push our modal for selecting the play type
+        auto& playTypeModal = dusk::ui::push_document(std::make_unique<dusk::ui::Modal>(dusk::ui::Modal::Props{
+            .title = "Play Type",
+            .bodyRml = "What mode would you like to play?",
+            .actions = {
+                // If vanilla is selected, proceed to name entry and reset randomizer context
+                dusk::ui::ModalAction{
+                .label = "Vanilla",
+                .onPressed = [this](dusk::ui::Modal& modal) {
+                    mDusk.mBackToFileSelect = false;
+                    mDoAud_seStartMenu(Z2SE_SY_CURSOR_OK);
+                    modal.hide(true);
+                    randomizer_GetContext() = RandomizerContext();
+                }},
+                // If randomizer is selected, proceed to the randomizer menu
+                dusk::ui::ModalAction{
+                .label = "Randomizer",
+                .onPressed = [this](dusk::ui::Modal& modal) {
+                    mDoAud_seStartMenu(Z2SE_SY_CURSOR_OK);
+                    modal.hide(true);
+                    dusk::ui::push_document(std::make_unique<dusk::ui::FileSelectRandomizerWindow>(this));
+                }},
+            },
+            // If we dismiss this modal, go back to file selection
+            .onDismiss = [this](dusk::ui::Modal& modal) {
+                mDoAud_seStartMenu(Z2SE_SY_MENU_BACK);
+                modal.hide(true);
+            },
+            .icon = "question-mark",
+        }));
+
+        // The next time we call this function, begin waiting to show the name input
+        mDusk.mStartNameAnm = true;
+
+        // By default, go back to the file selection after closing the various menus.
+        mDusk.mBackToFileSelect = true;
+
+        // Wait 6 frames for the rmlui window transition after it closes
+        mDusk.mPendingRmlCloseFrames = 6;
+
+        // Hide the name pane incase we go back
+        field_0x0128 = false;
+        mNameBasePane->hide();
+
+        playTypeModal.focus();
+    }
+}
+#endif
 
 void dFile_select_c::selectDataOpenEraseMove() {
     bool isHeaderTxtChange = headerTxtChangeAnm();
@@ -1652,6 +1783,14 @@ void dFile_select_c::nameInput() {
 }
 
 void dFile_select_c::nameToDataSelectMove() {
+#if TARGET_PC
+    // Delay this animation to make for a smoother transition from the Rmlui menus
+    if (mDusk.mPendingRmlCloseFrames > 0) {
+        mDusk.mPendingRmlCloseFrames -= 1;
+        return;
+    }
+#endif
+
     bool isHeaderTxtChange = headerTxtChangeAnm();
     bool isFileRecScale = fileRecScaleAnm2();
     bool isNameMove = nameMoveAnm();
@@ -1738,6 +1877,12 @@ void dFile_select_c::nameInput2() {
     case 2:
         dComIfGs_setHorseName(mpName->getInputStrPtr());
         mIsSelectEnd = true;
+#if TARGET_PC
+        // Create a randomizer save if one is selected
+        if (!randomizer_GetContext().mHash.empty()) {
+            dComIfGs_setupRandomizerSave();
+        }
+#endif
         mDataSelProc = DATASELPROC_NEXT_MODE_WAIT;
     }
 }
@@ -2627,6 +2772,12 @@ void dFile_select_c::CommandExec() {
         mDoMemCd_setCopyToPos(mCpDataToNum);
         dataSave();
         mDataSelProc = DATASELPROC_DATA_COPY_WAIT;
+#if TARGET_PC
+        // Copy over the seed hash as well
+        auto& seedHashes = dusk::getSettings().randomizer.seedHashes;
+        seedHashes[mCpDataToNum].setValue(seedHashes[mCpDataNum]);
+        dusk::config::Save();
+#endif
         break;
     }
 
@@ -2685,6 +2836,11 @@ void dFile_select_c::ErasePaneMoveOk() {
     if (iVar1 == 1 && iVar2 == 1) {
         field_0x0208 = 0;
         setSaveData();
+#if TARGET_PC
+        // Clear the seed hash for this file when it gets erased
+        dusk::getSettings().randomizer.seedHashes.at(mSelectNum).setValue("");
+        dusk::config::Save();
+#endif
         makeRecInfo(mSelectNum);
         headerTxtSet(0x4b, 0, 0);
         mpFileWarning->closeInit();
@@ -3456,7 +3612,7 @@ void dFile_select_c::screenSet() {
     mpFadePict->setBlackWhite(black, white);
     mpFadePict->setAlpha(0);
 #ifdef TARGET_PC
-    mFadeDlst.mpPict = mpFadePict;
+    mDusk.mFadeDlst.mpPict = mpFadePict;
 #endif
     #endif
 }
@@ -4258,7 +4414,7 @@ void dFile_select_c::_draw() {
 
         #if PLATFORM_GCN
         #if TARGET_PC
-        dComIfGd_set2DOpaTop(&mFadeDlst);
+        dComIfGd_set2DOpaTop(&mDusk.mFadeDlst);
         #else
         mpFadePict->draw(mDoGph_gInf_c::getMinXF(), mDoGph_gInf_c::getMinYF(),
                            mDoGph_gInf_c::getWidthF(), mDoGph_gInf_c::getHeightF(), false, false,
