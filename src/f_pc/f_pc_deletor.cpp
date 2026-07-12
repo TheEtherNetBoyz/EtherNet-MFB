@@ -5,6 +5,7 @@
 
 #include "f_pc/f_pc_deletor.h"
 #include "SSystem/SComponent/c_list_iter.h"
+#include "SSystem/SComponent/c_node.h"
 #include "f_pc/f_pc_creator.h"
 #include "f_pc/f_pc_executor.h"
 #include "f_pc/f_pc_load.h"
@@ -15,6 +16,8 @@
 #if TARGET_PC
 #include "d/d_com_inf_game.h"
 #include "dusk/settings.h"
+#include "dusk/logging.h"
+#include "dusk/multiplayer/multiplayer.hpp"
 #endif
 
 BOOL fpcDt_IsComplete() {
@@ -76,6 +79,25 @@ int fpcDt_ToQueue(base_process_class* i_proc) {
         }
 
         i_proc->delete_tag.layer = i_proc->layer_tag.layer;
+#if TARGET_PC
+        // A scene reload can invalidate a process saved by a mutating layer traversal.
+        // If its delete tag says it is detached, its node must also be standalone. The
+        // original list code follows any stale next pointer while appending and turns
+        // this recoverable lifecycle overlap into deletion-queue corruption.
+        create_tag_class* deleteTag = &i_proc->delete_tag.base;
+        node_class* deleteNode = &deleteTag->mpNode;
+        if (dusk::multiplayer::is_enabled() && !cTg_IsUse(deleteTag) &&
+            (deleteNode->mpPrevNode != NULL || deleteNode->mpNextNode != NULL ||
+             deleteNode->mpData != i_proc))
+        {
+            DuskLog.warn("Multiplayer repaired detached process delete tag proc={} id={} "
+                            "prev={} next={} data={}",
+                            (void*)i_proc, i_proc->id, (void*)deleteNode->mpPrevNode,
+                            (void*)deleteNode->mpNextNode, deleteNode->mpData);
+            cNd_ForcedClear(deleteNode);
+            cNd_SetObject(deleteNode, i_proc);
+        }
+#endif
         fpcDtTg_ToDeleteQ(&i_proc->delete_tag);
         fpcLy_DeletingMesg(i_proc->layer_tag.layer);
 #if DEBUG

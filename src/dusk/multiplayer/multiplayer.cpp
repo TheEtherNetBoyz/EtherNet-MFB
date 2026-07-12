@@ -35,6 +35,7 @@
 #include "f_op/f_op_camera_mng.h"
 #include "f_op/f_op_overlap_mng.h"
 #include "f_pc/f_pc_manager.h"
+#include "f_pc/f_pc_deletor.h"
 #include "f_pc/f_pc_name.h"
 #include "JSystem/J3DGraphBase/J3DMaterial.h"
 #include "JSystem/J3DGraphBase/J3DShape.h"
@@ -929,6 +930,11 @@ bool sManualSyncFullStateTransitionActive = false;
 bool sOrdonDayBoundaryReloadPending = false;
 std::string sOrdonDayBoundaryReloadPeerId;
 uint16_t sOrdonDayBoundaryReloadFlag = 0;
+uint32_t sOrdonDayBoundaryReloadWaitTicks = 0;
+bool sOrdonDayBoundaryReloadTransitionActive = false;
+bool sOrdonDayBoundaryReloadSawStageLoad = false;
+constexpr uint32_t kOrdonDayBoundaryReloadStableTicks = 3;
+constexpr uint32_t kOrdonDayBoundaryReloadTimeoutTicks = 180;
 bool sMirrorCompleteReloadPending = false;
 std::string sMirrorCompleteReloadPeerId;
 uint16_t sMirrorCompleteReloadFlag = 0;
@@ -2080,6 +2086,9 @@ void queue_ordon_day_boundary_reload(const std::string& peerId, uint16_t flag) {
     sOrdonDayBoundaryReloadPending = true;
     sOrdonDayBoundaryReloadPeerId = peerId;
     sOrdonDayBoundaryReloadFlag = flag;
+    sOrdonDayBoundaryReloadWaitTicks = 0;
+    sOrdonDayBoundaryReloadTransitionActive = true;
+    sOrdonDayBoundaryReloadSawStageLoad = false;
     push_notification("Ordon state changed; reloading area", 4.0f);
     DuskLog.info("Multiplayer Ordon day boundary reload queued peer={} flag={} stage={} room={} "
                  "layer={}",
@@ -2099,7 +2108,52 @@ bool flush_ordon_day_boundary_reload() {
         sOrdonDayBoundaryReloadPending = false;
         sOrdonDayBoundaryReloadPeerId.clear();
         sOrdonDayBoundaryReloadFlag = 0;
+        sOrdonDayBoundaryReloadWaitTicks = 0;
+        sOrdonDayBoundaryReloadTransitionActive = false;
+        sOrdonDayBoundaryReloadSawStageLoad = false;
         return false;
+    }
+
+    ++sOrdonDayBoundaryReloadWaitTicks;
+    bool affectedPeerUnsafe = false;
+    std::string unsafePeerId;
+    for (const auto& entry : sPeerProgressionStates) {
+        const PeerProgressionState& state = entry.second;
+        if (!state.valid || state.ageTicks > kProgressionStateReadyMaxAgeTicks ||
+            !is_ordon_day_boundary_stage(state.stage))
+        {
+            continue;
+        }
+        if (!state.manualSyncReady) {
+            affectedPeerUnsafe = true;
+            unsafePeerId = entry.first;
+            break;
+        }
+    }
+
+    const bool deleteQueueBusy = !fpcDt_IsComplete();
+    const bool stableLongEnough =
+        sOrdonDayBoundaryReloadWaitTicks >= kOrdonDayBoundaryReloadStableTicks;
+    if ((!stableLongEnough || affectedPeerUnsafe || deleteQueueBusy) &&
+        sOrdonDayBoundaryReloadWaitTicks < kOrdonDayBoundaryReloadTimeoutTicks)
+    {
+        if (sOrdonDayBoundaryReloadWaitTicks == 1 ||
+            (sOrdonDayBoundaryReloadWaitTicks % 30) == 0)
+        {
+            DuskLog.info("Multiplayer Ordon day boundary reload waiting peer={} flag={} "
+                         "ticks={} stable={} unsafePeer={} deleteQueueBusy={}",
+                         sOrdonDayBoundaryReloadPeerId, sOrdonDayBoundaryReloadFlag,
+                         sOrdonDayBoundaryReloadWaitTicks, stableLongEnough, unsafePeerId,
+                         deleteQueueBusy);
+        }
+        return false;
+    }
+
+    if (affectedPeerUnsafe || deleteQueueBusy) {
+        DuskLog.warn("Multiplayer Ordon day boundary reload safety wait timed out peer={} "
+                        "flag={} unsafePeer={} deleteQueueBusy={}",
+                        sOrdonDayBoundaryReloadPeerId, sOrdonDayBoundaryReloadFlag,
+                        unsafePeerId, deleteQueueBusy);
     }
 
     DuskLog.info("Multiplayer Ordon day boundary reload restarting current room peer={} flag={} "
@@ -2110,6 +2164,7 @@ bool flush_ordon_day_boundary_reload() {
     sOrdonDayBoundaryReloadPending = false;
     sOrdonDayBoundaryReloadPeerId.clear();
     sOrdonDayBoundaryReloadFlag = 0;
+    sOrdonDayBoundaryReloadWaitTicks = 0;
     daPy_py_c::forceRestartRoom(0, 5, 0xC9);
     return true;
 }
@@ -3924,6 +3979,9 @@ void reset_connection_state() {
     sOrdonDayBoundaryReloadPending = false;
     sOrdonDayBoundaryReloadPeerId.clear();
     sOrdonDayBoundaryReloadFlag = 0;
+    sOrdonDayBoundaryReloadWaitTicks = 0;
+    sOrdonDayBoundaryReloadTransitionActive = false;
+    sOrdonDayBoundaryReloadSawStageLoad = false;
     sMirrorCompleteReloadPending = false;
     sMirrorCompleteReloadPeerId.clear();
     sMirrorCompleteReloadFlag = 0;
@@ -10528,6 +10586,16 @@ void update_connected() {
     age_recent_remote_switches();
     tick_pending_manual_sync_apply();
 
+    if (sOrdonDayBoundaryReloadTransitionActive) {
+        if (is_engine_stage_load_unsafe_for_multiplayer()) {
+            sOrdonDayBoundaryReloadSawStageLoad = true;
+        } else if (sOrdonDayBoundaryReloadSawStageLoad) {
+            sOrdonDayBoundaryReloadTransitionActive = false;
+            sOrdonDayBoundaryReloadSawStageLoad = false;
+            DuskLog.info("Multiplayer Ordon day boundary reload transition complete");
+        }
+    }
+
     if (sSession.mode == NetworkMode::DirectHost) {
         update_listening();
     }
@@ -11615,6 +11683,9 @@ void apply_sync_flags_enabled(bool enabled) {
         sOrdonDayBoundaryReloadPending = false;
         sOrdonDayBoundaryReloadPeerId.clear();
         sOrdonDayBoundaryReloadFlag = 0;
+        sOrdonDayBoundaryReloadWaitTicks = 0;
+        sOrdonDayBoundaryReloadTransitionActive = false;
+        sOrdonDayBoundaryReloadSawStageLoad = false;
         sPendingManualSyncInfo.reset();
         sPendingManualFlagsSyncSave.reset();
         sPendingManualSyncVibration.reset();
@@ -12384,6 +12455,14 @@ void draw_debug_peer_marker() {
 
     if (!sEnabled) {
         log_transform_draw_gate("disabled");
+        return;
+    }
+    // Once a synchronized Ordon layer reload is queued, leave existing remote actors
+    // untouched for scene teardown to own. Updating, replacing, or deleting them here
+    // while the scene request recursively queues actors for deletion can corrupt the
+    // process deletion list.
+    if (sOrdonDayBoundaryReloadPending || sOrdonDayBoundaryReloadTransitionActive) {
+        log_transform_draw_gate("ordon_day_boundary_reload");
         return;
     }
     if (!sDummyModelEnabled) {
