@@ -5369,6 +5369,11 @@ void send_welcome_to_peer(DirectPeer& peer) {
         {"protocol_version", 1},
         {"room_id", sSession.room},
         {"client_id", peer.id},
+        // Direct-host messages omit client_id and are represented by the
+        // synthetic kDirectPeerId on joiners.  This is the direct endpoint's
+        // player name, not a general lobby-owner identity; relay sessions
+        // continue to identify every player through their normal peer entry.
+        {"direct_peer_name", sSession.name},
         {"dummy_model", sDummyModelEnabled},
         {"sync_flags", sSyncFlagsEnabled},
         {"sync_world", sSyncWorldEnabled},
@@ -7578,7 +7583,7 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         sPeerColorSlots.clear();
         uint8_t nextColorSlot = 0;
         if (sSession.mode == NetworkMode::DirectJoin) {
-            sPeerNames[kDirectPeerId] = "Host";
+            sPeerNames[kDirectPeerId] = message.value("direct_peer_name", "Host");
             assign_player_color(kDirectPeerId, nextColorSlot++);
         }
         for (const json& peer : message.value("peers", json::array())) {
