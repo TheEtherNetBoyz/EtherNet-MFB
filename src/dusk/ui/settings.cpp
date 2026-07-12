@@ -1584,8 +1584,8 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .onChange = [](bool value) { aurora_set_background_input(value); },
             });
         config_milliseconds_select(leftPane, rightPane, getSettings().game.inputLagMs,
-            "Input Lag", "Adds a controller delay between 0-150ms. "
-                         "25-45ms matches GameCube latency.",
+            "Video Latency", "Delays the rendered game image by 0-150ms without changing "
+                             "which simulation frame receives controller input.",
             0, 150, 1);
 
 #if TOUCH_CONTROLS_AVAILABLE
@@ -2218,6 +2218,12 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             {
                 .key = "Show Pipeline Compilation",
                 .helpText = "Show an overlay when shaders are being compiled for your hardware.",
+            });
+        config_bool_select(leftPane, rightPane, getSettings().backend.checkForUpdates,
+            {
+                .key = "Check for Updates",
+                .helpText = "Checks GitHub releases for a new Dusklight version on startup.<br/><br/>"
+                            "No personal information is transmitted or collected.",
             });
 #ifdef DUSK_DISCORD
         config_bool_select(leftPane, rightPane, getSettings().game.enableDiscordPresence,
