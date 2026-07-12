@@ -217,9 +217,11 @@ constexpr uint32_t kGanondorfSyncSnapshotMaxAgeTicks = 45;
 constexpr int kPvpAttackLight = 1;
 constexpr int kPvpAttackHeavy = 2;
 constexpr int kPvpLightDamage = 2;
+constexpr int kPvpClawshotDamage = 1;
 constexpr int kPvpHeavyDamage = 4;
 constexpr int kPvpIronBallDamage = 12;
 constexpr int kPvpSpecialTechniqueDamage = 12;
+constexpr const char* kPvpReactionClawshot = "clawshot";
 constexpr const char* kPvpReactionIronBallLaunch = "iron_ball_launch";
 constexpr const char* kPvpReactionMortalDraw = "mortal_draw";
 constexpr const char* kPvpReactionGreatSpin = "great_spin";
@@ -7498,10 +7500,14 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             const bool specialTechnique =
                 attackClass == kPvpAttackHeavy &&
                 (reaction == kPvpReactionMortalDraw || reaction == kPvpReactionGreatSpin);
+            const bool clawshot = attackClass == kPvpAttackLight &&
+                                  reaction == kPvpReactionClawshot;
             const bool shieldBash = reaction == kPvpReactionShieldBash;
             int damage = attackClass == kPvpAttackHeavy ? kPvpHeavyDamage : kPvpLightDamage;
             if (ironBallLaunch) {
                 damage = kPvpIronBallDamage;
+            } else if (clawshot) {
+                damage = kPvpClawshotDamage;
             } else if (shieldBash) {
                 damage = 0;
             } else if (specialTechnique) {
@@ -11068,6 +11074,7 @@ void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo,
     }
 
     const int attackClass = classify_pvp_attack(attackInfo);
+    const bool clawshot = attackInfo->ChkAtType(AT_TYPE_HOOKSHOT);
     const bool ironBallLaunch = attackInfo->ChkAtType(AT_TYPE_IRON_BALL);
     const bool shieldBash = attackInfo->ChkAtType(AT_TYPE_SHIELD_ATTACK);
     const int cutType = allowSwordReaction ? static_cast<int>(link->getCutType()) :
@@ -11075,6 +11082,8 @@ void report_local_pvp_attack_hit(daAlink_c* link, dCcD_GObjInf* attackInfo,
     const char* reaction = nullptr;
     if (ironBallLaunch) {
         reaction = kPvpReactionIronBallLaunch;
+    } else if (clawshot) {
+        reaction = kPvpReactionClawshot;
     } else if (shieldBash) {
         reaction = kPvpReactionShieldBash;
     } else if (cutType == daPy_py_c::CUT_TYPE_MORTAL_DRAW_A ||
