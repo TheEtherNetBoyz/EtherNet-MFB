@@ -979,6 +979,15 @@ bool sApplyingRemoteSaveBit = false;
 std::optional<uint16_t> sPendingRupeeCountPublicationToSuppress;
 std::optional<uint8_t> sPendingMaxLifePublicationToSuppress;
 
+bool randomizer_multiplayer_sync_active() {
+    // The ImGui/Gameplay master switch prevents file select from loading a
+    // seed, which leaves randomizer_IsActive() false. An already-running
+    // randomizer save deliberately remains active until the run ends even if
+    // the setting is changed, so multiplayer must follow the active save and
+    // must not switch that session to vanilla packet semantics mid-run.
+    return randomizer_IsActive();
+}
+
 class ScopedRemoteSaveBitApplication {
 public:
     ScopedRemoteSaveBitApplication() : mPrevious(sApplyingRemoteSaveBit) {
@@ -8451,13 +8460,14 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         const int itemId = message.value("item_id", -1);
         const std::string remoteSeed = message.value("rando_seed_hash", "");
         const bool matchingSeed = !remoteSeed.empty() && remoteSeed == randomizer_GetContext().mHash;
-        if (randomizer_IsActive() && matchingSeed && itemId >= 0 && itemId <= 0xFF) {
+        const bool randomizerActive = randomizer_multiplayer_sync_active();
+        if (randomizerActive && matchingSeed && itemId >= 0 && itemId <= 0xFF) {
             ScopedRemoteSaveBitApplication applyingRemoteSaveBit;
-            execItemGet(static_cast<u8>(itemId));
-            DuskLog.info("Multiplayer applied randomizer item get item_id={}", itemId);
+            execResolvedItemGet(static_cast<u8>(itemId));
+            DuskLog.info("Multiplayer applied resolved randomizer item get item_id={}", itemId);
         } else {
             DuskLog.warn("Multiplayer ignored randomizer item get item_id={} active={} "
-                         "matching_seed={}", itemId, randomizer_IsActive(), matchingSeed);
+                         "matching_seed={}", itemId, randomizerActive, matchingSeed);
         }
     } else if (type == "item_get") {
         const int itemId = message.value("item_id", -1);
@@ -12943,7 +12953,7 @@ void notify_local_item_get(int itemId) {
     // The randomizer lane below carries every resolved reward, including
     // repeats and consumables. Sending this durable vanilla lane as well
     // would execute key items twice on the receiving peer.
-    if (randomizer_IsActive()) {
+    if (randomizer_multiplayer_sync_active()) {
         return;
     }
 
@@ -12961,7 +12971,7 @@ void notify_local_item_get(int itemId) {
 
 void notify_local_randomizer_item_get(int itemId) {
     if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit ||
-        !randomizer_IsActive() || itemId < 0 || itemId > 0xFF)
+        !randomizer_multiplayer_sync_active() || itemId < 0 || itemId > 0xFF)
     {
         return;
     }
@@ -12981,7 +12991,7 @@ void notify_local_item_first_bit_set(int itemId) {
 
     // rando_item_get applies the reward and its first-bit mutation together.
     // Sending the bit first can also make progressive resolution skip a tier.
-    if (randomizer_IsActive()) {
+    if (randomizer_multiplayer_sync_active()) {
         return;
     }
 
@@ -12999,6 +13009,12 @@ void notify_local_item_first_bit_set(int itemId) {
 
 void notify_local_item_first_bit_cleared(int itemId) {
     if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    // The randomizer reward event owns both sides of the first-bit mutation.
+    // Do not leak a generic vanilla clear alongside it.
+    if (randomizer_multiplayer_sync_active()) {
         return;
     }
 
@@ -13361,6 +13377,13 @@ void notify_local_region_bit_set(int region) {
 
 void notify_local_collect_set(int type, int item) {
     if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    // A randomizer reward carries its already-resolved equipment tier. Sending
+    // collect first mutates progressive state before the reward reaches peers
+    // and was what allowed a received sword to advance twice.
+    if (randomizer_multiplayer_sync_active()) {
         return;
     }
 

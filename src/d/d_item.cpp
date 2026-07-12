@@ -547,16 +547,25 @@ inline void getItemFunc(u8 i_itemNo) {
 #endif
 }
 
+void execResolvedItemGet(u8 i_itemNo) {
+#if TARGET_PC
+    if (randomizer_IsActive()) {
+        g_randomizerState.mUpdateTracker = true;
+    }
+#endif
+    getItemFunc(i_itemNo);
+}
+
 void execItemGet(u8 i_itemNo) {
 #if TARGET_PC
     const bool randomizerActive = randomizer_IsActive();
     if (randomizerActive) {
         i_itemNo = verifyProgressiveItem(i_itemNo);
-        g_randomizerState.mUpdateTracker = true;
     }
-
 #endif
-    getItemFunc(i_itemNo);
+
+    execResolvedItemGet(i_itemNo);
+
 #if TARGET_PC
     if (randomizerActive) {
         dusk::multiplayer::notify_local_randomizer_item_get(i_itemNo);

@@ -331,7 +331,7 @@ UserSettings g_userSettings = {
     },
 
     .randomizer = {
-        .enabled {"randomizer.enabled", true},
+        .enabled {"randomizer.enabled", false},
         .seedHashes = {
             ConfigVar<std::string>{"randomizer.file1SeedHash", ""},
             ConfigVar<std::string>{"randomizer.file2SeedHash", ""},

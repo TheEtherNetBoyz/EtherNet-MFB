@@ -33,8 +33,9 @@ void notify_local_dungeon_item_set(int kind);
 // the implementation; TP's item table also includes consumables.
 void notify_local_item_get(int itemId);
 // Randomizer-only item event. Unlike the durable vanilla item lane above,
-// this intentionally includes consumables because each randomized check's
-// resolved reward must run through execItemGet on every peer.
+// this intentionally includes consumables. itemId is already progressively
+// resolved by the originating peer and must be applied without resolving it
+// again on receivers.
 void notify_local_randomizer_item_get(int itemId);
 void notify_local_item_first_bit_set(int itemId);
 void notify_local_item_first_bit_cleared(int itemId);
