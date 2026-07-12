@@ -10,6 +10,7 @@
 #include "d/actor/d_a_obj_bbox.h"
 #include "d/actor/d_a_obj_carry.h"
 #include "d/actor/d_a_obj_life_container.h"
+#include "d/actor/d_a_obj_kgate.h"
 #include "d/actor/d_a_obj_lv4PoGate.h"
 #include "d/actor/d_a_obj_picture.h"
 #include "d/actor/d_a_obj_scannon.h"
@@ -771,6 +772,19 @@ bool sInitialized = false;
 bool sEnabled = false;
 Session sSession;
 
+struct SharedOoccooState {
+    bool exists = false;
+    bool cityVariant = false;
+    bool hasReturnMark = false;
+    int ownerStage = -1;
+    std::string returnStage;
+    cXyz returnPos;
+    s16 returnAngle = 0;
+    s8 returnRoom = -1;
+};
+
+SharedOoccooState sSharedOoccoo;
+
 struct UdpTxDatagram {
     sockaddr_in addr{};
     std::vector<uint8_t> bytes;
@@ -1026,6 +1040,8 @@ constexpr int kProgressionCueFaronBothCageBokoblinsKilledSwitch = 45; // Faron a
 constexpr int kProgressionCueFaronMonkeyCageBrokenSwitch = 46; // Faron area flag 0E:40.
 constexpr int kProgressionCueFaronLeftCageBokoblinKilledSwitch = 47; // Faron area flag 0E:80.
 constexpr int kProgressionCueFaronRightCageBokoblinKilledSwitch = 48; // Faron area flag 0D:01.
+constexpr int kFaronNorthMistGateUnlockSwitch = 0x14; // Faron area flag 09:10.
+constexpr int kFaronNorthMistGateRoom = 5;
 constexpr int kFaronWarpSequenceStartSwitch = 72; // S Faron warp shadow beasts spawned.
 constexpr int kFaronWarpSequenceFenceSwitch = 27; // S Faron warp twilight fences fall.
 constexpr int kFaronWarpSequenceBeastsKilledSwitch = 64; // S Faron warp shadow beasts killed.
@@ -1352,7 +1368,7 @@ bool is_sync_flags_message_type(const std::string& type) {
            type == "key_num" || type == "light_drop_num" ||
            type == "light_drop_get_flag" || type == "max_life_update" ||
            type == "bottle_slots" || type == "rupee_count" || type == "bomb_bag_slot" ||
-           type == "ganondorf_hit" || type == "rando_item_get";
+           type == "ganondorf_hit" || type == "rando_item_get" || type == "ooccoo_state";
 }
 
 bool is_engine_stage_load_unsafe_for_multiplayer() {
@@ -1874,6 +1890,153 @@ bool is_synced_item_first_bit(int itemId) {
            (itemId >= dItemNo_M_BEETLE_e && itemId <= dItemNo_F_MAYFLY_e);
 }
 
+bool is_ooccoo_slot_item(int itemId) {
+    return itemId == dItemNo_DUNGEON_EXIT_e || itemId == dItemNo_DUNGEON_BACK_e ||
+           itemId == dItemNo_LV7_DUNGEON_EXIT_e || itemId == dItemNo_TKS_LETTER_e;
+}
+
+json make_shared_ooccoo_state() {
+    return {
+        {"exists", sSharedOoccoo.exists},
+        {"owner_stage", sSharedOoccoo.ownerStage},
+        {"city_variant", sSharedOoccoo.cityVariant},
+        {"has_return_mark", sSharedOoccoo.hasReturnMark},
+        {"return_stage", sSharedOoccoo.returnStage},
+        {"return_room", static_cast<int>(sSharedOoccoo.returnRoom)},
+        {"return_x", sSharedOoccoo.returnPos.x},
+        {"return_y", sSharedOoccoo.returnPos.y},
+        {"return_z", sSharedOoccoo.returnPos.z},
+        {"return_angle", static_cast<int>(sSharedOoccoo.returnAngle)},
+    };
+}
+
+bool decode_shared_ooccoo_state(const json& state, const char* source) {
+    SharedOoccooState decoded;
+    decoded.exists = state.value("exists", false);
+    if (!decoded.exists) {
+        const int clearStage = state.value("clear_stage", -1);
+        if (clearStage >= 0 && sSharedOoccoo.exists &&
+            sSharedOoccoo.ownerStage != clearStage)
+        {
+            DuskLog.info("Multiplayer ignored stale Ooccoo clear source={} clear_stage={} "
+                         "owner_stage={}",
+                         source, clearStage, sSharedOoccoo.ownerStage);
+            return false;
+        }
+    }
+    if (decoded.exists) {
+        decoded.ownerStage = state.value("owner_stage", -1);
+        decoded.cityVariant = state.value("city_variant", false);
+        decoded.hasReturnMark = state.value("has_return_mark", false);
+        if (decoded.ownerStage < 0 || decoded.ownerStage >= dSv_save_c::STAGE_MAX) {
+            DuskLog.warn("Multiplayer ignored invalid Ooccoo owner source={} stage={}", source,
+                         decoded.ownerStage);
+            return false;
+        }
+        if (decoded.hasReturnMark) {
+            decoded.returnStage = state.value("return_stage", std::string());
+            const int room = state.value("return_room", -1);
+            if (decoded.returnStage.empty() || decoded.returnStage.size() >= 8 || room < -1 ||
+                room > 63)
+            {
+                DuskLog.warn("Multiplayer ignored invalid Ooccoo mark source={} stage={} room={}",
+                             source, decoded.returnStage, room);
+                return false;
+            }
+            decoded.returnRoom = static_cast<s8>(room);
+            decoded.returnPos.set(state.value("return_x", 0.0f),
+                                  state.value("return_y", 0.0f),
+                                  state.value("return_z", 0.0f));
+            decoded.returnAngle = static_cast<s16>(state.value("return_angle", 0));
+        }
+    }
+
+    sSharedOoccoo = decoded;
+    DuskLog.info("Multiplayer accepted Ooccoo state source={} exists={} owner_stage={} "
+                 "has_mark={} return_stage={} return_room={}",
+                 source, decoded.exists, decoded.ownerStage, decoded.hasReturnMark,
+                 decoded.returnStage, static_cast<int>(decoded.returnRoom));
+    return true;
+}
+
+void apply_shared_ooccoo_local_form() {
+    if (!sSession.welcomed || is_stage_load_unsafe_for_multiplayer()) {
+        return;
+    }
+
+    const int currentItem = dComIfGs_getItem(SLOT_18, false);
+    if (!sSharedOoccoo.exists) {
+        if (is_ooccoo_slot_item(currentItem)) {
+            ScopedRemoteSaveBitApplication applyingRemoteSaveBit;
+            dComIfGs_setItem(SLOT_18, dItemNo_NONE_e);
+            dComIfGs_resetLastWarpAcceptStage();
+        }
+        return;
+    }
+
+    stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+    if (stagInfo == nullptr) {
+        return;
+    }
+    const int currentStage = dStage_stagInfo_GetSaveTbl(stagInfo);
+    // Vanilla playerInit() replaces Ooccoo with Ooccoo's Note when Link is
+    // outside the dungeon and no warp-out return point exists yet.  The note
+    // occupies the same inventory slot and must remain tied to this shared
+    // Ooccoo state so a later dungeon clear removes it on every peer.
+    int desiredItem = dItemNo_TKS_LETTER_e;
+    if (currentStage == sSharedOoccoo.ownerStage) {
+        desiredItem = sSharedOoccoo.cityVariant ? dItemNo_LV7_DUNGEON_EXIT_e :
+                                                 dItemNo_DUNGEON_EXIT_e;
+    } else if (sSharedOoccoo.hasReturnMark) {
+        desiredItem = dItemNo_DUNGEON_BACK_e;
+    }
+
+    ScopedRemoteSaveBitApplication applyingRemoteSaveBit;
+    if (sSharedOoccoo.hasReturnMark && desiredItem == dItemNo_DUNGEON_BACK_e) {
+        dComIfGs_setLastWarpMarkItemData(
+            sSharedOoccoo.returnStage.c_str(), sSharedOoccoo.returnPos,
+            sSharedOoccoo.returnAngle, sSharedOoccoo.returnRoom, 0, 1);
+        dComIfGs_setLastWarpAcceptStage(static_cast<s8>(sSharedOoccoo.ownerStage));
+    }
+    if (currentItem != desiredItem) {
+        dComIfGs_setItem(SLOT_18, static_cast<u8>(desiredItem));
+        DuskLog.info("Multiplayer applied local Ooccoo form item={} owner_stage={} "
+                     "current_stage={} has_mark={}",
+                     desiredItem, sSharedOoccoo.ownerStage, currentStage,
+                     sSharedOoccoo.hasReturnMark);
+    }
+}
+
+void hydrate_shared_ooccoo_from_local_save() {
+    if (sSharedOoccoo.exists) {
+        return;
+    }
+
+    const int itemId = dComIfGs_getItem(SLOT_18, false);
+    if (itemId == dItemNo_DUNGEON_BACK_e) {
+        const int ownerStage = dComIfGs_getLastWarpAcceptStage();
+        const char* returnStage = dComIfGs_getWarpStageName();
+        if (ownerStage >= 0 && ownerStage < dSv_save_c::STAGE_MAX && returnStage != nullptr &&
+            returnStage[0] != '\0')
+        {
+            sSharedOoccoo.exists = true;
+            sSharedOoccoo.ownerStage = ownerStage;
+            sSharedOoccoo.hasReturnMark = true;
+            sSharedOoccoo.returnStage = returnStage;
+            sSharedOoccoo.returnPos = dComIfGs_getWarpPlayerPos();
+            sSharedOoccoo.returnAngle = dComIfGs_getWarpPlayerAngleY();
+            sSharedOoccoo.returnRoom = dComIfGs_getWarpRoomNo();
+        }
+    } else if (itemId == dItemNo_DUNGEON_EXIT_e || itemId == dItemNo_LV7_DUNGEON_EXIT_e) {
+        stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+        if (stagInfo != nullptr) {
+            sSharedOoccoo.exists = true;
+            sSharedOoccoo.ownerStage = dStage_stagInfo_GetSaveTbl(stagInfo);
+            sSharedOoccoo.cityVariant = itemId == dItemNo_LV7_DUNGEON_EXIT_e;
+        }
+    }
+}
+
 void remember_synced_key_item(int itemId) {
     if (is_synced_key_item(itemId)) {
         sObservedKeyItems.insert(itemId);
@@ -2337,6 +2500,58 @@ bool repair_remote_faron_cage_sequence_switch(int stage, int flag);
 bool repair_remote_breakable_carry_box_switch(int stage, int flag);
 bool is_sewers_progression_switch(int stage, int flag);
 
+void* repair_faron_north_mist_gate_actor(void* actor, void* data) {
+    if (actor == nullptr || data == nullptr || !fopAcM_IsActor(actor) ||
+        fopAcM_GetName(actor) != fpcNm_Obj_KkrGate_e)
+    {
+        return nullptr;
+    }
+
+    auto* gate = static_cast<daObjKGate_c*>(actor);
+    if (gate->getSwNo() != kFaronNorthMistGateUnlockSwitch ||
+        fopAcM_GetRoomNo(gate) != kFaronNorthMistGateRoom)
+    {
+        return nullptr;
+    }
+
+    // ACT_DEAD (2) is the vanilla post-unlock event state. The gate's normal action
+    // code still runs and observes the live switch, but it can no longer offer a
+    // second key-unlock interaction to this client.
+    gate->setAction(2);
+    *static_cast<bool*>(data) = true;
+    return actor;
+}
+
+bool repair_remote_faron_north_mist_gate_switch(int stage, int flag) {
+    if (stage != kProgressionCueFaronCageStage ||
+        flag != kFaronNorthMistGateUnlockSwitch)
+    {
+        return false;
+    }
+
+    // dComIfGs_onStageSwitch() updates the durable save entry for an arbitrary stage,
+    // but an already-loaded Obj_KkrGate polls the current stage's live memory switch.
+    // Mirror the room-switch repair used by key doors so the gate reacts this frame
+    // instead of waiting for a room reload to repopulate live stage memory.
+    bool repaired = false;
+    if (!dComIfGs_isSwitch(flag, kFaronNorthMistGateRoom)) {
+        const bool wasApplyingRemoteSaveBit = sApplyingRemoteSaveBit;
+        sApplyingRemoteSaveBit = true;
+        dComIfGs_onSwitch(flag, kFaronNorthMistGateRoom);
+        sApplyingRemoteSaveBit = wasApplyingRemoteSaveBit;
+        repaired = true;
+    }
+
+    bool repairedActor = false;
+    fopAcM_Search(repair_faron_north_mist_gate_actor, &repairedActor);
+    repaired = repaired || repairedActor;
+
+    DuskLog.info("Multiplayer applied Faron north mist gate live switch stage={} flag={} "
+                 "room={} actor_repaired={}",
+                 stage, flag, kFaronNorthMistGateRoom, repairedActor);
+    return repaired;
+}
+
 void dispatch_remote_switch_repair_hook(int stage, int flag, const char* reason) {
     stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
     if (stagInfo == nullptr || stage != dStage_stagInfo_GetSaveTbl(stagInfo)) {
@@ -2352,16 +2567,21 @@ void dispatch_remote_switch_repair_hook(int stage, int flag, const char* reason)
     const bool repairedSCannon = duskRepairSCannonRemotePortalClosed(flag);
     const bool repairedFaronCageSequence = repair_remote_faron_cage_sequence_switch(stage, flag);
     const bool repairedBreakableCarryBox = repair_remote_breakable_carry_box_switch(stage, flag);
+    const bool repairedFaronNorthMistGate =
+        repair_remote_faron_north_mist_gate_switch(stage, flag);
 
     if (repairedCBlock || repairedJumpTbox || repairedLv4PoGate || repairedPZ ||
-        repairedSCannon || repairedFaronCageSequence || repairedBreakableCarryBox)
+        repairedSCannon || repairedFaronCageSequence || repairedBreakableCarryBox ||
+        repairedFaronNorthMistGate)
     {
         DuskLog.info("Multiplayer remote switch repair stage={} flag={} reason={} "
                      "cblock={} jump_tbox={} lv4_poe_gate={} e_pz={} scannon={} "
-                     "faron_cage_sequence={} breakable_box={} picture_monitor={} npc_chin_monitor={}",
+                     "faron_cage_sequence={} breakable_box={} faron_north_mist_gate={} "
+                     "picture_monitor={} npc_chin_monitor={}",
                      stage, flag, reason, repairedCBlock, repairedJumpTbox, repairedLv4PoGate,
                      repairedPZ, repairedSCannon, repairedFaronCageSequence,
-                     repairedBreakableCarryBox, monitoredPicture, monitoredNpcChin);
+                     repairedBreakableCarryBox, repairedFaronNorthMistGate, monitoredPicture,
+                     monitoredNpcChin);
     } else if (monitoredPicture || monitoredNpcChin) {
         DuskLog.info("Multiplayer remote switch monitor stage={} flag={} reason={} "
                      "picture_monitor={} npc_chin_monitor={} repair=reload_or_cosmetic",
@@ -2369,10 +2589,12 @@ void dispatch_remote_switch_repair_hook(int stage, int flag, const char* reason)
     } else {
         DuskLog.info("Multiplayer remote switch repair checked stage={} flag={} reason={} "
                      "cblock={} jump_tbox={} lv4_poe_gate={} e_pz={} scannon={} "
-                     "faron_cage_sequence={} breakable_box={} picture_monitor={} npc_chin_monitor={}",
+                     "faron_cage_sequence={} breakable_box={} faron_north_mist_gate={} "
+                     "picture_monitor={} npc_chin_monitor={}",
                      stage, flag, reason, repairedCBlock, repairedJumpTbox, repairedLv4PoGate,
                      repairedPZ, repairedSCannon, repairedFaronCageSequence,
-                     repairedBreakableCarryBox, monitoredPicture, monitoredNpcChin);
+                     repairedBreakableCarryBox, repairedFaronNorthMistGate, monitoredPicture,
+                     monitoredNpcChin);
     }
 }
 
@@ -4139,7 +4361,7 @@ const char* packet_category(const std::string& type) {
     {
         return "world_state";
     }
-    if (type == "item_get" || type == "item_first_bit" ||
+    if (type == "item_get" || type == "item_first_bit" || type == "ooccoo_state" ||
         type == "collect_crystal" || type == "collect_mirror" ||
         type == "dark_clear_lv" || type == "transform_lv" || type == "region_bit" ||
         type == "collect" || type == "visited_room" || type == "letter_get")
@@ -4851,6 +5073,7 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
     }
 
     repair_synced_key_item_state(manualSync ? "manual_snapshot_encode" : "snapshot_encode");
+    hydrate_shared_ooccoo_from_local_save();
 
     json eventFlags = json::array();
     for (int i = 0; i < 256 * 8; ++i) {
@@ -5009,6 +5232,7 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
         {"max_life", dComIfGs_getMaxLife()},
         {"bottle_slots", dComIfGs_getBottleSlotCount()},
         {"rupees", dComIfGs_getRupee()},
+        {"ooccoo_state", make_shared_ooccoo_state()},
     };
     if (!targetClientId.empty()) {
         snapshot["target_client_id"] = targetClientId;
@@ -7573,6 +7797,10 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
 
         std::optional<ScopedRemoteSaveBitApplication> applyingRemoteSaveBit;
         applyingRemoteSaveBit.emplace();
+        if (message.contains("ooccoo_state")) {
+            decode_shared_ooccoo_state(message.value("ooccoo_state", json::object()),
+                                       "snapshot");
+        }
         for (const json& flag : message.value("event_flags", json::array())) {
             const uint16_t flagValue = static_cast<uint16_t>(flag.get<int>());
             if (is_unsynced_event_bit(flagValue)) {
@@ -8487,6 +8715,9 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             DuskLog.warn("Multiplayer ignored randomizer item get item_id={} active={} "
                          "matching_seed={}", itemId, randomizerActive, matchingSeed);
         }
+    } else if (type == "ooccoo_state") {
+        decode_shared_ooccoo_state(routedMessage.value("state", json::object()), "live");
+        apply_shared_ooccoo_local_form();
     } else if (type == "item_get") {
         const int itemId = message.value("item_id", -1);
         // Guard against double-apply. Verified directly in d_item.cpp: every
@@ -10647,6 +10878,7 @@ void update_connected() {
     update_remote_switch_policy_room_state();
     age_recent_remote_switches();
     tick_pending_manual_sync_apply();
+    apply_shared_ooccoo_local_form();
 
     if (sOrdonDayBoundaryReloadTransitionActive) {
         if (is_engine_stage_load_unsafe_for_multiplayer()) {
@@ -12964,6 +13196,81 @@ void notify_local_dungeon_item_set(int kind) {
         {"kind", kind},
     });
     DuskLog.info("Multiplayer sent local dungeon item bit stage={} kind={}", stageNo, kind);
+}
+
+void notify_local_ooccoo_acquired(int itemId) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit ||
+        (itemId != dItemNo_DUNGEON_EXIT_e && itemId != dItemNo_LV7_DUNGEON_EXIT_e))
+    {
+        return;
+    }
+
+    stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+    if (stagInfo == nullptr) {
+        return;
+    }
+
+    sSharedOoccoo = {};
+    sSharedOoccoo.exists = true;
+    sSharedOoccoo.ownerStage = dStage_stagInfo_GetSaveTbl(stagInfo);
+    sSharedOoccoo.cityVariant = itemId == dItemNo_LV7_DUNGEON_EXIT_e;
+    send_json({{"type", "ooccoo_state"}, {"state", make_shared_ooccoo_state()}});
+    DuskLog.info("Multiplayer sent Ooccoo acquisition owner_stage={} city_variant={}",
+                 sSharedOoccoo.ownerStage, sSharedOoccoo.cityVariant);
+}
+
+void notify_local_ooccoo_warp_out() {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    const int ownerStage = dComIfGs_getLastWarpAcceptStage();
+    const char* returnStage = dComIfGs_getWarpStageName();
+    if (ownerStage < 0 || ownerStage >= dSv_save_c::STAGE_MAX || returnStage == nullptr ||
+        returnStage[0] == '\0')
+    {
+        return;
+    }
+
+    const bool retainCityVariant =
+        sSharedOoccoo.exists && sSharedOoccoo.ownerStage == ownerStage &&
+        sSharedOoccoo.cityVariant;
+    sSharedOoccoo.exists = true;
+    sSharedOoccoo.ownerStage = ownerStage;
+    sSharedOoccoo.cityVariant = retainCityVariant;
+    sSharedOoccoo.hasReturnMark = true;
+    sSharedOoccoo.returnStage = returnStage;
+    sSharedOoccoo.returnPos = dComIfGs_getWarpPlayerPos();
+    sSharedOoccoo.returnAngle = dComIfGs_getWarpPlayerAngleY();
+    sSharedOoccoo.returnRoom = dComIfGs_getWarpRoomNo();
+    send_json({{"type", "ooccoo_state"}, {"state", make_shared_ooccoo_state()}});
+    DuskLog.info("Multiplayer sent Ooccoo warp-out owner_stage={} return_stage={} room={}",
+                 ownerStage, sSharedOoccoo.returnStage,
+                 static_cast<int>(sSharedOoccoo.returnRoom));
+}
+
+void notify_local_ooccoo_cleared() {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
+    if (stagInfo == nullptr) {
+        return;
+    }
+    const int clearStage = dStage_stagInfo_GetSaveTbl(stagInfo);
+    if (sSharedOoccoo.exists && sSharedOoccoo.ownerStage != clearStage) {
+        DuskLog.info("Multiplayer kept newer Ooccoo during dungeon clear clear_stage={} "
+                     "owner_stage={}",
+                     clearStage, sSharedOoccoo.ownerStage);
+        return;
+    }
+
+    sSharedOoccoo = {};
+    json state = make_shared_ooccoo_state();
+    state["clear_stage"] = clearStage;
+    send_json({{"type", "ooccoo_state"}, {"state", state}});
+    DuskLog.info("Multiplayer sent Ooccoo cleared state stage={}", clearStage);
 }
 
 void notify_local_item_get(int itemId) {

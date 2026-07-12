@@ -28,6 +28,10 @@ void notify_local_tbox_set(int flag);
 // 6=OOCCOO_NOTE (warp), 7=STAGE_BOSS_ENEMY_2 (mid-boss).
 void notify_local_dungeon_item_set(int kind);
 
+void notify_local_ooccoo_acquired(int itemId);
+void notify_local_ooccoo_warp_out();
+void notify_local_ooccoo_cleared();
+
 // Item acquisition lane for durable inventory/progression effects that are
 // not represented by actor/chest flags alone. Keep this narrowly filtered in
 // the implementation; TP's item table also includes consumables.

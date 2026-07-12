@@ -1333,6 +1333,9 @@ void item_func_COMPUS() {
 void item_func_DUNGEON_EXIT() {
     dComIfGs_onDungeonItemWarp();
     dComIfGs_setItem(SLOT_18, dItemNo_DUNGEON_EXIT_e);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_ooccoo_acquired(dItemNo_DUNGEON_EXIT_e);
+#endif
 }
 
 void item_func_BOSS_KEY() {
@@ -1393,6 +1396,9 @@ void item_func_MAGIC_LV1() {
 
 void item_func_DUNGEON_EXIT_2() {
     dComIfGs_setItem(SLOT_18, dItemNo_DUNGEON_EXIT_e);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_ooccoo_acquired(dItemNo_DUNGEON_EXIT_e);
+#endif
 }
 
 void item_func_WALLET_LV1() {
@@ -2266,6 +2272,9 @@ void item_func_ANCIENT_DOCUMENT2() {
 
 void item_func_LV7_DUNGEON_EXIT() {
     dComIfGs_setItem(SLOT_18, dItemNo_LV7_DUNGEON_EXIT_e);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_ooccoo_acquired(dItemNo_LV7_DUNGEON_EXIT_e);
+#endif
 }
 
 void item_func_LINKS_SAVINGS() {

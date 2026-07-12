@@ -4854,6 +4854,9 @@ int daAlink_c::procCoWarpInit(int param_0, int param_1) {
 #endif
                         dComIfGs_setItem(SLOT_18, dItemNo_NONE_e);
                         dComIfGs_resetLastWarpAcceptStage();
+#if TARGET_PC
+                        dusk::multiplayer::notify_local_ooccoo_cleared();
+#endif
                     }
                 }
 

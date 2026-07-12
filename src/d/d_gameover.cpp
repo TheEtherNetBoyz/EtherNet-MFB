@@ -164,6 +164,9 @@ int dGameover_c::_create() {
 #endif
                 dComIfGs_setItem(SLOT_18, dItemNo_NONE_e);
                 dComIfGs_resetLastWarpAcceptStage();
+#if TARGET_PC
+                dusk::multiplayer::notify_local_ooccoo_cleared();
+#endif
             }
 
             dMs_c->setUseType(3);

@@ -665,6 +665,9 @@ void dMeter2Info_c::warpOutProc() {
 
     dComIfGs_setWarpItemData(dComIfGp_getStartStageName(), pos, angle.y, room_no, 0, 1);
     dComIfGs_setItem(SLOT_18, dItemNo_DUNGEON_BACK_e);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_ooccoo_warp_out();
+#endif
 }
 
 void dMeter2Info_c::resetMeterString() {
