@@ -311,6 +311,18 @@ bool apply_pvp_player_damage(int attackClass, bool ironBallLaunch, int damage, f
             return player->procCoLargeDamageInit(-1, FALSE, 0, 0, nullptr, 0) != 0;
         }
 
+        // Vanilla damage dispatch keeps ordinary hits inside the swim procedure family.
+        // Sending a submerged human Link through procDamageInit() drops the swimming mode;
+        // re-entering it then refreshes the breath timer. Use the native directional swim
+        // damage reaction so PvP light hits preserve the current air supply.
+        if (attackClass == kPvpAttackLight && !player->checkWolf() &&
+            player->checkModeFlg(daAlink_c::MODE_SWIMMING))
+        {
+            player->setDamagePointNormal(damage);
+            player->current.angle.y = hitAngle;
+            return player->procSwimDamageInit(nullptr) != 0;
+        }
+
         // Vanilla routes every airborne hit through its large-damage reaction, even when
         // the attack itself is light. Keep the PvP damage class independent from that
         // reaction so an airborne light hit still deals light damage.
