@@ -137,13 +137,15 @@ void notify_local_light_drop_get_flag_set(uint8_t area);
 // already used for late-join catch-up.
 void notify_local_max_life_set(uint8_t maxLife);
 
-// Total occupied bottle slots (0-4), NOT bottle contents. Empty-bottle
-// grants are repeatable pickups sharing one item ID
+// Total occupied bottle slots (0-4), NOT bottle contents. In vanilla,
+// empty-bottle grants are repeatable pickups sharing one item ID
 // (dItemNo_EMPTY_BOTTLE_e) across up to 4 different NPCs/quests, the same
 // shape as the max-life bug above. Broadcasts the absolute slot count
 // (how many of the 4 slots are occupied by any bottle item, regardless of
 // what liquid each currently holds) and applies it on receive as a
 // monotonic max-merge, filling additional empty slots locally to match.
+// Randomizer live rewards use rando_item_get instead so the count and item
+// lanes cannot both apply the same bottle. Snapshots still carry the count.
 // Deliberately does not sync bottle contents (what liquid is in which
 // slot) -- that stays local/volatile per the existing consumables rule.
 void notify_local_bottle_slot_count_set(uint8_t count);

@@ -8605,11 +8605,17 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             DuskLog.info("Multiplayer applied remote max life value={}", value);
         }
     } else if (type == "bottle_slots") {
-        // Same monotonic max-merge as max_life. Fills additional empty
-        // slots locally (always as a generic empty bottle) to match the
-        // remote count -- never touches existing slot contents.
         const int count = message.value("count", -1);
-        if (count >= 0 && count <= 4) {
+        if (randomizer_multiplayer_sync_active()) {
+            // A randomizer pickup is already carried by rando_item_get. Older
+            // peers may also send this vanilla companion first; applying both
+            // turns one empty-bottle reward into two slots.
+            DuskLog.info("Multiplayer ignored live bottle slots count={} during randomizer",
+                         count);
+        } else if (count >= 0 && count <= 4) {
+            // Same monotonic max-merge as max_life. Fills additional empty
+            // slots locally (always as a generic empty bottle) to match the
+            // remote count -- never touches existing slot contents.
             const int localCount = dComIfGs_getBottleSlotCount();
             if (count > localCount) {
                 sApplyingRemoteSaveBit = true;
@@ -13843,12 +13849,14 @@ void notify_local_max_life_set(uint8_t maxLife) {
     DuskLog.info("Multiplayer sent local max life value={}", maxLife);
 }
 
-// Same shape as max_life: empty-bottle grants share one item ID across up
-// to 4 NPCs/quests, so the item_get lane swallows every one after the
-// first. Broadcasts the slot count only, not contents (see
-// notify_local_bottle_slot_count_set's declaration for why).
+// Vanilla empty-bottle grants share one item ID across up to 4 NPCs/quests,
+// so the item_get lane swallows every one after the first. Randomizer instead
+// carries every resolved reward through rando_item_get; sending this companion
+// lane as well would apply one bottle twice on receivers.
 void notify_local_bottle_slot_count_set(uint8_t count) {
-    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit ||
+        randomizer_multiplayer_sync_active())
+    {
         return;
     }
 
