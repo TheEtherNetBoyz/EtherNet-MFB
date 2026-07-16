@@ -2143,9 +2143,12 @@ inline u8 dComIfGs_getKeyNum() {
 }
 
 inline void dComIfGs_setKeyNum(u8 i_keyNum) {
+#if TARGET_PC
+    const u8 previousKeyNum = g_dComIfG_gameInfo.info.getMemory().getBit().getKeyNum();
+#endif
     g_dComIfG_gameInfo.info.getMemory().getBit().setKeyNum(i_keyNum);
 #if TARGET_PC
-    dusk::multiplayer::notify_local_key_num_set(i_keyNum);
+    dusk::multiplayer::notify_local_key_num_set(previousKeyNum, i_keyNum);
 #endif
 }
 

@@ -108,8 +108,10 @@ void notify_local_letter_get_set(int no);
 // the same setter this hooks, so one hook covers both triggers. The
 // receiver applies it as an absolute overwrite (last-write-wins), not an
 // OR-merge -- there is no per-key identity in this lane, by design, same
-// as OoT Anchor.
-void notify_local_key_num_set(uint8_t keyNum);
+// as OoT Anchor. In randomizer, rando_item_get owns key gains while this
+// lane continues to carry key consumption; previousKeyNum distinguishes the
+// two without depending on a playing host or packet timing.
+void notify_local_key_num_set(uint8_t previousKeyNum, uint8_t keyNum);
 
 // Light Drop tear count, per dark-twilight area (dSv_light_drop_c). Same
 // absolute-overwrite model as small keys above, for the same reason: the

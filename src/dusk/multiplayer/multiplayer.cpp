@@ -5265,6 +5265,7 @@ void update_local_bomb_bag_slot_sync() {
         return;
     }
 
+    const bool randomizerActive = randomizer_multiplayer_sync_active();
     for (int bagIdx = 0; bagIdx < 3; ++bagIdx) {
         if (is_rental_bomb_bag_slot(bagIdx)) {
             continue;
@@ -5277,7 +5278,7 @@ void update_local_bomb_bag_slot_sync() {
             (!previous.valid || previous.item != current.item || previous.count == 0);
 
         previous = current;
-        if (!shouldSend) {
+        if (!shouldSend || randomizerActive) {
             continue;
         }
 
@@ -8532,10 +8533,22 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         const int stage = message.value("stage", -1);
         const int count = message.value("count", -1);
         if (stage >= 0 && stage < dSv_save_c::STAGE_MAX && count >= 0 && count <= 99) {
-            sApplyingRemoteSaveBit = true;
-            dComIfGs_setKeyNum(stage, static_cast<u8>(count));
-            sApplyingRemoteSaveBit = false;
-            DuskLog.info("Multiplayer applied remote key num stage={} count={}", stage, count);
+            const int localCount = dComIfGs_getKeyNum(stage);
+            if (randomizer_multiplayer_sync_active() && count > localCount) {
+                // Randomizer key gains are already delivered by
+                // rando_item_get. Ignore the positive absolute companion
+                // emitted by older peers, but keep decreases so opening a
+                // locked door still synchronizes normally.
+                DuskLog.info("Multiplayer ignored live key gain stage={} local_count={} "
+                             "remote_count={} during randomizer",
+                             stage, localCount, count);
+            } else {
+                sApplyingRemoteSaveBit = true;
+                dComIfGs_setKeyNum(stage, static_cast<u8>(count));
+                sApplyingRemoteSaveBit = false;
+                DuskLog.info("Multiplayer applied remote key num stage={} count={}", stage,
+                             count);
+            }
         }
     } else if (type == "light_drop_num") {
         // A bare count is legacy last-write-wins data. New clients also attach
@@ -8763,8 +8776,19 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                 dComIfGs_getItem(SLOT_1, true), dComIfGs_getMaxOil(), dComIfGs_getOil());
         }
     } else if (type == "bomb_bag_slot") {
-        apply_remote_bomb_bag_slot(message.value("bag", -1), message.value("item", -1),
-                                   message.value("count", -1), "live");
+        if (randomizer_multiplayer_sync_active()) {
+            // Randomizer rewards already carry bag allocation and contents
+            // through rando_item_get. Exact bag slots remain in snapshots for
+            // catch-up, but applying this live companion can allocate a second
+            // bag if it and the reward are ever reordered by a relay.
+            DuskLog.info("Multiplayer ignored live bomb bag slot bag={} item={} count={} "
+                         "during randomizer",
+                         message.value("bag", -1), message.value("item", -1),
+                         message.value("count", -1));
+        } else {
+            apply_remote_bomb_bag_slot(message.value("bag", -1), message.value("item", -1),
+                                       message.value("count", -1), "live");
+        }
     } else if (type == "item_first_bit") {
         const int itemId = message.value("item_id", -1);
         const bool owned = message.value("owned", true);
@@ -13764,8 +13788,18 @@ void notify_local_letter_get_set(int no) {
 // straight from save state, not a per-instance bit. Works regardless of
 // where the receiving player physically is, unlike a fix that depends on
 // finding a live actor in the world.
-void notify_local_key_num_set(uint8_t keyNum) {
+void notify_local_key_num_set(uint8_t previousKeyNum, uint8_t keyNum) {
     if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    // rando_item_get is the authoritative lane for rewards. Sending the
+    // resulting absolute increase too would grant the same key twice on
+    // peers. Decreases remain live so door/key consumption still syncs.
+    if (randomizer_multiplayer_sync_active() && keyNum > previousKeyNum) {
+        DuskLog.info("Multiplayer suppressed local key gain previous_count={} count={} "
+                     "during randomizer",
+                     previousKeyNum, keyNum);
         return;
     }
 
