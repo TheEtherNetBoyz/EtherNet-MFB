@@ -7,6 +7,9 @@
 #include "f_op/f_op_actor_mng.h"
 #include "stages.h"
 #include "verify_item_functions.h"
+#include "dusk/randomizer/generator/utility/yaml.hpp"
+
+#include <array>
 
 bool playerIsInRoomStage(s32 room, const char* stage)
 {
@@ -126,6 +129,23 @@ u16 getItemMessageID(u8 itemId) {
     }
 
     return itemId + 0x65;
+}
+
+const std::string& getRandomizerItemName(u8 itemId) {
+    static const std::array<std::string, 256> itemNames = [] {
+        std::array<std::string, 256> names{};
+        const auto itemData = LOAD_EMBED_YAML(RANDO_DATA_PATH "items.yaml");
+        for (const auto& item : itemData) {
+            const int id = item["Id"].as<int>(-1);
+            if (id >= 0 && id < static_cast<int>(names.size())) {
+                names[id] = item["Name"].as<std::string>("");
+            }
+        }
+        return names;
+    }();
+
+    static const std::string unknownItem = "Unknown Item";
+    return itemNames[itemId].empty() ? unknownItem : itemNames[itemId];
 }
 
 int numCompletedDungeons() {

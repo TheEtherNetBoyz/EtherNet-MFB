@@ -32,6 +32,7 @@
 #include "dusk/multiplayer/invite_code.hpp"
 #include "dusk/multiplayer/remote_link_dummy.hpp"
 #include "dusk/randomizer/game/randomizer_context.hpp"
+#include "dusk/randomizer/game/tools.h"
 #include "dusk/autosave.h"
 #include "f_op/f_op_actor_mng.h"
 #include "f_op/f_op_camera_mng.h"
@@ -271,6 +272,8 @@ bool send_json(const json& message);
 void broadcast_to_direct_peers(const json& message, const std::string& excludePeerId = "");
 int angle_y_from_delta(float dx, float dz);
 void push_notification(std::string text, float durationSeconds);
+void push_player_notification(std::string playerName, std::string text, PlayerColor color,
+                              float durationSeconds = 5.0f);
 
 bool apply_ganondorf_remote_player_damage(const GanondorfRemotePlayerDamageEvent& damage) {
     daAlink_c* player = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
@@ -869,7 +872,9 @@ constexpr auto kLightDropTboxAssociationWindow = std::chrono::seconds(2);
 bool sNetworkStackStarted = false;
 
 struct Notification {
+    std::string playerName;
     std::string text;
+    PlayerColor playerColor;
     float ageSeconds = 0.0f;
     float durationSeconds = 5.0f;
 };
@@ -3479,7 +3484,20 @@ void push_notification(std::string text, float durationSeconds = 5.0f) {
         return;
     }
 
-    sNotifications.push_back({std::move(text), 0.0f, durationSeconds});
+    sNotifications.push_back({{}, std::move(text), {}, 0.0f, durationSeconds});
+    if (sNotifications.size() > 5) {
+        sNotifications.erase(sNotifications.begin());
+    }
+}
+
+void push_player_notification(std::string playerName, std::string text, PlayerColor color,
+                              float durationSeconds) {
+    if (playerName.empty() || text.empty()) {
+        return;
+    }
+
+    sNotifications.push_back(
+        {std::move(playerName), std::move(text), color, 0.0f, durationSeconds});
     if (sNotifications.size() > 5) {
         sNotifications.erase(sNotifications.begin());
     }
@@ -3879,7 +3897,7 @@ uint8_t get_player_color_slot(const std::string& peerId) {
     return slotIt != sPeerColorSlots.end() ? slotIt->second : 7;
 }
 
-PlayerColor get_player_color(const std::string& peerId) {
+PlayerColor get_player_color_for_slot(uint8_t slot) {
     static const PlayerColor kPlayerColors[8] = {
         PlayerColor{255, 255, 255, 255},
         PlayerColor{94, 211, 255, 255},
@@ -3890,7 +3908,11 @@ PlayerColor get_player_color(const std::string& peerId) {
         PlayerColor{184, 160, 255, 255},
         PlayerColor{90, 232, 209, 255},
     };
-    return kPlayerColors[get_player_color_slot(peerId)];
+    return kPlayerColors[std::min<uint8_t>(slot, static_cast<uint8_t>(7))];
+}
+
+PlayerColor get_player_color(const std::string& peerId) {
+    return get_player_color_for_slot(get_player_color_slot(peerId));
 }
 
 std::vector<MinimapPeerMarker> collect_minimap_peer_markers(uint32_t maxAgeTicks) {
@@ -8734,6 +8756,13 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         if (randomizerActive && matchingSeed && itemId >= 0 && itemId <= 0xFF) {
             ScopedRemoteSaveBitApplication applyingRemoteSaveBit;
             execResolvedItemGet(static_cast<u8>(itemId));
+            const std::string peerId = resolve_peer_id(routedMessage);
+            if (peerId != sSession.clientId) {
+                push_player_notification(
+                    display_name_for_peer(peerId),
+                    " found " + getRandomizerItemName(static_cast<u8>(itemId)),
+                    get_player_color(peerId));
+            }
             DuskLog.info("Multiplayer applied resolved randomizer item get item_id={}", itemId);
         } else {
             DuskLog.warn("Multiplayer ignored randomizer item get item_id={} active={} "
@@ -13134,6 +13163,16 @@ void draw_notifications_overlay() {
         for (const Notification& notification : sNotifications) {
             const float remaining = notification.durationSeconds - notification.ageSeconds;
             const float alpha = remaining < 1.0f ? remaining : 1.0f;
+            if (!notification.playerName.empty()) {
+                const PlayerColor color = notification.playerColor;
+                ImGui::PushStyleColor(
+                    ImGuiCol_Text,
+                    ImVec4(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f,
+                           (color.a / 255.0f) * alpha));
+                ImGui::TextUnformatted(notification.playerName.c_str());
+                ImGui::PopStyleColor();
+                ImGui::SameLine(0.0f, 0.0f);
+            }
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.94f, 0.97f, 1.0f, alpha));
             ImGui::TextUnformatted(notification.text.c_str());
             ImGui::PopStyleColor();
