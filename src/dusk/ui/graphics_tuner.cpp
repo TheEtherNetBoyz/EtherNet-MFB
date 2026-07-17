@@ -89,7 +89,7 @@ void set_value(GraphicsOption option, int value) {
     }
     case GraphicsOption::BloomMode:
         getSettings().game.bloomMode.setValue(static_cast<BloomMode>(std::clamp(
-            value, static_cast<int>(BloomMode::Off), static_cast<int>(BloomMode::Shield))));
+            value, static_cast<int>(BloomMode::Off), static_cast<int>(BloomMode::Dusk))));
         break;
     case GraphicsOption::DepthOfFieldMode:
         getSettings().game.depthOfFieldMode.setValue(static_cast<DepthOfFieldMode>(std::clamp(
@@ -225,8 +225,6 @@ Rml::String format_graphics_setting_value(GraphicsOption option, int value) {
             return "Classic";
         case BloomMode::Dusk:
             return "Dusklight";
-        case BloomMode::Shield:
-            return "Shield";
         }
         break;
     case GraphicsOption::DepthOfFieldMode:
