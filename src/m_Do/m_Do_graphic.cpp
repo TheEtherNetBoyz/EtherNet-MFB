@@ -1785,10 +1785,17 @@ void mDoGph_gInf_c::bloom_c::draw2() {
 // Goal: reproduce the exact "Native Bloom ON" look using the original full-resolution
 // (getWidth/getHeight) source and the original getZbufferTex/GXCopyTex/mDoGph_drawFilterQuad
 // plumbing, rather than the Classic path's fixed FB_WIDTH/FB_HEIGHT downscale.
-void mDoGph_gInf_c::bloom_c::drawShield() {
+void mDoGph_gInf_c::bloom_c::drawShield(bool blurred) {
     ZoneScoped;
     bool enabled = mEnable && m_buffer != NULL;
     if (mMonoColor.a != 0 || enabled) {
+        u32 blurRadius =
+            blurred ? std::max(1u, JUTVideo::getManager()->getRenderHeight() / FB_HEIGHT_BASE)
+                    : 0;
+        u32 copyBlurRadius = blurred ? std::max(1u, blurRadius / 2) : 0;
+        // Keep the game's framebuffer and copy dimensions unchanged. Aurora's render target
+        // already carries the internal-resolution scale, just as Dolphin's EFB does; applying
+        // that scale here as well makes the copy texture dimensions disagree with its GXTexObj.
         f32 width = mDoGph_gInf_c::getWidth();
         f32 height = mDoGph_gInf_c::getHeight();
         GXSetViewport(0.0f, 0.0f, width, height, 0.0f, 1.0f);
@@ -1832,7 +1839,11 @@ void mDoGph_gInf_c::bloom_c::drawShield() {
             mDoGph_drawFilterQuad(4, 4);
         }
         if (enabled) {
-            GXCreateFrameBuffer(width, height);
+            if (blurred) {
+                GXCreateScaledFrameBuffer(width, height, blurRadius);
+            } else {
+                GXCreateFrameBuffer(width, height);
+            }
 
             GXSetNumTevStages(3);
             GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
@@ -1859,7 +1870,11 @@ void mDoGph_gInf_c::bloom_c::drawShield() {
             GXSetTevAlphaOp(GX_TEVSTAGE2, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE,
                             GX_TEVPREV);
             GXSetBlendMode(GX_BM_NONE, GX_BL_ZERO, GX_BL_ZERO, GX_LO_OR);
-            GXColorS10 tevColor0 = {(s16)-mPoint, (s16)-mPoint, (s16)-mPoint, 0x40};
+            s16 bloomAlpha =
+                blurred ? s16(0x40 * dusk::getSettings().game.bloomMultiplier.getValue())
+                        : 0x40;
+            GXColorS10 tevColor0 = {(s16)-mPoint, (s16)-mPoint, (s16)-mPoint,
+                                    bloomAlpha};
             GXSetTevColorS10(GX_TEVREG0, tevColor0);
             GXColor tevColor1 = {mBlureRatio, mBlureRatio, mBlureRatio, mBlureRatio};
             GXSetTevColor(GX_TEVREG1, tevColor1);
@@ -1874,6 +1889,9 @@ void mDoGph_gInf_c::bloom_c::drawShield() {
             void* zBufferTex = getZbufferTex();
             GXSetTexCopySrc(0, 0, width / 2, height / 2);
             GXSetTexCopyDst(width / 4, height / 4, GX_TF_RGBA8, GX_TRUE);
+            if (blurred) {
+                GXSetCopyBlur(copyBlurRadius);
+            }
             GXCopyTex(zBufferTex, 0);
 
             TGXTexObj tmp_tex1;
@@ -1928,6 +1946,9 @@ void mDoGph_gInf_c::bloom_c::drawShield() {
             GXSetTexCopyDst(width / 8, height / 8, GX_TF_RGBA8, GX_TRUE);
 
             // Downsample EFB 1/4 to zBufferTex 1/8 (tmp_tex2).
+            if (blurred) {
+                GXSetCopyBlur(copyBlurRadius);
+            }
             GXCopyTex(zBufferTex, GX_FALSE);
 
             TGXTexObj tmp_tex2;
@@ -1948,6 +1969,9 @@ void mDoGph_gInf_c::bloom_c::drawShield() {
             // Now that we've upsampled and filtered our final bloom, copy 1/4 buffer back to zBufferTex.
             GXSetTexCopySrc(0, 0, width / 4, height / 4);
             GXSetTexCopyDst(width / 4, height / 4, GX_TF_RGBA8, GX_FALSE);
+            if (blurred) {
+                GXSetCopyBlur(copyBlurRadius);
+            }
             GXCopyTex(zBufferTex, GX_FALSE);
 
             GXRestoreFrameBuffer();
@@ -1980,14 +2004,13 @@ void mDoGph_gInf_c::bloom_c::draw() {
         return;
     }
 #if TARGET_PC
-    if (dusk::getSettings().game.bloomMode.getValue() == dusk::BloomMode::Shield) {
-        drawShield();
+    if (dusk::getSettings().game.bloomMode.getValue() == dusk::BloomMode::Classic) {
+        drawShield(true);
         return;
     }
+    // The Shield bloom option was disabled because it never worked correctly.
 #endif
-    if (dusk::getSettings().game.bloomMode.getValue() != dusk::BloomMode::Classic &&
-        dusk::getSettings().game.bloomMode.getValue() != dusk::BloomMode::Shield)
-    {
+    if (dusk::getSettings().game.bloomMode.getValue() != dusk::BloomMode::Classic) {
         return;
     }
 

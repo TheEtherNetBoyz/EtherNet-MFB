@@ -273,7 +273,7 @@ namespace dusk {
         void BloomModeControl() {
             auto& value = getSettings().game.bloomMode;
             int copy = static_cast<int>(value.getValue());
-            const char* items[] = {"Off", "Classic", "Dusk", "Shield"};
+            const char* items[] = {"Off", "Classic", "Dusk"};
             ImGui::TextUnformatted("Bloom Mode");
             ImGui::SameLine(170.0f);
             ImGui::SetNextItemWidth(150.0f);

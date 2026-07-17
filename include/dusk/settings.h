@@ -13,7 +13,7 @@ enum class BloomMode : int {
     Off = 0,
     Classic = 1,
     Dusk = 2,
-    Shield = 3,
+    // Shield = 3,  // Disabled because it never worked correctly.
 };
 
 enum class DepthOfFieldMode : int {
@@ -90,7 +90,7 @@ namespace config {
 template <>
 struct ConfigEnumRange<BloomMode> {
     static constexpr auto min = BloomMode::Off;
-    static constexpr auto max = BloomMode::Shield;
+    static constexpr auto max = BloomMode::Dusk;
 };
 
 template <>
