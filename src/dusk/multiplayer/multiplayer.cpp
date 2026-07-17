@@ -8757,7 +8757,9 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             ScopedRemoteSaveBitApplication applyingRemoteSaveBit;
             execResolvedItemGet(static_cast<u8>(itemId));
             const std::string peerId = resolve_peer_id(routedMessage);
-            if (peerId != sSession.clientId) {
+            if (peerId != sSession.clientId &&
+                itemId != dItemNo_Randomizer_HEART_e)
+            {
                 push_player_notification(
                     display_name_for_peer(peerId),
                     " found " + getRandomizerItemName(static_cast<u8>(itemId)),
