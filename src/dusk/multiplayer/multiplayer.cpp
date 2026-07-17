@@ -1389,6 +1389,14 @@ bool is_title_screen_active() {
     return fpcM_SearchByName(fpcNm_TITLE_e) != nullptr;
 }
 
+bool is_opening_or_title_screen_active() {
+    // The opening scene initializes temporary save data for the title-screen
+    // Link before the title actor itself exists. Those equipment setters are
+    // presentation-only and must not be published as persistent inventory.
+    return fpcM_SearchByName(fpcNm_OPENING_SCENE_e) != nullptr ||
+           is_title_screen_active();
+}
+
 bool is_manual_sync_request_safe() {
     return is_title_screen_active() || !is_stage_load_unsafe_for_multiplayer();
 }
@@ -8872,7 +8880,13 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
     } else if (type == "collect") {
         const int collectType = message.value("collect_type", -1);
         const int item = message.value("item", -1);
-        if (collectType >= 0 && collectType <= B_BUTTON_ITEM && item >= 0 && item < 8) {
+        if (randomizer_multiplayer_sync_active()) {
+            // Resolved randomizer rewards are authoritative for equipment
+            // progression. This also protects active randomizer saves from
+            // title-demo collect packets sent by older peers.
+            DuskLog.info("Multiplayer ignored remote collect type={} item={} during randomizer",
+                         collectType, item);
+        } else if (collectType >= 0 && collectType <= B_BUTTON_ITEM && item >= 0 && item < 8) {
             sApplyingRemoteSaveBit = true;
             g_dComIfG_gameInfo.info.getPlayer().getCollect().setCollect(collectType,
                                                                          static_cast<u8>(item));
@@ -13781,6 +13795,14 @@ void notify_local_region_bit_set(int region) {
 
 void notify_local_collect_set(int type, int item) {
     if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+
+    // Opening/title setup gives its display Link temporary equipment through
+    // the normal save setters. Keep that local presentation state off the
+    // persistent multiplayer inventory lane in both vanilla and randomizer.
+    if (is_opening_or_title_screen_active()) {
+        DuskLog.info("Multiplayer suppressed title/opening collect type={} item={}", type, item);
         return;
     }
 
