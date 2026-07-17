@@ -33,7 +33,7 @@ public:
         void draw();
 #if TARGET_PC
         void draw2();
-        void drawShield();
+        void drawShield(bool blurred);
 #endif
 
         u8 getEnable() { return mEnable; }

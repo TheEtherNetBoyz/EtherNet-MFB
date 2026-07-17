@@ -2535,7 +2535,13 @@ void dScnKy_env_light_c::setLight() {
                     S_fuwan_sin += (s16)cM_rndF(2000.0f) + 500;
                 #endif
 
-                blure_size += (u8)(sin * (0.2f * blure_size));
+                f32 pulseAmount = 0.2f;
+                #if TARGET_PC
+                if (dusk::getSettings().game.bloomMode.getValue() == dusk::BloomMode::Classic) {
+                    pulseAmount = 0.1f;
+                }
+                #endif
+                blure_size += (u8)(sin * (pulseAmount * blure_size));
             }
 
             mDoGph_gInf_c::getBloom()->setBlureSize(blure_size);
