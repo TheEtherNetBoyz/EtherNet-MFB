@@ -33,7 +33,9 @@ public:
         void draw();
 #if TARGET_PC
         void draw2();
-        void drawShield(bool blurred);
+        void drawClassic();
+        void drawLegacy();
+        void drawClassicPass(bool legacy);
 #endif
 
         u8 getEnable() { return mEnable; }
