@@ -1782,25 +1782,36 @@ void mDoGph_gInf_c::bloom_c::draw2() {
     }
 }
 
-// Verbatim port of the April-9 (pre-"Widescreen rework") bloom_c::draw() PC path.
-// Goal: reproduce the exact "Native Bloom ON" look using the original full-resolution
-// (getWidth/getHeight) source and the original getZbufferTex/GXCopyTex/mDoGph_drawFilterQuad
-// plumbing, rather than the Classic path's fixed FB_WIDTH/FB_HEIGHT downscale.
-void mDoGph_gInf_c::bloom_c::drawShield(bool blurred) {
+void mDoGph_gInf_c::bloom_c::drawClassic() {
+    drawClassicPass(false);
+}
+
+void mDoGph_gInf_c::bloom_c::drawLegacy() {
+    drawClassicPass(true);
+}
+
+// Classic and Legacy use the same original bloom algorithm. Classic retains the
+// high-resolution blur path formerly hidden behind drawShield(true), while Legacy
+// reproduces the live render-space routing used by the April 9 Aurora build.
+void mDoGph_gInf_c::bloom_c::drawClassicPass(bool legacy) {
     ZoneScoped;
     bool enabled = mEnable && m_buffer != NULL;
     if (mMonoColor.a != 0 || enabled) {
         u32 blurRadius =
-            blurred ? std::max(1u, JUTVideo::getManager()->getRenderHeight() / FB_HEIGHT_BASE)
-                    : 0;
-        u32 copyBlurRadius = blurred ? std::max(1u, blurRadius / 2) : 0;
-        // Keep the game's framebuffer and copy dimensions unchanged. Aurora's render target
-        // already carries the internal-resolution scale, just as Dolphin's EFB does; applying
-        // that scale here as well makes the copy texture dimensions disagree with its GXTexObj.
-        f32 width = mDoGph_gInf_c::getWidth();
-        f32 height = mDoGph_gInf_c::getHeight();
-        GXSetViewport(0.0f, 0.0f, width, height, 0.0f, 1.0f);
-        GXSetScissor(0, 0, width, height);
+            legacy ? 0
+                   : std::max(1u, JUTVideo::getManager()->getRenderHeight() / FB_HEIGHT_BASE);
+        u32 copyBlurRadius = legacy ? 0 : std::max(1u, blurRadius / 2);
+        f32 width = legacy ? JUTVideo::getManager()->getRenderWidth()
+                           : mDoGph_gInf_c::getWidth();
+        f32 height = legacy ? JUTVideo::getManager()->getRenderHeight()
+                            : mDoGph_gInf_c::getHeight();
+        if (legacy) {
+            GXSetViewportRender(0.0f, 0.0f, width, height, 0.0f, 1.0f);
+            GXSetScissorRender(0, 0, width, height);
+        } else {
+            GXSetViewport(0.0f, 0.0f, width, height, 0.0f, 1.0f);
+            GXSetScissor(0, 0, width, height);
+        }
 
         GXLoadTexObj(getFrameBufferTexObj(), GX_TEXMAP0);
         GXSetNumChans(0);
@@ -1840,10 +1851,10 @@ void mDoGph_gInf_c::bloom_c::drawShield(bool blurred) {
             mDoGph_drawFilterQuad(4, 4);
         }
         if (enabled) {
-            if (blurred) {
-                GXCreateScaledFrameBuffer(width, height, blurRadius);
-            } else {
+            if (legacy) {
                 GXCreateFrameBuffer(width, height);
+            } else {
+                GXCreateScaledFrameBuffer(width, height, blurRadius);
             }
 
             GXSetNumTevStages(3);
@@ -1872,8 +1883,8 @@ void mDoGph_gInf_c::bloom_c::drawShield(bool blurred) {
                             GX_TEVPREV);
             GXSetBlendMode(GX_BM_NONE, GX_BL_ZERO, GX_BL_ZERO, GX_LO_OR);
             s16 bloomAlpha =
-                blurred ? s16(0x40 * dusk::getSettings().game.bloomMultiplier.getValue())
-                        : 0x40;
+                legacy ? 0x40
+                       : s16(0x40 * dusk::getSettings().game.bloomMultiplier.getValue());
             GXColorS10 tevColor0 = {(s16)-mPoint, (s16)-mPoint, (s16)-mPoint,
                                     bloomAlpha};
             GXSetTevColorS10(GX_TEVREG0, tevColor0);
@@ -1890,7 +1901,7 @@ void mDoGph_gInf_c::bloom_c::drawShield(bool blurred) {
             void* zBufferTex = getZbufferTex();
             GXSetTexCopySrc(0, 0, width / 2, height / 2);
             GXSetTexCopyDst(width / 4, height / 4, GX_TF_RGBA8, GX_TRUE);
-            if (blurred) {
+            if (!legacy) {
                 GXSetCopyBlur(copyBlurRadius);
             }
             GXCopyTex(zBufferTex, 0);
@@ -1909,7 +1920,7 @@ void mDoGph_gInf_c::bloom_c::drawShield(bool blurred) {
             for (int texCoord = (int)GX_TEXCOORD1; texCoord < (int)GX_MAX_TEXCOORD; texCoord++) {
                 GXSetTexCoordGen((GXTexCoordID)texCoord, GX_TG_MTX2x4, GX_TG_TEX0, iVar11);
 
-                f32 dVar15 = mBlureSize * ((448.0f / getHeight()) / 6400.0f);
+                f32 dVar15 = mBlureSize * ((448.0f / height) / 6400.0f);
 
                 mDoMtx_stack_c::transS((dVar15 * cM_scos(sVar10)) * getInvScale(),
                                        dVar15 * cM_ssin(sVar10), 0.0f);
@@ -1947,7 +1958,7 @@ void mDoGph_gInf_c::bloom_c::drawShield(bool blurred) {
             GXSetTexCopyDst(width / 8, height / 8, GX_TF_RGBA8, GX_TRUE);
 
             // Downsample EFB 1/4 to zBufferTex 1/8 (tmp_tex2).
-            if (blurred) {
+            if (!legacy) {
                 GXSetCopyBlur(copyBlurRadius);
             }
             GXCopyTex(zBufferTex, GX_FALSE);
@@ -1970,7 +1981,7 @@ void mDoGph_gInf_c::bloom_c::drawShield(bool blurred) {
             // Now that we've upsampled and filtered our final bloom, copy 1/4 buffer back to zBufferTex.
             GXSetTexCopySrc(0, 0, width / 4, height / 4);
             GXSetTexCopyDst(width / 4, height / 4, GX_TF_RGBA8, GX_FALSE);
-            if (blurred) {
+            if (!legacy) {
                 GXSetCopyBlur(copyBlurRadius);
             }
             GXCopyTex(zBufferTex, GX_FALSE);
@@ -2006,10 +2017,13 @@ void mDoGph_gInf_c::bloom_c::draw() {
     }
 #if TARGET_PC
     if (dusk::getSettings().game.bloomMode.getValue() == dusk::BloomMode::Classic) {
-        drawShield(true);
+        drawClassic();
         return;
     }
-    // The Shield bloom option was disabled because it never worked correctly.
+    if (dusk::getSettings().game.bloomMode.getValue() == dusk::BloomMode::Legacy) {
+        drawLegacy();
+        return;
+    }
 #endif
     if (dusk::getSettings().game.bloomMode.getValue() != dusk::BloomMode::Classic) {
         return;
