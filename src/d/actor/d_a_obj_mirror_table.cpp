@@ -319,6 +319,13 @@ int daObjMirrorTable_c::execute() {
             dComIfG_Bgsp().Regist(&mBgW[1], this);
         }
     } else {
+        // Complete-only resources are allocated when this actor is created. If the
+        // flag changes while it is alive, wait for the room reload to replace it.
+        if (mpStairBrkAnm == NULL) {
+            setBaseMtx();
+            return 1;
+        }
+
         dComIfGs_onSaveSwitch(0x79);
 
         cXyz pos(1800.0f, 4700.0f, -21320.0f);
