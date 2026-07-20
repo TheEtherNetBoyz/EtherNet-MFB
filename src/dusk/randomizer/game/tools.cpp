@@ -118,7 +118,7 @@ int getStageID(const char* stage)
 bool playerIsOnTitleScreen() {
     // Player is either on title screen movie stage (S_MV000) or on title screen map layer 10
     return strcmp(dComIfGp_getStartStageName(), "S_MV000") == 0 ||
-          (strcmp(dComIfGp_getStartStageName(), "F_SP102") == 0 && dComIfG_play_c::getLayerNo(0) == 10);
+          (strcmp(dComIfGp_getStartStageName(), "F_SP102") == 0 && dComIfGp_getStartStageLayer() == 10);
 }
 
 u16 getItemMessageID(u8 itemId) {
