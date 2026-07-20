@@ -171,6 +171,7 @@ private:
     void captureRemoteBodyMatrixSnapshot(
         const dusk::multiplayer::RemoteModelMatrixSnapshot& i_source);
     void clearRemoteBodyMatrixInterpolation();
+    f32 getRemoteMatrixInterpolationStep() const;
     void applyInterpolatedRemoteBodyMatrices();
     void setBaseMtx();
     void calcModels();
@@ -315,6 +316,8 @@ private:
     dusk::multiplayer::RemoteModelMatrixSnapshot mCurrBodyMatrixSnapshot;
     bool mPrevBodyMatrixSnapshotValid;
     bool mCurrBodyMatrixSnapshotValid;
+    u32 mRemoteMatrixTicksSinceCapture;
+    u32 mRemoteMatrixBlendDurationTicks;
     RemoteModelMatrixInterpState mFaceMatrixInterp;
     RemoteModelMatrixInterpState mHandMatrixInterp;
     RemoteModelMatrixInterpState mSwordMatrixInterp;

@@ -69,6 +69,21 @@ static int sPvpTargetLogCount;
 static uint32_t sPvpTargetLogTicks;
 static f32 const l_remoteMotionAudioVolumeScale = 0.75f;
 
+constexpr f32 remoteMatrixFallbackInterpolationStep(u32 i_elapsedTicks,
+                                                    u32 i_durationTicks) {
+    if (i_durationTicks == 0 || i_elapsedTicks >= i_durationTicks) {
+        return 1.0f;
+    }
+    return static_cast<f32>(i_elapsedTicks) / static_cast<f32>(i_durationTicks);
+}
+
+static_assert(remoteMatrixFallbackInterpolationStep(0, 1) == 0.0f);
+static_assert(remoteMatrixFallbackInterpolationStep(1, 1) == 1.0f);
+static_assert(remoteMatrixFallbackInterpolationStep(1, 2) == 0.5f);
+static_assert(remoteMatrixFallbackInterpolationStep(2, 2) == 1.0f);
+static_assert(remoteMatrixFallbackInterpolationStep(3, 2) == 1.0f);
+static_assert(remoteMatrixFallbackInterpolationStep(0, 0) == 1.0f);
+
 static dCcD_SrcCyl l_pvpTargetCylSrc = {
     {
         {0, {{AT_TYPE_0, 0, 0}, {0xD8FBFDFF, 5}, 0x73}},
@@ -706,6 +721,8 @@ daRemoteLink_c::daRemoteLink_c()
       mCurrBodyMatrixSnapshot(),
       mPrevBodyMatrixSnapshotValid(false),
       mCurrBodyMatrixSnapshotValid(false),
+      mRemoteMatrixTicksSinceCapture(0),
+      mRemoteMatrixBlendDurationTicks(1),
       mFaceMatrixInterp(),
       mHandMatrixInterp(),
       mSwordMatrixInterp(),
@@ -2634,6 +2651,9 @@ int daRemoteLink_c::Execute() {
 
     if (remoteMatrixLocalInterpolationEnabled()) {
         dusk::frame_interp::add_interpolation_callback(&daRemoteLink_matrixInterpCallback, this);
+        if (mRemoteMatrixTicksSinceCapture < 120) {
+            ++mRemoteMatrixTicksSinceCapture;
+        }
     }
 
     if (isRemoteBombActorKind(mRemoteItemActorKind) && mItemActorMatrixValid) {
@@ -3035,7 +3055,7 @@ bool daRemoteLink_c::applyInterpolatedRemoteModelMatrices(
     J3DModel* i_model, RemoteModelMatrixInterpState& io_state, const char* i_label) {
     if (!remoteMatrixLocalInterpolationEnabled() || !io_state.prevValid || !io_state.currValid ||
         i_model == NULL || i_model->getModelData() == NULL ||
-        !dusk::frame_interp::is_enabled() || dusk::frame_interp::is_sim_frame())
+        (dusk::frame_interp::is_enabled() && dusk::frame_interp::is_sim_frame()))
     {
         return false;
     }
@@ -3084,7 +3104,7 @@ bool daRemoteLink_c::applyInterpolatedRemoteModelMatrices(
         }
     }
 
-    const f32 alpha = std::clamp(dusk::frame_interp::get_interpolation_step(), 0.0f, 1.0f);
+    const f32 alpha = getRemoteMatrixInterpolationStep();
     static int sAttachmentInterpLogCount = 0;
     if (sAttachmentInterpLogCount < 16) {
         DuskLog.info("RemoteLink: local matrix interp attachment={} alpha={} joints={} weights={}",
@@ -3206,9 +3226,7 @@ void daRemoteLink_c::applyInterpolatedRemoteAttachments() {
         // offset. Rebuild it after the wolf body has been interpolated so the
         // sword, sheath, and shield follow the render-frame body pose instead
         // of remaining at their last simulation-frame matrices.
-        if (dusk::frame_interp::is_enabled()) {
-            applyWolfEquipmentMatrices();
-        }
+        applyWolfEquipmentMatrices();
     } else {
         applyInterpolatedRemoteModelMatrices(mpSwordModel, mSwordMatrixInterp, "sword");
         applyInterpolatedRemoteModelMatrices(mpSheathModel, mSheathMatrixInterp, "sheath");
@@ -3273,6 +3291,8 @@ void daRemoteLink_c::captureRemoteBodyMatrixSnapshot(
     {
         mPrevBodyMatrixSnapshot = mCurrBodyMatrixSnapshot;
         mPrevBodyMatrixSnapshotValid = true;
+        mRemoteMatrixBlendDurationTicks = std::max<u32>(mRemoteMatrixTicksSinceCapture, 1);
+        mRemoteMatrixTicksSinceCapture = 0;
         static int sDuplicateCaptureLogCount = 0;
         if (sDuplicateCaptureLogCount < 12) {
             DuskLog.info("RemoteLink: local matrix interp duplicate body snapshot collapsed");
@@ -3289,6 +3309,8 @@ void daRemoteLink_c::captureRemoteBodyMatrixSnapshot(
     }
     mCurrBodyMatrixSnapshot = i_source;
     mCurrBodyMatrixSnapshotValid = true;
+    mRemoteMatrixBlendDurationTicks = std::max<u32>(mRemoteMatrixTicksSinceCapture, 1);
+    mRemoteMatrixTicksSinceCapture = 0;
 
     static int sCaptureLogCount = 0;
     if (sCaptureLogCount < 12) {
@@ -3304,6 +3326,8 @@ void daRemoteLink_c::clearRemoteBodyMatrixInterpolation() {
     mCurrBodyMatrixSnapshot = {};
     mPrevBodyMatrixSnapshotValid = false;
     mCurrBodyMatrixSnapshotValid = false;
+    mRemoteMatrixTicksSinceCapture = 0;
+    mRemoteMatrixBlendDurationTicks = 1;
     clearRemoteModelMatrixInterpolation(mFaceMatrixInterp);
     clearRemoteModelMatrixInterpolation(mHandMatrixInterp);
     clearRemoteModelMatrixInterpolation(mSwordMatrixInterp);
@@ -3319,6 +3343,15 @@ void daRemoteLink_c::clearRemoteBodyMatrixInterpolation() {
 void daRemoteLink_c::applyRemoteBodyMatrixInterpolationForPresentation() {
     applyInterpolatedRemoteBodyMatrices();
     applyInterpolatedRemoteAttachments();
+}
+
+f32 daRemoteLink_c::getRemoteMatrixInterpolationStep() const {
+    if (dusk::frame_interp::is_enabled()) {
+        return std::clamp(dusk::frame_interp::get_interpolation_step(), 0.0f, 1.0f);
+    }
+
+    return remoteMatrixFallbackInterpolationStep(mRemoteMatrixTicksSinceCapture,
+                                                 mRemoteMatrixBlendDurationTicks);
 }
 
 bool daRemoteLink_c::getNameLabelPosition(cXyz* o_pos) const {
@@ -3372,12 +3405,7 @@ void daRemoteLink_c::applyInterpolatedRemoteBodyMatrices() {
         return;
     }
 
-    if (!dusk::frame_interp::is_enabled()) {
-        logApplyReject("frame_interp_disabled");
-        return;
-    }
-
-    if (dusk::frame_interp::is_sim_frame()) {
+    if (dusk::frame_interp::is_enabled() && dusk::frame_interp::is_sim_frame()) {
         logApplyReject("sim_frame");
         return;
     }
@@ -3432,7 +3460,7 @@ void daRemoteLink_c::applyInterpolatedRemoteBodyMatrices() {
         }
     }
 
-    f32 alpha = std::clamp(dusk::frame_interp::get_interpolation_step(), 0.0f, 1.0f);
+    f32 alpha = getRemoteMatrixInterpolationStep();
     static int sLocalInterpLogCount = 0;
     if (sLocalInterpLogCount < 12) {
         DuskLog.info("RemoteLink: local matrix interp apply alpha={} joints={} weights={}",
@@ -4018,6 +4046,15 @@ void daRemoteLink_c::stopRemoteActiveSounds() {
 int daRemoteLink_c::Draw() {
     if (isRemoteLinkSceneUnsafe()) {
         return TRUE;
+    }
+
+    // Remote matrix packets can arrive less often than the 30 Hz simulation.
+    // Only use the fallback after an observed multi-tick packet gap, leaving the
+    // normal 30 Hz path byte-for-byte on its existing matrices.
+    if (remoteMatrixLocalInterpolationEnabled() && !dusk::frame_interp::is_enabled() &&
+        mRemoteMatrixBlendDurationTicks > 1)
+    {
+        applyRemoteBodyMatrixInterpolationForPresentation();
     }
 
     if (sDrawLogCount < 5) {
