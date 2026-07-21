@@ -290,8 +290,6 @@ void ImGuiOnline::draw(bool& open) {
                     rememberLobbyName(m_room);
                 }
                 ImGui::SetNextItemWidth(190.0f);
-                ImGui::InputText("Bind", m_bindHost, sizeof(m_bindHost));
-                ImGui::SetNextItemWidth(190.0f);
                 ImGui::InputText("Public Host", m_publicHost, sizeof(m_publicHost));
                 ImGui::SetNextItemWidth(190.0f);
                 ImGui::InputInt("Port", &m_port);
