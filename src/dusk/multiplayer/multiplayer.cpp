@@ -8699,6 +8699,14 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             }
             begin_flag_trace_window("remote_rx", "switch", stage, flag, set, sourceActor,
                                     sourceRoom, sourceParams);
+            // Completion must release every local participant before the rest of the
+            // sequence can flush. Keep the switch itself deferred until all peers have
+            // reported inactive, but do not leave it trapped behind that same fence.
+            if (stage == kProgressionCueFaronCageStage &&
+                flag == kFaronWarpSequenceCompleteSwitch && set)
+            {
+                set_local_faron_warp_sequence_active(false);
+            }
             if (is_faron_warp_sequence_switch(stage, flag) && should_defer_faron_warp_sequence()) {
                 sDeferredFaronWarpSequenceEvents.push_back(routedMessage);
                 DuskLog.info("Multiplayer deferred remote Faron warp switch peer={} stage={} "
@@ -13506,17 +13514,24 @@ void notify_local_memory_switch_set(int flag) {
         message["source_params"] = sLocalSwitchActorContext.actorParams;
     }
 
-    if (is_faron_warp_sequence_switch(stageNo, flag) && should_defer_faron_warp_sequence()) {
-        sDeferredFaronWarpSequenceBroadcasts.push_back(std::move(message));
-        if (flag == kFaronWarpSequenceCompleteSwitch) {
-            set_local_faron_warp_sequence_active(false);
-        }
-        DuskLog.info("Multiplayer deferred local Faron warp switch set stage={} flag={}",
+    // Switch 71 is also the coordination edge that tells the other fight
+    // participants to lower their safeguard. Sending it only with the deferred
+    // batch leaves every receiver waiting for a completion it cannot receive.
+    if (stageNo == kProgressionCueFaronCageStage &&
+        flag == kFaronWarpSequenceCompleteSwitch)
+    {
+        set_local_faron_warp_sequence_active(false);
+        send_json(message);
+        DuskLog.info("Multiplayer sent local Faron warp completion switch stage={} flag={}",
                      stageNo, flag);
         return;
     }
-    if (stageNo == kProgressionCueFaronCageStage && flag == kFaronWarpSequenceCompleteSwitch) {
-        set_local_faron_warp_sequence_active(false);
+
+    if (is_faron_warp_sequence_switch(stageNo, flag) && should_defer_faron_warp_sequence()) {
+        sDeferredFaronWarpSequenceBroadcasts.push_back(std::move(message));
+        DuskLog.info("Multiplayer deferred local Faron warp switch set stage={} flag={}",
+                     stageNo, flag);
+        return;
     }
 
     send_json(message);
