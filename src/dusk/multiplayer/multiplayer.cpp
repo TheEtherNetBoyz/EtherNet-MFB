@@ -972,6 +972,9 @@ constexpr uint32_t kOrdonDayBoundaryReloadTimeoutTicks = 180;
 bool sMirrorCompleteReloadPending = false;
 std::string sMirrorCompleteReloadPeerId;
 uint16_t sMirrorCompleteReloadFlag = 0;
+bool sZoraThawReloadPending = false;
+std::string sZoraThawReloadPeerId;
+uint16_t sZoraThawReloadFlag = 0;
 std::set<uint16_t> sDeferredFaronDayBoundaryBroadcasts;
 std::vector<json> sDeferredFaronDayBoundaryEvents;
 bool sLocalFaronCageSequenceActive = false;
@@ -1055,6 +1058,7 @@ constexpr int kFaronWarpSequenceReturnSwitch = 15; // Returned to the S Faron wa
 constexpr int kFaronWarpSequenceCompleteSwitch = 71; // Last local switch in the warp sequence.
 constexpr uint16_t kFaronWarpSequenceNightStalkerEventBit = 0x1202;
 constexpr uint16_t kFaronWarpSequenceMidnaChargeEventBit = 0x0501;
+constexpr uint16_t kZoraThawEventBit = 0x0880;
 constexpr uint16_t kProgressionCueSewersCompleteEventBit = 0x6140; // offset 0x61 bit 64 - "remove midna from z (temporary flag after sewers)".
 constexpr uint16_t kProgressionCueFaronTwilightEventBit = 0x0640; // offset 0x06 bit 64 - "watched faron twilight intro cutscene".
 constexpr int kUnsyncedSwitchOrdonStage = dStage_SaveTbl_ORDON;
@@ -1523,6 +1527,11 @@ void update_local_faron_cage_sequence_state() {
 
 bool is_mirror_complete_reload_stage(std::string_view stage) {
     return stage == "F_SP118" || stage == "F_SP125";
+}
+
+bool is_zora_thaw_reload_area(std::string_view stage, int room) {
+    return stage == "F_SP112" || stage == "F_SP113" || stage == "F_SP126" ||
+           (stage == "F_SP115" && room == 0);
 }
 
 bool is_local_final_ganondorf_ready() {
@@ -2420,6 +2429,65 @@ bool flush_mirror_complete_reload() {
     DuskLog.info("Multiplayer Mirror completion restarting current room peer={} flag={} "
                  "stage={} room={}", peerId, flag, current_stage_name(),
                  dComIfGp_roomControl_getStayNo());
+    daPy_py_c::forceRestartRoom(0, 5, 0xC9);
+    return true;
+}
+
+void queue_zora_thaw_reload(const std::string& peerId, uint16_t flag) {
+    if (sZoraThawReloadPending) {
+        return;
+    }
+
+    const int room = dComIfGp_roomControl_getStayNo();
+    if (!is_zora_thaw_reload_area(current_stage_name(), room)) {
+        apply_remote_event_bit(flag, true);
+        DuskLog.info("Multiplayer Zora thaw applied without reload peer={} flag={} stage={} "
+                     "room={} reason=outside_affected_area",
+                     peerId, flag, current_stage_name(), room);
+        return;
+    }
+
+    sZoraThawReloadPending = true;
+    sZoraThawReloadPeerId = peerId;
+    sZoraThawReloadFlag = flag;
+    push_notification("Zora's Domain thawed; updating area", 4.0f);
+    DuskLog.info("Multiplayer Zora thaw reload queued peer={} flag={} stage={} room={}",
+                 peerId, flag, current_stage_name(), room);
+}
+
+bool flush_zora_thaw_reload() {
+    if (!sZoraThawReloadPending) {
+        return false;
+    }
+
+    const uint16_t flag = sZoraThawReloadFlag;
+    const std::string peerId = sZoraThawReloadPeerId;
+    sZoraThawReloadPending = false;
+    sZoraThawReloadPeerId.clear();
+    sZoraThawReloadFlag = 0;
+    apply_remote_event_bit(flag, true);
+
+    const char* stage = current_stage_name();
+    const int room = dComIfGp_roomControl_getStayNo();
+    if (!is_zora_thaw_reload_area(stage, room)) {
+        DuskLog.info("Multiplayer Zora thaw applied without reload peer={} flag={} stage={} "
+                     "room={} reason=left_affected_area",
+                     peerId, flag, stage, room);
+        return false;
+    }
+
+    if (std::strcmp(stage, "F_SP126") == 0 ||
+        (std::strcmp(stage, "F_SP115") == 0 && room == 0))
+    {
+        DuskLog.info("Multiplayer Zora thaw warping to Domain peer={} flag={} sourceStage={} "
+                     "sourceRoom={} destStage=F_SP113 destRoom=1 destPoint=10",
+                     peerId, flag, stage, room);
+        dComIfGp_setNextStage("F_SP113", 10, 1, -1, 0.0f, 0, 1, 0, 0, 1, 3);
+        return true;
+    }
+
+    DuskLog.info("Multiplayer Zora thaw restarting current room peer={} flag={} stage={} room={}",
+                 peerId, flag, stage, room);
     daPy_py_c::forceRestartRoom(0, 5, 0xC9);
     return true;
 }
@@ -4269,6 +4337,9 @@ void reset_connection_state() {
     sMirrorCompleteReloadPending = false;
     sMirrorCompleteReloadPeerId.clear();
     sMirrorCompleteReloadFlag = 0;
+    sZoraThawReloadPending = false;
+    sZoraThawReloadPeerId.clear();
+    sZoraThawReloadFlag = 0;
     sDeferredFaronDayBoundaryBroadcasts.clear();
     sDeferredFaronDayBoundaryEvents.clear();
     sLocalFaronCageSequenceActive = false;
@@ -8509,6 +8580,10 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             queue_mirror_complete_reload(peerId, flag);
             return;
         }
+        if (set && flag == kZoraThawEventBit && !dComIfGs_isEventBit(flag)) {
+            queue_zora_thaw_reload(peerId, flag);
+            return;
+        }
         if (set && is_ordon_day_boundary_event_bit(flag) &&
             is_local_faron_cage_sequence_active())
         {
@@ -11052,6 +11127,9 @@ void update_connected() {
         if (flush_mirror_complete_reload()) {
             return;
         }
+        if (flush_zora_thaw_reload()) {
+            return;
+        }
         if (flush_ordon_day_boundary_reload()) {
             return;
         }
@@ -12071,6 +12149,12 @@ void apply_sync_flags_enabled(bool enabled) {
         sOrdonDayBoundaryReloadWaitTicks = 0;
         sOrdonDayBoundaryReloadTransitionActive = false;
         sOrdonDayBoundaryReloadSawStageLoad = false;
+        sMirrorCompleteReloadPending = false;
+        sMirrorCompleteReloadPeerId.clear();
+        sMirrorCompleteReloadFlag = 0;
+        sZoraThawReloadPending = false;
+        sZoraThawReloadPeerId.clear();
+        sZoraThawReloadFlag = 0;
         sPendingManualSyncInfo.reset();
         sPendingManualFlagsSyncSave.reset();
         sPendingManualSyncVibration.reset();
