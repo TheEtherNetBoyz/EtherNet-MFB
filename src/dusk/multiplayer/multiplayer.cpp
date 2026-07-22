@@ -1113,7 +1113,6 @@ constexpr uint32_t kPendingSyncReplyTimeoutTicks = 1800;
 // pickup in the catch-up snapshot even if vanilla has not committed the
 // current stage memory back into the savedata table yet.
 std::map<int, std::set<int>> sObservedMemoryItems;
-std::set<int> sObservedKeyItems;
 
 struct BombBagSlotSyncState {
     u8 item = dItemNo_NONE_e;
@@ -2059,12 +2058,6 @@ void hydrate_shared_ooccoo_from_local_save() {
     }
 }
 
-void remember_synced_key_item(int itemId) {
-    if (is_synced_key_item(itemId)) {
-        sObservedKeyItems.insert(itemId);
-    }
-}
-
 void repair_lantern_item_state(const char* reason) {
     if (!dComIfGs_isItemFirstBit(dItemNo_KANTERA_e)) {
         return;
@@ -2072,7 +2065,6 @@ void repair_lantern_item_state(const char* reason) {
 
     const bool wasApplyingRemoteSaveBit = sApplyingRemoteSaveBit;
     sApplyingRemoteSaveBit = true;
-    remember_synced_key_item(dItemNo_KANTERA_e);
     if (dComIfGs_getItem(SLOT_1, true) != dItemNo_KANTERA_e) {
         dComIfGs_setItem(SLOT_1, dItemNo_KANTERA_e);
         DuskLog.info("Multiplayer repaired lantern inventory slot reason={}", reason);
@@ -2088,22 +2080,28 @@ void repair_lantern_item_state(const char* reason) {
     sApplyingRemoteSaveBit = wasApplyingRemoteSaveBit;
 }
 
-void repair_synced_key_item_state(const char* reason) {
-    const bool wasApplyingRemoteSaveBit = sApplyingRemoteSaveBit;
-    sApplyingRemoteSaveBit = true;
-
-    for (const int itemId : sObservedKeyItems) {
-        if (!is_synced_key_item(itemId)) {
-            continue;
-        }
-        if (!dComIfGs_isItemFirstBit(static_cast<u8>(itemId))) {
-            execItemGet(static_cast<u8>(itemId));
-            DuskLog.info("Multiplayer repaired synced key item get item_id={} reason={}",
-                         itemId, reason);
+std::vector<u8> capture_current_synced_key_items() {
+    std::vector<u8> items;
+    for (int itemId = 0; itemId < 256; ++itemId) {
+        if (is_synced_key_item(itemId) &&
+            dComIfGs_isItemFirstBit(static_cast<u8>(itemId)))
+        {
+            items.push_back(static_cast<u8>(itemId));
         }
     }
+    return items;
+}
 
-    repair_lantern_item_state(reason);
+void restore_captured_synced_key_items(const std::vector<u8>& items, const char* reason) {
+    const bool wasApplyingRemoteSaveBit = sApplyingRemoteSaveBit;
+    sApplyingRemoteSaveBit = true;
+    for (const u8 itemId : items) {
+        if (!dComIfGs_isItemFirstBit(itemId)) {
+            execItemGet(itemId);
+            DuskLog.info("Multiplayer restored current key item item_id={} reason={}",
+                         static_cast<int>(itemId), reason);
+        }
+    }
     sApplyingRemoteSaveBit = wasApplyingRemoteSaveBit;
 }
 
@@ -5027,10 +5025,12 @@ bool apply_manual_sync_full_state(const std::string& encoded) {
     }
 
     toggleAutoSave(false);
+    const std::vector<u8> localKeyItems = capture_current_synced_key_items();
     const u8 vibration = dComIfGs_getOptVibration();
     std::memcpy(&g_dComIfG_gameInfo.info, raw.data() + sizeof(packet), sizeof(dSv_info_c));
     g_dComIfG_gameInfo.info.getPlayer().getConfig().setVibration(vibration);
-    repair_synced_key_item_state("manual_full_state_decode");
+    restore_captured_synced_key_items(localKeyItems, "manual_full_state_decode");
+    repair_lantern_item_state("manual_full_state_decode");
     sPendingManualSyncInfo = g_dComIfG_gameInfo.info;
     sPendingManualSyncVibration = vibration;
     sManualSyncFullStateTransitionActive = true;
@@ -5144,14 +5144,16 @@ bool apply_manual_flags_sync_full_state(const std::string& encoded) {
     syncedSave.getPlayer().getConfig() = localConfig;
 
     toggleAutoSave(false);
+    const std::vector<u8> localKeyItems = capture_current_synced_key_items();
     g_dComIfG_gameInfo.info.setSavedata(syncedSave);
     dSv_memory_c currentMemory = syncedSave.getSave(currentStage);
     g_dComIfG_gameInfo.info.setMemory(currentMemory);
-    repair_synced_key_item_state("manual_flags_sync_decode");
+    restore_captured_synced_key_items(localKeyItems, "manual_flags_sync_decode");
+    repair_lantern_item_state("manual_flags_sync_decode");
 
     // Keep a durable-only copy for a second application after the room reload. This
     // prevents scene teardown/load code from restoring stale pre-sync save data.
-    sPendingManualFlagsSyncSave = syncedSave;
+    sPendingManualFlagsSyncSave = g_dComIfG_gameInfo.info.getSavedata();
     sManualSyncReloadPending = true;
     DuskLog.info("Multiplayer applied manual flags sync from stage={} room={}; queued room restart",
                  packet.stageName, static_cast<int>(packet.roomNo));
@@ -5173,7 +5175,6 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
         return;
     }
 
-    repair_synced_key_item_state(manualSync ? "manual_snapshot_encode" : "snapshot_encode");
     hydrate_shared_ooccoo_from_local_save();
 
     json eventFlags = json::array();
@@ -5270,7 +5271,6 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
     json keyItems = json::array();
     for (int i = 0; i < 256; ++i) {
         if (is_synced_key_item(i) && dComIfGs_isItemFirstBit(static_cast<u8>(i))) {
-            remember_synced_key_item(i);
             keyItems.push_back(i);
         }
     }
@@ -8009,15 +8009,12 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         }
         for (const json& idEntry : message.value("key_items", json::array())) {
             const int itemId = idEntry.get<int>();
-            if (is_synced_key_item(itemId)) {
-                remember_synced_key_item(itemId);
-            }
             if (is_synced_key_item(itemId) && !dComIfGs_isItemFirstBit(static_cast<u8>(itemId))) {
                 execItemGet(static_cast<u8>(itemId));
                 DuskLog.info("Multiplayer snapshot key item item_id={}", itemId);
             }
         }
-        repair_synced_key_item_state("snapshot_apply");
+        repair_lantern_item_state("snapshot_apply");
         for (const json& entry : message.value("bomb_bag_slots", json::array())) {
             apply_remote_bomb_bag_slot(entry.value("bag", -1), entry.value("item", -1),
                                        entry.value("count", -1), "snapshot");
@@ -8877,19 +8874,14 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         // (e.g. from a resent snapshot) would silently reassign that slot
         // back to the original item, reverting any slot swap the local
         // player made since first picking it up.
-        if (is_synced_key_item(itemId)) {
-            remember_synced_key_item(itemId);
-        }
         if (is_synced_key_item(itemId) && !dComIfGs_isItemFirstBit(static_cast<u8>(itemId))) {
             sApplyingRemoteSaveBit = true;
             execItemGet(static_cast<u8>(itemId));
             sApplyingRemoteSaveBit = false;
             DuskLog.info("Multiplayer applied remote item get item_id={}", itemId);
         }
-        // A live item event is authoritative only for this item. Do not use it as an
-        // opportunity to replay every item ever observed during the session: after a
-        // manual state replacement that historical set can contain intentionally absent
-        // items (notably BOMB_BAG_LV1), which would grant and re-broadcast unrelated gear.
+        // A live item event is authoritative only for this item. Current save state,
+        // rather than historical observations, supplies late-join snapshots.
         if (itemId == dItemNo_KANTERA_e) {
             repair_lantern_item_state("live_item_get");
             DuskLog.info(
@@ -11018,7 +11010,7 @@ void tick_pending_manual_sync_apply() {
     if (sPendingManualSyncInfo.has_value()) {
         g_dComIfG_gameInfo.info = *sPendingManualSyncInfo;
         sPendingManualSyncInfo.reset();
-        repair_synced_key_item_state("manual_full_state_reapply");
+        repair_lantern_item_state("manual_full_state_reapply");
         if (sPendingManualSyncVibration.has_value()) {
             dComIfGs_setOptVibration(*sPendingManualSyncVibration);
             dComIfGp_setNowVibration(*sPendingManualSyncVibration);
@@ -11031,7 +11023,7 @@ void tick_pending_manual_sync_apply() {
     } else {
         g_dComIfG_gameInfo.info.setSavedata(*sPendingManualFlagsSyncSave);
         sPendingManualFlagsSyncSave.reset();
-        repair_synced_key_item_state("manual_flags_sync_reapply");
+        repair_lantern_item_state("manual_flags_sync_reapply");
         DuskLog.info("Multiplayer manual flags save data reapplied after room reload");
     }
     sManualSyncFullStateTransitionActive = false;
@@ -13471,7 +13463,6 @@ void notify_local_item_get(int itemId) {
         return;
     }
 
-    remember_synced_key_item(itemId);
     send_json({
         {"type", "item_get"},
         {"item_id", itemId},
