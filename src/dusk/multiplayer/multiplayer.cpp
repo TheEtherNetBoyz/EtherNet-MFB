@@ -2563,6 +2563,15 @@ bool is_group2_lifecycle_actor(int actorName) {
     return group2_lifecycle_actor_reason(actorName) != nullptr;
 }
 
+// The Eldin Gorge bridge cutscene reuses Tag_Mhint as an automatic event-area
+// trigger. Unlike ordinary per-player hint lifecycle switches, its output is
+// the durable completion switch that prevents the cutscene from firing again.
+bool is_eldin_gorge_bridge_cutscene_completion_switch(int stage, int flag, int sourceActor,
+                                                       int sourceRoom, uint32_t sourceParams) {
+    return stage == 6 && flag == 24 && sourceActor == fpcNm_Tag_Mhint_e &&
+           sourceRoom == 3 && sourceParams == 0xFFFFFFFF;
+}
+
 void remember_remote_switch(int stage, int flag, bool deferred) {
     for (RecentRemoteSwitch& recent : sRecentRemoteSwitches) {
         if (recent.stage == stage && recent.flag == flag) {
@@ -3017,9 +3026,20 @@ void suppress_remote_switch_bit(int stage, int flag, const RemoteSwitchPolicy& p
                  policy.reason);
 }
 
-bool suppress_remote_switch_from_source_actor(int stage, int flag, int sourceActor) {
+bool suppress_remote_switch_from_source_actor(int stage, int flag, int sourceActor,
+                                              int sourceRoom, uint32_t sourceParams,
+                                              bool hasSourceParams) {
     const char* reason = group2_lifecycle_actor_reason(sourceActor);
     if (reason == nullptr) {
+        return false;
+    }
+
+    if (hasSourceParams &&
+        is_eldin_gorge_bridge_cutscene_completion_switch(stage, flag, sourceActor, sourceRoom,
+                                                         sourceParams)) {
+        DuskLog.info("Multiplayer allowed remote Eldin Gorge bridge cutscene completion switch "
+                     "stage={} flag={} sourceActor={} sourceRoom={} sourceParams=0x{:08X}",
+                     stage, flag, sourceActor, sourceRoom, sourceParams);
         return false;
     }
 
@@ -8762,6 +8782,7 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         const int sourceActor = message.value("source_actor", -1);
         const int sourceRoom = message.value("source_room", -128);
         const uint32_t sourceParams = message.value("source_params", 0xFFFFFFFFU);
+        const bool hasSourceParams = message.contains("source_params");
         const bool set = message.value("set", true);
         if (stage >= 0 && flag >= 0) {
             if (is_unsynced_switch_bit(stage, flag)) {
@@ -8796,7 +8817,8 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
                 maybe_show_progression_sync_prompt_for_switch(resolve_peer_id(routedMessage), stage,
                                                               flag);
             }
-            if (!suppress_remote_switch_from_source_actor(stage, flag, sourceActor)) {
+            if (!suppress_remote_switch_from_source_actor(stage, flag, sourceActor, sourceRoom,
+                                                          sourceParams, hasSourceParams)) {
                 if (set) {
                     apply_remote_switch_bit(stage, flag);
                 } else {
@@ -13555,7 +13577,18 @@ void notify_local_memory_switch_set(int flag) {
     }
 
     if (hasActorContext && is_group2_lifecycle_actor(sLocalSwitchActorContext.actorName)) {
-        if (is_sewers_progression_switch(stageNo, flag)) {
+        const bool isEldinGorgeBridgeCutsceneCompletion =
+            std::strcmp(current_stage_name(), "F_SP121") == 0 &&
+            is_eldin_gorge_bridge_cutscene_completion_switch(
+                stageNo, flag, sLocalSwitchActorContext.actorName,
+                sLocalSwitchActorContext.room, sLocalSwitchActorContext.actorParams);
+        if (isEldinGorgeBridgeCutsceneCompletion) {
+            DuskLog.info("Multiplayer allowed local Eldin Gorge bridge cutscene completion "
+                         "switch stage={} flag={} sourceActor={} sourceRoom={} "
+                         "sourceParams=0x{:08X}",
+                         stageNo, flag, sLocalSwitchActorContext.actorName,
+                         sLocalSwitchActorContext.room, sLocalSwitchActorContext.actorParams);
+        } else if (is_sewers_progression_switch(stageNo, flag)) {
             DuskLog.info("Multiplayer allowed sewers progression switch stage={} flag={} "
                          "sourceActor={} sourceRoom={} reason={}",
                          stageNo, flag, sLocalSwitchActorContext.actorName,
