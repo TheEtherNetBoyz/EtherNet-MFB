@@ -858,7 +858,23 @@ bool wants_remote_midna_matrices() {
 // Off by default; opt in with DUSK_MP_LAYER_SYNC=1 once that audit is done,
 // or for testing with both peers in the same room at the same time. Province
 // DarkClearLV 0-2 are exempt: they use participant-aware routing below.
+// DarkClearLV(3) is also exempt because it is the audited companion clear for
+// TransformLV(3), ending the post-Lakebed forced-wolf state.
 bool sLayerRiskSyncEnabled = false;
+
+bool is_dark_clear_level_sync_allowed(int no) {
+    return no >= 0 && no < 8 && (no <= 3 || sLayerRiskSyncEnabled);
+}
+
+bool is_transform_level_sync_allowed(int no) {
+    // TransformLV(3) is not an optional room-local toggle once Midna's
+    // Desperate Hour has started. The Lakebed exit sets it after M_071 and
+    // vanilla uses it both to select the post-Lakebed sewer layer and to put
+    // dying Midna's real/tired body on Link's back. Keep every other
+    // unaudited TransformLV behind DUSK_MP_LAYER_SYNC.
+    return sLayerRiskSyncEnabled ||
+           (no == 3 && dComIfGs_isEventBit(dSv_event_flag_c::M_071));
+}
 
 struct LocalLightDropTboxContext {
     int stage = -1;
@@ -2189,7 +2205,7 @@ bool is_local_twilight_completion_participant(int no) {
 
 void apply_remote_dark_clear(int no, const char* source) {
     const bool sharedProvinceClear = no >= 0 && no < 3;
-    if ((!sharedProvinceClear && !sLayerRiskSyncEnabled) || no < 0 || no >= 8) {
+    if (!is_dark_clear_level_sync_allowed(no)) {
         return;
     }
 
@@ -5304,12 +5320,15 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
     for (int i = 0; i < 8; ++i) {
         if (dComIfGs_isCollectCrystal(static_cast<u8>(i))) crystals.push_back(i);
         if (dComIfGs_isCollectMirror(static_cast<u8>(i))) mirrors.push_back(i);
-        // Province clears are safe-routed per receiver. Other layer-risk
-        // levels remain behind DUSK_MP_LAYER_SYNC.
-        if ((i < 3 || sLayerRiskSyncEnabled) && dComIfGs_isDarkClearLV(i)) {
+        // Province clears are safe-routed per receiver and level 3 is the
+        // audited post-Lakebed forced-wolf clear. Other layer-risk levels
+        // remain behind DUSK_MP_LAYER_SYNC.
+        if (is_dark_clear_level_sync_allowed(i) && dComIfGs_isDarkClearLV(i)) {
             darkClearLevels.push_back(i);
         }
-        if (sLayerRiskSyncEnabled && dComIfGs_isTransformLV(i)) transformLevels.push_back(i);
+        if (is_transform_level_sync_allowed(i) && dComIfGs_isTransformLV(i)) {
+            transformLevels.push_back(i);
+        }
         if (dComIfGs_isRegionBit(i)) regionBits.push_back(i);
     }
 
@@ -8047,16 +8066,14 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         }
         for (const json& entry : message.value("dark_clear_levels", json::array())) {
             const int no = entry.get<int>();
-            if ((no >= 0 && no < 3) || (sLayerRiskSyncEnabled && no >= 3 && no < 8)) {
+            if (is_dark_clear_level_sync_allowed(no)) {
                 apply_remote_dark_clear(no, "snapshot");
             }
         }
-        if (sLayerRiskSyncEnabled) {
-            for (const json& entry : message.value("transform_levels", json::array())) {
-                const int no = entry.get<int>();
-                if (no >= 0 && no < 8) {
-                    dComIfGs_onTransformLV(no);
-                }
+        for (const json& entry : message.value("transform_levels", json::array())) {
+            const int no = entry.get<int>();
+            if (no >= 0 && no < 8 && is_transform_level_sync_allowed(no)) {
+                dComIfGs_onTransformLV(no);
             }
         }
         for (const json& entry : message.value("region_bits", json::array())) {
@@ -8960,7 +8977,7 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         apply_remote_dark_clear(no, "live");
     } else if (type == "transform_lv") {
         const int no = message.value("no", -1);
-        if (sLayerRiskSyncEnabled && no >= 0 && no < 8) {
+        if (no >= 0 && no < 8 && is_transform_level_sync_allowed(no)) {
             sApplyingRemoteSaveBit = true;
             dComIfGs_onTransformLV(no);
             sApplyingRemoteSaveBit = false;
@@ -13878,7 +13895,7 @@ void notify_local_dark_clear_lv_set(int no) {
     }
 
     if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit ||
-        (no >= 3 && !sLayerRiskSyncEnabled))
+        !is_dark_clear_level_sync_allowed(no))
     {
         return;
     }
@@ -13891,8 +13908,8 @@ void notify_local_dark_clear_lv_set(int no) {
 }
 
 void notify_local_transform_lv_set(int no) {
-    if (!sync_flags_enabled() || !sLayerRiskSyncEnabled || !sSession.welcomed ||
-        sApplyingRemoteSaveBit)
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit ||
+        !is_transform_level_sync_allowed(no))
     {
         return;
     }
