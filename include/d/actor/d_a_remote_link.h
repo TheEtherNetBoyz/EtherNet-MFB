@@ -176,6 +176,8 @@ private:
     void setBaseMtx();
     void calcModels();
     void drawModel(J3DModel* i_model);
+    void updateKanteraGlowOcclusion();
+    void resetKanteraGlowOcclusion();
     void drawLinkedItemActorModel();
     void drawShadowMidnaModels();
     void updateRemoteBombActor();
@@ -284,6 +286,9 @@ private:
     /* 0xBF5 */ bool mArrowMatrixValid;
     /* 0xBF6 */ bool mKanteraMatrixValid;
     /* 0xBF7 */ bool mKanteraGlowMatrixValid;
+    u32 mKanteraGlowBufferZ;
+    f32 mKanteraGlowDepth;
+    f32 mKanteraGlowScale;
     /* 0xBF8 */ bool mItemActorMatrixValid;
     /* 0xBF9 */ bool mRideActorMatrixValid;
     /* 0xBFA */ bool mMidnaMatrixValid;

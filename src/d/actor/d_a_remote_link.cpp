@@ -35,6 +35,8 @@
 #include "f_op/f_op_overlap_mng.h"
 #include "f_pc/f_pc_draw_priority.h"
 #include "m_Do/m_Do_ext.h"
+#include "m_Do/m_Do_graphic.h"
+#include "m_Do/m_Do_lib.h"
 #include "m_Do/m_Do_mtx.h"
 #include "res/Object/AlAnm.h"
 #include "res/Object/Alink.h"
@@ -689,6 +691,9 @@ daRemoteLink_c::daRemoteLink_c()
       mArrowMatrixValid(false),
       mKanteraMatrixValid(false),
       mKanteraGlowMatrixValid(false),
+      mKanteraGlowBufferZ(0),
+      mKanteraGlowDepth(-1.0f),
+      mKanteraGlowScale(0.0f),
       mItemActorMatrixValid(false),
       mRideActorMatrixValid(false),
       mMidnaMatrixValid(false),
@@ -3846,6 +3851,65 @@ void daRemoteLink_c::drawModel(J3DModel* i_model) {
     mDoExt_modelEntryDL(i_model);
 }
 
+void daRemoteLink_c::updateKanteraGlowOcclusion() {
+    if (mpKanteraGlowModel == NULL) {
+        return;
+    }
+
+    // ef_ktGlow is intentionally not depth-tested. Match local Link's
+    // receiver-camera depth check instead of transmitting camera-dependent
+    // visibility over the network.
+    const f32 scaleTarget = mKanteraGlowDepth > static_cast<f32>(mKanteraGlowBufferZ)
+                                ? 0.0f
+                                : 1.0f;
+    cLib_addCalc(&mKanteraGlowScale, scaleTarget, 0.5f, 0.3f, 0.1f);
+    mpKanteraGlowModel->setBaseScale(
+        cXyz(mKanteraGlowScale, mKanteraGlowScale, mKanteraGlowScale));
+
+    MtxP glowMtx = mpKanteraGlowModel->getBaseTRMtx();
+    cXyz flamePos(glowMtx[0][3], glowMtx[1][3], glowMtx[2][3]);
+    cXyz projected;
+    mDoLib_project(&flamePos, &projected);
+
+    camera_process_class* camera = dComIfGp_getCamera(0);
+    const f32 trimHeight = camera != NULL ? camera->mCamera.TrimHeight() : 0.0f;
+    if (projected.x > 0.0f && projected.x < FB_WIDTH &&
+        projected.y > trimHeight && projected.y < FB_HEIGHT - trimHeight)
+    {
+        dComIfGd_peekZ(projected.x, projected.y, &mKanteraGlowBufferZ);
+    } else {
+        mKanteraGlowBufferZ = 0;
+    }
+
+    view_class* view = dComIfGd_getView();
+    if (view == NULL) {
+        mKanteraGlowDepth = -1.0f;
+        return;
+    }
+
+    mDoLib_pos2camera(&flamePos, &projected);
+    projected.z += 30.0f;
+    if (projected.z > -0.01f) {
+        projected.z = -0.01f;
+    }
+
+    const f32 nearPlane = view->near_;
+    const f32 farPlane = view->far_;
+    mKanteraGlowDepth =
+        ((nearPlane + (farPlane * nearPlane) / projected.z) / (farPlane - nearPlane) +
+         1.0f) *
+        1.6777215E7f;
+}
+
+void daRemoteLink_c::resetKanteraGlowOcclusion() {
+    mKanteraGlowBufferZ = 0;
+    mKanteraGlowDepth = -1.0f;
+    mKanteraGlowScale = 0.0f;
+    if (mpKanteraGlowModel != NULL) {
+        mpKanteraGlowModel->setBaseScale(cXyz::Zero);
+    }
+}
+
 void daRemoteLink_c::drawLinkedItemActorModel() {
     if (mpItemActorModel == NULL) {
         return;
@@ -4143,7 +4207,10 @@ int daRemoteLink_c::Draw() {
         drawModel(mpKanteraModel);
     }
     if (mKanteraGlowMatrixValid) {
+        updateKanteraGlowOcclusion();
         drawModel(mpKanteraGlowModel);
+    } else {
+        resetKanteraGlowOcclusion();
     }
     if (mItemActorMatrixValid) {
         drawLinkedItemActorModel();
