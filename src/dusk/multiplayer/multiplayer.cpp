@@ -1120,6 +1120,8 @@ constexpr const char* kProgressionCueTempleOfTimeExitStage = "F_SP117";
 constexpr const char* kProgressionCueFinalGanondorfStage = "D_MN09C"; // Dark Lord Ganondorf arena, after horseback phase.
 constexpr const char* kProgressionCueSewersCompleteDestStage = "F_SP104"; // Ordon Spring.
 constexpr const char* kProgressionCueFaronTwilightDestStage = "F_SP108"; // Faron Woods (twilight).
+constexpr uint16_t kTitleSyntheticEponaRescuedEventBit = 0x0601; // M_023.
+constexpr const char* kTitleDemoStage = "F_SP102";
 constexpr float kProgressionSyncPromptDuration = 8.0f;
 constexpr float kProgressionSyncHoldDuration = 1.0f;
 constexpr uint32_t kProgressionSyncStableReadyTicks = 1;
@@ -8200,7 +8202,9 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
     } else if (type == "sync_request") {
         const std::string cueKey = routedMessage.value("cue_key", "");
         const bool flagsOnly = routedMessage.value("manual_sync_mode", "warp") == "flags";
-        if (dComIfGp_getStageStagInfo() == nullptr || dComIfGp_event_runCheck()) {
+        if (dComIfGp_getStageStagInfo() == nullptr || dComIfGp_event_runCheck() ||
+            is_opening_or_title_screen_active())
+        {
             DuskLog.warn("Multiplayer manual sync request ignored while stage/event is not ready");
         } else {
             if (sender != nullptr) {
@@ -11194,7 +11198,8 @@ void update_connected() {
 
     if (!is_stage_load_unsafe_for_multiplayer()) {
         flush_pending_remote_dark_clears();
-        if (sSession.snapshotPending) {
+        const bool titleOrOpeningActive = is_opening_or_title_screen_active();
+        if (sSession.snapshotPending && !titleOrOpeningActive) {
             // The network handshake can complete within milliseconds, well
             // before the game has finished booting to a loaded stage (still
             // on the boot logo/title). Every per-stage save accessor used by
@@ -11205,7 +11210,7 @@ void update_connected() {
         }
         for (auto& entry : sSession.directPeers) {
             DirectPeer& peer = entry.second;
-            if (peer.snapshotPending) {
+            if (peer.snapshotPending && !titleOrOpeningActive) {
                 send_save_snapshot(&peer);
                 peer.snapshotPending = false;
             }
@@ -13414,6 +13419,16 @@ void draw_notifications_overlay() {
 
 void notify_local_event_bit_set(uint16_t flag) {
     if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
+        return;
+    }
+    // The title demo uses F_SP102 and creates a synthetic save with M_023 set.
+    // Suppress only that sender-side live edge. A real Epona rescue occurs in
+    // gameplay elsewhere, and M_023 remains eligible for normal snapshots.
+    if (flag == kTitleSyntheticEponaRescuedEventBit &&
+        std::strcmp(current_stage_name(), kTitleDemoStage) == 0)
+    {
+        DuskLog.info("Multiplayer suppressed title-demo M_023 event bit stage={}",
+                     current_stage_name());
         return;
     }
     if (is_unsynced_event_bit(flag)) {
