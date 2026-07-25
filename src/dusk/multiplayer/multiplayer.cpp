@@ -964,6 +964,8 @@ ProgressionSyncPrompt sProgressionSyncPrompt;
 PendingProgressionSync sPendingProgressionSync;
 std::vector<PendingProgressionCueArrival> sPendingProgressionCueArrivals;
 std::vector<PendingSyncReply> sPendingSyncReplies;
+ManualSyncRequestStatus sManualSyncRequestStatus;
+uint32_t sManualSyncRequestWaitTicks = 0;
 std::map<std::string, PeerProgressionState> sPeerProgressionStates;
 bool sProgressionPromptAcceptHeld = false;
 std::set<std::string> sShownPoseProgressionCues;
@@ -1130,6 +1132,7 @@ constexpr uint32_t kFlagTraceActorWindowTicks = 180;
 // up and replying anyway (better than leaving the requester hanging forever
 // if something about the expected stage/form never actually materializes).
 constexpr uint32_t kPendingSyncReplyTimeoutTicks = 1800;
+constexpr uint32_t kManualSyncRequestTimeoutTicks = 180;
 
 // Local memory-tier item bits observed through the live setter hook. This
 // intentionally records before the network "welcomed" check, so a player can
@@ -4475,6 +4478,8 @@ void reset_connection_state() {
     sPendingProgressionSync = {};
     sPendingProgressionCueArrivals.clear();
     sPendingSyncReplies.clear();
+    sManualSyncRequestStatus = {};
+    sManualSyncRequestWaitTicks = 0;
     sPeerProgressionStates.clear();
     sShownPoseProgressionCues.clear();
     sHandledProgressionSyncCues.clear();
@@ -5533,6 +5538,18 @@ void update_pending_sync_replies() {
             DuskLog.info("Multiplayer replied to deferred manual sync request cue={}", it->cueKey);
         }
         it = sPendingSyncReplies.erase(it);
+    }
+}
+
+void update_manual_sync_request_status() {
+    if (sManualSyncRequestStatus.state != ManualSyncRequestState::Waiting) {
+        return;
+    }
+    if (++sManualSyncRequestWaitTicks >= kManualSyncRequestTimeoutTicks) {
+        sManualSyncRequestStatus.state = ManualSyncRequestState::Failed;
+        DuskLog.info("Multiplayer manual sync request timed out peer={} mode={}",
+                     sManualSyncRequestStatus.peerId,
+                     sManualSyncRequestStatus.flagsOnly ? "flags" : "warp");
     }
 }
 
@@ -7978,13 +7995,25 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
     } else if (type == "save_snapshot") {
         if (message.value("manual_sync", false) && message.contains("full_state")) {
             const bool flagsOnly = message.value("manual_sync_mode", "warp") == "flags";
+            bool applied = false;
             if (flagsOnly) {
-                if (apply_manual_flags_sync_full_state(message.value("full_state", ""))) {
+                applied = apply_manual_flags_sync_full_state(message.value("full_state", ""));
+                if (applied) {
                     DuskLog.info("Multiplayer applied manual flags-only snapshot from peer");
                 }
-            } else if (apply_manual_sync_full_state(message.value("full_state", ""))) {
-                sManualSyncReloadPending = false;
-                DuskLog.info("Multiplayer applied manual sync-and-warp snapshot from peer");
+            } else {
+                applied = apply_manual_sync_full_state(message.value("full_state", ""));
+                if (applied) {
+                    sManualSyncReloadPending = false;
+                    DuskLog.info("Multiplayer applied manual sync-and-warp snapshot from peer");
+                }
+            }
+            if (sManualSyncRequestStatus.state == ManualSyncRequestState::Waiting &&
+                sManualSyncRequestStatus.flagsOnly == flagsOnly)
+            {
+                sManualSyncRequestStatus.state =
+                    applied ? ManualSyncRequestState::Succeeded : ManualSyncRequestState::Failed;
+                sManualSyncRequestWaitTicks = 0;
             }
             return;
         }
@@ -11160,6 +11189,7 @@ void update_connected() {
     update_pending_progression_cue_arrivals();
     flush_pending_progression_sync();
     update_pending_sync_replies();
+    update_manual_sync_request_status();
     update_local_bomb_bag_slot_sync();
 
     if (!is_stage_load_unsafe_for_multiplayer()) {
@@ -12024,7 +12054,7 @@ void disconnect_session() {
 }
 
 bool request_manual_sync_impl(const std::string& peerId, bool flagsOnly,
-                              std::string* errorOut) {
+                              std::string* errorOut, bool trackStatus = true) {
     if (!sEnabled || !sSession.welcomed) {
         if (errorOut != nullptr) {
             *errorOut = "Not connected.";
@@ -12084,6 +12114,15 @@ bool request_manual_sync_impl(const std::string& peerId, bool flagsOnly,
         send_json(request);
     }
 
+    if (trackStatus) {
+        sManualSyncRequestStatus = {
+            ManualSyncRequestState::Waiting,
+            flagsOnly,
+            peerId,
+            display_name_for_peer(peerId),
+        };
+        sManualSyncRequestWaitTicks = 0;
+    }
     return true;
 }
 
@@ -12093,6 +12132,10 @@ bool request_manual_sync(const std::string& peerId, std::string* errorOut) {
 
 bool request_manual_flags_sync(const std::string& peerId, std::string* errorOut) {
     return request_manual_sync_impl(peerId, true, errorOut);
+}
+
+ManualSyncRequestStatus get_manual_sync_request_status() {
+    return sManualSyncRequestStatus;
 }
 
 SessionStatus get_session_status() {
@@ -13078,7 +13121,7 @@ void draw_peer_name_labels_native() {
 
 bool request_progression_sync_now(const std::string& peerId, const std::string& peerName) {
     std::string error;
-    if (request_manual_sync(peerId, &error)) {
+    if (request_manual_sync_impl(peerId, false, &error, false)) {
         if (!sAwaitingManualSyncCueKey.empty()) {
             mark_progression_sync_cue_handled(peerId, sAwaitingManualSyncCueKey,
                                               "manual_sync_requested");
@@ -13197,7 +13240,7 @@ void draw_progression_sync_prompt() {
         sProgressionSyncPrompt.ageSeconds += dt;
     }
     const bool eventRunning = dComIfGp_event_runCheck();
-    if (!eventRunning && !sProgressionSyncPrompt.waiting) {
+    if (!sProgressionSyncPrompt.waiting) {
         sProgressionSyncPrompt.ageSeconds += dt;
     }
 
@@ -13217,14 +13260,14 @@ void draw_progression_sync_prompt() {
             queue_progression_sync_for_peer(sProgressionSyncPrompt);
         }
         sProgressionSyncPrompt.title = "Waiting for sync...";
-        sProgressionSyncPrompt.body = "Waiting for peer to be ready";
+        sProgressionSyncPrompt.body = "Sync will begin when ready";
         sProgressionSyncPrompt.ageSeconds = 0.0f;
         sProgressionSyncPrompt.holdSeconds = 0.0f;
         sProgressionSyncPrompt.waiting = true;
         return;
     }
 
-    if (!sProgressionSyncPrompt.waiting && !eventRunning &&
+    if (!sProgressionSyncPrompt.waiting &&
         sProgressionSyncPrompt.ageSeconds >= kProgressionSyncPromptDuration)
     {
         DuskLog.info("Multiplayer progression sync prompt expired peer={} cue={}",

@@ -358,6 +358,20 @@ struct SessionStatus {
     bool hasRecentPeerPose = false;
 };
 
+enum class ManualSyncRequestState {
+    Idle,
+    Waiting,
+    Succeeded,
+    Failed,
+};
+
+struct ManualSyncRequestStatus {
+    ManualSyncRequestState state = ManualSyncRequestState::Idle;
+    bool flagsOnly = false;
+    std::string peerId;
+    std::string peerName;
+};
+
 struct PlayerListEntry {
     std::string id;
     std::string name;
@@ -394,6 +408,7 @@ bool join_relay(const RelayJoinOptions& options, std::string* errorOut = nullptr
 void disconnect_session();
 bool request_manual_sync(const std::string& peerId, std::string* errorOut = nullptr);
 bool request_manual_flags_sync(const std::string& peerId, std::string* errorOut = nullptr);
+ManualSyncRequestStatus get_manual_sync_request_status();
 SessionStatus get_session_status();
 std::vector<PlayerListEntry> get_player_list();
 void set_name_labels_enabled(bool enabled);

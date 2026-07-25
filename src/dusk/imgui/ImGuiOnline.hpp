@@ -34,6 +34,7 @@ private:
     bool m_remoteCollision = true;
     bool m_pvp = false;
     int m_syncPeerIndex = 0;
+    int m_lastManualSyncRequestState = -1;
     bool m_namesLoaded = false;
     std::string m_statusMessage;
 };

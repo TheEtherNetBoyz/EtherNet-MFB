@@ -73,6 +73,22 @@ void ImGuiOnline::draw(bool& open) {
     }
 
     const auto status = multiplayer::get_session_status();
+    const auto manualSyncStatus = multiplayer::get_manual_sync_request_status();
+    const int manualSyncState = static_cast<int>(manualSyncStatus.state);
+    if (manualSyncState != m_lastManualSyncRequestState) {
+        m_lastManualSyncRequestState = manualSyncState;
+        const std::string action =
+            manualSyncStatus.flagsOnly ? "Flag sync" : "Sync + warp";
+        if (manualSyncStatus.state == multiplayer::ManualSyncRequestState::Waiting) {
+            m_statusMessage =
+                action + " requested from " + manualSyncStatus.peerName + ". Waiting for response...";
+        } else if (manualSyncStatus.state == multiplayer::ManualSyncRequestState::Succeeded) {
+            m_statusMessage = action + " received from " + manualSyncStatus.peerName + ".";
+        } else if (manualSyncStatus.state == multiplayer::ManualSyncRequestState::Failed) {
+            m_statusMessage =
+                action + " failed or timed out. Wait for cutscenes to finish, then retry.";
+        }
+    }
     draw_status_row("Mode", status.mode);
     draw_status_row("State", status.state);
     if (!status.enabled) {
