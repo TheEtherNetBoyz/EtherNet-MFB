@@ -991,6 +991,14 @@ uint16_t sMirrorCompleteReloadFlag = 0;
 bool sZoraThawReloadPending = false;
 std::string sZoraThawReloadPeerId;
 uint16_t sZoraThawReloadFlag = 0;
+struct ZoraThawDestination {
+    bool valid = false;
+    std::string stage;
+    int room = -1;
+    int layer = -1;
+    int startPoint = -1;
+};
+ZoraThawDestination sZoraThawDestination;
 std::set<uint16_t> sDeferredFaronDayBoundaryBroadcasts;
 std::vector<json> sDeferredFaronDayBoundaryEvents;
 bool sLocalFaronCageSequenceActive = false;
@@ -1547,6 +1555,24 @@ bool is_mirror_complete_reload_stage(std::string_view stage) {
 bool is_zora_thaw_reload_area(std::string_view stage, int room) {
     return stage == "F_SP112" || stage == "F_SP113" || stage == "F_SP126" ||
            (stage == "F_SP115" && room == 0);
+}
+
+ZoraThawDestination parse_zora_thaw_destination(const json& message) {
+    ZoraThawDestination destination;
+    const json data = message.value("zora_thaw_destination", json::object());
+    destination.stage = data.value("stage", "");
+    destination.room = data.value("room", -1);
+    destination.layer = data.value("layer", -1);
+    destination.startPoint = data.value("start_point", -1);
+
+    // The magma-rock warp always finishes in Zora's Domain. Restrict this
+    // event-specific destination so a malformed packet cannot cause an
+    // arbitrary stage warp.
+    destination.valid = destination.stage == "F_SP113" &&
+                        (destination.room == 0 || destination.room == 1) &&
+                        destination.layer >= -1 && destination.layer < 15 &&
+                        destination.startPoint >= 0 && destination.startPoint <= 255;
+    return destination;
 }
 
 bool is_local_final_ganondorf_ready() {
@@ -2447,7 +2473,8 @@ bool flush_mirror_complete_reload() {
     return true;
 }
 
-void queue_zora_thaw_reload(const std::string& peerId, uint16_t flag) {
+void queue_zora_thaw_reload(const std::string& peerId, uint16_t flag,
+                            const ZoraThawDestination& destination) {
     if (sZoraThawReloadPending) {
         return;
     }
@@ -2464,9 +2491,14 @@ void queue_zora_thaw_reload(const std::string& peerId, uint16_t flag) {
     sZoraThawReloadPending = true;
     sZoraThawReloadPeerId = peerId;
     sZoraThawReloadFlag = flag;
-    push_notification("Zora's Domain thawed; updating area", 4.0f);
-    DuskLog.info("Multiplayer Zora thaw reload queued peer={} flag={} stage={} room={}",
-                 peerId, flag, current_stage_name(), room);
+    sZoraThawDestination = destination;
+    push_notification("Zora state changed; reloading area", 4.0f);
+    DuskLog.info("Multiplayer Zora rock reload queued peer={} flag={} stage={} room={} "
+                 "senderDestinationValid={} senderStage={} senderRoom={} senderLayer={} "
+                 "senderPoint={}",
+                 peerId, flag, current_stage_name(), room, destination.valid,
+                 destination.stage, destination.room, destination.layer,
+                 destination.startPoint);
 }
 
 bool flush_zora_thaw_reload() {
@@ -2476,9 +2508,11 @@ bool flush_zora_thaw_reload() {
 
     const uint16_t flag = sZoraThawReloadFlag;
     const std::string peerId = sZoraThawReloadPeerId;
+    const ZoraThawDestination destination = sZoraThawDestination;
     sZoraThawReloadPending = false;
     sZoraThawReloadPeerId.clear();
     sZoraThawReloadFlag = 0;
+    sZoraThawDestination = {};
     apply_remote_event_bit(flag, true);
 
     const char* stage = current_stage_name();
@@ -2490,6 +2524,19 @@ bool flush_zora_thaw_reload() {
         return false;
     }
 
+    if (destination.valid) {
+        DuskLog.info("Multiplayer Zora rock matching warper spawn peer={} flag={} "
+                     "sourceStage={} sourceRoom={} destStage={} destRoom={} destLayer={} "
+                     "destPoint={}",
+                     peerId, flag, stage, room, destination.stage, destination.room,
+                     destination.layer, destination.startPoint);
+        dComIfGp_setNextStage(destination.stage.c_str(), destination.startPoint,
+                              destination.room, destination.layer, 0.0f, 0, 1, 0, 0, 1, 3);
+        return true;
+    }
+
+    // Compatibility fallback for peers that predate the rock-warp destination
+    // fields. New peers use the sender's exact start-stage tuple above.
     if (std::strcmp(stage, "F_SP126") == 0 ||
         (std::strcmp(stage, "F_SP115") == 0 && room == 0))
     {
@@ -4374,6 +4421,7 @@ void reset_connection_state() {
     sZoraThawReloadPending = false;
     sZoraThawReloadPeerId.clear();
     sZoraThawReloadFlag = 0;
+    sZoraThawDestination = {};
     sDeferredFaronDayBoundaryBroadcasts.clear();
     sDeferredFaronDayBoundaryEvents.clear();
     sLocalFaronCageSequenceActive = false;
@@ -8615,7 +8663,7 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             return;
         }
         if (set && flag == kZoraThawEventBit && !dComIfGs_isEventBit(flag)) {
-            queue_zora_thaw_reload(peerId, flag);
+            queue_zora_thaw_reload(peerId, flag, parse_zora_thaw_destination(routedMessage));
             return;
         }
         if (set && is_ordon_day_boundary_event_bit(flag) &&
@@ -12186,6 +12234,7 @@ void apply_sync_flags_enabled(bool enabled) {
         sZoraThawReloadPending = false;
         sZoraThawReloadPeerId.clear();
         sZoraThawReloadFlag = 0;
+        sZoraThawDestination = {};
         sPendingManualSyncInfo.reset();
         sPendingManualFlagsSyncSave.reset();
         sPendingManualSyncVibration.reset();
@@ -13347,11 +13396,28 @@ void notify_local_event_bit_set(uint16_t flag) {
         return;
     }
 
-    send_json({
+    json message = {
         {"type", "event_bit"},
         {"flag", flag},
         {"set", true},
-    });
+    };
+    if (flag == kZoraThawEventBit &&
+        std::strcmp(dComIfGp_getStartStageName(), "F_SP113") == 0)
+    {
+        message["zora_thaw_destination"] = {
+            {"stage", dComIfGp_getStartStageName()},
+            {"room", static_cast<int>(dComIfGp_getStartStageRoomNo())},
+            {"layer", static_cast<int>(dComIfGp_getStartStageLayer())},
+            {"start_point", static_cast<int>(dComIfGp_getStartStagePoint())},
+        };
+        DuskLog.info("Multiplayer Zora rock publishing warper spawn stage={} room={} "
+                     "layer={} point={}",
+                     dComIfGp_getStartStageName(),
+                     static_cast<int>(dComIfGp_getStartStageRoomNo()),
+                     static_cast<int>(dComIfGp_getStartStageLayer()),
+                     static_cast<int>(dComIfGp_getStartStagePoint()));
+    }
+    send_json(message);
     DuskLog.info("Multiplayer sent local event bit flag={}", flag);
 }
 
