@@ -32,6 +32,7 @@
 #include "f_op/f_op_overlap_mng.h"
 #include "f_pc/f_pc_name.h"
 #include "m_Do/m_Do_controller_pad.h"
+#include "m_Do/m_Do_graphic.h"
 
 #include <algorithm>
 #include <array>
@@ -2200,9 +2201,10 @@ void draw_native_input_display(JUTFont* font) {
 
 void draw_native_link_debug(JUTFont* font) {
     const JUtility::TColor kWhite(0xFF, 0xFF, 0xFF, 0xFF);
+    const float left = mDoGph_gInf_c::ScaleHUDXRight(452.0f);
     daAlink_c* player = daAlink_getAlinkActorClass();
     if (player == nullptr) {
-        draw_native_text(font, 452.0f, 178.0f, 14.0f, kWhite, "link: ?");
+        draw_native_text(font, left, 178.0f, 14.0f, kWhite, "link: ?");
         return;
     }
 
@@ -2226,7 +2228,7 @@ void draw_native_link_debug(JUTFont* font) {
 
     float y = 182.0f;
     for (const auto& line : lines) {
-        draw_native_text(font, 452.0f, y, 14.0f, kWhite, line);
+        draw_native_text(font, left, y, 14.0f, kWhite, line);
         y += 20.0f;
     }
 }
@@ -2265,7 +2267,7 @@ void ImGuiPracticeSaves::drawNative(bool menuOpen) {
     const JUtility::TColor kWhite(0xFF, 0xFF, 0xFF, 0xFF);
     const JUtility::TColor kGreen(26, 230, 26, 0xFF);  // imgui (0.1, 0.9, 0.1)
 
-    const float left = 24.0f;
+    const float left = mDoGph_gInf_c::ScaleHUDXLeft(24.0f);
     const float headerSize = 18.0f;
     const float itemSize = 15.0f;
     const float lineH = 19.0f;
