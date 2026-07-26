@@ -5,6 +5,7 @@
 #include "fmt/format.h"
 
 #include "JSystem/J2DGraph/J2DGrafContext.h"
+#include "JSystem/J2DGraph/J2DOrthoGraph.h"
 #include "JSystem/J2DGraph/J2DTextBox.h"
 #include "JSystem/JUtility/JUTResFont.h"
 #include "JSystem/JUtility/TColor.h"
@@ -2246,20 +2247,20 @@ void ImGuiPracticeSaves::drawNative(bool menuOpen) {
     if (!menuOpen && !nativeLinkDebugInfo && !nativeInputViewer) {
         return;
     }
-    J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
-    if (port == nullptr) {
-        return;
-    }
-    // Re-establish the active HUD ortho (viewport + projection + pos matrix).
-    port->setPort();
+    // Use overlay-owned render state, as decompGZ does, instead of depending on
+    // the active scene's graphics port. The scene port may not exist while a
+    // load-zone transition is replacing the play scene.
+    static J2DOrthoGraph sNativeOrtho(0.0f, 0.0f, 608.0f, 448.0f, -1.0f, 1.0f);
+    sNativeOrtho.setPort();
 
-    // Guard: the message font lives in the font archive, absent on some
-    // transition/title frames. Avoid lazy init there; shape-only overlays can
-    // still draw without labels when the native menu is closed.
-    JUTFont* font = nullptr;
-    if (dComIfGp_getFontArchive() != nullptr) {
-        font = mDoExt_getMesgFont();
+    // Retain one reference to the game font once its archive becomes available.
+    // The archive pointer temporarily disappears during scene transitions, but
+    // the retained font remains valid for this process-lifetime overlay.
+    static JUTFont* sNativeFont = nullptr;
+    if (sNativeFont == nullptr && dComIfGp_getFontArchive() != nullptr) {
+        sNativeFont = mDoExt_getMesgFont();
     }
+    JUTFont* font = sNativeFont;
     if (font == nullptr && menuOpen) {
         return;
     }
