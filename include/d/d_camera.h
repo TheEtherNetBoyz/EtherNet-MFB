@@ -1041,6 +1041,9 @@ public:
     bool freeCamera();
     bool executeDebugFlyCam();
     void deactivateDebugFlyCam();
+    static bool isDebugFlyCamMouseLookEnabled();
+    static void setDebugFlyCamMouseLookEnabled(bool enabled);
+    void setDebugFlyCamTransform(const cXyz& center, const cXyz& eye, f32 fovy, s16 bank);
     #endif
     bool towerCamera(s32);
     bool hookshotCamera(s32);

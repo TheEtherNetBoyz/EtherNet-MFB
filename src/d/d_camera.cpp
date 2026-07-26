@@ -7514,6 +7514,7 @@ static constexpr f32 FLYCAM_ROTATION_SPEED = 0.002f;
 static constexpr f32 FLYCAM_TRIGGER_DEADZONE = 20.0f;
 static constexpr s16 FLYCAM_ROLL_SPEED = 256;
 static ImVec2 sFlyCamLastMousePos = {-1.f, -1.f};
+static bool sFlyCamMouseLookEnabled = true;
 
 #if TARGET_PC
 static constexpr f32 TOUCH_CAMERA_CSTICK_EXIT_THRESHOLD = 0.05f;
@@ -7523,6 +7524,29 @@ bool dCamera_c::isAimActive() {
     auto* link = daAlink_getAlinkActorClass();
     return link != nullptr && link->checkAimInputContext() &&
            dComIfGp_checkCameraAttentionStatus(link->field_0x317c, 0x10);
+}
+
+bool dCamera_c::isDebugFlyCamMouseLookEnabled() {
+    return sFlyCamMouseLookEnabled;
+}
+
+void dCamera_c::setDebugFlyCamMouseLookEnabled(bool enabled) {
+    sFlyCamMouseLookEnabled = enabled;
+    // Re-baseline the cursor when mouse look is enabled again so movement that
+    // happened while unlocked cannot produce a large camera jump.
+    sFlyCamLastMousePos = {-1.0f, -1.0f};
+}
+
+void dCamera_c::setDebugFlyCamTransform(const cXyz& center, const cXyz& eye, f32 fovy,
+                                        s16 bank) {
+    const f32 dx = center.x - eye.x;
+    const f32 dy = center.y - eye.y;
+    const f32 dz = center.z - eye.z;
+    mDebugFlyCam.yaw = atan2f(dz, dx);
+    mDebugFlyCam.pitch = atan2f(dy, sqrtf(dx * dx + dz * dz));
+    mFovy = std::clamp(fovy, 0.1f, 179.9f);
+    mBank = bank;
+    Reset(center, eye, mFovy, bank);
 }
 
 bool dCamera_c::executeDebugFlyCam() {
@@ -7595,6 +7619,10 @@ bool dCamera_c::executeDebugFlyCam() {
     {
         ImGuiIO& io = ImGui::GetIO();
         if (!io.WantCaptureKeyboard) {
+            if (ImGui::IsKeyPressed(ImGuiKey_P, false)) {
+                setDebugFlyCamMouseLookEnabled(!sFlyCamMouseLookEnabled);
+            }
+
             f32 kbX = 0.0f, kbY = 0.0f;
             if (ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_UpArrow)) kbY += 1.f;
             if (ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_DownArrow)) kbY -= 1.f;
@@ -7610,7 +7638,8 @@ bool dCamera_c::executeDebugFlyCam() {
             if (ImGui::IsKeyDown(ImGuiKey_Q)) rollInput -= 1.0f;
             if (ImGui::IsKeyDown(ImGuiKey_E)) rollInput += 1.0f;
         }
-        bool mouseValid = !io.WantCaptureMouse && io.MousePos.x >= 0.0f && io.MousePos.y >= 0.0f;
+        bool mouseValid = sFlyCamMouseLookEnabled && !io.WantCaptureMouse &&
+                          io.MousePos.x >= 0.0f && io.MousePos.y >= 0.0f;
         if (mouseValid && sFlyCamLastMousePos.x >= 0.0f) {
             cStickX -= (io.MousePos.x - sFlyCamLastMousePos.x) * 2.0f;
             cStickY -= (io.MousePos.y - sFlyCamLastMousePos.y) * 2.0f;

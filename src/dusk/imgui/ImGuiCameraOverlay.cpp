@@ -8,6 +8,19 @@
 #include "ImGuiMenuTools.hpp"
 #include "dusk/settings.h"
 
+#include <vector>
+
+namespace {
+struct CameraKeyframe {
+    cXyz center;
+    cXyz eye;
+    f32 fovy;
+    s16 bank;
+};
+
+std::vector<CameraKeyframe> sCameraKeyframes;
+}
+
 namespace dusk {
     void ImGuiMenuTools::ShowCameraOverlay() {
         if (!getSettings().backend.enableAdvancedSettings ||
@@ -67,7 +80,8 @@ namespace dusk {
                 ImGui::SetTooltip("Detach camera and fly freely.\n"
                                   "WASD/Arrows/Left stick: move, Mouse/C-stick: look\n"
                                   "Ctrl/L: down, Space/R: up, Shift/Z: fast\n"
-                                "Q Key/Y: roll left, R Key/X: roll right");
+                                  "Q Key/Y: roll left, E Key/X: roll right\n"
+                                  "P: toggle mouse look");
             }
         }
         if (eventRunning) {
@@ -87,6 +101,48 @@ namespace dusk {
         }
         if (!getSettings().game.debugFlyCam) {
             ImGui::EndDisabled();
+        }
+
+        bool mouseLook = dCamera_c::isDebugFlyCamMouseLookEnabled();
+        if (ImGui::Checkbox("Mouse Look (P)", &mouseLook)) {
+            dCamera_c::setDebugFlyCamMouseLookEnabled(mouseLook);
+        }
+
+        ImGui::SeparatorText("Keyframes");
+
+        if (!getSettings().game.debugFlyCam) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button("Capture Keyframe")) {
+            sCameraKeyframes.push_back({dCam->mCenter, dCam->mEye, dCam->mFovy,
+                                        dCam->mBank.Val()});
+        }
+        if (!getSettings().game.debugFlyCam) {
+            ImGui::EndDisabled();
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Clear") && !sCameraKeyframes.empty()) {
+            sCameraKeyframes.clear();
+        }
+
+        for (size_t i = 0; i < sCameraKeyframes.size();) {
+            ImGui::PushID(static_cast<int>(i));
+            ImGui::Text("Keyframe %zu", i + 1);
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Go")) {
+                const CameraKeyframe& keyframe = sCameraKeyframes[i];
+                dCam->setDebugFlyCamTransform(keyframe.center, keyframe.eye, keyframe.fovy,
+                                              keyframe.bank);
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Delete")) {
+                sCameraKeyframes.erase(sCameraKeyframes.begin() + i);
+                ImGui::PopID();
+                continue;
+            }
+            ImGui::PopID();
+            ++i;
         }
 
         ShowCornerContextMenu(m_cameraOverlayCorner, 0);
