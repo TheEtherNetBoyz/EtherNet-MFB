@@ -65,7 +65,7 @@ private:
     void consumeControllerInput();
     void drawCategoryList();
     void drawPracticePanel(bool& open);
-    void drawGenericPanel();
+    void drawGenericPanel(bool& open);
     std::vector<PracticeSaveEntry>& currentSaves();
     const std::vector<PracticeSaveEntry>& currentSaves() const;
 
