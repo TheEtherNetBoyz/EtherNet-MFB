@@ -8,6 +8,7 @@
 #include "nlohmann/json.hpp"
 
 #include "d/d_com_inf_game.h"
+#include "d/actor/d_a_player.h"
 #include "dusk/main.h"
 #include "dusk/io.hpp"
 #include "dusk/logging.h"
@@ -260,7 +261,11 @@ void ImGuiStateShare::draw(bool& open) {
         if (dusk::getTransientSettings().stateShareLoadActive) {
             if (fopOvlpM_IsPeek()) {
                 m_stateSharePeekSeen = true;
-            } else if (m_stateSharePeekSeen) {
+            } else if (m_stateSharePeekSeen ||
+                       (getSettings().game.enableInstaLoads.getValue() &&
+                        !dComIfGp_isEnableNextStage() &&
+                        daPy_getPlayerActorClass() != nullptr))
+            {
                 dusk::getTransientSettings().stateShareLoadActive = false;
                 m_stateSharePeekSeen = false;
             }
