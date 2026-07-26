@@ -131,7 +131,7 @@ bool hotkey_event_pressed(const SDL_Event& event, const dusk::UserSettings::Hotk
 
 void toggle_config_bool(dusk::config::ConfigVar<bool>& value) {
     value.setValue(!value.getValue());
-    dusk::config::Save();
+    dusk::config::save();
 }
 
 void toggle_texture_pack() {
@@ -336,7 +336,7 @@ namespace dusk {
         if (hotkey_event_pressed(event, hotkeys.toggleFullscreen)) {
             getSettings().video.enableFullscreen.setValue(!getSettings().video.enableFullscreen);
             VISetWindowFullscreen(getSettings().video.enableFullscreen);
-            config::Save();
+            config::save();
         }
 
         if (hotkey_event_pressed(event, hotkeys.hideShowImGuiMenu)) {
@@ -395,6 +395,12 @@ namespace dusk {
         ZoneScoped;
 
         UpdateSettings();
+
+        if (ImGui::IsKeyPressed(ImGuiKey_F11)) {
+            getSettings().video.enableFullscreen.setValue(!getSettings().video.enableFullscreen);
+            VISetWindowFullscreen(getSettings().video.enableFullscreen);
+            config::save();
+        }
 
         if (getSettings().game.enableResetKeybind && ImGui::GetIO().KeyCtrl &&
             ImGui::IsKeyReleased(ImGuiKey_R) && !fpcM_SearchByName(fpcNm_LOGO_SCENE_e))
@@ -468,7 +474,7 @@ namespace dusk {
             if constexpr (SupportsProcessRestart) {
                 if (ImGui::Button("Retry (Auto backend)")) {
                     getSettings().backend.graphicsBackend.setValue("auto");
-                    config::Save();
+                    config::save();
                     RestartRequested = true;
                     IsRunning = false;
                 }

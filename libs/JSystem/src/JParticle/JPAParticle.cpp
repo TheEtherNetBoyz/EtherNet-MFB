@@ -10,6 +10,10 @@
 #include "dusk/frame_interpolation.h"
 #endif
 
+#if TARGET_PC
+#include "dusk/frame_interpolation.h"
+#endif
+
 JPAParticleCallBack::~JPAParticleCallBack() {
     /* empty function */
 }

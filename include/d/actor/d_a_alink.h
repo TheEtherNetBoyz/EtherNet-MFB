@@ -57,8 +57,8 @@ public:
     void setNowOffsetX(f32 i_offset) { mNowOffsetX = i_offset; }
     void setNowOffsetY(f32 i_offset) { mNowOffsetY = i_offset; }
 
-    static bool m_eye_move_flg;
-    static u8 m_morf_frame;
+    static DUSK_GAME_DATA bool m_eye_move_flg;
+    static DUSK_GAME_DATA u8 m_morf_frame;
 
     /* 0x0F4 */ mutable f32 field_0xf4;
     /* 0x0F8 */ mutable f32 field_0xf8;
@@ -3921,20 +3921,20 @@ public:
 
     static u32 getOtherHeapSize() { return 0xF0A60; }
 
-    static daAlink_BckData const m_mainBckShield[20];
-    static daAlink_BckData const m_mainBckSword[5];
-    static daAlink_BckData const m_mainBckFishing[28];
-    static daAlink_AnmData const m_anmDataTable[ANM_MAX];
-    static daAlink_WlAnmData const m_wlAnmDataTable[WANM_MAX];
-    static daAlink_FaceTexData const m_faceTexDataTable[];
-    static Vec const m_handLeftOutSidePos;
-    static Vec const m_handRightOutSidePos;
-    static Vec const m_handLeftInSidePos;
-    static Vec const m_handRightInSidePos;
+    static DUSK_GAME_DATA daAlink_BckData const m_mainBckShield[20];
+    static DUSK_GAME_DATA daAlink_BckData const m_mainBckSword[5];
+    static DUSK_GAME_DATA daAlink_BckData const m_mainBckFishing[28];
+    static DUSK_GAME_DATA daAlink_AnmData const m_anmDataTable[ANM_MAX];
+    static DUSK_GAME_DATA daAlink_WlAnmData const m_wlAnmDataTable[WANM_MAX];
+    static DUSK_GAME_DATA daAlink_FaceTexData const m_faceTexDataTable[];
+    static DUSK_GAME_DATA Vec const m_handLeftOutSidePos;
+    static DUSK_GAME_DATA Vec const m_handRightOutSidePos;
+    static DUSK_GAME_DATA Vec const m_handLeftInSidePos;
+    static DUSK_GAME_DATA Vec const m_handRightInSidePos;
 
-    static const daAlink_procInitTable m_procInitTable[];
-    static daAlink_procFunc m_demoInitTable[];
-    static const EffParamProc m_fEffParamProc[];
+    static DUSK_GAME_DATA const daAlink_procInitTable m_procInitTable[];
+    static DUSK_GAME_DATA daAlink_procFunc m_demoInitTable[];
+    static DUSK_GAME_DATA const EffParamProc m_fEffParamProc[];
 
     /* 0x0062C */ request_of_phase_process_class mPhaseReq;
     /* 0x00634 */ const char* mArcName;
@@ -4657,7 +4657,7 @@ struct daAlinkHIO_basic_c1 {
 
 class daAlinkHIO_basic_c0 {
 public:
-    static daAlinkHIO_basic_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_basic_c1 const m;
 };
 
 class daAlinkHIO_basic_c : public daAlinkHIO_data_c {
@@ -4708,7 +4708,7 @@ public:
 
 class daAlinkHIO_move_c0 {
 public:
-    static daAlinkHIO_move_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_move_c1 const m;
 };
 
 class daAlinkHIO_move_c : public daAlinkHIO_data_c {
@@ -4754,7 +4754,7 @@ public:
 
 class daAlinkHIO_atnMove_c0 {
 public:
-    static daAlinkHIO_atnMove_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_atnMove_c1 const m;
 };
 
 class daAlinkHIO_atnMove_c : public daAlinkHIO_data_c {
@@ -4800,7 +4800,7 @@ public:
 
 class daAlinkHIO_noActAtnMove_c0 {
 public:
-    static daAlinkHIO_noActAtnMove_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_noActAtnMove_c1 const m;
 };
 
 class daAlinkHIO_noActAtnMove_c : public daAlinkHIO_data_c {
@@ -4842,7 +4842,7 @@ public:
 
 class daAlinkHIO_frontRoll_c0 {
 public:
-    static daAlinkHIO_frontRoll_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_frontRoll_c1 const m;
 };
 
 class daAlinkHIO_frontRoll_c : public daAlinkHIO_data_c {
@@ -4872,7 +4872,7 @@ public:
 
 class daAlinkHIO_backJump_c0 {
 public:
-    static daAlinkHIO_backJump_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_backJump_c1 const m;
 };
 
 class daAlinkHIO_backJump_c : public daAlinkHIO_data_c {
@@ -4906,7 +4906,7 @@ public:
 
 class daAlinkHIO_sideStep_c0 {
 public:
-    static daAlinkHIO_sideStep_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_sideStep_c1 const m;
 };
 
 class daAlinkHIO_sideStep_c : public daAlinkHIO_data_c {
@@ -4944,7 +4944,7 @@ public:
 
 class daAlinkHIO_slide_c0 {
 public:
-    static daAlinkHIO_slide_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_slide_c1 const m;
 };
 
 class daAlinkHIO_slide_c : public daAlinkHIO_data_c {
@@ -4972,27 +4972,27 @@ public:
 
 class daAlinkHIO_cutNmV_c0 {
 public:
-    static daAlinkHIO_cutNormal_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutNormal_c1 const m;
 };
 
 class daAlinkHIO_cutNmL_c0 {
 public:
-    static daAlinkHIO_cutNormal_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutNormal_c1 const m;
 };
 
 class daAlinkHIO_cutNmR_c0 {
 public:
-    static daAlinkHIO_cutNormal_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutNormal_c1 const m;
 };
 
 class daAlinkHIO_cutNmSL_c0 {
 public:
-    static daAlinkHIO_cutNormal_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutNormal_c1 const m;
 };
 
 class daAlinkHIO_cutNmSR_c0 {
 public:
-    static daAlinkHIO_cutNormal_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutNormal_c1 const m;
 };
 
 class daAlinkHIO_cutNormal_c : public daAlinkHIO_data_c {
@@ -5023,32 +5023,32 @@ public:
 
 class daAlinkHIO_cutFnL_c0 {
 public:
-    static daAlinkHIO_cutFinish_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutFinish_c1 const m;
 };
 
 class daAlinkHIO_cutFnV_c0 {
 public:
-    static daAlinkHIO_cutFinish_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutFinish_c1 const m;
 };
 
 class daAlinkHIO_cutFnS_c0 {
 public:
-    static daAlinkHIO_cutFinish_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutFinish_c1 const m;
 };
 
 class daAlinkHIO_cutFnSl_c0 {
 public:
-    static daAlinkHIO_cutFinish_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutFinish_c1 const m;
 };
 
 class daAlinkHIO_cutFnSm_c0 {
 public:
-    static daAlinkHIO_cutFinish_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutFinish_c1 const m;
 };
 
 class daAlinkHIO_cutFnR_c0 {
 public:
-    static daAlinkHIO_cutFinish_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutFinish_c1 const m;
 };
 
 class daAlinkHIO_cutFinish_c : public daAlinkHIO_data_c {
@@ -5085,7 +5085,7 @@ public:
 
 class daAlinkHIO_cutFnJU_c0 {
 public:
-    static daAlinkHIO_cutFnJU_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutFnJU_c1 const m;
 };
 
 class daAlinkHIO_cutFnJU_c : public daAlinkHIO_data_c {
@@ -5112,17 +5112,17 @@ public:
 
 class daAlinkHIO_cutDaL_c0 {
 public:
-    static daAlinkHIO_cutDash_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutDash_c1 const m;
 };
 
 class daAlinkHIO_cutDaR_c0 {
 public:
-    static daAlinkHIO_cutDash_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutDash_c1 const m;
 };
 
 class daAlinkHIO_cutDaCharge_c0 {
 public:
-    static daAlinkHIO_cutDash_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutDash_c1 const m;
 };
 
 class daAlinkHIO_cutDash_c : public daAlinkHIO_data_c {
@@ -5154,7 +5154,7 @@ public:
 
 class daAlinkHIO_cutJump_c0 {
 public:
-    static daAlinkHIO_cutJump_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutJump_c1 const m;
 };
 
 class daAlinkHIO_cutJump_c : public daAlinkHIO_data_c {
@@ -5205,7 +5205,7 @@ public:
 
 class daAlinkHIO_cutTurn_c0 {
 public:
-    static daAlinkHIO_cutTurn_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutTurn_c1 const m;
 };
 
 class daAlinkHIO_cutTurn_c : public daAlinkHIO_data_c {
@@ -5233,22 +5233,22 @@ public:
 
 class daAlinkHIO_hoCutLA_c0 {
 public:
-    static daAlinkHIO_hoCut_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_hoCut_c1 const m;
 };
 
 class daAlinkHIO_hoCutLB_c0 {
 public:
-    static daAlinkHIO_hoCut_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_hoCut_c1 const m;
 };
 
 class daAlinkHIO_hoCutRA_c0 {
 public:
-    static daAlinkHIO_hoCut_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_hoCut_c1 const m;
 };
 
 class daAlinkHIO_hoCutRB_c0 {
 public:
-    static daAlinkHIO_hoCut_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_hoCut_c1 const m;
 };
 
 class daAlinkHIO_hoCut_c : public daAlinkHIO_data_c {
@@ -5281,7 +5281,7 @@ public:
 
 class daAlinkHIO_hoCutCharge_c0 {
 public:
-    static daAlinkHIO_hoCutCharge_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_hoCutCharge_c1 const m;
 };
 
 class daAlinkHIO_hoCutCharge_c : public daAlinkHIO_data_c {
@@ -5315,7 +5315,7 @@ public:
 
 class daAlinkHIO_cutDown_c0 {
 public:
-    static daAlinkHIO_cutDown_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutDown_c1 const m;
 };
 
 class daAlinkHIO_cutDown_c : public daAlinkHIO_data_c {
@@ -5351,7 +5351,7 @@ public:
 
 class daAlinkHIO_cutHead_c0 {
 public:
-    static daAlinkHIO_cutHead_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutHead_c1 const m;
 };
 
 class daAlinkHIO_cutHead_c : public daAlinkHIO_data_c {
@@ -5388,7 +5388,7 @@ public:
 
 class daAlinkHIO_cutLargeJump_c0 {
 public:
-    static daAlinkHIO_cutLargeJump_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cutLargeJump_c1 const m;
 };
 
 class daAlinkHIO_cutLargeJump_c : public daAlinkHIO_data_c {
@@ -5465,7 +5465,7 @@ public:
     static daAlinkHIO_cutDown_c0 const mCutDown;
     static daAlinkHIO_cutHead_c0 const mCutHead;
     static daAlinkHIO_cutLargeJump_c0 const mCutLargeJump;
-    static daAlinkHIO_cut_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_cut_c1 const m;
 };
 
 class daAlinkHIO_cut_c : public daAlinkHIO_data_c {
@@ -5521,12 +5521,12 @@ public:
 
 class daAlinkHIO_gAtPush_c0 {
 public:
-    static daAlinkHIO_guardAttack_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_guardAttack_c1 const m;
 };
 
 class daAlinkHIO_gAtKick_c0 {
 public:
-    static daAlinkHIO_guardAttack_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_guardAttack_c1 const m;
 };
 
 class daAlinkHIO_guardAttack_c : public daAlinkHIO_data_c {
@@ -5558,7 +5558,7 @@ public:
 
 class daAlinkHIO_turnMove_c0 {
 public:
-    static daAlinkHIO_turnMove_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_turnMove_c1 const m;
 };
 
 class daAlinkHIO_turnMove_c : public daAlinkHIO_data_c {
@@ -5603,7 +5603,7 @@ public:
     static daAlinkHIO_gAtPush_c0 const mAtPush;
     static daAlinkHIO_gAtKick_c0 const mAtKick;
     static daAlinkHIO_turnMove_c0 const mTurnMove;
-    static daAlinkHIO_guard_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_guard_c1 const m;
 };
 
 class daAlinkHIO_guard_c : public daAlinkHIO_data_c {
@@ -5642,7 +5642,7 @@ public:
 
 class daAlinkHIO_crouch_c0 {
 public:
-    static daAlinkHIO_crouch_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_crouch_c1 const m;
 };
 
 class daAlinkHIO_crouch_c : public daAlinkHIO_data_c {
@@ -5697,7 +5697,7 @@ public:
 
 class daAlinkHIO_autoJump_c0 {
 public:
-    static daAlinkHIO_autoJump_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_autoJump_c1 const m;
 };
 
 class daAlinkHIO_autoJump_c : public daAlinkHIO_data_c {
@@ -5727,7 +5727,7 @@ public:
 
 class daAlinkHIO_smallJump_c0 {
 public:
-    static daAlinkHIO_smallJump_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_smallJump_c1 const m;
 };
 
 class daAlinkHIO_smallJump_c : public daAlinkHIO_data_c {
@@ -5756,7 +5756,7 @@ public:
 
 class daAlinkHIO_wallCatch_c0 {
 public:
-    static daAlinkHIO_wallCatch_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wallCatch_c1 const m;
 };
 
 class daAlinkHIO_wallCatch_c : public daAlinkHIO_data_c {
@@ -5782,7 +5782,7 @@ public:
 
 class daAlinkHIO_wallFall_c0 {
 public:
-    static daAlinkHIO_wallFall_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wallFall_c1 const m;
 };
 
 class daAlinkHIO_wallFall_c : public daAlinkHIO_data_c {
@@ -5811,7 +5811,7 @@ public:
 
 class daAlinkHIO_wallMove_c0 {
 public:
-    static daAlinkHIO_wallMove_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wallMove_c1 const m;
 };
 
 class daAlinkHIO_wallMove_c : public daAlinkHIO_data_c {
@@ -5847,7 +5847,7 @@ public:
     static daAlinkHIO_wallCatch_c0 const mWallCatch;
     static daAlinkHIO_wallFall_c0 const mWallFall;
     static daAlinkHIO_wallMove_c0 const mWallMove;
-    static daAlinkHIO_wallHang_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wallHang_c1 const m;
 };
 
 class daAlinkHIO_wallHang_c : public daAlinkHIO_data_c {
@@ -5894,7 +5894,7 @@ public:
 
 class daAlinkHIO_pushpull_c0 {
 public:
-    static daAlinkHIO_pushpull_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_pushpull_c1 const m;
 };
 
 class daAlinkHIO_pushpull_c : public daAlinkHIO_data_c {
@@ -5928,7 +5928,7 @@ public:
 
 class daAlinkHIO_damNormal_c0 {
 public:
-    static daAlinkHIO_damNormal_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_damNormal_c1 const m;
 };
 
 class daAlinkHIO_damNormal_c : public daAlinkHIO_data_c {
@@ -5967,12 +5967,12 @@ public:
 
 class daAlinkHIO_damLarge_c0 {
 public:
-    static daAlinkHIO_damLaHu_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_damLaHu_c1 const m;
 };
 
 class daAlinkHIO_damHuge_c0 {
 public:
-    static daAlinkHIO_damLaHu_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_damLaHu_c1 const m;
 };
 
 class daAlinkHIO_damLaHu_c : public daAlinkHIO_data_c {
@@ -6000,7 +6000,7 @@ public:
 
 class daAlinkHIO_damHorse_c0 {
 public:
-    static daAlinkHIO_damHorse_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_damHorse_c1 const m;
 };
 
 class daAlinkHIO_damHorse_c : public daAlinkHIO_data_c {
@@ -6035,7 +6035,7 @@ public:
 
 class daAlinkHIO_damFall_c0 {
 public:
-    static daAlinkHIO_damFall_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_damFall_c1 const m;
 };
 
 class daAlinkHIO_damFall_c : public daAlinkHIO_data_c {
@@ -6065,7 +6065,7 @@ public:
 
 class daAlinkHIO_damCaught_c0 {
 public:
-    static daAlinkHIO_damCaught_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_damCaught_c1 const m;
 };
 
 class daAlinkHIO_damCaught_c : public daAlinkHIO_data_c {
@@ -6101,7 +6101,7 @@ public:
 
 class daAlinkHIO_damSwim_c0 {
 public:
-    static daAlinkHIO_damSwim_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_damSwim_c1 const m;
 };
 
 class daAlinkHIO_damSwim_c : public daAlinkHIO_data_c {
@@ -6148,7 +6148,7 @@ public:
 
 class daAlinkHIO_damage_c0 {
 public:
-    static daAlinkHIO_damage_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_damage_c1 const m;
     static daAlinkHIO_damNormal_c0 const mDamNormal;
     static daAlinkHIO_damLarge_c0 const mDamLarge;
     static daAlinkHIO_damHuge_c0 const mDamHuge;
@@ -6200,7 +6200,7 @@ public:
 
 class daAlinkHIO_horse_c0 {
 public:
-    static daAlinkHIO_horse_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_horse_c1 const m;
 };
 
 class daAlinkHIO_horse_c : public daAlinkHIO_data_c {
@@ -6239,7 +6239,7 @@ public:
 
 class daAlinkHIO_canoe_c0 {
 public:
-    static daAlinkHIO_canoe_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_canoe_c1 const m;
 };
 
 class daAlinkHIO_canoe_c : public daAlinkHIO_data_c {
@@ -6284,7 +6284,7 @@ public:
 
 class daAlinkHIO_bow_c0 {
 public:
-    static daAlinkHIO_bow_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_bow_c1 const m;
 };
 
 class daAlinkHIO_bow_c : public daAlinkHIO_data_c {
@@ -6320,7 +6320,7 @@ public:
 
 class daAlinkHIO_boom_c0 {
 public:
-    static daAlinkHIO_boom_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_boom_c1 const m;
 };
 
 class daAlinkHIO_boom_c : public daAlinkHIO_data_c {
@@ -6364,7 +6364,7 @@ public:
 
 class daAlinkHIO_bomb_c0 {
 public:
-    static daAlinkHIO_bomb_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_bomb_c1 const m;
 };
 
 class daAlinkHIO_bomb_c : public daAlinkHIO_data_c {
@@ -6399,7 +6399,7 @@ public:
 
 class daAlinkHIO_huLight_c0 {
 public:
-    static daAlinkHIO_huLight_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_huLight_c1 const m;
 };
 
 class daAlinkHIO_wlLight_c1 {
@@ -6418,7 +6418,7 @@ public:
 
 class daAlinkHIO_wlLight_c0 {
 public:
-    static daAlinkHIO_wlLight_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlLight_c1 const m;
 };
 
 class daAlinkHIO_zwLight_c1 {  // may be wrong
@@ -6437,7 +6437,7 @@ public:
 
 class daAlinkHIO_zwLight_c0 {
 public:
-    static daAlinkHIO_zwLight_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_zwLight_c1 const m;
 };
 
 class daAlinkHIO_light_c : public daAlinkHIO_data_c {
@@ -6473,7 +6473,7 @@ public:
 
 class daAlinkHIO_kandelaar_c0 {
 public:
-    static daAlinkHIO_kandelaar_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_kandelaar_c1 const m;
 };
 
 class daAlinkHIO_kandelaar_c : public daAlinkHIO_data_c {
@@ -6512,7 +6512,7 @@ public:
 
 class daAlinkHIO_magneBoots_c0 {
 public:
-    static daAlinkHIO_magneBoots_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_magneBoots_c1 const m;
 };
 
 class daAlinkHIO_magneBoots_c : public daAlinkHIO_data_c {
@@ -6538,7 +6538,7 @@ public:
 
 class daAlinkHIO_fmChain_c0 {
 public:
-    static daAlinkHIO_fmChain_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_fmChain_c1 const m;
 };
 
 class daAlinkHIO_fmChain_c : public daAlinkHIO_data_c {
@@ -6578,7 +6578,7 @@ public:
 
 class daAlinkHIO_hookshot_c0 {
 public:
-    static daAlinkHIO_hookshot_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_hookshot_c1 const m;
 };
 
 class daAlinkHIO_hookshot_c : public daAlinkHIO_data_c {
@@ -6616,7 +6616,7 @@ public:
 
 class daAlinkHIO_spinner_c0 {
 public:
-    static daAlinkHIO_spinner_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_spinner_c1 const m;
 };
 
 class daAlinkHIO_spinner_c : public daAlinkHIO_data_c {
@@ -6672,7 +6672,7 @@ public:
 
 class daAlinkHIO_ironBall_c0 {
 public:
-    static daAlinkHIO_ironBall_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_ironBall_c1 const m;
 };
 
 class daAlinkHIO_ironBall_c : public daAlinkHIO_data_c {
@@ -6702,7 +6702,7 @@ public:
 
 class daAlinkHIO_copyRod_c0 {
 public:
-    static daAlinkHIO_copyRod_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_copyRod_c1 const m;
 };
 
 class daAlinkHIO_copyRod_c : public daAlinkHIO_data_c {
@@ -6730,7 +6730,7 @@ public:
 
 class daAlinkHIO_pickUp_c0 {
 public:
-    static daAlinkHIO_pickUp_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_pickUp_c1 const m;
 };
 
 class daAlinkHIO_pickUp_c : public daAlinkHIO_data_c {
@@ -6777,7 +6777,7 @@ public:
 
 class daAlinkHIO_board_c0 {
 public:
-    static daAlinkHIO_board_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_board_c1 const m;
 };
 
 class daAlinkHIO_board_c : public daAlinkHIO_data_c {
@@ -6810,7 +6810,7 @@ public:
 
 class daAlinkHIO_bottle_c0 {
 public:
-    static daAlinkHIO_bottle_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_bottle_c1 const m;
 };
 
 class daAlinkHIO_bottle_c : public daAlinkHIO_data_c {
@@ -6858,7 +6858,7 @@ public:
     static daAlinkHIO_ironBall_c0 const mIronBall;
     static daAlinkHIO_copyRod_c0 const mCopyRod;
     static daAlinkHIO_zwLight_c0 const mZoraArmorPL;
-    static daAlinkHIO_item_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_item_c1 const m;
 };
 
 class daAlinkHIO_item_c : public daAlinkHIO_data_c {
@@ -6917,7 +6917,7 @@ public:
 
 class daAlinkHIO_ladder_c0 {
 public:
-    static daAlinkHIO_ladder_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_ladder_c1 const m;
 };
 
 class daAlinkHIO_ladder_c : public daAlinkHIO_data_c {
@@ -6957,7 +6957,7 @@ public:
 
 class daAlinkHIO_roofHang_c0 {
 public:
-    static daAlinkHIO_roofHang_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_roofHang_c1 const m;
 };
 
 class daAlinkHIO_roofHang_c : public daAlinkHIO_data_c {
@@ -6995,7 +6995,7 @@ public:
 
 class daAlinkHIO_grab_c0 {
 public:
-    static daAlinkHIO_grab_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_grab_c1 const m;
 };
 
 class daAlinkHIO_grab_c : public daAlinkHIO_data_c {
@@ -7070,7 +7070,7 @@ public:
 
 class daAlinkHIO_swim_c0 {
 public:
-    static daAlinkHIO_swim_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_swim_c1 const m;
 };
 
 class daAlinkHIO_swim_c : public daAlinkHIO_data_c {
@@ -7146,7 +7146,7 @@ public:
 
 class daAlinkHIO_wlMove_c0 {
 public:
-    static daAlinkHIO_wlMove_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlMove_c1 const m;
 };
 
 class daAlinkHIO_wlMove_c : public daAlinkHIO_data_c {
@@ -7189,7 +7189,7 @@ public:
 
 class daAlinkHIO_wlMoveNoP_c0 {
 public:
-    static daAlinkHIO_wlMoveNoP_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlMoveNoP_c1 const m;
 };
 
 class daAlinkHIO_wlMoveNoP_c : public daAlinkHIO_data_c {
@@ -7228,7 +7228,7 @@ public:
 
 class daAlinkHIO_wlAtnMove_c0 {
 public:
-    static daAlinkHIO_wlAtnMove_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlAtnMove_c1 const m;
 };
 
 class daAlinkHIO_wlAtnMove_c : public daAlinkHIO_data_c {
@@ -7260,7 +7260,7 @@ public:
 
 class daAlinkHIO_wlHowl_c0 {
 public:
-    static daAlinkHIO_wlHowl_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlHowl_c1 const m;
 };
 
 class daAlinkHIO_wlHowl_c : public daAlinkHIO_data_c {
@@ -7294,7 +7294,7 @@ public:
 
 class daAlinkHIO_wlSideStep_c0 {
 public:
-    static daAlinkHIO_wlSideStep_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlSideStep_c1 const m;
 };
 
 class daAlinkHIO_wlSideStep_c : public daAlinkHIO_data_c {
@@ -7324,7 +7324,7 @@ public:
 
 class daAlinkHIO_wlBackJump_c0 {
 public:
-    static daAlinkHIO_wlBackJump_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlBackJump_c1 const m;
 };
 
 class daAlinkHIO_wlBackJump_c : public daAlinkHIO_data_c {
@@ -7369,7 +7369,7 @@ public:
 
 class daAlinkHIO_wlAutoJump_c0 {
 public:
-    static daAlinkHIO_wlAutoJump_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlAutoJump_c1 const m;
 };
 
 class daAlinkHIO_wlAutoJump_c : public daAlinkHIO_data_c {
@@ -7398,7 +7398,7 @@ public:
 
 class daAlinkHIO_wlPush_c0 {
 public:
-    static daAlinkHIO_wlPush_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlPush_c1 const m;
 };
 
 class daAlinkHIO_wlPush_c : public daAlinkHIO_data_c {
@@ -7434,7 +7434,7 @@ public:
 
 class daAlinkHIO_wlLie_c0 {
 public:
-    static daAlinkHIO_wlLie_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlLie_c1 const m;
 };
 
 class daAlinkHIO_wlLie_c : public daAlinkHIO_data_c {
@@ -7473,7 +7473,7 @@ public:
 
 class daAlinkHIO_wlWallHang_c0 {
 public:
-    static daAlinkHIO_wlWallHang_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlWallHang_c1 const m;
 };
 
 class daAlinkHIO_wlWallHang_c : public daAlinkHIO_data_c {
@@ -7505,7 +7505,7 @@ public:
 
 class daAlinkHIO_wlDamNormal_c0 {
 public:
-    static daAlinkHIO_wlDamNormal_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlDamNormal_c1 const m;
 };
 
 class daAlinkHIO_wlDamNormal_c : public daAlinkHIO_data_c {
@@ -7540,12 +7540,12 @@ public:
 
 class daAlinkHIO_wlDamLarge_c0 {
 public:
-    static daAlinkHIO_wlDamLaHu_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlDamLaHu_c1 const m;
 };
 
 class daAlinkHIO_wlDamHuge_c0 {
 public:
-    static daAlinkHIO_wlDamLaHu_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlDamLaHu_c1 const m;
 };
 
 class daAlinkHIO_wlDamLaHu_c : public daAlinkHIO_data_c {
@@ -7574,7 +7574,7 @@ public:
 
 class daAlinkHIO_wlDamCaught_c0 {
 public:
-    static daAlinkHIO_wlDamCaught_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlDamCaught_c1 const m;
 };
 
 class daAlinkHIO_wlDamCaught_c : public daAlinkHIO_data_c {
@@ -7607,7 +7607,7 @@ public:
 
 class daAlinkHIO_wlDamFall_c0 {
 public:
-    static daAlinkHIO_wlDamFall_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlDamFall_c1 const m;
 };
 
 class daAlinkHIO_wlDamFall_c : public daAlinkHIO_data_c {
@@ -7634,7 +7634,7 @@ public:
 
 class daAlinkHIO_wlDamage_c0 {
 public:
-    static daAlinkHIO_wlDamage_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlDamage_c1 const m;
     static daAlinkHIO_wlDamNormal_c0 const mNormal;
     static daAlinkHIO_wlDamLarge_c0 const mLarge;
     static daAlinkHIO_wlDamHuge_c0 const mHuge;
@@ -7684,7 +7684,7 @@ public:
 
 class daAlinkHIO_wlSlide_c0 {
 public:
-    static daAlinkHIO_wlSlide_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlSlide_c1 const m;
 };
 
 class daAlinkHIO_wlSlide_c : public daAlinkHIO_data_c {
@@ -7719,7 +7719,7 @@ public:
 
 class daAlinkHIO_wlRope_c0 {
 public:
-    static daAlinkHIO_wlRope_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlRope_c1 const m;
 };
 
 class daAlinkHIO_wlRope_c : public daAlinkHIO_data_c {
@@ -7755,17 +7755,17 @@ public:
 
 class daAlinkHIO_wlAtWaTl_c0 {
 public:
-    static daAlinkHIO_wlAtWait_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlAtWait_c1 const m;
 };
 
 class daAlinkHIO_wlAtWaSc_c0 {
 public:
-    static daAlinkHIO_wlAtWait_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlAtWait_c1 const m;
 };
 
 class daAlinkHIO_wlAtWaLr_c0 {
 public:
-    static daAlinkHIO_wlAtWait_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlAtWait_c1 const m;
 };
 
 class daAlinkHIO_wlAtWait_c : public daAlinkHIO_data_c {
@@ -7792,7 +7792,7 @@ public:
 
 class daAlinkHIO_wlAtRoll_c0 {
 public:
-    static daAlinkHIO_wlAtRoll_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlAtRoll_c1 const m;
 };
 
 class daAlinkHIO_wlAtRoll_c : public daAlinkHIO_data_c {
@@ -7827,7 +7827,7 @@ public:
 
 class daAlinkHIO_wlAtNjump_c0 {
 public:
-    static daAlinkHIO_wlAtNjump_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlAtNjump_c1 const m;
 };
 
 class daAlinkHIO_wlAtNjump_c : public daAlinkHIO_data_c {
@@ -7868,7 +7868,7 @@ public:
 
 class daAlinkHIO_wlAtCjump_c0 {
 public:
-    static daAlinkHIO_wlAtCjump_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlAtCjump_c1 const m;
 };
 
 class daAlinkHIO_wlAtCjump_c : public daAlinkHIO_data_c {
@@ -7896,7 +7896,7 @@ public:
 
 class daAlinkHIO_wlAtLand_c0 {
 public:
-    static daAlinkHIO_wlAtLand_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlAtLand_c1 const m;
 };
 
 class daAlinkHIO_wlAtLand_c : public daAlinkHIO_data_c {
@@ -7932,7 +7932,7 @@ public:
 
 class daAlinkHIO_wlAtDown_c0 {
 public:
-    static daAlinkHIO_wlAtDown_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlAtDown_c1 const m;
 };
 
 class daAlinkHIO_wlAtDown_c : public daAlinkHIO_data_c {
@@ -7969,7 +7969,7 @@ public:
 
 class daAlinkHIO_wlAtLock_c0 {
 public:
-    static daAlinkHIO_wlAtLock_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlAtLock_c1 const m;
 };
 
 class daAlinkHIO_wlAtLock_c : public daAlinkHIO_data_c {
@@ -8009,7 +8009,7 @@ public:
 
 class daAlinkHIO_wlAtBite_c0 {
 public:
-    static daAlinkHIO_wlAtBite_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlAtBite_c1 const m;
 };
 
 class daAlinkHIO_wlAtBite_c : public daAlinkHIO_data_c {
@@ -8054,7 +8054,7 @@ public:
     static  daAlinkHIO_wlAtDown_c0 const mWlAtDown;
     static  daAlinkHIO_wlAtLock_c0 const mWlAtLock;
     static  daAlinkHIO_wlAtBite_c0 const mWlAtBite;
-    static  daAlinkHIO_wlAttack_c1 const m;
+    static DUSK_GAME_DATA  daAlinkHIO_wlAttack_c1 const m;
 };
 
 class daAlinkHIO_wlAttack_c : public daAlinkHIO_data_c {
@@ -8101,7 +8101,7 @@ public:
 
 class daAlinkHIO_wlPoint_c0 {
 public:
-    static daAlinkHIO_wlPoint_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlPoint_c1 const m;
 };
 
 class daAlinkHIO_wlPoint_c : public daAlinkHIO_data_c {
@@ -8137,7 +8137,7 @@ public:
 
 class daAlinkHIO_wlChain_c0 {
 public:
-    static daAlinkHIO_wlChain_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlChain_c1 const m;
 };
 
 class daAlinkHIO_wlChain_c : public daAlinkHIO_data_c {
@@ -8194,7 +8194,7 @@ public:
 
 class daAlinkHIO_wlSwim_c0 {
 public:
-    static daAlinkHIO_wlSwim_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlSwim_c1 const m;
 };
 
 class daAlinkHIO_wlSwim_c : public daAlinkHIO_data_c {
@@ -8223,7 +8223,7 @@ public:
 
 class daAlinkHIO_wlGrab_c0 {
 public:
-    static daAlinkHIO_wlGrab_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlGrab_c1 const m;
 };
 
 class daAlinkHIO_wlGrab_c : public daAlinkHIO_data_c {
@@ -8253,7 +8253,7 @@ public:
 
 class daAlinkHIO_wlBall_c0 {
 public:
-    static daAlinkHIO_wlBall_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wlBall_c1 const m;
 };
 
 class daAlinkHIO_wlBall_c : public daAlinkHIO_data_c {
@@ -8308,7 +8308,7 @@ public:
     static daAlinkHIO_wlSwim_c0 const mWlSwim;
     static daAlinkHIO_wlGrab_c0 const mWlGrab;
     static daAlinkHIO_wlBall_c0 const mWlBall;
-    static daAlinkHIO_wolf_c1 const m;
+    static DUSK_GAME_DATA daAlinkHIO_wolf_c1 const m;
 };
 
 class daAlinkHIO_wolf_c : public daAlinkHIO_data_c {
