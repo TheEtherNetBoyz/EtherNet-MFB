@@ -340,6 +340,7 @@ struct UserSettings {
         ConfigVar<bool> showInputViewerGyro;
         ConfigVar<bool> nativeInputViewer;
         ConfigVar<bool> nativeLinkDebugInfo;
+        ConfigVar<std::string> triggerViewDefinitions;
         // When true, the practice-tools menu renders natively (J2D/GX), which
         // scales with resolution but is controller-only. When false, it uses
         // the imgui menu (mouse-capable).
@@ -371,6 +372,7 @@ struct UserSettings {
         HotkeyBinding saveEditor;
         HotkeyBinding stateShare;
         HotkeyBinding debugCamera;
+        HotkeyBinding captureCameraKeyframe;
         HotkeyBinding audioDebug;
         HotkeyBinding useTexturePack;
         HotkeyBinding gyroAim;
@@ -398,6 +400,7 @@ void registerSettings();
 struct CollisionViewSettings {
     bool enableTerrainView;
     bool enableWireframe;
+    bool enableTriggerView;
     bool enableAtView;
     bool enableTgView;
     bool enableCoView;

@@ -37,6 +37,7 @@
 #include "dusk/settings.h"
 #include "dusk/touch_camera.h"
 #include "imgui.h"
+#include <SDL3/SDL_keyboard.h>
 #endif
 
 namespace {
@@ -7515,6 +7516,7 @@ static constexpr f32 FLYCAM_TRIGGER_DEADZONE = 20.0f;
 static constexpr s16 FLYCAM_ROLL_SPEED = 256;
 static ImVec2 sFlyCamLastMousePos = {-1.f, -1.f};
 static bool sFlyCamMouseLookEnabled = true;
+static bool sFlyCamMouseLookKeyWasDown = false;
 
 #if TARGET_PC
 static constexpr f32 TOUCH_CAMERA_CSTICK_EXIT_THRESHOLD = 0.05f;
@@ -7555,6 +7557,7 @@ bool dCamera_c::executeDebugFlyCam() {
             deactivateDebugFlyCam();
         }
         sFlyCamLastMousePos = {-1.f, -1.f};
+        sFlyCamMouseLookKeyWasDown = false;
         return false;
     }
 
@@ -7618,11 +7621,17 @@ bool dCamera_c::executeDebugFlyCam() {
 
     {
         ImGuiIO& io = ImGui::GetIO();
-        if (!io.WantCaptureKeyboard) {
-            if (ImGui::IsKeyPressed(ImGuiKey_P, false)) {
-                setDebugFlyCamMouseLookEnabled(!sFlyCamMouseLookEnabled);
-            }
+        int keyboardStateCount = 0;
+        const bool* keyboardState = SDL_GetKeyboardState(&keyboardStateCount);
+        const bool mouseLookKeyDown =
+            keyboardState != nullptr && SDL_SCANCODE_P < keyboardStateCount &&
+            keyboardState[SDL_SCANCODE_P];
+        if (mouseLookKeyDown && !sFlyCamMouseLookKeyWasDown && !io.WantTextInput) {
+            setDebugFlyCamMouseLookEnabled(!sFlyCamMouseLookEnabled);
+        }
+        sFlyCamMouseLookKeyWasDown = mouseLookKeyDown;
 
+        if (!io.WantCaptureKeyboard) {
             f32 kbX = 0.0f, kbY = 0.0f;
             if (ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_UpArrow)) kbY += 1.f;
             if (ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_DownArrow)) kbY -= 1.f;
