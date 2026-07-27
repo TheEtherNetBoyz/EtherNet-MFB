@@ -1,8 +1,10 @@
 #include <algorithm>
 #include <array>
-#include <numeric>
-#include <string_view>
 #include <chrono>
+#include <cstring>
+#include <numeric>
+#include <string>
+#include <string_view>
 
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include "imgui.h"
@@ -17,6 +19,8 @@
 #include "SDL3/SDL_events.h"
 #include "SDL3/SDL_gamepad.h"
 #include "SDL3/SDL_scancode.h"
+#include "d/actor/d_a_player.h"
+#include "d/d_com_inf_game.h"
 #include "dusk/action_bindings.h"
 #include "dusk/audio/DuskAudioSystem.h"
 #include "dusk/config.hpp"
@@ -47,6 +51,17 @@ using namespace std::string_literals;
 using namespace std::string_view_literals;
 
 namespace {
+struct LinkTeleportPoint {
+    cXyz position = cXyz::Zero;
+    s16 angleY = 0;
+    std::string stage;
+    s8 room = -1;
+    s8 layer = -1;
+    bool valid = false;
+};
+
+LinkTeleportPoint sLinkTeleportPoint;
+
 ImGuiWindow* FindDragScrollWindow(ImGuiWindow* window) {
     while (window != nullptr) {
         const bool canScrollX = window->ScrollMax.x > 0.0f;
@@ -388,6 +403,59 @@ namespace dusk {
         }
         if (getSettings().game.speedrunMode || !getSettings().game.moveLink.getValue()) {
             getTransientSettings().moveLinkActive = false;
+        }
+
+        if (dusk::frame_interp::get_ui_tick_pending() &&
+            getSettings().game.teleportLink.getValue() &&
+            !getSettings().game.speedrunMode && !dComIfGp_isEnableNextStage())
+        {
+            const u32 held = mDoCPd_c::getUnfilteredHold(PAD_1);
+            const u32 triggered = mDoCPd_c::getUnfilteredTrig(PAD_1);
+            const u32 setChord = PAD_TRIGGER_R | PAD_BUTTON_UP;
+            const u32 warpChord = PAD_TRIGGER_R | PAD_BUTTON_DOWN;
+            const bool setPressed =
+                (held & PAD_TRIGGER_L) == 0 &&
+                (held & setChord) == setChord && (triggered & setChord) != 0;
+            const bool warpPressed =
+                (held & PAD_TRIGGER_L) == 0 &&
+                (held & warpChord) == warpChord && (triggered & warpChord) != 0;
+            daPy_py_c* player = daPy_getPlayerActorClass();
+
+            if (setPressed && player != nullptr) {
+                sLinkTeleportPoint.position = player->current.pos;
+                sLinkTeleportPoint.angleY = player->shape_angle.y;
+                sLinkTeleportPoint.stage = dComIfGp_getStartStageName();
+                sLinkTeleportPoint.room =
+                    static_cast<s8>(dComIfGp_roomControl_getStayNo());
+                sLinkTeleportPoint.layer = dComIfGp_getStartStageLayer();
+                sLinkTeleportPoint.valid = true;
+                DuskToast(
+                    fmt::format(
+                        "Teleport point set: {:.4f}, {:.4f}, {:.4f}",
+                        sLinkTeleportPoint.position.x,
+                        sLinkTeleportPoint.position.y,
+                        sLinkTeleportPoint.position.z),
+                    2.0f);
+            } else if (warpPressed) {
+                if (!sLinkTeleportPoint.valid) {
+                    DuskToast("Set a teleport point with D-pad Up + R first.", 2.0f);
+                } else if (
+                    player == nullptr ||
+                    sLinkTeleportPoint.stage != dComIfGp_getStartStageName() ||
+                    sLinkTeleportPoint.room != dComIfGp_roomControl_getStayNo() ||
+                    sLinkTeleportPoint.layer != dComIfGp_getStartStageLayer())
+                {
+                    DuskToast(
+                        "Teleport point is in a different loaded area.", 2.0f);
+                } else {
+                    player->setPlayerPosAndAngle(
+                        &sLinkTeleportPoint.position,
+                        sLinkTeleportPoint.angleY, TRUE);
+                    player->speed = cXyz::Zero;
+                    player->speedF = 0.0f;
+                    DuskToast("Teleported Link.", 1.5f);
+                }
+            }
         }
     }
 

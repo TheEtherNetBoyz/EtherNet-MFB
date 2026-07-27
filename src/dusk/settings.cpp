@@ -170,6 +170,7 @@ UserSettings g_userSettings = {
         .liveSplitEnabled {"game.liveSplitEnabled", false},
         .showSpeedrunRTATimer {"game.showSpeedrunRTATimer", true},
         .moveLink {"game.moveLink", false},
+        .teleportLink {"game.teleportLink", false},
         .gorgeVoidChecker {"game.gorgeVoidChecker", false},
         .recordingMode {"game.recordingMode", false},
         .removeQuestMapMarkers {"game.removeQuestMapMarkers", false},
@@ -432,6 +433,7 @@ void registerSettings() {
     Register(g_userSettings.game.liveSplitEnabled);
     Register(g_userSettings.game.showSpeedrunRTATimer);
     Register(g_userSettings.game.moveLink);
+    Register(g_userSettings.game.teleportLink);
     Register(g_userSettings.game.gorgeVoidChecker);
     Register(g_userSettings.game.recordingMode);
     Register(g_userSettings.game.menuScalingMode);

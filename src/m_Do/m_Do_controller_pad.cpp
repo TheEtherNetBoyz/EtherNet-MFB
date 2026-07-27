@@ -26,6 +26,8 @@ JUTGamePad* mDoCPd_c::m_gamePad[4];
 
 interface_of_controller_pad mDoCPd_c::m_cpadInfo[4];
 interface_of_controller_pad mDoCPd_c::m_debugCpadInfo[4];
+u32 mDoCPd_c::m_unfilteredButtonFlags[4] = {};
+u32 mDoCPd_c::m_unfilteredPressedButtonFlags[4] = {};
 
 #if TARGET_PC
 static bool sCtrlRResetHeld = false;
@@ -58,6 +60,12 @@ static void clearPracticeMenuInput(interface_of_controller_pad* interface) {
     interface->mTrigLockL = false;
     interface->mHoldLockR = false;
     interface->mTrigLockR = false;
+}
+
+static void clearTeleportLinkDpadInput(interface_of_controller_pad* interface) {
+    constexpr u32 kTeleportDpadMask = PAD_BUTTON_UP | PAD_BUTTON_DOWN;
+    interface->mButtonFlags &= ~kTeleportDpadMask;
+    interface->mPressedButtonFlags &= ~kTeleportDpadMask;
 }
 
 #endif
@@ -138,8 +146,12 @@ void mDoCPd_c::read() {
     for (u32 i = 0; i < 4; i++) {
         if (*pad == NULL) {
             cLib_memSet(interface, 0, sizeof(interface_of_controller_pad));
+            m_unfilteredButtonFlags[i] = 0;
+            m_unfilteredPressedButtonFlags[i] = 0;
         } else {
             convert(interface, *pad);
+            m_unfilteredButtonFlags[i] = interface->mButtonFlags;
+            m_unfilteredPressedButtonFlags[i] = interface->mPressedButtonFlags;
 #if TARGET_PC
             const u32 suppressedButtons = dusk::menu_pointer::suppressed_pad_buttons(i);
             interface->mButtonFlags &= ~suppressedButtons;
@@ -172,6 +184,14 @@ void mDoCPd_c::read() {
                      : dusk::input_macro::tick(m_cpadInfo, ctrlRResetRequested);
     if (replayResetRequested && !mDoRst::isReset()) {
         mDoRst_resetCallBack(-1, NULL);
+    }
+
+    if (dusk::getSettings().game.teleportLink.getValue() &&
+        !dusk::getSettings().game.speedrunMode.getValue() &&
+        (m_unfilteredButtonFlags[PAD_1] & PAD_TRIGGER_R) != 0 &&
+        (m_unfilteredButtonFlags[PAD_1] & PAD_TRIGGER_L) == 0)
+    {
+        clearTeleportLinkDpadInput(&m_cpadInfo[PAD_1]);
     }
 #endif
 }

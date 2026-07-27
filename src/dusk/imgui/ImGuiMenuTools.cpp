@@ -98,6 +98,7 @@ namespace dusk {
             s.game.recordingMode.setSpeedrunValue(false);
             s.game.debugFlyCam.setSpeedrunValue(false);
             s.game.moveLink.setSpeedrunValue(false);
+            s.game.teleportLink.setSpeedrunValue(false);
             s.game.gorgeVoidChecker.setSpeedrunValue(false);
             getTransientSettings().moveLinkActive = false;
         }
@@ -544,6 +545,11 @@ namespace dusk {
             ImGui::MenuItem("TAS Movie", nullptr, &m_showTasMovie);
             ImGui::MenuItem("State Share", hotkeys::SHOW_STATE_SHARE, &m_showStateShare);
             MenuCheckbox("Move Link", getSettings().game.moveLink);
+            MenuCheckbox("Teleport Link", getSettings().game.teleportLink);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "D-pad Up + R: set point\nD-pad Down + R: teleport");
+            }
 
             ImGui::EndDisabled();
 
