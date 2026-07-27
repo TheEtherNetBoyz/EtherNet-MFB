@@ -8,6 +8,7 @@
 #include "SSystem/SComponent/c_lib.h"
 #include "d/d_com_inf_game.h"
 #include "dusk/input_macro.h"
+#include "dusk/tas_movie.h"
 #include "f_ap/f_ap_game.h"
 #include "m_Do/m_Do_Reset.h"
 #include "m_Do/m_Do_main.h"
@@ -163,7 +164,13 @@ void mDoCPd_c::read() {
     }
 
 #if TARGET_PC
-    if (dusk::input_macro::tick(m_cpadInfo, ctrlRResetRequested) && !mDoRst::isReset()) {
+    const bool tasOwnsInput =
+        dusk::tas_movie::state() == dusk::tas_movie::State::Recording ||
+        dusk::tas_movie::state() == dusk::tas_movie::State::Playing;
+    const bool replayResetRequested =
+        tasOwnsInput ? dusk::tas_movie::tick(m_cpadInfo, ctrlRResetRequested)
+                     : dusk::input_macro::tick(m_cpadInfo, ctrlRResetRequested);
+    if (replayResetRequested && !mDoRst::isReset()) {
         mDoRst_resetCallBack(-1, NULL);
     }
 #endif

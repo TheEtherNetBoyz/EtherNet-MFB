@@ -490,6 +490,7 @@ namespace dusk {
         m_menuTools.ShowInputViewer();
 
         if (dusk::IsGameLaunched && !dusk::getSettings().game.speedrunMode) {
+            m_menuTools.UpdateTasMovie();
             m_menuTools.ShowDebugOverlay();
             m_menuTools.ShowCameraOverlay();
             m_menuTools.ShowProcessManager();
@@ -501,6 +502,7 @@ namespace dusk {
             m_menuTools.ShowSaveEditor();
             m_menuTools.ShowPracticeSaves();
             m_menuTools.ShowInputMacro();
+            m_menuTools.ShowTasMovie();
             m_menuTools.ShowStateShare();
             m_menuTools.ShowActorSpawner();
         }

@@ -16,10 +16,13 @@ struct SavedStateEntry {
 class ImGuiStateShare {
 public:
     void draw(bool& open);
+    void updateRuntime();
+    std::string captureEncodedState();
+    bool beginApplyEncodedState(const std::string& encoded, const std::string& name = {});
+    bool loadInProgress() const;
+    const std::vector<SavedStateEntry>& savedStates();
 
 private:
-    std::string encodeCurrentState();
-    bool applyEncodedState(const std::string& encoded, const std::string& name = {});
     void tickPendingApply();
     void loadStatesFile();
     void saveStatesFile();

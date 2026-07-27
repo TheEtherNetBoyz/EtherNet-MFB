@@ -92,7 +92,7 @@ void ImGuiStateShare::saveStatesFile() {
     }
 }
 
-std::string ImGuiStateShare::encodeCurrentState() {
+std::string ImGuiStateShare::captureEncodedState() {
     StateSharePacket pkt = {};
     strncpy(pkt.stageName, dComIfGp_getStartStageName(), 7);
     pkt.roomNo     = dComIfGp_getStartStageRoomNo();
@@ -110,7 +110,7 @@ std::string ImGuiStateShare::encodeCurrentState() {
     return absl::Base64Escape(compressed);
 }
 
-bool ImGuiStateShare::applyEncodedState(const std::string& encoded, const std::string& name) {
+bool ImGuiStateShare::beginApplyEncodedState(const std::string& encoded, const std::string& name) {
     std::string decoded;
     if (!absl::Base64Unescape(encoded, &decoded)) {
         m_statusMsg = "Invalid base64.";
@@ -198,6 +198,38 @@ void ImGuiStateShare::tickPendingApply() {
     dComIfGp_setOxygen(600);
 }
 
+void ImGuiStateShare::updateRuntime() {
+    if (!dusk::IsGameLaunched) {
+        return;
+    }
+
+    tickPendingApply();
+    if (dusk::getTransientSettings().stateShareLoadActive) {
+        if (fopOvlpM_IsPeek()) {
+            m_stateSharePeekSeen = true;
+        } else if (m_stateSharePeekSeen ||
+                   (getSettings().game.enableInstaLoads.getValue() &&
+                    !dComIfGp_isEnableNextStage() &&
+                    daPy_getPlayerActorClass() != nullptr))
+        {
+            dusk::getTransientSettings().stateShareLoadActive = false;
+            m_stateSharePeekSeen = false;
+        }
+    }
+}
+
+bool ImGuiStateShare::loadInProgress() const {
+    return dusk::getTransientSettings().stateShareLoadActive ||
+           m_pendingInfo.has_value() || m_pendingSavedata.has_value();
+}
+
+const std::vector<SavedStateEntry>& ImGuiStateShare::savedStates() {
+    if (!m_loaded) {
+        loadStatesFile();
+    }
+    return m_states;
+}
+
 static bool ValidateEncodedState(const std::string& encoded) {
     std::string decoded;
     if (!absl::Base64Unescape(encoded, &decoded)) {
@@ -256,21 +288,7 @@ void ImGuiStateShare::mergeFromFile(const std::string& path) {
 }
 
 void ImGuiStateShare::draw(bool& open) {
-    if (dusk::IsGameLaunched) {
-        tickPendingApply();
-        if (dusk::getTransientSettings().stateShareLoadActive) {
-            if (fopOvlpM_IsPeek()) {
-                m_stateSharePeekSeen = true;
-            } else if (m_stateSharePeekSeen ||
-                       (getSettings().game.enableInstaLoads.getValue() &&
-                        !dComIfGp_isEnableNextStage() &&
-                        daPy_getPlayerActorClass() != nullptr))
-            {
-                dusk::getTransientSettings().stateShareLoadActive = false;
-                m_stateSharePeekSeen = false;
-            }
-        }
-    }
+    updateRuntime();
 
     if (!m_loaded) {
         loadStatesFile();
@@ -335,7 +353,7 @@ void ImGuiStateShare::draw(bool& open) {
         ImGui::SameLine();
         if (!gameRunning || loadInProgress) { ImGui::BeginDisabled(); }
         if (ImGui::Button("Load")) {
-            applyEncodedState(m_states[i].encoded, m_states[i].name);
+            beginApplyEncodedState(m_states[i].encoded, m_states[i].name);
         }
         if (!gameRunning || loadInProgress) { ImGui::EndDisabled(); }
 
@@ -366,7 +384,7 @@ void ImGuiStateShare::draw(bool& open) {
     if (ImGui::Button("Save")) {
         SavedStateEntry entry;
         entry.name    = fmt::format("State {}", m_states.size() + 1);
-        entry.encoded = encodeCurrentState();
+        entry.encoded = captureEncodedState();
         m_states.push_back(std::move(entry));
         saveStatesFile();
         m_statusMsg = fmt::format("Saved as '{}'.", m_states.back().name);

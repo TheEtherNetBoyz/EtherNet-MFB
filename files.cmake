@@ -1447,6 +1447,7 @@ set(DUSK_FILES
         src/dusk/http/http.hpp
         src/dusk/io.cpp
         src/dusk/input_macro.cpp
+        src/dusk/tas_movie.cpp
         src/dusk/layout.cpp
         src/dusk/latency_trace.cpp
         src/dusk/video_latency.cpp
@@ -1477,6 +1478,7 @@ set(DUSK_FILES
         src/dusk/imgui/ImGuiCameraOverlay.cpp
         src/dusk/imgui/ImGuiHeapOverlay.cpp
         src/dusk/imgui/ImGuiInputMacro.cpp
+        src/dusk/imgui/ImGuiTasMovie.cpp
         src/dusk/imgui/ImGuiControllerOverlay.cpp
         src/dusk/imgui/ImGuiStubLog.cpp
         src/dusk/imgui/ImGuiSaveEditor.cpp

@@ -541,6 +541,7 @@ namespace dusk {
             ImGui::MenuItem("Save Editor", hotkeys::SHOW_SAVE_EDITOR, &m_showSaveEditor);
             ImGui::MenuItem("Practice Saves", nullptr, &m_showPracticeSaves);
             ImGui::MenuItem("Input Macro", nullptr, &m_showInputMacro);
+            ImGui::MenuItem("TAS Movie", nullptr, &m_showTasMovie);
             ImGui::MenuItem("State Share", hotkeys::SHOW_STATE_SHARE, &m_showStateShare);
             MenuCheckbox("Move Link", getSettings().game.moveLink);
 
