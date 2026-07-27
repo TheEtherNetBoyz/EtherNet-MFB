@@ -60,6 +60,7 @@
 #include "dusk/action_bindings.h"
 #include "dusk/frame_interpolation.h"
 #include "dusk/settings.h"
+#include "dusk/tas_movie.h"
 #include "res/Object/Alink.h"
 #include <algorithm>
 #include <cstring>
@@ -19717,10 +19718,23 @@ int daAlink_c::draw() {
         #endif
     }
 
+    BOOL isPlayerNoDraw = checkPlayerNoDraw();
+#if TARGET_PC
+    // First-person/C-up deliberately hides Link for the gameplay camera. The
+    // detached presentation camera is render-only, so retain explicit
+    // cutscene/player hide flags but ignore that camera-proximity hide.
+    if (dusk::tas_movie::presentationCameraEnabled() &&
+        dComIfGp_checkCameraAttentionStatus(field_0x317c, 2) &&
+        !checkNoResetFlg0(FLG0_PLAYER_NO_DRAW))
+    {
+        isPlayerNoDraw = FALSE;
+    }
+#endif
+
     if (checkNoResetFlg1(FLG1_UNK_80)) {
         JPABaseEmitter* emitter_p = dComIfGp_particle_getEmitter(field_0x31c4);
         if (emitter_p != NULL) {
-            if (checkPlayerNoDraw() && !checkEndResetFlg1(ERFLG1_UNK_4)) {
+            if (isPlayerNoDraw && !checkEndResetFlg1(ERFLG1_UNK_4)) {
                 emitter_p->stopDrawParticle();
             } else {
                 emitter_p->playDrawParticle();
@@ -19745,7 +19759,6 @@ int daAlink_c::draw() {
         return 1;
     }
 
-    BOOL isPlayerNoDraw = checkPlayerNoDraw();
     BOOL var_r29 = FALSE;
     BOOL var_r31 = TRUE;
 
@@ -19941,7 +19954,15 @@ int daAlink_c::draw() {
             modelDraw(mpDemoHRTmpModel, isPlayerNoDraw);
         }
 
-        BOOL var_r3 = isPlayerNoDraw || dComIfGp_checkCameraAttentionStatus(field_0x317c, 0x20);
+        BOOL hideAimingHead = dComIfGp_checkCameraAttentionStatus(field_0x317c, 0x20);
+#if TARGET_PC
+        // Aiming modes hide the head and face for the gameplay camera. Keep
+        // that behavior unless the detached presentation camera is rendering.
+        if (dusk::tas_movie::presentationCameraEnabled()) {
+            hideAimingHead = FALSE;
+        }
+#endif
+        BOOL var_r3 = isPlayerNoDraw || hideAimingHead;
 
         modelDraw(mpLinkHatModel, var_r3);
 

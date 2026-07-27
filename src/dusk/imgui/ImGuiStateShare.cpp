@@ -8,6 +8,7 @@
 #include "nlohmann/json.hpp"
 
 #include "d/d_com_inf_game.h"
+#include "d/d_meter2_info.h"
 #include "d/actor/d_a_player.h"
 #include "dusk/main.h"
 #include "dusk/io.hpp"
@@ -40,6 +41,19 @@ static constexpr size_t PACKET_SAVE_ONLY = sizeof(StateSharePacket) + sizeof(dSv
 static constexpr auto STATES_FILENAME = "states.json";
 
 static bool ValidateEncodedState(const std::string&);
+
+static bool GameplayMenuBlocksStateLoad() {
+    switch (dMeter2Info_getWindowStatus()) {
+    case 2:  // item wheel
+    case 3:
+    case 4:
+    case 5:
+    case 10:
+        return true;
+    default:
+        return dComIfGp_isPauseFlag();
+    }
+}
 
 void ImGuiStateShare::onMergeFileSelected(void* userdata, const char* path, const char* /*error*/) {
     auto* self = static_cast<ImGuiStateShare*>(userdata);
@@ -111,6 +125,14 @@ std::string ImGuiStateShare::captureEncodedState() {
 }
 
 bool ImGuiStateShare::beginApplyEncodedState(const std::string& encoded, const std::string& name) {
+    // A gameplay menu owns live processes such as MENUWINDOW and MSG_OBJECT.
+    // Starting a stage transition while they are alive can leave one of those
+    // processes queued with an invalid execute method during scene teardown.
+    if (GameplayMenuBlocksStateLoad()) {
+        m_statusMsg = "Close the item wheel or pause menu before loading a state.";
+        return false;
+    }
+
     std::string decoded;
     if (!absl::Base64Unescape(encoded, &decoded)) {
         m_statusMsg = "Invalid base64.";

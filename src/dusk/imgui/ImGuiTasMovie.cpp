@@ -1,17 +1,22 @@
 #include "ImGuiMenuTools.hpp"
 
+#include "SSystem/SComponent/c_counter.h"
 #include "d/actor/d_a_player.h"
 #include "d/d_com_inf_game.h"
 #include "dusk/input_macro.h"
 #include "dusk/io.hpp"
+#include "dusk/logging.h"
 #include "dusk/main.h"
 #include "dusk/tas_movie.h"
 #include "f_op/f_op_camera_mng.h"
+#include "f_op/f_op_overlap_mng.h"
+#include "f_pc/f_pc_create_tag.h"
 
 #include "absl/strings/escaping.h"
 #include "fmt/format.h"
 #include "imgui.h"
 #include "nlohmann/json.hpp"
+#include <SDL3/SDL_keyboard.h>
 
 #include <filesystem>
 #include <string>
@@ -33,6 +38,11 @@ std::string sStatus;
 bool sLoaded = false;
 int sSelectedState = 0;
 int sSeekFrame = 0;
+bool sPauseHotkeyWasDown = false;
+bool sFrameAdvanceHotkeyWasDown = false;
+bool sAnchorReadyCandidate = false;
+u64 sAnchorReadyCreationEpoch = 0;
+u32 sAnchorReadySimulationFrame = 0;
 
 std::filesystem::path TasMoviesFilePath() {
     return ConfigPath / kTasMoviesFilename;
@@ -91,13 +101,54 @@ void loadMoviesFile() {
 void ImGuiMenuTools::UpdateTasMovie() {
     m_stateShare.updateRuntime();
     tas_movie::updatePresentationCameraControls(std::max(ImGui::GetIO().DeltaTime, 0.0f));
-    if (tas_movie::waitingForAnchor() && !m_stateShare.loadInProgress() &&
-        daPy_getPlayerActorClass() != nullptr)
+
+    int keyCount = 0;
+    const bool* keys = SDL_GetKeyboardState(&keyCount);
+    const bool pauseDown = keyCount > SDL_SCANCODE_L && keys[SDL_SCANCODE_L];
+    const bool frameAdvanceDown = keyCount > SDL_SCANCODE_PERIOD && keys[SDL_SCANCODE_PERIOD];
+    const bool movieRunning =
+        tas_movie::state() == tas_movie::State::Recording ||
+        tas_movie::state() == tas_movie::State::Playing;
+    if (!ImGui::GetIO().WantTextInput && movieRunning) {
+        if (pauseDown && !sPauseHotkeyWasDown) {
+            tas_movie::setPaused(!tas_movie::paused());
+        }
+        if (frameAdvanceDown && !sFrameAdvanceHotkeyWasDown && tas_movie::paused()) {
+            tas_movie::requestFrameAdvance();
+        }
+    }
+    sPauseHotkeyWasDown = pauseDown;
+    sFrameAdvanceHotkeyWasDown = frameAdvanceDown;
+
+    const bool anchorCanSettle =
+        tas_movie::waitingForAnchor() &&
+        !m_stateShare.loadInProgress() &&
+        !dComIfGp_isEnableNextStage() &&
+        !fopOvlpM_IsDoingReq() &&
+        daPy_getPlayerActorClass() != nullptr &&
+        g_fpcCtTg_Queue.mSize == 0;
+    if (!anchorCanSettle) {
+        sAnchorReadyCandidate = false;
+    } else if (
+        !sAnchorReadyCandidate ||
+        sAnchorReadyCreationEpoch != g_fpcCtTg_ActivityEpoch)
     {
+        // An empty queue is not sufficient by itself: a complete actor batch
+        // can be added and drained between two UI presentations. Snapshot both
+        // creation activity and the simulation counter, then require a whole
+        // simulation boundary with neither changing.
+        sAnchorReadyCandidate = true;
+        sAnchorReadyCreationEpoch = g_fpcCtTg_ActivityEpoch;
+        sAnchorReadySimulationFrame = g_Counter.mCounter0;
+    } else if (sAnchorReadySimulationFrame != g_Counter.mCounter0) {
+        DuskLog.debug(
+            "TAS anchor settled at simulation frame {} (creation epoch {})",
+            g_Counter.mCounter0, g_fpcCtTg_ActivityEpoch);
         tas_movie::notifyAnchorReady();
+        sAnchorReadyCandidate = false;
         sStatus = tas_movie::state() == tas_movie::State::Recording
-                      ? "Anchor loaded. Recording began on this simulation frame."
-                      : "Anchor loaded. Playback began on this simulation frame.";
+                      ? "Anchor settled. Recording began on this simulation frame."
+                      : "Anchor settled. Playback began on this simulation frame.";
     }
 }
 
@@ -254,6 +305,7 @@ void ImGuiMenuTools::ShowTasMovie() {
     if (!paused) {
         ImGui::EndDisabled();
     }
+    ImGui::TextDisabled("L toggles simulation. Period advances one frame.");
     bool turbo = tas_movie::turbo();
     if (ImGui::Checkbox("Turbo playback/recording", &turbo)) {
         tas_movie::setTurbo(turbo);
@@ -405,6 +457,14 @@ void ImGuiMenuTools::ShowTasMovie() {
     bool mouseLook = tas_movie::presentationCameraMouseLookEnabled();
     if (ImGui::Checkbox("Mouse look (P)", &mouseLook)) {
         tas_movie::setPresentationCameraMouseLookEnabled(mouseLook);
+    }
+    bool dualCulling = tas_movie::presentationCameraDualCullingEnabled();
+    if (ImGui::Checkbox("Keep gameplay-camera actors visible", &dualCulling)) {
+        tas_movie::setPresentationCameraDualCullingEnabled(dualCulling);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Render-only dual-frustum culling. Gameplay, audio, and room streaming remain attached to Link.");
     }
     float moveSpeed = tas_movie::presentationCameraMoveSpeed();
     ImGui::SetNextItemWidth(180.0f);

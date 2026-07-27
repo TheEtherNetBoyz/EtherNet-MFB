@@ -4,7 +4,9 @@
 #include "dusk/frame_interpolation.h"
 #include "d/d_camera.h"
 #include "f_op/f_op_view.h"
+#include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_graphic.h"
+#include "m_Do/m_Do_lib.h"
 #include "m_Do/m_Do_mtx.h"
 
 #include <SDL3/SDL_keyboard.h>
@@ -107,6 +109,9 @@ bool sPaused = false;
 bool sFrameAdvancePending = false;
 bool sTurbo = false;
 float sSimulationRate = 30.0f;
+bool sAnchorJustReady = false;
+bool sPlaybackRumbleSuppressed = false;
+u32 sSavedRumbleMask = 0;
 bool sPendingRngRestore = false;
 size_t sPauseAtFrame = std::numeric_limits<size_t>::max();
 PresentationCamera sPresentationCamera;
@@ -115,6 +120,7 @@ bool sCameraTrackPlaying = false;
 bool sCameraTrackPaused = false;
 bool sCameraTrackLoop = false;
 bool sCameraTrackEase = true;
+bool sDualCameraCulling = true;
 float sCameraTrackPreviewFrame = 0.0f;
 
 void updateCameraAngles() {
@@ -133,6 +139,26 @@ void updateCameraCenter() {
     sPresentationCamera.center.z =
         sPresentationCamera.eye.z + std::sin(sPresentationCamera.yaw) *
                                             std::cos(sPresentationCamera.pitch) * kTargetDistance;
+}
+
+void suppressPlaybackRumble() {
+    if (sPlaybackRumbleSuppressed) {
+        return;
+    }
+    sSavedRumbleMask = JUTGamePad::CRumble::mEnabled;
+    for (int port = 0; port < 4; ++port) {
+        JUTGamePad::CRumble::stopMotorHard(port);
+    }
+    JUTGamePad::CRumble::setEnabled(0);
+    sPlaybackRumbleSuppressed = true;
+}
+
+void restorePlaybackRumble() {
+    if (!sPlaybackRumbleSuppressed) {
+        return;
+    }
+    JUTGamePad::CRumble::setEnabled(sSavedRumbleMask);
+    sPlaybackRumbleSuppressed = false;
 }
 
 float timelineFrame() {
@@ -299,6 +325,7 @@ bool armRecording(std::string encodedState) {
     sPlaybackFrame = 0;
     sPaused = false;
     sFrameAdvancePending = false;
+    sAnchorJustReady = false;
     sRngCallDiverged = false;
     sState = State::WaitingToRecord;
     game_clock::set_sim_rate(sSimulationRate);
@@ -315,6 +342,7 @@ bool armPlayback() {
     sPendingResetRequest = false;
     sPaused = false;
     sFrameAdvancePending = false;
+    sAnchorJustReady = false;
     sRngCallDiverged = false;
     sPauseAtFrame = std::numeric_limits<size_t>::max();
     sState = State::WaitingToPlay;
@@ -370,11 +398,17 @@ void notifyAnchorReady() {
         sPlaybackFrame = 0;
         sPlaybackResetComboHeld = false;
         sState = State::Playing;
+        suppressPlaybackRumble();
         if (sPauseAtFrame == 0) {
             sPaused = true;
             sPauseAtFrame = std::numeric_limits<size_t>::max();
         }
     }
+    // Anchor completion is detected on a presentation update. Discard any
+    // fractional/deferred scheduler time accumulated across the load so a low
+    // viewing rate cannot batch multiple movie inputs into the first display.
+    sAnchorJustReady = true;
+    game_clock::reset_frame_timer();
 }
 
 void cancelAnchorLoad() {
@@ -393,6 +427,7 @@ void stop() {
     sPendingRngRestore = false;
     sPaused = false;
     sFrameAdvancePending = false;
+    sAnchorJustReady = false;
     sTurbo = false;
     sPauseAtFrame = std::numeric_limits<size_t>::max();
     game_clock::set_sim_rate(30.0f);
@@ -532,8 +567,18 @@ void setSimulationRate(float hz) {
 }
 
 int simulationTicksForHostFrame(int normalTicks) {
+    if (sState != State::Playing) {
+        restorePlaybackRumble();
+    }
     if (sState != State::Recording && sState != State::Playing) {
         return normalTicks;
+    }
+    if (sAnchorJustReady) {
+        if (normalTicks <= 0) {
+            return 0;
+        }
+        sAnchorJustReady = false;
+        normalTicks = std::min(normalTicks, 1);
     }
     if (sPaused) {
         if (sFrameAdvancePending) {
@@ -660,6 +705,31 @@ void setPresentationCameraMouseLookEnabled(bool enabled) {
 
 bool presentationCameraMouseLookEnabled() {
     return sPresentationCamera.mouseLookEnabled;
+}
+
+bool presentationCameraDualCullingEnabled() {
+    return sDualCameraCulling;
+}
+
+void setPresentationCameraDualCullingEnabled(bool enabled) {
+    sDualCameraCulling = enabled;
+}
+
+bool getGameplayCullView(Mtx outView, float* fovy, float* aspect, float* nearPlane) {
+    if (!sDualCameraCulling || !sPresentationCamera.enabled || !sViewBackup.valid) {
+        return false;
+    }
+    MTXCopy(sViewBackup.saved.viewMtx, outView);
+    if (fovy != nullptr) {
+        *fovy = sViewBackup.saved.fovy;
+    }
+    if (aspect != nullptr) {
+        *aspect = sViewBackup.saved.aspect;
+    }
+    if (nearPlane != nullptr) {
+        *nearPlane = sViewBackup.saved.near_;
+    }
+    return true;
 }
 
 float presentationCameraMoveSpeed() {
@@ -857,6 +927,8 @@ void applyPresentationCamera(view_class* view) {
     view->viewMtxNoTrans[1][3] = 0.0f;
     view->viewMtxNoTrans[2][3] = 0.0f;
     cMtx_concatProjView(view->projMtx, view->viewMtx, view->projViewMtx);
+    mDoLib_clipper::setup(
+        view->fovy, view->aspect, view->near_, mDoLib_clipper::getFar());
 }
 
 void restorePresentationCamera() {
@@ -874,6 +946,8 @@ void restorePresentationCamera() {
     mDoGph_gInf_c::setWideZoomProjection(view->projMtx);
 #endif
     j3dSys.setViewMtx(view->viewMtx);
+    mDoLib_clipper::setup(
+        view->fovy, view->aspect, view->near_, mDoLib_clipper::getFar());
     sViewBackup = {};
 }
 
