@@ -61,6 +61,8 @@ void setPaused(bool paused);
 void requestFrameAdvance();
 bool turbo();
 void setTurbo(bool turbo);
+float simulationRate();
+void setSimulationRate(float hz);
 int simulationTicksForHostFrame(int normalTicks);
 
 std::string serialize();

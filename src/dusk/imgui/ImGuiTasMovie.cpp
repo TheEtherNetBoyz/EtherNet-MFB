@@ -258,6 +258,14 @@ void ImGuiMenuTools::ShowTasMovie() {
     if (ImGui::Checkbox("Turbo playback/recording", &turbo)) {
         tas_movie::setTurbo(turbo);
     }
+    float simulationRate = tas_movie::simulationRate();
+    if (ImGui::SliderFloat("Viewing tick rate", &simulationRate, 1.0f, 120.0f, "%.0f Hz")) {
+        tas_movie::setSimulationRate(simulationRate);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Runtime viewing speed only. This is not saved in the movie and does not change recorded frames.");
+    }
     if (tas_movie::state() != tas_movie::State::Playing || !paused) {
         ImGui::BeginDisabled();
     }

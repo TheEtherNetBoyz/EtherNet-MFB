@@ -106,6 +106,7 @@ cM_RndCallCounts sActualRngCalls{};
 bool sPaused = false;
 bool sFrameAdvancePending = false;
 bool sTurbo = false;
+float sSimulationRate = 30.0f;
 bool sPendingRngRestore = false;
 size_t sPauseAtFrame = std::numeric_limits<size_t>::max();
 PresentationCamera sPresentationCamera;
@@ -300,6 +301,7 @@ bool armRecording(std::string encodedState) {
     sFrameAdvancePending = false;
     sRngCallDiverged = false;
     sState = State::WaitingToRecord;
+    game_clock::set_sim_rate(sSimulationRate);
     return true;
 }
 
@@ -316,6 +318,7 @@ bool armPlayback() {
     sRngCallDiverged = false;
     sPauseAtFrame = std::numeric_limits<size_t>::max();
     sState = State::WaitingToPlay;
+    game_clock::set_sim_rate(sSimulationRate);
     return true;
 }
 
@@ -378,11 +381,11 @@ void cancelAnchorLoad() {
     if (waitingForAnchor()) {
         sPendingRngRestore = false;
         sState = State::Idle;
+        game_clock::set_sim_rate(30.0f);
     }
 }
 
 void stop() {
-    const bool wasTurbo = sTurbo;
     sState = State::Idle;
     sPlaybackFrame = 0;
     sPlaybackResetComboHeld = false;
@@ -392,9 +395,8 @@ void stop() {
     sFrameAdvancePending = false;
     sTurbo = false;
     sPauseAtFrame = std::numeric_limits<size_t>::max();
-    if (wasTurbo) {
-        game_clock::reset_frame_timer();
-    }
+    game_clock::set_sim_rate(30.0f);
+    game_clock::reset_frame_timer();
 }
 
 void clear() {
@@ -490,10 +492,13 @@ bool paused() {
 
 void setPaused(bool paused) {
     if (sState == State::Recording || sState == State::Playing) {
-        sPaused = paused;
-        if (!paused) {
-            sFrameAdvancePending = false;
+        if (sPaused == paused) {
+            return;
         }
+        sPaused = paused;
+        sFrameAdvancePending = false;
+        // Paused wall time is presentation time, not simulation debt.
+        game_clock::reset_frame_timer();
     }
 }
 
@@ -515,6 +520,17 @@ void setTurbo(bool turbo) {
     game_clock::reset_frame_timer();
 }
 
+float simulationRate() {
+    return sSimulationRate;
+}
+
+void setSimulationRate(float hz) {
+    sSimulationRate = std::clamp(hz, 1.0f, 120.0f);
+    if (active()) {
+        game_clock::set_sim_rate(sSimulationRate);
+    }
+}
+
 int simulationTicksForHostFrame(int normalTicks) {
     if (sState != State::Recording && sState != State::Playing) {
         return normalTicks;
@@ -522,8 +538,13 @@ int simulationTicksForHostFrame(int normalTicks) {
     if (sPaused) {
         if (sFrameAdvancePending) {
             sFrameAdvancePending = false;
+            game_clock::reset_frame_timer();
             return 1;
         }
+        // advance_main_loop() has already sampled the host clock. Rebase every
+        // paused presentation so elapsed wall time can never accumulate into
+        // catch-up ticks when playback resumes.
+        game_clock::reset_frame_timer();
         return 0;
     }
     if (sTurbo) {
