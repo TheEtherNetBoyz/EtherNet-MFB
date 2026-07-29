@@ -822,13 +822,9 @@ bool sNameLabelsEnabled = true;
 // while the main online model is visual puppets plus progression flags.
 bool sSyncWorldEnabled = false;
 bool sSyncFlagsEnabled = true;
-// Local receive/display preference. Direct peers advertise this so the sender
-// can skip the separate Midna-matrix lane for clients that do not want it.
-// Relay still needs relay-side routing support before it can avoid forwarding
-// Midna to only the users who opted out.
-// Keep the separate Midna lane out of the current network test build.
-constexpr bool kStreamRemoteMidnaMatrices = false;
-bool sDisplayRemoteMidnaEnabled = true;
+// Local receive/display preference. The compile-time transport capability in
+// multiplayer.hpp remains the single switch for the unfinished Midna lane.
+bool sDisplayRemoteMidnaEnabled = kRemoteMidnaStreamingEnabled;
 // Receive-side policy for remote-player collision. Today this gates the simple
 // pose-based body push; future engine-backed collision should use the same
 // switch so presets do not need to care which implementation is active.
@@ -843,7 +839,7 @@ bool wants_remote_puppet_matrices() {
 }
 
 bool wants_remote_midna_matrices() {
-    return kStreamRemoteMidnaMatrices && wants_remote_puppet_matrices() &&
+    return kRemoteMidnaStreamingEnabled && wants_remote_puppet_matrices() &&
            sDisplayRemoteMidnaEnabled;
 }
 
@@ -6035,7 +6031,9 @@ bool add_link_matrices(json& state, json* midnaMatrices = nullptr, bool includeL
     const bool includeHumanCoreParts = !isWolf;
     const bool includeHumanParts = includeHumanCoreParts && !isTransforming;
     const LocalMidnaVisualState midnaVisual =
-        isTransforming ? LocalMidnaVisualState() : detect_midna_visual_state(link, isWolf);
+        kRemoteMidnaStreamingEnabled && !isTransforming
+            ? detect_midna_visual_state(link, isWolf)
+            : LocalMidnaVisualState();
     J3DModel* arrowModel = nullptr;
     J3DModel* itemActorModel = nullptr;
     J3DModel* rideActorModel = nullptr;
@@ -6117,62 +6115,66 @@ bool add_link_matrices(json& state, json* midnaMatrices = nullptr, bool includeL
         }
     }
 
-    daMidna_c* midnaActor = daPy_py_c::getMidnaActor();
-    J3DModel* midnaModel = nullptr;
-    J3DModel* midnaMaskModel = nullptr;
-    J3DModel* midnaHandModel = nullptr;
-    J3DModel* midnaHairModel = nullptr;
-    J3DModel* midnaGlowModel = nullptr;
-    if (midnaVisual.shadowForm && midnaActor != nullptr) {
-        midnaModel = midnaVisual.body ? midnaActor->getShadowModel() : nullptr;
-        midnaMaskModel = midnaVisual.mask ? midnaActor->getShadowMaskModel() : nullptr;
-        midnaHandModel = midnaVisual.hand ? midnaActor->getShadowHandModel() : nullptr;
-        midnaHairModel = midnaVisual.hair ? midnaActor->getShadowHairHandModel() : nullptr;
-        midnaGlowModel = midnaVisual.glow ? midnaActor->getGokouModel() : nullptr;
-    } else {
-        midnaModel = midnaVisual.body ? link->getMidnaModel() : nullptr;
-        midnaMaskModel = midnaVisual.mask ? link->getMidnaMaskModel() : nullptr;
-        midnaHandModel = midnaVisual.hand ? link->getMidnaHandModel() : nullptr;
-        midnaHairModel = midnaVisual.hair ? link->getMidnaHairHandModel() : nullptr;
-    }
+    if (midnaMatrices != nullptr) {
+        daMidna_c* midnaActor = daPy_py_c::getMidnaActor();
+        J3DModel* midnaModel = nullptr;
+        J3DModel* midnaMaskModel = nullptr;
+        J3DModel* midnaHandModel = nullptr;
+        J3DModel* midnaHairModel = nullptr;
+        J3DModel* midnaGlowModel = nullptr;
+        if (midnaVisual.shadowForm && midnaActor != nullptr) {
+            midnaModel = midnaVisual.body ? midnaActor->getShadowModel() : nullptr;
+            midnaMaskModel = midnaVisual.mask ? midnaActor->getShadowMaskModel() : nullptr;
+            midnaHandModel = midnaVisual.hand ? midnaActor->getShadowHandModel() : nullptr;
+            midnaHairModel = midnaVisual.hair ? midnaActor->getShadowHairHandModel() : nullptr;
+            midnaGlowModel = midnaVisual.glow ? midnaActor->getGokouModel() : nullptr;
+        } else {
+            midnaModel = midnaVisual.body ? link->getMidnaModel() : nullptr;
+            midnaMaskModel = midnaVisual.mask ? link->getMidnaMaskModel() : nullptr;
+            midnaHandModel = midnaVisual.hand ? link->getMidnaHandModel() : nullptr;
+            midnaHairModel = midnaVisual.hair ? link->getMidnaHairHandModel() : nullptr;
+        }
 
-    const int midnaHairShape =
-        (isWolf || midnaVisual.shadowForm) ? visible_material_shape_index(midnaHairModel, 3, 0) : 0;
+        const int midnaHairShape =
+            (isWolf || midnaVisual.shadowForm)
+                ? visible_material_shape_index(midnaHairModel, 3, 0)
+                : 0;
 
-    if (midnaMatrices != nullptr && includeLinkMatrices) {
-        *midnaMatrices = link_matrix_pack_to_json(
-            {
-                {"body", nullptr},
-                {"hat", nullptr},
-                {"face", nullptr},
-                {"hand", nullptr},
-                {"sword", nullptr},
-                {"sheath", nullptr},
-                {"shield", nullptr},
-                {"held_item", nullptr},
-                {"hook_tip", nullptr},
-                {"hook_sub_item", nullptr},
-                {"hook_sub_tip", nullptr},
-                {"arrow", nullptr},
-                {"kantera", nullptr},
-                {"kantera_glow", nullptr},
-                {"item_actor", nullptr},
-                {"ride_actor", nullptr},
-                {"midna", midnaModel},
-                {"midna_mask", midnaMaskModel},
-                {"midna_hand", midnaHandModel},
-                {"midna_hair", midnaHairModel},
-                {"midna_glow", midnaGlowModel},
-            },
-            midnaHairShape);
-        sLastMidnaMatrixPackedBytes = sLastPoseMatrixPackedBytes;
-        sLastMidnaMatrixBase64Bytes = sLastPoseMatrixBase64Bytes;
-        sLastMidnaMatrixPresentSlots = sLastPoseMatrixPresentSlots;
-    } else if (midnaMatrices != nullptr) {
-        *midnaMatrices = json::object();
-        sLastMidnaMatrixPackedBytes = 0;
-        sLastMidnaMatrixBase64Bytes = 0;
-        sLastMidnaMatrixPresentSlots = 0;
+        if (includeLinkMatrices) {
+            *midnaMatrices = link_matrix_pack_to_json(
+                {
+                    {"body", nullptr},
+                    {"hat", nullptr},
+                    {"face", nullptr},
+                    {"hand", nullptr},
+                    {"sword", nullptr},
+                    {"sheath", nullptr},
+                    {"shield", nullptr},
+                    {"held_item", nullptr},
+                    {"hook_tip", nullptr},
+                    {"hook_sub_item", nullptr},
+                    {"hook_sub_tip", nullptr},
+                    {"arrow", nullptr},
+                    {"kantera", nullptr},
+                    {"kantera_glow", nullptr},
+                    {"item_actor", nullptr},
+                    {"ride_actor", nullptr},
+                    {"midna", midnaModel},
+                    {"midna_mask", midnaMaskModel},
+                    {"midna_hand", midnaHandModel},
+                    {"midna_hair", midnaHairModel},
+                    {"midna_glow", midnaGlowModel},
+                },
+                midnaHairShape);
+            sLastMidnaMatrixPackedBytes = sLastPoseMatrixPackedBytes;
+            sLastMidnaMatrixBase64Bytes = sLastPoseMatrixBase64Bytes;
+            sLastMidnaMatrixPresentSlots = sLastPoseMatrixPresentSlots;
+        } else {
+            *midnaMatrices = json::object();
+            sLastMidnaMatrixPackedBytes = 0;
+            sLastMidnaMatrixBase64Bytes = 0;
+            sLastMidnaMatrixPresentSlots = 0;
+        }
     }
 
     if (includeLinkMatrices) {
@@ -6217,11 +6219,13 @@ bool add_link_matrices(json& state, json* midnaMatrices = nullptr, bool includeL
         !isWolf && static_cast<bool>(link->checkShieldDraw()) &&
         static_cast<bool>(link->checkNoResetFlg2(daPy_py_c::FLG2_UNK_8000000));
     state["sword_out"] = !isWolf && link->mEquipItem == 0x103;
-    state["midna_draw"] = midnaVisual.body;
-    state["midna_mask_draw"] = midnaVisual.mask;
-    state["midna_hand_draw"] = midnaVisual.hand;
-    state["midna_hair_draw"] = midnaVisual.hair;
-    state["midna_shadow_form"] = midnaVisual.shadowForm;
+    if (kRemoteMidnaStreamingEnabled) {
+        state["midna_draw"] = midnaVisual.body;
+        state["midna_mask_draw"] = midnaVisual.mask;
+        state["midna_hand_draw"] = midnaVisual.hand;
+        state["midna_hair_draw"] = midnaVisual.hair;
+        state["midna_shadow_form"] = midnaVisual.shadowForm;
+    }
     state["heavy_boots"] = !isWolf && static_cast<bool>(link->checkEquipHeavyBoots());
     state["item_draw"] = !isWolf && static_cast<bool>(link->checkItemDraw());
     state["kantera_draw"] =
@@ -9948,6 +9952,9 @@ bool send_direct_pose_udp(const json& message) {
 }
 
 bool send_direct_midna_udp(const json& message) {
+    if (!kRemoteMidnaStreamingEnabled) {
+        return false;
+    }
     if (sSession.mode == NetworkMode::DirectHost) {
         bool sentAny = false;
         for (auto& entry : sSession.directPeers) {
@@ -9982,6 +9989,9 @@ bool send_pose_message(const json& message) {
 }
 
 bool send_midna_pose_message(const json& message) {
+    if (!kRemoteMidnaStreamingEnabled) {
+        return true;
+    }
     if (sSession.mode == NetworkMode::DirectHost || sSession.mode == NetworkMode::DirectJoin) {
         // Optional visual channels must not fall back to the generic JSON path
         // when every direct receiver opted out. That would preserve the exact
@@ -10226,6 +10236,11 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
         header.chunkCount == 0 || header.chunkIndex > header.chunkCount ||
         header.compressedSize == 0 || header.compressedSize > kUdpPoseMaxCompressedBytes ||
         header.uncompressedSize == 0 || header.uncompressedSize > kUdpPoseMaxUncompressedBytes)
+    {
+        return;
+    }
+    if (header.type == kUdpPacketTypeMidnaMsgpack &&
+        !kRemoteMidnaStreamingEnabled)
     {
         return;
     }
@@ -10874,7 +10889,6 @@ void send_pose() {
                                             activeAudioEvents.front().soundId);
     }
 
-    const LocalMidnaVisualState midnaVisual = detect_midna_visual_state(link, isWolf);
     const f32 poseX = player->current.pos.x;
     const f32 poseY = player->current.pos.y;
     const f32 poseZ = player->current.pos.z;
@@ -10960,11 +10974,6 @@ void send_pose() {
              static_cast<bool>(
                  link->checkNoResetFlg2(daPy_py_c::FLG2_UNK_8000000))},
         {"sword_out", link != nullptr && !isWolf && link->mEquipItem == 0x103},
-        {"midna_draw", midnaVisual.body},
-        {"midna_mask_draw", midnaVisual.mask},
-        {"midna_hand_draw", midnaVisual.hand},
-        {"midna_hair_draw", midnaVisual.hair},
-        {"midna_shadow_form", midnaVisual.shadowForm},
         {"heavy_boots",
          link != nullptr && !isWolf && static_cast<bool>(link->checkEquipHeavyBoots())},
         {"item_draw", link != nullptr && !isWolf && static_cast<bool>(link->checkItemDraw())},
@@ -10986,7 +10995,9 @@ void send_pose() {
         (nextPoseSequence <= 3 || isTransforming || sWasSendingTransform ||
          kLinkMatrixFullPoseInterval <= 1 ||
          ((nextPoseSequence - 1) % kLinkMatrixFullPoseInterval) == 0);
-    if (isLink && !add_link_matrices(state, &midnaMatrices, sendFullMatrices))
+    json* const midnaMatricesOut =
+        kRemoteMidnaStreamingEnabled ? &midnaMatrices : nullptr;
+    if (isLink && !add_link_matrices(state, midnaMatricesOut, sendFullMatrices))
     {
         static uint32_t sMatrixPoseDropLogCount = 0;
         ++sMatrixPoseDropLogCount;
@@ -11031,7 +11042,7 @@ void send_pose() {
         {"sequence", sequence},
         {"state", state},
     });
-    if (sLastMidnaMatrixPresentSlots > 0) {
+    if (kRemoteMidnaStreamingEnabled && sLastMidnaMatrixPresentSlots > 0) {
         send_midna_pose_message({
             {"type", "midna_pose"},
             {"sequence", sequence},
@@ -11918,7 +11929,8 @@ bool host_direct(const DirectHostOptions& options, std::string* errorOut) {
     sNameLabelsEnabled = options.nameLabels;
     sSyncFlagsEnabled = options.syncFlags;
     sSyncWorldEnabled = options.syncWorld;
-    sDisplayRemoteMidnaEnabled = options.displayMidna;
+    sDisplayRemoteMidnaEnabled =
+        kRemoteMidnaStreamingEnabled && options.displayMidna;
     sRemoteCollisionEnabled = options.remoteCollision;
     apply_pvp_enabled(options.pvp);
     sSession.sessionId = make_session_token(9);
@@ -11984,7 +11996,8 @@ bool join_direct(const DirectJoinOptions& options, std::string* errorOut) {
     sNameLabelsEnabled = options.nameLabels;
     sSyncFlagsEnabled = options.syncFlags;
     sSyncWorldEnabled = options.syncWorld;
-    sDisplayRemoteMidnaEnabled = options.displayMidna;
+    sDisplayRemoteMidnaEnabled =
+        kRemoteMidnaStreamingEnabled && options.displayMidna;
     sRemoteCollisionEnabled = options.remoteCollision;
     apply_pvp_enabled(options.pvp);
 
@@ -12034,7 +12047,8 @@ bool join_relay(const RelayJoinOptions& options, std::string* errorOut) {
     sNameLabelsEnabled = options.nameLabels;
     sSyncFlagsEnabled = options.syncFlags;
     sSyncWorldEnabled = options.syncWorld;
-    sDisplayRemoteMidnaEnabled = options.displayMidna;
+    sDisplayRemoteMidnaEnabled =
+        kRemoteMidnaStreamingEnabled && options.displayMidna;
     sRemoteCollisionEnabled = options.remoteCollision;
     apply_pvp_enabled(options.pvp);
 
@@ -12163,7 +12177,7 @@ SessionStatus get_session_status() {
     status.syncFlagsHostControlled = sSession.mode == NetworkMode::DirectJoin;
     status.syncWorld = sSyncWorldEnabled;
     status.syncWorldHostControlled = sSession.mode == NetworkMode::DirectJoin;
-    status.displayMidna = sDisplayRemoteMidnaEnabled;
+    status.displayMidna = wants_remote_midna_matrices();
     status.remoteCollision = sRemoteCollisionEnabled;
     status.remoteCollisionHostControlled = sSession.mode == NetworkMode::DirectJoin;
     status.pvp = pvp_enabled();
@@ -12377,7 +12391,8 @@ void set_remote_link_model_enabled(bool enabled) {
 }
 
 void set_display_remote_midna_enabled(bool enabled) {
-    sDisplayRemoteMidnaEnabled = enabled;
+    sDisplayRemoteMidnaEnabled =
+        kRemoteMidnaStreamingEnabled && enabled;
     DuskLog.info("Multiplayer remote Midna display {}",
                  sDisplayRemoteMidnaEnabled ? "enabled" : "disabled");
     if (sEnabled && sSession.welcomed) {

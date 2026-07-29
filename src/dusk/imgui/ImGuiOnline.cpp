@@ -98,11 +98,16 @@ void ImGuiOnline::draw(bool& open) {
         ImGui::Checkbox("Remote Link model", &m_dummyModel);
         ImGui::SameLine();
         ImGui::Checkbox("Sync world", &m_syncWorld);
-        if (!m_dummyModel) {
+        if (!multiplayer::kRemoteMidnaStreamingEnabled) {
+            m_displayMidna = false;
+        }
+        const bool midnaControlDisabled =
+            !multiplayer::kRemoteMidnaStreamingEnabled || !m_dummyModel;
+        if (midnaControlDisabled) {
             ImGui::BeginDisabled();
         }
         ImGui::Checkbox("Display Midna", &m_displayMidna);
-        if (!m_dummyModel) {
+        if (midnaControlDisabled) {
             ImGui::EndDisabled();
         }
         ImGui::SameLine();
@@ -187,17 +192,20 @@ void ImGuiOnline::draw(bool& open) {
         if (status.syncWorldHostControlled) {
             ImGui::EndDisabled();
         }
-        bool displayMidna = status.displayMidna;
-        // Local display-only toggle for now. A later upload/room policy can
-        // decide whether Midna matrices are streamed at all.
-        if (!status.dummyModel) {
+        bool displayMidna =
+            multiplayer::kRemoteMidnaStreamingEnabled && status.displayMidna;
+        const bool midnaControlDisabled =
+            !multiplayer::kRemoteMidnaStreamingEnabled || !status.dummyModel;
+        if (midnaControlDisabled) {
             ImGui::BeginDisabled();
         }
-        if (ImGui::Checkbox("Display Midna", &displayMidna)) {
+        if (ImGui::Checkbox("Display Midna", &displayMidna) &&
+            multiplayer::kRemoteMidnaStreamingEnabled)
+        {
             multiplayer::set_display_remote_midna_enabled(displayMidna);
             m_displayMidna = displayMidna;
         }
-        if (!status.dummyModel) {
+        if (midnaControlDisabled) {
             ImGui::EndDisabled();
         }
         ImGui::SameLine();

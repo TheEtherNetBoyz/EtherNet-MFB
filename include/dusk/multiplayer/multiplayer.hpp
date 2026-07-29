@@ -12,6 +12,11 @@ class fopAc_ac_c;
 
 namespace dusk::multiplayer {
 
+// One switch for the unfinished remote-Midna matrix stream. Keeping this
+// public lets the Online UI reflect the transport capability. Change this to
+// true when the stream is ready to be tested again.
+inline constexpr bool kRemoteMidnaStreamingEnabled = false;
+
 struct PlayerColor {
     uint8_t r = 255;
     uint8_t g = 255;
