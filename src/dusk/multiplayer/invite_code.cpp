@@ -21,6 +21,7 @@ constexpr uint64_t kFnvPrime = 1099511628211ULL;
 constexpr char kAlphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 constexpr uint8_t kCompactVersion = 1;
 constexpr uint8_t kCompactTransportDirect = 1;
+constexpr uint8_t kCompactTransportRelay = 2;
 
 std::string base64url_encode(const uint8_t* data, size_t size) {
     std::string out;
@@ -157,8 +158,10 @@ bool parse_ipv4(const std::string& host, std::array<uint8_t, 4>& out) {
 }
 
 std::optional<std::string> create_compact_invite_code(const InviteCodePayload& payload) {
-    if (payload.version != 1 || payload.transport != "direct" || payload.port <= 0 ||
-        payload.port > 65535) {
+    if (payload.version != 1 ||
+        (payload.transport != "direct" && payload.transport != "relay") ||
+        payload.port <= 0 || payload.port > 65535)
+    {
         return std::nullopt;
     }
 
@@ -170,7 +173,8 @@ std::optional<std::string> create_compact_invite_code(const InviteCodePayload& p
     std::vector<uint8_t> bytes;
     bytes.reserve(64 + payload.room.size() + payload.sessionId.size() + payload.sessionKey.size());
     bytes.push_back(kCompactVersion);
-    bytes.push_back(kCompactTransportDirect);
+    bytes.push_back(payload.transport == "relay" ? kCompactTransportRelay :
+                                                     kCompactTransportDirect);
     bytes.insert(bytes.end(), ip.begin(), ip.end());
     append_u16(bytes, payload.port);
     if (!append_string(bytes, payload.room) || !append_string(bytes, payload.sessionId) ||
@@ -287,14 +291,17 @@ std::optional<InviteCodePayload> decode_invite_code(const std::string& code, std
         size_t offset = 0;
         const uint8_t version = (*bytes)[offset++];
         const uint8_t transport = (*bytes)[offset++];
-        if (version != kCompactVersion || transport != kCompactTransportDirect) {
+        if (version != kCompactVersion ||
+            (transport != kCompactTransportDirect && transport != kCompactTransportRelay))
+        {
             set_error(errorOut, "unsupported compact payload");
             return std::nullopt;
         }
 
         InviteCodePayload payload;
         payload.version = version;
-        payload.transport = "direct";
+        payload.transport =
+            transport == kCompactTransportRelay ? "relay" : "direct";
         payload.host = std::to_string((*bytes)[offset]) + "." +
                        std::to_string((*bytes)[offset + 1]) + "." +
                        std::to_string((*bytes)[offset + 2]) + "." +

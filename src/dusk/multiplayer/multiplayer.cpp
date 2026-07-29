@@ -204,6 +204,7 @@ constexpr uint8_t kUdpPacketTypePoseMsgpack = 2;
 constexpr uint8_t kUdpPacketTypeRemoteObject = 3;
 constexpr uint8_t kUdpPacketTypeMidnaMsgpack = 4;
 constexpr uint8_t kUdpPacketTypePoseAck = 5;
+constexpr uint8_t kUdpPacketTypeRelayRegister = 6;
 constexpr uint32_t kGanondorfTargetMaxAgeTicks = 30;
 constexpr const char* kGanondorfFinalSyncId = "D_MN09B:GANONDORF_FINAL";
 constexpr float kGanondorfRemoteLinkEyeOffsetY = 150.0f;
@@ -266,6 +267,7 @@ std::vector<GanondorfRemotePlayerDamageEvent> sPendingGanondorfRemotePlayerDamag
 
 bool remote_object_sync_enabled();
 std::string local_udp_pose_sender_id();
+void send_relay_udp_registration();
 std::string pose_ack_key(const std::string& receiverId, const std::string& poseSenderId,
                          uint8_t packetType);
 bool send_json(const json& message);
@@ -744,11 +746,15 @@ struct Session {
     std::string sessionId;
     std::string sessionKey;
     std::string relayPassword;
+    std::string relayOwnerClientId;
+    std::string relayUdpToken;
     std::string rxBuffer;
     std::string txBuffer;
+    std::string connectionError;
     int port = 34197;
     uint32_t reconnectTicks = 0;
     uint32_t pingTicks = 0;
+    uint32_t relayUdpRegisterTicks = 0;
     uint32_t progressionStateTicks = 0;
     uint32_t poseSequence = 0;
     uint32_t peerPoseLogTicks = 0;
@@ -759,6 +765,11 @@ struct Session {
     bool welcomeSent = false;
     bool welcomed = false;
     bool snapshotPending = false;
+    bool automaticReconnect = true;
+    bool handshakeRejected = false;
+    bool relayCreateRoom = false;
+    bool relayMayRecreateRoom = false;
+    bool relayUdpReady = false;
     uint32_t repairSweepTicks = 0;
     uint32_t nextDirectPeerId = 1;
     std::map<std::string, DirectPeer> directPeers;
@@ -3376,7 +3387,7 @@ bool send_udp_tx_datagram_now(const UdpTxDatagram& datagram) {
         return false;
     }
     if (sent != packetSize) {
-        DuskLog.warn("Multiplayer direct UDP tx pacer partial send type={} seq={} chunk={}/{} "
+        DuskLog.warn("Multiplayer UDP tx pacer partial send type={} seq={} chunk={}/{} "
                      "sent={} expected={}",
                      datagram.packetType, datagram.sequence, datagram.chunkIndex + 1,
                      datagram.chunkCount, sent, packetSize);
@@ -3486,7 +3497,7 @@ void udp_tx_pacer_thread_main() {
                     queued = sUdpTxPacerQueue.size();
                 }
                 if (wouldBlockCount <= 20 || (wouldBlockCount % 120) == 0) {
-                    DuskLog.warn("Multiplayer direct UDP tx pacer would block count={} queued={}",
+                    DuskLog.warn("Multiplayer UDP tx pacer would block count={} queued={}",
                                  wouldBlockCount, queued);
                 }
                 continue;
@@ -4407,7 +4418,12 @@ void reset_connection_state() {
     sSession.welcomeSent = false;
     sSession.welcomed = false;
     sSession.snapshotPending = false;
+    sSession.handshakeRejected = false;
     sSession.clientId.clear();
+    sSession.relayOwnerClientId.clear();
+    sSession.relayUdpToken.clear();
+    sSession.relayUdpReady = false;
+    sSession.relayUdpRegisterTicks = 0;
     sManualSyncReloadPending = false;
     sManualSyncFullStateTransitionActive = false;
     sOrdonDayBoundaryReloadPending = false;
@@ -4465,10 +4481,16 @@ void reset_connection_state() {
     sPendingLocalAudioEvents.clear();
     sPeerNames.clear();
     clear_player_color_slots();
-    sNameLabelsEnabled = true;
-    sSyncWorldEnabled = false;
-    sSyncFlagsEnabled = true;
-    sDisplayRemoteMidnaEnabled = true;
+    // Relay settings belong to the room and must survive a transient socket
+    // reconnect. A successful welcome will normalize them against the relay's
+    // copy; if the creator was alone and the room vanished, these are also the
+    // values used to recreate it.
+    if (sSession.mode != NetworkMode::RelayHarness) {
+        sNameLabelsEnabled = true;
+        sSyncWorldEnabled = false;
+        sSyncFlagsEnabled = true;
+        sDisplayRemoteMidnaEnabled = true;
+    }
     sDirectRemoteWantsPuppet = true;
     sDirectRemoteWantsMidna = true;
     sNotifications.clear();
@@ -4489,6 +4511,12 @@ void reset_connection_state() {
 void disconnect(const char* reason) {
     if (sSession.state != ConnectionState::Disconnected) {
         DuskLog.warn("Multiplayer disconnected: {}", reason);
+    }
+    if (sSession.connectionError.empty() &&
+        std::strcmp(reason, "user requested") != 0 &&
+        std::strcmp(reason, "shutdown") != 0)
+    {
+        sSession.connectionError = reason;
     }
 
     reset_connection_state();
@@ -4845,16 +4873,47 @@ void send_hello() {
         return;
     }
 
-    sSession.helloSent = send_json({
+    json hello = {
         {"type", "hello"},
-        {"protocol_version", 1},
+        {"protocol_version", sSession.mode == NetworkMode::RelayHarness ? 2 : 1},
         {"room_id", sSession.room},
         {"session_id", sSession.sessionId},
         {"password", sSession.relayPassword},
         {"name", sSession.name},
         {"want_puppet", wants_remote_puppet_matrices()},
         {"want_midna", wants_remote_midna_matrices()},
-    });
+    };
+    if (sSession.mode == NetworkMode::RelayHarness) {
+        hello["action"] = sSession.relayCreateRoom ? "create" : "join";
+        if (sSession.relayCreateRoom) {
+            hello["settings"] = {
+                {"dummy_model", sDummyModelEnabled},
+                {"sync_flags", sSyncFlagsEnabled},
+                {"sync_world", sSyncWorldEnabled},
+                {"remote_collision", sRemoteCollisionEnabled},
+                {"pvp", pvp_enabled()},
+            };
+        }
+    }
+    sSession.helloSent = send_json(hello);
+}
+
+void apply_relay_room_settings(const json& settings, const char* source) {
+    if (!settings.is_object()) {
+        DuskLog.warn("Multiplayer ignored invalid relay room settings source={}", source);
+        return;
+    }
+
+    apply_remote_link_model_enabled(settings.value("dummy_model", sDummyModelEnabled));
+    apply_sync_flags_enabled(settings.value("sync_flags", sSyncFlagsEnabled));
+    apply_sync_world_enabled(settings.value("sync_world", sSyncWorldEnabled));
+    sRemoteCollisionEnabled =
+        settings.value("remote_collision", sRemoteCollisionEnabled);
+    apply_pvp_enabled(settings.value("pvp", sPvpEnabled));
+    DuskLog.info(
+        "Multiplayer relay settings source={} dummy={} flags={} world={} collision={} pvp={}",
+        source, sDummyModelEnabled, sSyncFlagsEnabled, sSyncWorldEnabled,
+        sRemoteCollisionEnabled, sPvpEnabled);
 }
 
 void send_progression_state(bool force = false) {
@@ -7751,6 +7810,23 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         }, sender->id);
     } else if (type == "welcome") {
         sSession.welcomed = true;
+        sSession.connectionError.clear();
+        sSession.clientId = message.value("client_id", "");
+        if (sSession.mode == NetworkMode::RelayHarness) {
+            if (sSession.relayCreateRoom) {
+                sSession.relayMayRecreateRoom = true;
+            }
+            sSession.relayOwnerClientId = message.value("owner_client_id", "");
+            sSession.relayUdpToken = message.value("udp_token", "");
+            sSession.relayCreateRoom = false;
+            apply_relay_room_settings(message.value("settings", json::object()), "welcome");
+            send_json({
+                {"type", "puppet_preference"},
+                {"want_puppet", wants_remote_puppet_matrices()},
+                {"want_midna", wants_remote_midna_matrices()},
+            });
+            send_relay_udp_registration();
+        }
         if (message.contains("sync_flags")) {
             apply_sync_flags_enabled(message.value("sync_flags", sSyncFlagsEnabled));
             DuskLog.info("Multiplayer sync flags synced from welcome {}",
@@ -7790,8 +7866,6 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         DuskLog.info("Multiplayer joined room={} client_id={} peers={}",
                      message.value("room_id", ""), message.value("client_id", ""),
                      message.value("peers", json::array()).size());
-        sSession.clientId = message.value("client_id", "");
-
         sPeerColorSlots.clear();
         uint8_t nextColorSlot = 0;
         if (sSession.mode == NetworkMode::DirectJoin) {
@@ -7818,6 +7892,34 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
         DuskLog.info("Multiplayer peer joined id={} name={}", message.value("client_id", ""),
                      message.value("name", ""));
         push_notification(display_name_for_peer(peerId) + " joined");
+    } else if (type == "owner_changed" &&
+               sSession.mode == NetworkMode::RelayHarness)
+    {
+        sSession.relayOwnerClientId = message.value("owner_client_id", "");
+        DuskLog.info("Multiplayer relay owner changed owner={} local_owner={}",
+                     sSession.relayOwnerClientId,
+                     sSession.relayOwnerClientId == sSession.clientId);
+        if (sSession.relayOwnerClientId == sSession.clientId) {
+            push_notification("You are now the lobby host");
+        }
+    } else if (type == "udp_ready" &&
+               sSession.mode == NetworkMode::RelayHarness)
+    {
+        sSession.relayUdpReady = true;
+        DuskLog.info("Multiplayer relay UDP visual channel ready");
+    } else if (type == "room_settings" &&
+               sSession.mode == NetworkMode::RelayHarness)
+    {
+        const std::string ownerClientId = message.value("owner_client_id", "");
+        if (!ownerClientId.empty()) {
+            sSession.relayOwnerClientId = ownerClientId;
+        }
+        apply_relay_room_settings(message.value("settings", json::object()), "update");
+        send_json({
+            {"type", "puppet_preference"},
+            {"want_puppet", wants_remote_puppet_matrices()},
+            {"want_midna", wants_remote_midna_matrices()},
+        });
     } else if (type == "midna_preference") {
         const bool wantMidna = message.value("want_midna", true);
         if (sender != nullptr) {
@@ -9127,7 +9229,17 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
     } else if (type == "pong") {
         DuskLog.debug("Multiplayer pong");
     } else if (type == "error") {
-        DuskLog.warn("Multiplayer remote error: {}", message.value("error", ""));
+        const std::string error = message.value("error", "");
+        DuskLog.warn("Multiplayer remote error: {}", error);
+        if (sSession.mode == NetworkMode::RelayHarness && !sSession.welcomed) {
+            const bool recreateMissingRoom =
+                error == "lobby_not_found" && sSession.relayMayRecreateRoom;
+            sSession.relayCreateRoom = recreateMissingRoom;
+            sSession.connectionError =
+                recreateMissingRoom ? "Relay room vanished; recreating it" : error;
+            sSession.automaticReconnect = recreateMissingRoom;
+            sSession.handshakeRejected = true;
+        }
     } else {
         DuskLog.debug("Multiplayer message type={}", type);
     }
@@ -9165,6 +9277,9 @@ bool pump_receive_from_socket(socket_t sock, std::string& rxBuffer, DirectPeer* 
                 } catch (const json::exception& e) {
                     DuskLog.warn("Multiplayer received invalid JSON: {}", e.what());
                 }
+                if (sender == nullptr && sSession.handshakeRejected) {
+                    return false;
+                }
             }
             continue;
         }
@@ -9188,7 +9303,8 @@ void pump_receive() {
     }
 
     if (!pump_receive_from_socket(sSession.sock, sSession.rxBuffer)) {
-        disconnect("remote closed");
+        const bool handshakeRejected = sSession.handshakeRejected;
+        disconnect(handshakeRejected ? "relay handshake rejected" : "remote closed");
         return;
     }
 
@@ -9223,7 +9339,27 @@ bool fill_ipv4(sockaddr_in& addr, const std::string& host, int port) {
     addr = {};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(static_cast<uint16_t>(port));
-    return inet_pton(AF_INET, host.c_str(), &addr.sin_addr) == 1;
+    if (inet_pton(AF_INET, host.c_str(), &addr.sin_addr) == 1) {
+        return true;
+    }
+
+    addrinfo hints{};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    addrinfo* result = nullptr;
+    if (getaddrinfo(host.c_str(), nullptr, &hints, &result) != 0 || result == nullptr) {
+        return false;
+    }
+    addr.sin_addr =
+        reinterpret_cast<const sockaddr_in*>(result->ai_addr)->sin_addr;
+    freeaddrinfo(result);
+    return true;
+}
+
+bool same_ipv4_endpoint(const sockaddr_in& left, const sockaddr_in& right) {
+    return left.sin_family == right.sin_family &&
+           left.sin_port == right.sin_port &&
+           left.sin_addr.s_addr == right.sin_addr.s_addr;
 }
 
 std::string sender_id_from_udp_header(const UdpPoseChunkHeader& header) {
@@ -9255,7 +9391,10 @@ void set_pose_ack_sender(UdpPoseAckPacket& packet, const std::string& senderId) 
 }
 
 std::string local_udp_pose_sender_id() {
-    if (sSession.mode == NetworkMode::DirectJoin && !sSession.clientId.empty()) {
+    if ((sSession.mode == NetworkMode::DirectJoin ||
+         sSession.mode == NetworkMode::RelayHarness) &&
+        !sSession.clientId.empty())
+    {
         return sSession.clientId;
     }
     return kDirectPeerId;
@@ -9287,6 +9426,10 @@ uint32_t max_local_pose_ack_lag(uint32_t currentSequence, bool* hasAckOut) {
         }
     } else if (sSession.mode == NetworkMode::DirectJoin) {
         considerReceiver(kDirectPeerId);
+    } else if (sSession.mode == NetworkMode::RelayHarness) {
+        for (const auto& peer : sPeerNames) {
+            considerReceiver(peer.first);
+        }
     }
 
     if (hasAckOut != nullptr) {
@@ -9313,6 +9456,12 @@ bool local_pose_ack_loss_stressed(uint32_t currentSequence) {
         }
     } else if (sSession.mode == NetworkMode::DirectJoin) {
         return receiverStressed(kDirectPeerId);
+    } else if (sSession.mode == NetworkMode::RelayHarness) {
+        for (const auto& peer : sPeerNames) {
+            if (receiverStressed(peer.first)) {
+                return true;
+            }
+        }
     }
 
     return false;
@@ -9435,12 +9584,12 @@ bool open_udp_socket(const std::string& bindHost, int bindPort) {
 
     sSession.udpSock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sSession.udpSock == INVALID_SOCKET) {
-        DuskLog.warn("Multiplayer direct UDP disabled: socket failed");
+        DuskLog.warn("Multiplayer UDP disabled: socket failed");
         return false;
     }
 
     if (!set_nonblocking(sSession.udpSock)) {
-        DuskLog.warn("Multiplayer direct UDP disabled: nonblocking failed");
+        DuskLog.warn("Multiplayer UDP disabled: nonblocking failed");
         close_socket(sSession.udpSock);
         return false;
     }
@@ -9448,19 +9597,19 @@ bool open_udp_socket(const std::string& bindHost, int bindPort) {
 
     sockaddr_in addr{};
     if (!fill_ipv4(addr, bindHost, bindPort)) {
-        DuskLog.warn("Multiplayer direct UDP disabled: invalid bind host {}", bindHost);
+        DuskLog.warn("Multiplayer UDP disabled: invalid bind host {}", bindHost);
         close_socket(sSession.udpSock);
         return false;
     }
 
     if (bind(sSession.udpSock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-        DuskLog.warn("Multiplayer direct UDP disabled: bind failed {}:{}", bindHost, bindPort);
+        DuskLog.warn("Multiplayer UDP disabled: bind failed {}:{}", bindHost, bindPort);
         close_socket(sSession.udpSock);
         return false;
     }
 
     start_udp_tx_pacer();
-    DuskLog.info("Multiplayer direct UDP pose socket bound on {}:{}", bindHost, bindPort);
+    DuskLog.info("Multiplayer UDP pose socket bound on {}:{}", bindHost, bindPort);
     return true;
 }
 
@@ -9474,12 +9623,45 @@ void setup_direct_join_udp() {
     }
 
     if (!fill_ipv4(sSession.udpRemoteAddr, sSession.host, sSession.port)) {
-        DuskLog.warn("Multiplayer direct UDP disabled: invalid remote host {}", sSession.host);
+        DuskLog.warn("Multiplayer UDP disabled: invalid remote host {}", sSession.host);
         close_socket(sSession.udpSock);
         return;
     }
     sSession.udpRemoteAddrKnown = true;
-    DuskLog.info("Multiplayer direct UDP pose remote set to {}:{}", sSession.host, sSession.port);
+    DuskLog.info("Multiplayer UDP pose remote set to {}:{}", sSession.host, sSession.port);
+}
+
+void send_relay_udp_registration() {
+    if (sSession.mode != NetworkMode::RelayHarness ||
+        sSession.udpSock == INVALID_SOCKET ||
+        !sSession.udpRemoteAddrKnown ||
+        sSession.clientId.empty() ||
+        sSession.relayUdpToken.empty())
+    {
+        return;
+    }
+
+    UdpPoseChunkHeader header{};
+    std::memcpy(header.magic, "DMPU", 4);
+    header.version = 1;
+    header.type = kUdpPacketTypeRelayRegister;
+    header.headerSize = sizeof(UdpPoseChunkHeader);
+    header.sequence = 0;
+    header.chunkIndex = 0;
+    header.chunkCount = 1;
+    header.uncompressedSize = static_cast<uint32_t>(sSession.relayUdpToken.size());
+    header.compressedSize = header.uncompressedSize;
+    header.payloadSize = static_cast<uint16_t>(sSession.relayUdpToken.size());
+    set_udp_header_sender(header, sSession.clientId);
+
+    std::vector<uint8_t> packet(sizeof(header) + sSession.relayUdpToken.size());
+    std::memcpy(packet.data(), &header, sizeof(header));
+    std::memcpy(packet.data() + sizeof(header), sSession.relayUdpToken.data(),
+                sSession.relayUdpToken.size());
+    sendto(sSession.udpSock, reinterpret_cast<const char*>(packet.data()),
+           static_cast<int>(packet.size()), 0,
+           reinterpret_cast<const sockaddr*>(&sSession.udpRemoteAddr),
+           sizeof(sSession.udpRemoteAddr));
 }
 
 bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
@@ -9503,14 +9685,14 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
     const size_t compressedSize =
         ZSTD_compress(compressed.data(), compressed.size(), raw.data(), raw.size(), 1);
     if (ZSTD_isError(compressedSize)) {
-        DuskLog.warn("Multiplayer direct UDP pose compression failed: {}",
+        DuskLog.warn("Multiplayer UDP pose compression failed: {}",
                      ZSTD_getErrorName(compressedSize));
         return false;
     }
     if (compressedSize == 0 || compressedSize > kUdpPoseMaxCompressedBytes ||
         raw.size() > kUdpPoseMaxUncompressedBytes)
     {
-        DuskLog.warn("Multiplayer direct UDP pose too large raw={} compressed={}", raw.size(),
+        DuskLog.warn("Multiplayer UDP pose too large raw={} compressed={}", raw.size(),
                      compressedSize);
         return false;
     }
@@ -9658,13 +9840,13 @@ bool send_udp_pose_to_addr(const sockaddr_in& addr, const json& message,
         }
 
         DuskLog.info(
-            "Multiplayer direct UDP pose tx seq={} sender={} raw={} compressed={} chunks={} "
+            "Multiplayer UDP pose tx seq={} sender={} raw={} compressed={} chunks={} "
             "matrix_packed={} matrix_b64={} matrix_b64_zstd={} matrix_slots={}",
             sequence, senderId, raw.size(), compressed.size(), chunkCount,
             sLastPoseMatrixPackedBytes, sLastPoseMatrixBase64Bytes, matrixB64Compressed,
             sLastPoseMatrixPresentSlots);
         DuskLog.info(
-            "Multiplayer direct UDP pose tx breakdown seq={} raw_matrix={} raw_audio={} "
+            "Multiplayer UDP pose tx breakdown seq={} raw_matrix={} raw_audio={} "
             "raw_world={} raw_anim={} raw_transform={} raw_visual={} zdelta_matrix={} "
             "zdelta_audio={} zdelta_world={} zdelta_anim={} zdelta_transform={} zdelta_visual={}",
             sequence,
@@ -9723,7 +9905,7 @@ bool send_udp_pose_ack_to_addr(const sockaddr_in& addr, const std::string& poseS
         return false;
     }
     if (sent != packetSize) {
-        DuskLog.warn("Multiplayer direct UDP pose ack partial send sender={} seq={} sent={} "
+        DuskLog.warn("Multiplayer UDP pose ack partial send sender={} seq={} sent={} "
                      "expected={}",
                      poseSenderId, sequence, sent, packetSize);
         return false;
@@ -9826,7 +10008,9 @@ bool send_direct_remote_object_udp(const UdpRemoteObjectPacket& object) {
         return broadcast_udp_remote_object_to_direct_peers(object, local_udp_pose_sender_id());
     }
 
-    if (sSession.mode == NetworkMode::DirectJoin && sSession.udpRemoteAddrKnown &&
+    if ((sSession.mode == NetworkMode::DirectJoin ||
+         sSession.mode == NetworkMode::RelayHarness) &&
+        sSession.udpRemoteAddrKnown &&
         !sSession.clientId.empty())
     {
         return send_udp_remote_object_to_addr(sSession.udpRemoteAddr, object,
@@ -9941,7 +10125,9 @@ bool send_direct_pose_udp(const json& message) {
     // to other peers in the sender's stage. The future dedicated relay should
     // use the same topology -- stage/subscription filtering belongs at each
     // router-to-recipient edge, never at sender-to-router ingress.
-    if (sSession.mode == NetworkMode::DirectJoin && sSession.udpRemoteAddrKnown &&
+    if ((sSession.mode == NetworkMode::DirectJoin ||
+         sSession.mode == NetworkMode::RelayHarness) &&
+        sSession.udpRemoteAddrKnown &&
         !sSession.clientId.empty())
     {
         return send_udp_pose_to_addr(sSession.udpRemoteAddr, message, local_udp_pose_sender_id(),
@@ -9966,7 +10152,9 @@ bool send_direct_midna_udp(const json& message) {
 
     // Midna uses the same upstream-router rule as Link poses. Per-recipient
     // wantsMidna and stage checks remain in send_udp_midna_to_peer().
-    if (sSession.mode == NetworkMode::DirectJoin && sSession.udpRemoteAddrKnown &&
+    if ((sSession.mode == NetworkMode::DirectJoin ||
+         sSession.mode == NetworkMode::RelayHarness) &&
+        sSession.udpRemoteAddrKnown &&
         !sSession.clientId.empty())
     {
         return send_udp_pose_to_addr(sSession.udpRemoteAddr, message,
@@ -9978,7 +10166,10 @@ bool send_direct_midna_udp(const json& message) {
 }
 
 bool send_pose_message(const json& message) {
-    if (sSession.mode == NetworkMode::DirectHost || sSession.mode == NetworkMode::DirectJoin) {
+    if (sSession.mode == NetworkMode::DirectHost ||
+        sSession.mode == NetworkMode::DirectJoin ||
+        sSession.mode == NetworkMode::RelayHarness)
+    {
         // Direct visual pose traffic is optional per receiver. If no direct
         // receiver wants puppets, do not fall back to JSON/TCP and preserve
         // the bandwidth cost the preference is meant to avoid.
@@ -9992,7 +10183,10 @@ bool send_midna_pose_message(const json& message) {
     if (!kRemoteMidnaStreamingEnabled) {
         return true;
     }
-    if (sSession.mode == NetworkMode::DirectHost || sSession.mode == NetworkMode::DirectJoin) {
+    if (sSession.mode == NetworkMode::DirectHost ||
+        sSession.mode == NetworkMode::DirectJoin ||
+        sSession.mode == NetworkMode::RelayHarness)
+    {
         // Optional visual channels must not fall back to the generic JSON path
         // when every direct receiver opted out. That would preserve the exact
         // bandwidth cost the preference is meant to avoid.
@@ -10124,7 +10318,7 @@ void process_udp_pose_ack_packet(const UdpPoseAckPacket& ack, const std::string&
     if (sUdpPoseAckRxLogCount < 80 || ack.stressFlags != 0 ||
         (sUdpPoseAckRxLogCount % 240) == 0)
     {
-        DuskLog.info("Multiplayer direct UDP pose ack rx receiver={} sender={} type={} seq={} "
+        DuskLog.info("Multiplayer UDP pose ack rx receiver={} sender={} type={} seq={} "
                      "previous={} stress_flags={}",
                      receiverId, poseSenderId, static_cast<int>(ack.ackedType), ack.sequence,
                      old, static_cast<int>(ack.stressFlags));
@@ -10239,6 +10433,12 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
     {
         return;
     }
+    if (sSession.mode == NetworkMode::RelayHarness &&
+        (!sSession.udpRemoteAddrKnown ||
+         !same_ipv4_endpoint(fromAddr, sSession.udpRemoteAddr)))
+    {
+        return;
+    }
     if (header.type == kUdpPacketTypeMidnaMsgpack &&
         !kRemoteMidnaStreamingEnabled)
     {
@@ -10327,7 +10527,7 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
             if (sUdpPoseReassemblyEvictLogCount < 80 ||
                 (sUdpPoseReassemblyEvictLogCount % 240) == 0)
             {
-                DuskLog.warn("Multiplayer direct UDP pose reassembly evicted sender={} "
+                DuskLog.warn("Multiplayer UDP pose reassembly evicted sender={} "
                              "type={} seq={} received={}/{} missing={} missing_chunks={} "
                              "parity={} newer_seq={}",
                              senderId, static_cast<int>(header.type), dropped->first,
@@ -10430,7 +10630,7 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
         if (sUdpPoseParityRecoverLogCount < 40 ||
             (sUdpPoseParityRecoverLogCount % 120) == 0)
         {
-            DuskLog.info("Multiplayer direct UDP pose parity recovered sender={} seq={} "
+            DuskLog.info("Multiplayer UDP pose parity recovered sender={} seq={} "
                          "missing_chunk={}/{}",
                          senderId, header.sequence, missingIndex + 1, reassembly.chunkCount);
         }
@@ -10448,7 +10648,7 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
     if (ZSTD_isError(decompressedSize) || decompressedSize != raw.size()) {
         ++rxStats.decompressionFailures;
         maybe_log_udp_pose_rx_summary(senderId, header.type, rxStats, true);
-        DuskLog.warn("Multiplayer direct UDP pose decompression failed sender={} seq={} err={}",
+        DuskLog.warn("Multiplayer UDP pose decompression failed sender={} seq={} err={}",
                      senderId, header.sequence,
                      ZSTD_isError(decompressedSize) ? ZSTD_getErrorName(decompressedSize)
                                                     : "size mismatch");
@@ -10481,7 +10681,7 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
             if (sUdpPoseSequenceGapLogCount < 80 ||
                 (sUdpPoseSequenceGapLogCount % 240) == 0)
             {
-                DuskLog.warn("Multiplayer direct UDP pose sequence gap sender={} type={} "
+                DuskLog.warn("Multiplayer UDP pose sequence gap sender={} type={} "
                              "prev_seq={} seq={} gap={}",
                              senderId, static_cast<int>(header.type),
                              previousProcessedIt->second, header.sequence, gap);
@@ -10508,7 +10708,7 @@ void accept_udp_pose_chunk(const UdpPoseChunkHeader& header, const uint8_t* payl
     } catch (const json::exception& e) {
         ++rxStats.decodeFailures;
         maybe_log_udp_pose_rx_summary(senderId, header.type, rxStats, true);
-        DuskLog.warn("Multiplayer direct UDP pose decode failed sender={} seq={} type={} err={}",
+        DuskLog.warn("Multiplayer UDP pose decode failed sender={} seq={} type={} err={}",
                      senderId, header.sequence, header.type, e.what());
     }
 }
@@ -10532,7 +10732,7 @@ void pump_udp_pose_receives() {
                      &fromLen);
         if (read < 0) {
             if (!would_block()) {
-                DuskLog.warn("Multiplayer direct UDP recv failed");
+                DuskLog.warn("Multiplayer UDP recv failed");
             }
             return;
         }
@@ -10567,7 +10767,9 @@ void begin_connect() {
         return;
     }
 
-    if (sSession.mode == NetworkMode::DirectJoin) {
+    if (sSession.mode == NetworkMode::DirectJoin ||
+        sSession.mode == NetworkMode::RelayHarness)
+    {
         setup_direct_join_udp();
     }
 
@@ -11189,7 +11391,10 @@ void update_connected() {
     } else {
         pump_receive();
     }
-    if (sSession.mode == NetworkMode::DirectHost || sSession.mode == NetworkMode::DirectJoin) {
+    if (sSession.mode == NetworkMode::DirectHost ||
+        sSession.mode == NetworkMode::DirectJoin ||
+        sSession.mode == NetworkMode::RelayHarness)
+    {
         pump_udp_pose_receives();
     }
 
@@ -11198,6 +11403,13 @@ void update_connected() {
     }
 
     update_local_faron_cage_sequence_state();
+    if (sSession.mode == NetworkMode::RelayHarness && sSession.welcomed) {
+        ++sSession.relayUdpRegisterTicks;
+        const uint32_t registerInterval = sSession.relayUdpReady ? 600 : 30;
+        if ((sSession.relayUdpRegisterTicks % registerInterval) == 0) {
+            send_relay_udp_registration();
+        }
+    }
     send_progression_state();
     flush_deferred_faron_day_boundary_events();
     flush_deferred_faron_warp_sequence_messages();
@@ -11390,6 +11602,10 @@ bool configure_session() {
         const std::optional<InviteCodePayload> payload = decode_invite_code(code, &error);
         if (!payload) {
             DuskLog.warn("Multiplayer join disabled: invalid invite code ({})", error);
+            return false;
+        }
+        if (payload->transport != "direct") {
+            DuskLog.warn("Multiplayer join disabled: invite code is not for direct mode");
             return false;
         }
 
@@ -11808,7 +12024,7 @@ void update() {
         }
     }
 
-    if (sSession.state == ConnectionState::Disconnected) {
+    if (sSession.state == ConnectionState::Disconnected && sSession.automaticReconnect) {
         if ((sSession.reconnectTicks++ % 30) == 0) {
             if (sSession.mode == NetworkMode::DirectHost) {
                 begin_host();
@@ -11918,6 +12134,8 @@ bool host_direct(const DirectHostOptions& options, std::string* errorOut) {
     }
 
     reset_connection_state();
+    sSession.automaticReconnect = true;
+    sSession.connectionError.clear();
     sEnabled = true;
     sSession.mode = NetworkMode::DirectHost;
     sSession.name = options.name.empty() ? "Host" : options.name;
@@ -11975,6 +12193,12 @@ bool join_direct(const DirectJoinOptions& options, std::string* errorOut) {
         }
         return false;
     }
+    if (payload->transport != "direct") {
+        if (errorOut != nullptr) {
+            *errorOut = "This is not a direct lobby invite code";
+        }
+        return false;
+    }
 
     sInitialized = true;
     if (!ensure_network_stack(errorOut)) {
@@ -11983,6 +12207,8 @@ bool join_direct(const DirectJoinOptions& options, std::string* errorOut) {
     }
 
     reset_connection_state();
+    sSession.automaticReconnect = true;
+    sSession.connectionError.clear();
     sEnabled = true;
     sSession.mode = NetworkMode::DirectJoin;
     sSession.name = options.name.empty() ? "Joiner" : options.name;
@@ -12015,16 +12241,44 @@ bool join_direct(const DirectJoinOptions& options, std::string* errorOut) {
     return true;
 }
 
-bool join_relay(const RelayJoinOptions& options, std::string* errorOut) {
-    if (options.port <= 0 || options.port > 65535) {
+bool host_relay(const RelayHostOptions& options, std::string* errorOut) {
+    if (options.relayCode.empty()) {
         if (errorOut != nullptr) {
-            *errorOut = "Port must be between 1 and 65535";
+            *errorOut = "Relay code cannot be empty";
         }
         return false;
     }
-    if (options.host.empty() || options.room.empty()) {
+
+    std::string decodeError;
+    const std::optional<InviteCodePayload> payload =
+        decode_invite_code(options.relayCode, &decodeError);
+    if (!payload) {
         if (errorOut != nullptr) {
-            *errorOut = "Relay host and lobby name cannot be empty";
+            *errorOut = "Invalid relay code: " + decodeError;
+        }
+        return false;
+    }
+    if (payload->transport != "relay") {
+        if (errorOut != nullptr) {
+            *errorOut = "This code does not identify a relay server";
+        }
+        return false;
+    }
+    if (payload->host.empty() || payload->port <= 0 || payload->port > 65535) {
+        if (errorOut != nullptr) {
+            *errorOut = "Relay code contains an invalid endpoint";
+        }
+        return false;
+    }
+    if (options.room.empty()) {
+        if (errorOut != nullptr) {
+            *errorOut = "Lobby name cannot be empty";
+        }
+        return false;
+    }
+    if (options.password.size() < 6) {
+        if (errorOut != nullptr) {
+            *errorOut = "Password must be at least 6 characters";
         }
         return false;
     }
@@ -12036,13 +12290,105 @@ bool join_relay(const RelayJoinOptions& options, std::string* errorOut) {
     }
 
     reset_connection_state();
+    sSession.automaticReconnect = true;
+    sSession.connectionError.clear();
+    sEnabled = true;
+    sSession.mode = NetworkMode::RelayHarness;
+    sSession.name = options.name.empty() ? "Host" : options.name;
+    sSession.host = payload->host;
+    sSession.port = payload->port;
+    sSession.room = options.room;
+    sSession.sessionId = payload->sessionId;
+    sSession.sessionKey = payload->sessionKey;
+    sSession.inviteCode = options.relayCode;
+    sSession.relayPassword = options.password;
+    sSession.relayCreateRoom = true;
+    sSession.relayMayRecreateRoom = false;
+    sDummyModelEnabled = options.dummyModel;
+    sNameLabelsEnabled = options.nameLabels;
+    sSyncFlagsEnabled = options.syncFlags;
+    sSyncWorldEnabled = options.syncWorld;
+    sDisplayRemoteMidnaEnabled =
+        kRemoteMidnaStreamingEnabled && options.displayMidna;
+    sRemoteCollisionEnabled = options.remoteCollision;
+    apply_pvp_enabled(options.pvp);
+    DuskLog.info("Multiplayer relay room create started room={} endpoint={}:{}",
+                 sSession.room, sSession.host, sSession.port);
+    begin_connect();
+    if (sSession.state == ConnectionState::Disconnected) {
+        sEnabled = false;
+        sSession.mode = NetworkMode::Disabled;
+        if (errorOut != nullptr) {
+            *errorOut = "Failed to begin relay connection";
+        }
+        return false;
+    }
+    return true;
+}
+
+bool join_relay(const RelayJoinOptions& options, std::string* errorOut) {
+    if (options.relayCode.empty()) {
+        if (errorOut != nullptr) {
+            *errorOut = "Relay code cannot be empty";
+        }
+        return false;
+    }
+
+    std::string decodeError;
+    const std::optional<InviteCodePayload> payload =
+        decode_invite_code(options.relayCode, &decodeError);
+    if (!payload) {
+        if (errorOut != nullptr) {
+            *errorOut = "Invalid relay code: " + decodeError;
+        }
+        return false;
+    }
+    if (payload->transport != "relay") {
+        if (errorOut != nullptr) {
+            *errorOut = "This code does not identify a relay server";
+        }
+        return false;
+    }
+    if (payload->host.empty() || payload->port <= 0 || payload->port > 65535) {
+        if (errorOut != nullptr) {
+            *errorOut = "Relay code contains an invalid endpoint";
+        }
+        return false;
+    }
+    if (options.room.empty()) {
+        if (errorOut != nullptr) {
+            *errorOut = "Lobby name cannot be empty";
+        }
+        return false;
+    }
+    if (options.password.size() < 6) {
+        if (errorOut != nullptr) {
+            *errorOut = "Password must be at least 6 characters";
+        }
+        return false;
+    }
+
+    sInitialized = true;
+    if (!ensure_network_stack(errorOut)) {
+        sEnabled = false;
+        return false;
+    }
+
+    reset_connection_state();
+    sSession.automaticReconnect = true;
+    sSession.connectionError.clear();
     sEnabled = true;
     sSession.mode = NetworkMode::RelayHarness;
     sSession.name = options.name.empty() ? "Player" : options.name;
-    sSession.host = options.host;
-    sSession.port = options.port;
+    sSession.host = payload->host;
+    sSession.port = payload->port;
     sSession.room = options.room;
+    sSession.sessionId = payload->sessionId;
+    sSession.sessionKey = payload->sessionKey;
+    sSession.inviteCode = options.relayCode;
     sSession.relayPassword = options.password;
+    sSession.relayCreateRoom = false;
+    sSession.relayMayRecreateRoom = false;
     sDummyModelEnabled = options.dummyModel;
     sNameLabelsEnabled = options.nameLabels;
     sSyncFlagsEnabled = options.syncFlags;
@@ -12068,6 +12414,7 @@ bool join_relay(const RelayJoinOptions& options, std::string* errorOut) {
 
 void disconnect_session() {
     disconnect("user requested");
+    sSession.connectionError.clear();
     sEnabled = false;
     sSession.mode = NetworkMode::Disabled;
 }
@@ -12157,6 +12504,32 @@ ManualSyncRequestStatus get_manual_sync_request_status() {
     return sManualSyncRequestStatus;
 }
 
+bool relay_room_owner() {
+    return sSession.mode == NetworkMode::RelayHarness &&
+           sSession.welcomed &&
+           !sSession.clientId.empty() &&
+           sSession.relayOwnerClientId == sSession.clientId;
+}
+
+json current_relay_room_settings() {
+    return {
+        {"dummy_model", sDummyModelEnabled},
+        {"sync_flags", sSyncFlagsEnabled},
+        {"sync_world", sSyncWorldEnabled},
+        {"remote_collision", sRemoteCollisionEnabled},
+        {"pvp", pvp_enabled()},
+    };
+}
+
+void publish_relay_room_settings() {
+    if (sEnabled && relay_room_owner()) {
+        send_json({
+            {"type", "room_settings"},
+            {"settings", current_relay_room_settings()},
+        });
+    }
+}
+
 SessionStatus get_session_status() {
     SessionStatus status;
     status.enabled = sEnabled;
@@ -12168,20 +12541,32 @@ SessionStatus get_session_status() {
     status.bindHost = sSession.bindHost;
     status.publicHost = sSession.publicHost;
     status.inviteCode = sSession.inviteCode;
+    status.connectionError = sSession.connectionError;
+    status.ownerClientId = sSession.relayOwnerClientId;
     status.port = sSession.port;
+    status.isOwner = relay_room_owner();
+    const bool relaySettingsHostControlled =
+        sSession.mode == NetworkMode::RelayHarness &&
+        sSession.welcomed &&
+        !status.isOwner;
     status.dummyModel = sDummyModelEnabled;
-    status.dummyModelHostControlled = sSession.mode == NetworkMode::DirectJoin;
+    status.dummyModelHostControlled =
+        sSession.mode == NetworkMode::DirectJoin || relaySettingsHostControlled;
     status.nameLabels = sNameLabelsEnabled;
     status.nameLabelsHostControlled = false;
     status.syncFlags = sSyncFlagsEnabled;
-    status.syncFlagsHostControlled = sSession.mode == NetworkMode::DirectJoin;
+    status.syncFlagsHostControlled =
+        sSession.mode == NetworkMode::DirectJoin || relaySettingsHostControlled;
     status.syncWorld = sSyncWorldEnabled;
-    status.syncWorldHostControlled = sSession.mode == NetworkMode::DirectJoin;
+    status.syncWorldHostControlled =
+        sSession.mode == NetworkMode::DirectJoin || relaySettingsHostControlled;
     status.displayMidna = wants_remote_midna_matrices();
     status.remoteCollision = sRemoteCollisionEnabled;
-    status.remoteCollisionHostControlled = sSession.mode == NetworkMode::DirectJoin;
+    status.remoteCollisionHostControlled =
+        sSession.mode == NetworkMode::DirectJoin || relaySettingsHostControlled;
     status.pvp = pvp_enabled();
-    status.pvpHostControlled = sSession.mode == NetworkMode::DirectJoin;
+    status.pvpHostControlled =
+        sSession.mode == NetworkMode::DirectJoin || relaySettingsHostControlled;
     status.hasRecentPeerPose = has_recent_peer_pose(90);
     return status;
 }
@@ -12304,7 +12689,10 @@ void apply_sync_flags_enabled(bool enabled) {
 }
 
 void set_sync_flags_enabled(bool enabled) {
-    if (sSession.mode == NetworkMode::DirectJoin) {
+    if (sSession.mode == NetworkMode::DirectJoin ||
+        (sSession.mode == NetworkMode::RelayHarness && sSession.welcomed &&
+         !relay_room_owner()))
+    {
         DuskLog.info("Multiplayer sync flags change ignored on join client; host controlled");
         return;
     }
@@ -12316,6 +12704,7 @@ void set_sync_flags_enabled(bool enabled) {
             {"enabled", sSyncFlagsEnabled},
         });
     }
+    publish_relay_room_settings();
 }
 
 bool sync_flags_enabled() {
@@ -12329,7 +12718,10 @@ void apply_sync_world_enabled(bool enabled) {
 }
 
 void set_sync_world_enabled(bool enabled) {
-    if (sSession.mode == NetworkMode::DirectJoin) {
+    if (sSession.mode == NetworkMode::DirectJoin ||
+        (sSession.mode == NetworkMode::RelayHarness && sSession.welcomed &&
+         !relay_room_owner()))
+    {
         DuskLog.info("Multiplayer sync world change ignored on join client; host controlled");
         return;
     }
@@ -12341,6 +12733,7 @@ void set_sync_world_enabled(bool enabled) {
             {"enabled", sSyncWorldEnabled},
         });
     }
+    publish_relay_room_settings();
 }
 
 bool sync_world_enabled() {
@@ -12362,7 +12755,10 @@ void apply_remote_link_model_enabled(bool enabled) {
 }
 
 void set_remote_link_model_enabled(bool enabled) {
-    if (sSession.mode == NetworkMode::DirectJoin) {
+    if (sSession.mode == NetworkMode::DirectJoin ||
+        (sSession.mode == NetworkMode::RelayHarness && sSession.welcomed &&
+         !relay_room_owner()))
+    {
         DuskLog.info("Multiplayer remote Link model change ignored on join client; host controlled");
         return;
     }
@@ -12376,6 +12772,7 @@ void set_remote_link_model_enabled(bool enabled) {
                 {"enabled", sDummyModelEnabled},
             });
         }
+        publish_relay_room_settings();
 
         json message = {
             {"type", "puppet_preference"},
@@ -12413,7 +12810,10 @@ bool display_remote_midna_enabled() {
 }
 
 void set_remote_collision_enabled(bool enabled) {
-    if (sSession.mode == NetworkMode::DirectJoin) {
+    if (sSession.mode == NetworkMode::DirectJoin ||
+        (sSession.mode == NetworkMode::RelayHarness && sSession.welcomed &&
+         !relay_room_owner()))
+    {
         DuskLog.info("Multiplayer remote collision change ignored on join client; host controlled");
         return;
     }
@@ -12434,6 +12834,7 @@ void set_remote_collision_enabled(bool enabled) {
             {"enabled", pvp_enabled()},
         });
     }
+    publish_relay_room_settings();
 }
 
 bool remote_collision_enabled() {
@@ -12446,7 +12847,10 @@ void apply_pvp_enabled(bool enabled) {
 }
 
 void set_pvp_enabled(bool enabled) {
-    if (sSession.mode == NetworkMode::DirectJoin) {
+    if (sSession.mode == NetworkMode::DirectJoin ||
+        (sSession.mode == NetworkMode::RelayHarness && sSession.welcomed &&
+         !relay_room_owner()))
+    {
         DuskLog.info("Multiplayer PvP change ignored on join client; host controlled");
         return;
     }
@@ -12458,6 +12862,7 @@ void set_pvp_enabled(bool enabled) {
             {"enabled", pvp_enabled()},
         });
     }
+    publish_relay_room_settings();
 }
 
 bool pvp_enabled() {

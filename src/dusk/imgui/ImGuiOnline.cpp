@@ -29,6 +29,51 @@ void draw_status_row(const char* label, const std::string& value) {
     ImGuiStringViewText(value);
 }
 
+std::string connection_error_message(const std::string& error) {
+    if (error == "bad_password") return "Incorrect lobby password.";
+    if (error == "lobby_not_found") return "Lobby not found on this relay.";
+    if (error == "lobby_exists") return "A lobby with that name already exists.";
+    if (error == "lobby_full") return "This lobby is full.";
+    if (error == "password_too_short") return "Password must be at least 6 characters.";
+    if (error == "password_too_long") return "Password is too long.";
+    if (error == "missing_lobby") return "Enter a lobby name.";
+    if (error == "lobby_too_long") return "Lobby name is too long.";
+    if (error == "missing_username") return "Enter a nickname.";
+    if (error == "username_too_long") return "Nickname is too long.";
+    if (error == "protocol_version") {
+        return "This game build is incompatible with the relay version.";
+    }
+    if (error == "invalid_action") return "The relay rejected the host/join request.";
+    if (error == "invalid_settings") return "The lobby settings were invalid.";
+    if (error == "owner_only") return "Only the lobby host can change these settings.";
+    if (error == "already_joined") return "This connection has already joined a lobby.";
+    if (error == "hello_timeout") return "The relay timed out during connection setup.";
+    if (error == "message_too_large") return "The relay rejected an oversized network message.";
+    if (error == "Relay room vanished; recreating it") return error + ".";
+    if (error == "connect failed" || error == "connect poll failed") {
+        return "Could not connect to the server. Check the code, address, port, and firewall.";
+    }
+    if (error == "remote closed") return "The server closed the connection.";
+    if (error == "send failed") return "The connection was lost while sending data.";
+    if (error == "nonblocking failed") return "Windows could not initialize the network socket.";
+    if (error == "listen failed") {
+        return "Could not host on this port. It may already be in use.";
+    }
+    if (error == "invalid host" || error == "invalid bind host") {
+        return "The server address could not be resolved.";
+    }
+    if (error == "relay handshake rejected") return "The relay rejected the connection.";
+    return error;
+}
+
+void draw_error_row(const std::string& error) {
+    ImGui::TextColored(ImVec4(1.0f, 0.38f, 0.38f, 1.0f), "Error");
+    ImGui::SameLine(115.0f);
+    ImGui::PushTextWrapPos(0.0f);
+    ImGuiStringViewText(connection_error_message(error));
+    ImGui::PopTextWrapPos();
+}
+
 }  // namespace
 
 void ImGuiOnline::loadRememberedNames() {
@@ -91,6 +136,9 @@ void ImGuiOnline::draw(bool& open) {
     }
     draw_status_row("Mode", status.mode);
     draw_status_row("State", status.state);
+    if (!status.connectionError.empty()) {
+        draw_error_row(status.connectionError);
+    }
     if (!status.enabled) {
         ImGui::Checkbox("Name labels", &m_nameLabels);
         ImGui::Checkbox("Sync flags", &m_syncFlags);
@@ -132,6 +180,9 @@ void ImGuiOnline::draw(bool& open) {
     if (status.enabled) {
         draw_status_row("Room", status.room);
         draw_status_row("Player", status.name);
+        if (status.mode == "relay" && !status.ownerClientId.empty()) {
+            draw_status_row("Role", status.isOwner ? "lobby host" : "player");
+        }
         ImGui::Text("Port");
         ImGui::SameLine(115.0f);
         ImGui::Text("%d", status.port);
@@ -289,13 +340,14 @@ void ImGuiOnline::draw(bool& open) {
 
     if (!status.inviteCode.empty()) {
         ImGui::Separator();
-        ImGui::TextUnformatted("Invite code");
+        ImGui::TextUnformatted(status.mode == "relay" ? "Relay code" : "Invite code");
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x);
         ImGuiStringViewText(status.inviteCode);
         ImGui::PopTextWrapPos();
-        if (ImGui::Button("Copy Invite Code")) {
+        if (ImGui::Button(status.mode == "relay" ? "Copy Relay Code" : "Copy Invite Code")) {
             ImGui::SetClipboardText(status.inviteCode.c_str());
-            m_statusMessage = "Invite code copied.";
+            m_statusMessage =
+                status.mode == "relay" ? "Relay code copied." : "Invite code copied.";
         }
     }
 
@@ -349,8 +401,11 @@ void ImGuiOnline::draw(bool& open) {
                 if (ImGui::IsItemDeactivatedAfterEdit()) {
                     rememberPlayerName(m_joinName);
                 }
+                ImGui::TextUnformatted("Invite code");
                 ImGui::SetNextItemWidth(-1.0f);
-                ImGui::InputTextMultiline("Invite Code", m_inviteCode, sizeof(m_inviteCode), ImVec2(0.0f, ImGui::GetTextLineHeight() * 3.0f));
+                ImGui::InputTextMultiline(
+                    "##directInviteCode", m_inviteCode, sizeof(m_inviteCode),
+                    ImVec2(0.0f, ImGui::GetTextLineHeight() * 3.0f));
 
                 if (ImGui::Button("Join Lobby")) {
                     multiplayer::DirectJoinOptions options;
@@ -376,43 +431,92 @@ void ImGuiOnline::draw(bool& open) {
         }
 
         if (ImGui::BeginTabItem("Relay")) {
-            ImGui::SetNextItemWidth(190.0f);
-            ImGui::InputText("Username##relayName", m_relayName, sizeof(m_relayName));
-            if (ImGui::IsItemDeactivatedAfterEdit()) {
-                rememberPlayerName(m_relayName);
-            }
-            ImGui::SetNextItemWidth(190.0f);
-            ImGui::InputText("Lobby", m_relayRoom, sizeof(m_relayRoom));
-            if (ImGui::IsItemDeactivatedAfterEdit()) {
-                rememberLobbyName(m_relayRoom);
-            }
-            ImGui::SetNextItemWidth(190.0f);
-            ImGui::InputText("Password", m_relayPassword, sizeof(m_relayPassword), ImGuiInputTextFlags_Password);
-            ImGui::SetNextItemWidth(190.0f);
-            ImGui::InputText("Relay Host", m_relayHost, sizeof(m_relayHost));
-            ImGui::SetNextItemWidth(190.0f);
-            ImGui::InputInt("Relay Port", &m_relayPort);
+            if (ImGui::CollapsingHeader("Host", ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::TextUnformatted("Relay code");
+                ImGui::SetNextItemWidth(-1.0f);
+                ImGui::InputTextMultiline(
+                    "##relayHostCode", m_relayCode, sizeof(m_relayCode),
+                    ImVec2(0.0f, ImGui::GetTextLineHeight() * 3.0f));
+                ImGui::SetNextItemWidth(190.0f);
+                ImGui::InputText("Nickname##relayHostName", m_relayName, sizeof(m_relayName));
+                if (ImGui::IsItemDeactivatedAfterEdit()) {
+                    rememberPlayerName(m_relayName);
+                }
+                ImGui::SetNextItemWidth(190.0f);
+                ImGui::InputText("Lobby name##relayHostRoom", m_relayRoom, sizeof(m_relayRoom));
+                if (ImGui::IsItemDeactivatedAfterEdit()) {
+                    rememberLobbyName(m_relayRoom);
+                }
+                ImGui::SetNextItemWidth(190.0f);
+                ImGui::InputText("Password##relayHostPassword", m_relayPassword,
+                                 sizeof(m_relayPassword), ImGuiInputTextFlags_Password);
+                ImGui::TextDisabled("At least 6 characters");
 
-            if (ImGui::Button("Join Relay Lobby")) {
-                multiplayer::RelayJoinOptions options;
-                options.name = m_relayName;
-                options.room = m_relayRoom;
-                options.password = m_relayPassword;
-                options.host = m_relayHost;
-                options.port = m_relayPort;
-                options.dummyModel = m_dummyModel;
-                options.nameLabels = m_nameLabels;
-                options.syncFlags = m_syncFlags;
-                options.syncWorld = m_syncWorld;
-                options.displayMidna = m_displayMidna;
-                options.remoteCollision = m_remoteCollision;
-                options.pvp = m_pvp;
+                if (ImGui::Button("Host Relay Lobby")) {
+                    multiplayer::RelayHostOptions options;
+                    options.name = m_relayName;
+                    options.room = m_relayRoom;
+                    options.password = m_relayPassword;
+                    options.relayCode = m_relayCode;
+                    options.dummyModel = m_dummyModel;
+                    options.nameLabels = m_nameLabels;
+                    options.syncFlags = m_syncFlags;
+                    options.syncWorld = m_syncWorld;
+                    options.displayMidna = m_displayMidna;
+                    options.remoteCollision = m_remoteCollision;
+                    options.pvp = m_pvp;
 
-                std::string error;
-                if (multiplayer::join_relay(options, &error)) {
-                    m_statusMessage = "Joining relay lobby.";
-                } else {
-                    m_statusMessage = "Relay join failed: " + error;
+                    std::string error;
+                    if (multiplayer::host_relay(options, &error)) {
+                        m_statusMessage = "Creating relay lobby.";
+                    } else {
+                        m_statusMessage = "Relay host failed: " + error;
+                    }
+                }
+            }
+
+            ImGui::Separator();
+            if (ImGui::CollapsingHeader("Join", ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::TextUnformatted("Relay code");
+                ImGui::SetNextItemWidth(-1.0f);
+                ImGui::InputTextMultiline(
+                    "##relayJoinCode", m_relayCode, sizeof(m_relayCode),
+                    ImVec2(0.0f, ImGui::GetTextLineHeight() * 3.0f));
+                ImGui::SetNextItemWidth(190.0f);
+                ImGui::InputText("Nickname##relayJoinName", m_relayName, sizeof(m_relayName));
+                if (ImGui::IsItemDeactivatedAfterEdit()) {
+                    rememberPlayerName(m_relayName);
+                }
+                ImGui::SetNextItemWidth(190.0f);
+                ImGui::InputText("Lobby name##relayJoinRoom", m_relayRoom,
+                                 sizeof(m_relayRoom));
+                if (ImGui::IsItemDeactivatedAfterEdit()) {
+                    rememberLobbyName(m_relayRoom);
+                }
+                ImGui::SetNextItemWidth(190.0f);
+                ImGui::InputText("Password##relayJoinPassword", m_relayPassword,
+                                 sizeof(m_relayPassword), ImGuiInputTextFlags_Password);
+
+                if (ImGui::Button("Join Relay Lobby")) {
+                    multiplayer::RelayJoinOptions options;
+                    options.name = m_relayName;
+                    options.room = m_relayRoom;
+                    options.password = m_relayPassword;
+                    options.relayCode = m_relayCode;
+                    options.dummyModel = m_dummyModel;
+                    options.nameLabels = m_nameLabels;
+                    options.syncFlags = m_syncFlags;
+                    options.syncWorld = m_syncWorld;
+                    options.displayMidna = m_displayMidna;
+                    options.remoteCollision = m_remoteCollision;
+                    options.pvp = m_pvp;
+
+                    std::string error;
+                    if (multiplayer::join_relay(options, &error)) {
+                        m_statusMessage = "Joining relay lobby.";
+                    } else {
+                        m_statusMessage = "Relay join failed: " + error;
+                    }
                 }
             }
             ImGui::EndTabItem();
@@ -434,6 +538,9 @@ void ImGuiOnline::draw(bool& open) {
 
     if (status.enabled && status.mode == "host" && !status.inviteCode.empty()) {
         copy_string(m_inviteCode, sizeof(m_inviteCode), status.inviteCode);
+    }
+    if (status.enabled && status.mode == "relay" && !status.inviteCode.empty()) {
+        copy_string(m_relayCode, sizeof(m_relayCode), status.inviteCode);
     }
 
     ImGui::End();

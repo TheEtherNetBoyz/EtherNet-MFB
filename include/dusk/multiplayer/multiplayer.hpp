@@ -321,12 +321,25 @@ struct DirectJoinOptions {
     bool pvp = false;
 };
 
+struct RelayHostOptions {
+    std::string name = "Host";
+    std::string room = "dev";
+    std::string password;
+    std::string relayCode;
+    bool dummyModel = true;
+    bool nameLabels = true;
+    bool syncFlags = true;
+    bool syncWorld = false;
+    bool displayMidna = true;
+    bool remoteCollision = true;
+    bool pvp = false;
+};
+
 struct RelayJoinOptions {
     std::string name = "Player";
     std::string room = "dev";
     std::string password;
-    std::string host = "127.0.0.1";
-    int port = 34197;
+    std::string relayCode;
     bool dummyModel = true;
     bool nameLabels = true;
     bool syncFlags = true;
@@ -346,7 +359,10 @@ struct SessionStatus {
     std::string bindHost;
     std::string publicHost;
     std::string inviteCode;
+    std::string connectionError;
+    std::string ownerClientId;
     int port = 0;
+    bool isOwner = false;
     bool dummyModel = false;
     bool dummyModelHostControlled = false;
     bool nameLabels = false;
@@ -409,6 +425,7 @@ bool get_remote_bomb_object_for_peer(const std::string& peerId,
                                      RemoteBombObjectSnapshot* out);
 bool host_direct(const DirectHostOptions& options, std::string* errorOut = nullptr);
 bool join_direct(const DirectJoinOptions& options, std::string* errorOut = nullptr);
+bool host_relay(const RelayHostOptions& options, std::string* errorOut = nullptr);
 bool join_relay(const RelayJoinOptions& options, std::string* errorOut = nullptr);
 void disconnect_session();
 bool request_manual_sync(const std::string& peerId, std::string* errorOut = nullptr);

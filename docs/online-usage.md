@@ -2,15 +2,29 @@
 
 ## Prerequisites
 
-Dusklight Multiplayer currently has no public server, so direct-hosted multiplayer is the only supported connection method. The host must either configure TCP and UDP port forwarding on their router, use a VPN that supports port forwarding such as ProtonVPN, or have everyone join the same Radmin VPN/Hamachi network.
+Dusklight Multiplayer can be played through a direct connection or a privately hosted relay. There is currently no public relay.
 
-## Hosting a lobby
+For a direct connection, the host must either configure TCP and UDP port forwarding on their router, use a VPN that supports port forwarding such as ProtonVPN, or have everyone join the same Radmin VPN/Hamachi network.
 
-After starting the game, use either "~" or "Shift + F1" to open the Imgui menu, then go to "Tools", then "Online." Type in your chosen lobby name, nickname, IP and Port, then click "Host" and send the invite code to whoever is joining.
+For a relay connection, the person running the relay must forward the chosen port for both TCP and UDP.
 
-## Joining a lobby
+## Direct lobbies
 
-The invite code you are given will already contain the IP and Port so there is no need to type it in, just paste in the code, type in your nickname and then join the lobby.
+After starting the game, use either "~" or "Shift + F1" to open the Imgui menu, then go to "Tools", then "Online", and select "Direct."
+
+To host, enter your name, room, public IP or hostname and port, then click "Host Lobby." Send the invite code to whoever is joining.
+
+To join, enter your name and paste in the invite code, then click "Join Lobby." The invite code already contains the IP and port.
+
+## Relay lobbies
+
+The person running the relay opens the relay launcher, enters their current public IP or hostname and forwarded port, then starts the relay and sends the relay code to the players.
+
+In the Online menu, select "Relay." To create a lobby, enter the relay code, nickname, lobby name and a password of at least 6 characters under "Host", then click "Host Relay Lobby."
+
+To join, enter the same relay code, lobby name and password under "Join", enter your own nickname, then click "Join Relay Lobby."
+
+The player who creates the lobby controls its settings, but the relay machine hosts the connection. If that player leaves, another player becomes the lobby owner.
 
 ## Design
 
@@ -32,7 +46,7 @@ Twilight Princess is designed with single player assumptions, it is likely that 
 
 ## Warnings
 
-This hasn't been extensively tested outside of multiplayer any% speed-runs and a few randomizer seeds, there is no guarantee that you won't encounter numerous bugs or crashes. If you do encounter any issues, feel free to send me some info and the log from AppData/Roaming/TwilitRealm/Dusklight (send to "mdra" on Discord). 
+This hasn't been extensively tested outside of multiplayer any% speed-runs and a few randomizer seeds, there is no guarantee that you won't encounter numerous bugs or crashes especially on a casual playthrough. If you do encounter any issues, feel free to send me some info and the log from AppData/Roaming/TwilitRealm/Dusklight/Logs (send to "mdra" on Discord).
 
 A few already known issues:
 

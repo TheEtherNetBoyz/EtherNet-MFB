@@ -562,11 +562,83 @@ target_include_directories(dusklight PRIVATE ${GAME_INCLUDE_DIRS})
 target_link_libraries(dusklight PRIVATE aurora::main ${GAME_LIBS} ${JSYSTEM_LINK_LIBRARIES})
 target_precompile_headers(dusklight PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/include/dusk_pch.hpp>")
 
-add_executable(tp_multiplayer_relay tools/multiplayer_relay/relay.cpp)
+add_executable(
+    tp_multiplayer_relay
+    tools/multiplayer_relay/relay.cpp
+    src/dusk/multiplayer/invite_code.cpp
+)
+target_include_directories(tp_multiplayer_relay PRIVATE include)
 target_link_libraries(tp_multiplayer_relay PRIVATE nlohmann_json::nlohmann_json)
 set_target_properties(tp_multiplayer_relay PROPERTIES FOLDER "tools")
 if (WIN32)
     target_link_libraries(tp_multiplayer_relay PRIVATE ws2_32)
+    if (MSVC)
+        set_property(
+            TARGET tp_multiplayer_relay
+            PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+        )
+    endif ()
+
+    add_executable(
+        tp_multiplayer_relay_launcher WIN32
+        tools/multiplayer_relay/launcher.cpp
+        src/dusk/multiplayer/invite_code.cpp
+    )
+    target_include_directories(tp_multiplayer_relay_launcher PRIVATE include)
+    target_link_libraries(
+        tp_multiplayer_relay_launcher
+        PRIVATE nlohmann_json::nlohmann_json user32 shell32
+    )
+    set_target_properties(tp_multiplayer_relay_launcher PROPERTIES FOLDER "tools")
+    if (MSVC)
+        set_property(
+            TARGET tp_multiplayer_relay_launcher
+            PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+        )
+    endif ()
+
+    set(RELAY_PACKAGE_DIR "${CMAKE_BINARY_DIR}/relay-package")
+    add_custom_target(
+        tp_multiplayer_relay_package
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${RELAY_PACKAGE_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:tp_multiplayer_relay>"
+            "${RELAY_PACKAGE_DIR}/tp_multiplayer_relay.exe"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:tp_multiplayer_relay_launcher>"
+            "${RELAY_PACKAGE_DIR}/tp_multiplayer_relay_launcher.exe"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/multiplayer_relay/README.md"
+            "${RELAY_PACKAGE_DIR}/README.md"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/multiplayer_relay/PROTOCOL.md"
+            "${RELAY_PACKAGE_DIR}/PROTOCOL.md"
+        COMMAND ${CMAKE_COMMAND} -E chdir "${RELAY_PACKAGE_DIR}"
+            ${CMAKE_COMMAND} -E tar cf
+            "${CMAKE_BINARY_DIR}/dusklight-relay-windows.zip"
+            --format=zip --
+            tp_multiplayer_relay.exe
+            tp_multiplayer_relay_launcher.exe
+            README.md
+            PROTOCOL.md
+        DEPENDS tp_multiplayer_relay tp_multiplayer_relay_launcher
+        COMMENT "Preparing the self-contained Windows relay package"
+    )
+    set_target_properties(tp_multiplayer_relay_package PROPERTIES FOLDER "tools")
+endif ()
+
+option(DUSK_BUILD_MULTIPLAYER_RELAY_TESTS "Build and register multiplayer relay integration tests" OFF)
+if (DUSK_BUILD_MULTIPLAYER_RELAY_TESTS)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    enable_testing()
+    add_test(
+        NAME tp_multiplayer_relay_integration
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/multiplayer_relay/test_relay.py
+            --relay $<TARGET_FILE:tp_multiplayer_relay>
+    )
+    set_tests_properties(tp_multiplayer_relay_integration PROPERTIES TIMEOUT 30)
 endif ()
 
 if (TARGET crashpad_handler)

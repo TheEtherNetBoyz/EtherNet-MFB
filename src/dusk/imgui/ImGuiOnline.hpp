@@ -23,9 +23,8 @@ private:
     char m_relayName[64] = "Player";
     char m_relayRoom[64] = "Lobby";
     char m_relayPassword[128] = "";
-    char m_relayHost[128] = "127.0.0.1";
+    char m_relayCode[512] = "";
     int m_port = 34197;
-    int m_relayPort = 34197;
     bool m_dummyModel = true;
     bool m_nameLabels = true;
     bool m_syncFlags = true;

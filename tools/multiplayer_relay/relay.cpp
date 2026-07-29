@@ -1,3 +1,4 @@
+#include "dusk/multiplayer/invite_code.hpp"
 #include "nlohmann/json.hpp"
 
 #if _WIN32
@@ -35,23 +36,69 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
+#include <exception>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <random>
 #include <set>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace {
 
 using json = nlohmann::json;
 
-constexpr int kProtocolVersion = 1;
+constexpr int kProtocolVersion = 2;
 constexpr size_t kMaxLineBytes = 512 * 1024;
+constexpr size_t kMaxQueuedBytes = 8 * 1024 * 1024;
 constexpr size_t kMaxRoomClients = 8;
+constexpr size_t kMaxRoomIdBytes = 64;
+constexpr size_t kMaxPasswordBytes = 128;
+constexpr size_t kMaxUsernameBytes = 32;
+constexpr size_t kMaxReliableSequences = 4096;
+constexpr size_t kMaxReadBytesPerTick = 256 * 1024;
+constexpr size_t kMinPasswordBytes = 6;
+constexpr double kHelloTimeoutSeconds = 10.0;
+constexpr size_t kUdpSenderIdBytes = 32;
+constexpr size_t kMaxUdpDatagramBytes = 2048;
+constexpr uint8_t kUdpPacketTypePoseJson = 1;
+constexpr uint8_t kUdpPacketTypePoseMsgpack = 2;
+constexpr uint8_t kUdpPacketTypeRemoteObject = 3;
+constexpr uint8_t kUdpPacketTypeMidnaMsgpack = 4;
+constexpr uint8_t kUdpPacketTypePoseAck = 5;
+constexpr uint8_t kUdpPacketTypeRelayRegister = 6;
+constexpr size_t kMaxUdpBytesPerClientSecond = 4 * 1024 * 1024;
 
-const std::set<std::string> kStateBroadcastTypes = {
+#pragma pack(push, 1)
+struct UdpRelayHeader {
+    char magic[4];
+    uint8_t version;
+    uint8_t type;
+    uint16_t headerSize;
+    uint32_t sequence;
+    uint16_t chunkIndex;
+    uint16_t chunkCount;
+    uint32_t uncompressedSize;
+    uint32_t compressedSize;
+    uint16_t payloadSize;
+    char senderId[kUdpSenderIdBytes];
+};
+
+struct UdpPoseAckPacket {
+    uint32_t sequence;
+    uint8_t ackedType;
+    char ackedSenderId[kUdpSenderIdBytes];
+    uint8_t stressFlags;
+};
+#pragma pack(pop)
+
+static_assert(sizeof(UdpRelayHeader) == 58);
+
+const std::set<std::string> kGameplayRouteTypes = {
     "event_bit",
     "tbox_bit",
     "switch_bit",
@@ -61,8 +108,10 @@ const std::set<std::string> kStateBroadcastTypes = {
     "save_snapshot",
     "key_num",
     "light_drop_num",
+    "light_drop_get_flag",
     "max_life_update",
     "bottle_slots",
+    "bomb_bag_slot",
     "rupee_count",
     "item_get",
     "rando_item_get",
@@ -75,7 +124,22 @@ const std::set<std::string> kStateBroadcastTypes = {
     "collect",
     "visited_room",
     "letter_get",
+    "presence",
+    "progression_state",
+    "puppet_preference",
+    "midna_preference",
+    "midna_pose",
+    "pvp_hit",
+    "ganondorf_owner_claim",
+    "ganondorf_owner",
+    "ganondorf_hit",
+    "ganondorf_reaction",
+    "ganondorf_player_damage",
+    "ganondorf_state",
+    "ooccoo_state",
 };
+
+using SteadyClock = std::chrono::steady_clock;
 
 bool env_enabled(const char* name) {
     const char* value = std::getenv(name);
@@ -85,16 +149,8 @@ bool env_enabled(const char* name) {
             std::strcmp(value, "ON") == 0);
 }
 
-bool env_disabled(const char* name) {
-    const char* value = std::getenv(name);
-    return value != nullptr &&
-           (std::strcmp(value, "0") == 0 || std::strcmp(value, "false") == 0 ||
-            std::strcmp(value, "FALSE") == 0 || std::strcmp(value, "off") == 0 ||
-            std::strcmp(value, "OFF") == 0);
-}
-
 bool relay_packet_trace_enabled() {
-    static const bool enabled = !env_disabled("DUSK_MP_RELAY_PACKET_TRACE");
+    static const bool enabled = env_enabled("DUSK_MP_RELAY_PACKET_TRACE");
     return enabled;
 }
 
@@ -103,7 +159,8 @@ const char* packet_category(const std::string& type) {
         return "pose";
     }
     if (type == "hello" || type == "welcome" || type == "peer_joined" ||
-        type == "peer_left" || type == "name_labels")
+        type == "peer_left" || type == "owner_changed" ||
+        type == "room_settings" || type == "name_labels")
     {
         return "session";
     }
@@ -195,26 +252,112 @@ struct Client {
     std::string id;
     std::string roomId;
     std::string name;
+    std::string stage;
     std::string rxBuffer;
-    std::set<uint32_t> reliableSeen;
+    std::deque<std::string> txQueue;
+    size_t txOffset = 0;
+    size_t txQueuedBytes = 0;
+    std::deque<uint32_t> reliableOrder;
+    std::unordered_set<uint32_t> reliableSeen;
+    std::string udpToken;
+    sockaddr_in udpAddr{};
+    SteadyClock::time_point acceptedAt = SteadyClock::now();
+    SteadyClock::time_point udpRateWindowStarted = SteadyClock::now();
+    size_t udpRateWindowBytes = 0;
     uint32_t poseCount = 0;
+    bool closeAfterFlush = false;
+    bool disconnectRequested = false;
+    bool wantsPuppet = true;
+    bool wantsMidna = false;
+    bool udpAddrKnown = false;
 };
 
 struct Room {
     std::string id;
     std::string password;
-    std::set<std::string> clientIds;
+    std::vector<std::string> clientIds;
+    std::string ownerClientId;
+    bool dummyModel = true;
+    bool syncFlags = true;
+    bool syncWorld = false;
+    bool remoteCollision = true;
+    bool pvp = false;
 };
 
 struct Options {
     std::string host = "127.0.0.1";
+    std::string publicHost = "127.0.0.1";
     int port = 34197;
+    int publicPort = 0;
+    double helloTimeoutSeconds = kHelloTimeoutSeconds;
     bool verbose = false;
 };
+
+json room_settings_json(const Room& room) {
+    return {
+        {"dummy_model", room.dummyModel},
+        {"sync_flags", room.syncFlags},
+        {"sync_world", room.syncWorld},
+        {"remote_collision", room.remoteCollision},
+        {"pvp", room.pvp},
+    };
+}
+
+bool apply_room_settings(Room& room, const json& settings) {
+    if (!settings.is_object()) {
+        return false;
+    }
+
+    auto read_bool = [&](const char* key, bool& value) {
+        const auto it = settings.find(key);
+        if (it == settings.end()) {
+            return true;
+        }
+        if (!it->is_boolean()) {
+            return false;
+        }
+        value = it->get<bool>();
+        return true;
+    };
+
+    bool dummyModel = room.dummyModel;
+    bool syncFlags = room.syncFlags;
+    bool syncWorld = room.syncWorld;
+    bool remoteCollision = room.remoteCollision;
+    bool pvp = room.pvp;
+    if (!read_bool("dummy_model", dummyModel) ||
+        !read_bool("sync_flags", syncFlags) ||
+        !read_bool("sync_world", syncWorld) ||
+        !read_bool("remote_collision", remoteCollision) ||
+        !read_bool("pvp", pvp))
+    {
+        return false;
+    }
+
+    room.dummyModel = dummyModel;
+    room.syncFlags = syncFlags;
+    room.syncWorld = syncWorld;
+    room.remoteCollision = remoteCollision;
+    room.pvp = remoteCollision && pvp;
+    return true;
+}
 
 class Relay {
 public:
     explicit Relay(Options options) : mOptions(std::move(options)) {}
+
+    ~Relay() {
+        for (auto& entry : mClients) {
+            close_socket(entry.second.sock);
+        }
+        close_socket(mListenSock);
+        close_socket(mUdpSock);
+#if _WIN32
+        if (mWinsockStarted) {
+            WSACleanup();
+        }
+#endif
+    }
 
     bool run() {
 #if _WIN32
@@ -223,6 +366,7 @@ public:
             std::cerr << "WSAStartup failed\n";
             return false;
         }
+        mWinsockStarted = true;
 #endif
 
         mListenSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -255,7 +399,16 @@ public:
             return false;
         }
 
-        std::cout << "TP relay listening on " << mOptions.host << ":" << mOptions.port << "\n";
+        mUdpSock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (mUdpSock == INVALID_SOCKET || !set_nonblocking(mUdpSock) ||
+            bind(mUdpSock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0)
+        {
+            std::cerr << "UDP bind failed\n";
+            return false;
+        }
+
+        std::cout << "TP relay listening on TCP+UDP " << mOptions.host << ":"
+                  << mOptions.port << "\n";
         while (true) {
             tick();
         }
@@ -264,12 +417,21 @@ public:
 private:
     void tick() {
         fd_set readfds;
+        fd_set writefds;
         FD_ZERO(&readfds);
+        FD_ZERO(&writefds);
         FD_SET(mListenSock, &readfds);
-        socket_t maxSock = mListenSock;
+        FD_SET(mUdpSock, &readfds);
+        socket_t maxSock = std::max(mListenSock, mUdpSock);
 
         for (const auto& entry : mClients) {
-            FD_SET(entry.second.sock, &readfds);
+            const Client& client = entry.second;
+            if (!client.closeAfterFlush && !client.disconnectRequested) {
+                FD_SET(client.sock, &readfds);
+            }
+            if (!client.txQueue.empty() && !client.disconnectRequested) {
+                FD_SET(client.sock, &writefds);
+            }
             if (entry.second.sock > maxSock) {
                 maxSock = entry.second.sock;
             }
@@ -277,28 +439,64 @@ private:
 
         timeval timeout{0, 100000};
 #if _WIN32
-        const int result = select(0, &readfds, nullptr, nullptr, &timeout);
+        const int result = select(0, &readfds, &writefds, nullptr, &timeout);
 #else
-        const int result = select(maxSock + 1, &readfds, nullptr, nullptr, &timeout);
+        const int result = select(maxSock + 1, &readfds, &writefds, nullptr, &timeout);
 #endif
-        if (result <= 0) {
+        if (result < 0) {
             return;
         }
 
-        if (FD_ISSET(mListenSock, &readfds)) {
+        if (result > 0 && FD_ISSET(mListenSock, &readfds)) {
             accept_client();
+        }
+        if (result > 0 && FD_ISSET(mUdpSock, &readfds)) {
+            receive_udp_datagrams();
         }
 
         std::vector<std::string> disconnected;
         for (auto& entry : mClients) {
             Client& client = entry.second;
-            if (FD_ISSET(client.sock, &readfds) && !read_from_client(client)) {
+            if (client.disconnectRequested) {
+                disconnected.push_back(client.id);
+                continue;
+            }
+            if (result > 0 && FD_ISSET(client.sock, &readfds) &&
+                !read_from_client(client))
+            {
+                disconnected.push_back(client.id);
+                continue;
+            }
+            if (result > 0 && FD_ISSET(client.sock, &writefds) &&
+                !flush_client(client))
+            {
+                disconnected.push_back(client.id);
+                continue;
+            }
+            if (client.closeAfterFlush && client.txQueue.empty()) {
                 disconnected.push_back(client.id);
             }
         }
 
+        const auto now = SteadyClock::now();
+        for (auto& entry : mClients) {
+            Client& client = entry.second;
+            if (client.roomId.empty() && !client.closeAfterFlush &&
+                std::chrono::duration<double>(now - client.acceptedAt).count() >=
+                    mOptions.helloTimeoutSeconds)
+            {
+                reject_and_close(client, "hello_timeout");
+            }
+        }
+
+        std::sort(disconnected.begin(), disconnected.end());
+        disconnected.erase(std::unique(disconnected.begin(), disconnected.end()),
+                           disconnected.end());
         for (const std::string& clientId : disconnected) {
             remove_client(clientId);
+        }
+        if (mOptions.verbose || relay_packet_trace_enabled()) {
+            std::cout.flush();
         }
     }
 
@@ -315,6 +513,19 @@ private:
                 return;
             }
 
+#if !_WIN32
+            if (accepted >= FD_SETSIZE) {
+                close_socket(accepted);
+                log("connection rejected: descriptor_out_of_range");
+                continue;
+            }
+#endif
+            if (mClients.size() >= static_cast<size_t>(FD_SETSIZE - 2)) {
+                close_socket(accepted);
+                log("connection rejected: server_full");
+                continue;
+            }
+
             if (!set_nonblocking(accepted)) {
                 close_socket(accepted);
                 continue;
@@ -323,6 +534,7 @@ private:
             Client client;
             client.sock = accepted;
             client.id = make_id("client");
+            client.udpToken = make_id("udp");
             const std::string clientId = client.id;
             mClients.emplace(clientId, std::move(client));
         }
@@ -330,17 +542,20 @@ private:
 
     bool read_from_client(Client& client) {
         std::array<char, 4096> buffer{};
+        size_t readThisTick = 0;
         while (true) {
             const int read = recv(client.sock, buffer.data(), static_cast<int>(buffer.size()), 0);
             if (read > 0) {
+                readThisTick += static_cast<size_t>(read);
                 client.rxBuffer.append(buffer.data(), static_cast<size_t>(read));
-                if (client.rxBuffer.size() > kMaxLineBytes) {
-                    send_error(client, "message_too_large");
-                    return false;
-                }
 
                 size_t newline = std::string::npos;
                 while ((newline = client.rxBuffer.find('\n')) != std::string::npos) {
+                    if (newline > kMaxLineBytes) {
+                        client.rxBuffer.clear();
+                        reject_and_close(client, "message_too_large");
+                        return true;
+                    }
                     std::string line = client.rxBuffer.substr(0, newline);
                     client.rxBuffer.erase(0, newline + 1);
                     if (line.empty()) {
@@ -352,6 +567,17 @@ private:
                     } catch (const json::exception&) {
                         send_error(client, "invalid_json");
                     }
+                    if (client.closeAfterFlush || client.disconnectRequested) {
+                        return true;
+                    }
+                }
+                if (client.rxBuffer.size() > kMaxLineBytes) {
+                    client.rxBuffer.clear();
+                    reject_and_close(client, "message_too_large");
+                    return true;
+                }
+                if (readThisTick >= kMaxReadBytesPerTick) {
+                    return true;
                 }
                 continue;
             }
@@ -374,6 +600,10 @@ private:
 
         const std::string type = message.value("type", "");
         if (type == "hello") {
+            if (!client.roomId.empty()) {
+                send_error(client, "already_joined");
+                return;
+            }
             handle_hello(client, message);
             return;
         }
@@ -385,6 +615,43 @@ private:
 
         if (type == "ping") {
             send_json(client, {{"type", "pong"}, {"time", now_seconds()}});
+            return;
+        }
+
+        if (type == "puppet_preference") {
+            client.wantsPuppet = message.value("want_puppet", client.wantsPuppet);
+            client.wantsMidna = message.value("want_midna", client.wantsMidna);
+        } else if (type == "midna_preference") {
+            client.wantsMidna = message.value("want_midna", client.wantsMidna);
+        }
+        if (type == "presence" || type == "progression_state") {
+            client.stage = message.value("stage", client.stage);
+        }
+
+        if (type == "room_settings") {
+            auto roomIt = mRooms.find(client.roomId);
+            if (roomIt == mRooms.end()) {
+                send_error(client, "lobby_not_found");
+                return;
+            }
+            Room& room = roomIt->second;
+            if (room.ownerClientId != client.id) {
+                send_error(client, "owner_only");
+                return;
+            }
+            const json settings = message.value("settings", json{});
+            if (!apply_room_settings(room, settings)) {
+                send_error(client, "invalid_settings");
+                return;
+            }
+
+            const json routed = {
+                {"type", "room_settings"},
+                {"owner_client_id", room.ownerClientId},
+                {"settings", room_settings_json(room)},
+            };
+            send_json(client, routed);
+            broadcast(client, routed);
             return;
         }
 
@@ -412,6 +679,11 @@ private:
             if (!client.reliableSeen.insert(sequence).second) {
                 return;
             }
+            client.reliableOrder.push_back(sequence);
+            if (client.reliableOrder.size() > kMaxReliableSequences) {
+                client.reliableSeen.erase(client.reliableOrder.front());
+                client.reliableOrder.pop_front();
+            }
             broadcast(client, {
                 {"type", "reliable"},
                 {"client_id", client.id},
@@ -437,7 +709,7 @@ private:
             return;
         }
 
-        if (kStateBroadcastTypes.find(type) != kStateBroadcastTypes.end()) {
+        if (kGameplayRouteTypes.find(type) != kGameplayRouteTypes.end()) {
             json routed = message;
             routed["client_id"] = client.id;
             const std::string targetClientId = message.value("target_client_id", "");
@@ -462,6 +734,7 @@ private:
 
         std::string roomId = trim(hello.value("room_id", ""));
         std::string name = trim(hello.value("name", ""));
+        const std::string action = hello.value("action", "");
         const std::string password = hello.value("password", "");
         if (roomId.empty()) {
             send_error(client, "missing_lobby");
@@ -471,16 +744,45 @@ private:
             send_error(client, "missing_username");
             return;
         }
-        if (name.size() > 32) {
-            name.resize(32);
+        if (roomId.size() > kMaxRoomIdBytes) {
+            send_error(client, "lobby_too_long");
+            return;
+        }
+        if (name.size() > kMaxUsernameBytes) {
+            send_error(client, "username_too_long");
+            return;
+        }
+        if (password.size() > kMaxPasswordBytes) {
+            send_error(client, "password_too_long");
+            return;
+        }
+        if (password.size() < kMinPasswordBytes) {
+            send_error(client, "password_too_short");
+            return;
+        }
+        if (action != "create" && action != "join") {
+            send_error(client, "invalid_action");
+            return;
         }
 
         auto roomIt = mRooms.find(roomId);
-        if (roomIt == mRooms.end()) {
+        if (action == "create") {
+            if (roomIt != mRooms.end()) {
+                send_error(client, "lobby_exists");
+                return;
+            }
             Room room;
             room.id = roomId;
             room.password = password;
+            room.ownerClientId = client.id;
+            if (!apply_room_settings(room, hello.value("settings", json::object()))) {
+                send_error(client, "invalid_settings");
+                return;
+            }
             roomIt = mRooms.emplace(roomId, std::move(room)).first;
+        } else if (roomIt == mRooms.end()) {
+            send_error(client, "lobby_not_found");
+            return;
         } else if (roomIt->second.password != password) {
             send_error(client, "bad_password");
             return;
@@ -491,16 +793,10 @@ private:
             return;
         }
 
-        for (const std::string& peerId : roomIt->second.clientIds) {
-            const auto peerIt = mClients.find(peerId);
-            if (peerIt != mClients.end() && lower(peerIt->second.name) == lower(name)) {
-                send_error(client, "duplicate_username");
-                return;
-            }
-        }
-
         client.roomId = roomId;
         client.name = name;
+        client.wantsPuppet = hello.value("want_puppet", true);
+        client.wantsMidna = hello.value("want_midna", false);
 
         json peers = json::array();
         for (const std::string& peerId : roomIt->second.clientIds) {
@@ -510,7 +806,7 @@ private:
             }
         }
 
-        roomIt->second.clientIds.insert(client.id);
+        roomIt->second.clientIds.push_back(client.id);
         log("join room=" + roomId + " client=" + client.id + " name=" + client.name);
 
         send_json(client, {
@@ -518,6 +814,9 @@ private:
             {"protocol_version", kProtocolVersion},
             {"room_id", roomId},
             {"client_id", client.id},
+            {"udp_token", client.udpToken},
+            {"owner_client_id", roomIt->second.ownerClientId},
+            {"settings", room_settings_json(roomIt->second)},
             {"peers", peers},
         });
         broadcast(client, {
@@ -539,7 +838,173 @@ private:
             }
             auto peerIt = mClients.find(peerId);
             if (peerIt != mClients.end()) {
-                send_json(peerIt->second, message);
+                if (!send_json(peerIt->second, message)) {
+                    peerIt->second.disconnectRequested = true;
+                }
+            }
+        }
+    }
+
+    static std::string udp_sender_id(const UdpRelayHeader& header) {
+        size_t length = 0;
+        while (length < sizeof(header.senderId) && header.senderId[length] != '\0') {
+            ++length;
+        }
+        return std::string(header.senderId, length);
+    }
+
+    static std::string udp_acked_sender_id(const UdpPoseAckPacket& ack) {
+        size_t length = 0;
+        while (length < sizeof(ack.ackedSenderId) && ack.ackedSenderId[length] != '\0') {
+            ++length;
+        }
+        return std::string(ack.ackedSenderId, length);
+    }
+
+    static bool same_udp_endpoint(const sockaddr_in& left, const sockaddr_in& right) {
+        return left.sin_family == right.sin_family &&
+               left.sin_port == right.sin_port &&
+               left.sin_addr.s_addr == right.sin_addr.s_addr;
+    }
+
+    void send_udp_to_client(Client& client, const uint8_t* bytes, size_t size) {
+        if (!client.udpAddrKnown) {
+            return;
+        }
+        sendto(mUdpSock, reinterpret_cast<const char*>(bytes), static_cast<int>(size), 0,
+               reinterpret_cast<const sockaddr*>(&client.udpAddr), sizeof(client.udpAddr));
+    }
+
+    void receive_udp_datagrams() {
+        std::array<uint8_t, kMaxUdpDatagramBytes> packet{};
+        for (size_t receivedThisTick = 0; receivedThisTick < 512; ++receivedThisTick) {
+            sockaddr_in from{};
+#if _WIN32
+            int fromLength = sizeof(from);
+#else
+            socklen_t fromLength = sizeof(from);
+#endif
+            const int received =
+                recvfrom(mUdpSock, reinterpret_cast<char*>(packet.data()),
+                         static_cast<int>(packet.size()), 0,
+                         reinterpret_cast<sockaddr*>(&from), &fromLength);
+            if (received < 0) {
+                return;
+            }
+            if (static_cast<size_t>(received) < sizeof(UdpRelayHeader)) {
+                continue;
+            }
+
+            UdpRelayHeader header{};
+            std::memcpy(&header, packet.data(), sizeof(header));
+            const size_t packetSize = static_cast<size_t>(received);
+            if (std::memcmp(header.magic, "DMPU", 4) != 0 || header.version != 1 ||
+                header.headerSize != sizeof(UdpRelayHeader) ||
+                sizeof(UdpRelayHeader) + header.payloadSize != packetSize)
+            {
+                continue;
+            }
+
+            const std::string senderId = udp_sender_id(header);
+            auto senderIt = mClients.find(senderId);
+            if (senderIt == mClients.end() || senderIt->second.roomId.empty()) {
+                continue;
+            }
+            Client& sender = senderIt->second;
+            const uint8_t* payload = packet.data() + sizeof(UdpRelayHeader);
+
+            if (header.type == kUdpPacketTypeRelayRegister) {
+                const std::string token(reinterpret_cast<const char*>(payload),
+                                        header.payloadSize);
+                if (token == sender.udpToken) {
+                    const bool wasKnown = sender.udpAddrKnown;
+                    const bool endpointChanged =
+                        !wasKnown || !same_udp_endpoint(sender.udpAddr, from);
+                    sender.udpAddr = from;
+                    sender.udpAddrKnown = true;
+                    if (!wasKnown) {
+                        send_json(sender, {{"type", "udp_ready"}});
+                    }
+                    if (endpointChanged) {
+                        log("udp register client=" + sender.id);
+                    }
+                }
+                continue;
+            }
+
+            if (!sender.udpAddrKnown || !same_udp_endpoint(sender.udpAddr, from) ||
+                (header.type != kUdpPacketTypePoseJson &&
+                 header.type != kUdpPacketTypePoseMsgpack &&
+                 header.type != kUdpPacketTypeRemoteObject &&
+                 header.type != kUdpPacketTypeMidnaMsgpack &&
+                 header.type != kUdpPacketTypePoseAck))
+            {
+                continue;
+            }
+
+            const auto now = SteadyClock::now();
+            if (now - sender.udpRateWindowStarted >= std::chrono::seconds(1)) {
+                sender.udpRateWindowStarted = now;
+                sender.udpRateWindowBytes = 0;
+            }
+            if (packetSize > kMaxUdpBytesPerClientSecond -
+                                 std::min(sender.udpRateWindowBytes,
+                                          kMaxUdpBytesPerClientSecond))
+            {
+                continue;
+            }
+            sender.udpRateWindowBytes += packetSize;
+
+            const auto roomIt = mRooms.find(sender.roomId);
+            if (roomIt == mRooms.end()) {
+                continue;
+            }
+
+            if (header.type == kUdpPacketTypePoseAck) {
+                if (header.payloadSize != sizeof(UdpPoseAckPacket)) {
+                    continue;
+                }
+                UdpPoseAckPacket ack{};
+                std::memcpy(&ack, payload, sizeof(ack));
+                const std::string targetId = udp_acked_sender_id(ack);
+                auto targetIt = mClients.find(targetId);
+                if (targetIt != mClients.end() &&
+                    targetIt->second.roomId == sender.roomId)
+                {
+                    send_udp_to_client(targetIt->second, packet.data(), packetSize);
+                }
+                continue;
+            }
+
+            for (const std::string& peerId : roomIt->second.clientIds) {
+                if (peerId == sender.id) {
+                    continue;
+                }
+                auto peerIt = mClients.find(peerId);
+                if (peerIt == mClients.end()) {
+                    continue;
+                }
+                Client& peer = peerIt->second;
+                if ((header.type == kUdpPacketTypePoseJson ||
+                     header.type == kUdpPacketTypePoseMsgpack) &&
+                    !peer.wantsPuppet)
+                {
+                    continue;
+                }
+                if (header.type == kUdpPacketTypeMidnaMsgpack &&
+                    (!peer.wantsPuppet || !peer.wantsMidna))
+                {
+                    continue;
+                }
+                if ((header.type == kUdpPacketTypePoseJson ||
+                     header.type == kUdpPacketTypePoseMsgpack ||
+                     header.type == kUdpPacketTypeMidnaMsgpack) &&
+                    !sender.stage.empty() && !peer.stage.empty() &&
+                    sender.stage != peer.stage)
+                {
+                    continue;
+                }
+                send_udp_to_client(peer, packet.data(), packetSize);
             }
         }
     }
@@ -548,7 +1013,8 @@ private:
                         const json& message) {
         const auto roomIt = mRooms.find(sender.roomId);
         if (roomIt == mRooms.end() ||
-            roomIt->second.clientIds.find(targetClientId) == roomIt->second.clientIds.end())
+            std::find(roomIt->second.clientIds.begin(), roomIt->second.clientIds.end(),
+                      targetClientId) == roomIt->second.clientIds.end())
         {
             return false;
         }
@@ -558,7 +1024,9 @@ private:
             return false;
         }
 
-        send_json(peerIt->second, message);
+        if (!send_json(peerIt->second, message)) {
+            peerIt->second.disconnectRequested = true;
+        }
         return true;
     }
 
@@ -568,18 +1036,31 @@ private:
             return;
         }
 
-        const Client client = clientIt->second;
+        const std::string roomId = clientIt->second.roomId;
+        Client departed;
+        departed.id = clientId;
+        departed.roomId = roomId;
         close_socket(clientIt->second.sock);
         mClients.erase(clientIt);
 
-        if (!client.roomId.empty()) {
-            auto roomIt = mRooms.find(client.roomId);
+        if (!roomId.empty()) {
+            auto roomIt = mRooms.find(roomId);
             if (roomIt != mRooms.end()) {
-                roomIt->second.clientIds.erase(clientId);
-                log("leave room=" + client.roomId + " client=" + clientId);
-                broadcast(client, {{"type", "peer_left"}, {"client_id", clientId}});
-                if (roomIt->second.clientIds.empty()) {
+                Room& room = roomIt->second;
+                room.clientIds.erase(
+                    std::remove(room.clientIds.begin(), room.clientIds.end(), clientId),
+                    room.clientIds.end());
+                log("leave room=" + roomId + " client=" + clientId);
+                broadcast(departed, {{"type", "peer_left"}, {"client_id", clientId}});
+                if (room.clientIds.empty()) {
                     mRooms.erase(roomIt);
+                } else if (room.ownerClientId == clientId) {
+                    room.ownerClientId = room.clientIds.front();
+                    log("owner transfer room=" + roomId + " client=" + room.ownerClientId);
+                    broadcast(departed, {
+                        {"type", "owner_changed"},
+                        {"owner_client_id", room.ownerClientId},
+                    });
                 }
             }
         }
@@ -589,13 +1070,34 @@ private:
         std::string bytes = message.dump();
         bytes.push_back('\n');
         trace_packet_tx(client.id, message, bytes.size());
-        const char* cursor = bytes.data();
-        int remaining = static_cast<int>(bytes.size());
-        while (remaining > 0) {
-            const int sent = send(client.sock, cursor, remaining, kSendFlags);
+        if (bytes.size() > kMaxQueuedBytes ||
+            client.txQueuedBytes > kMaxQueuedBytes - bytes.size())
+        {
+            log("disconnect slow client=" + client.id + " queued_bytes=" +
+                std::to_string(client.txQueuedBytes));
+            client.disconnectRequested = true;
+            return false;
+        }
+        client.txQueuedBytes += bytes.size();
+        client.txQueue.push_back(std::move(bytes));
+        return true;
+    }
+
+    bool flush_client(Client& client) {
+        while (!client.txQueue.empty()) {
+            const std::string& bytes = client.txQueue.front();
+            const char* cursor = bytes.data() + client.txOffset;
+            const size_t remainingBytes = bytes.size() - client.txOffset;
+            const int sendBytes = static_cast<int>(
+                std::min(remainingBytes, static_cast<size_t>(std::numeric_limits<int>::max())));
+            const int sent = send(client.sock, cursor, sendBytes, kSendFlags);
             if (sent > 0) {
-                cursor += sent;
-                remaining -= sent;
+                client.txOffset += static_cast<size_t>(sent);
+                client.txQueuedBytes -= static_cast<size_t>(sent);
+                if (client.txOffset == bytes.size()) {
+                    client.txQueue.pop_front();
+                    client.txOffset = 0;
+                }
                 continue;
             }
             if (would_block()) {
@@ -608,6 +1110,14 @@ private:
 
     void send_error(Client& client, const std::string& error) {
         send_json(client, {{"type", "error"}, {"error", error}});
+    }
+
+    void reject_and_close(Client& client, const std::string& error) {
+        send_error(client, error);
+        client.closeAfterFlush = true;
+        if (client.txQueue.empty()) {
+            client.disconnectRequested = true;
+        }
     }
 
     static bool set_nonblocking(socket_t sock) {
@@ -662,13 +1172,6 @@ private:
         return first < last ? std::string(first, last) : std::string();
     }
 
-    static std::string lower(std::string value) {
-        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-            return static_cast<char>(std::tolower(c));
-        });
-        return value;
-    }
-
     void log(const std::string& message) const {
         if (mOptions.verbose) {
             std::cout << message << "\n";
@@ -677,8 +1180,12 @@ private:
 
     Options mOptions;
     socket_t mListenSock = INVALID_SOCKET;
+    socket_t mUdpSock = INVALID_SOCKET;
     std::map<std::string, Client> mClients;
     std::map<std::string, Room> mRooms;
+#if _WIN32
+    bool mWinsockStarted = false;
+#endif
 };
 
 Options parse_options(int argc, char** argv) {
@@ -695,17 +1202,45 @@ Options parse_options(int argc, char** argv) {
 
         if (arg == "--host") {
             options.host = next_value("--host");
+        } else if (arg == "--public-host") {
+            options.publicHost = next_value("--public-host");
         } else if (arg == "--port") {
             options.port = std::stoi(next_value("--port"));
+        } else if (arg == "--public-port") {
+            options.publicPort = std::stoi(next_value("--public-port"));
+        } else if (arg == "--hello-timeout-ms") {
+            const int timeoutMs = std::stoi(next_value("--hello-timeout-ms"));
+            if (timeoutMs < 1) {
+                std::cerr << "--hello-timeout-ms must be positive\n";
+                std::exit(2);
+            }
+            options.helloTimeoutSeconds = static_cast<double>(timeoutMs) / 1000.0;
         } else if (arg == "--verbose") {
             options.verbose = true;
         } else if (arg == "--help" || arg == "-h") {
-            std::cout << "Usage: tp_multiplayer_relay [--host 127.0.0.1] [--port 34197] [--verbose]\n";
+            std::cout << "Usage: tp_multiplayer_relay [--host 127.0.0.1] "
+                         "[--port 34197] [--public-host 127.0.0.1] "
+                         "[--public-port 34197] [--hello-timeout-ms 10000] [--verbose]\n";
             std::exit(0);
         } else {
             std::cerr << "unknown argument: " << arg << "\n";
             std::exit(2);
         }
+    }
+    if (options.port < 1 || options.port > 65535) {
+        std::cerr << "--port must be between 1 and 65535\n";
+        std::exit(2);
+    }
+    if (options.publicHost.empty()) {
+        std::cerr << "--public-host cannot be empty\n";
+        std::exit(2);
+    }
+    if (options.publicPort == 0) {
+        options.publicPort = options.port;
+    }
+    if (options.publicPort < 1 || options.publicPort > 65535) {
+        std::cerr << "--public-port must be between 1 and 65535\n";
+        std::exit(2);
     }
     return options;
 }
@@ -713,6 +1248,22 @@ Options parse_options(int argc, char** argv) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    Relay relay(parse_options(argc, argv));
-    return relay.run() ? 0 : 1;
+    try {
+        const Options options = parse_options(argc, argv);
+        dusk::multiplayer::InviteCodePayload endpoint;
+        endpoint.transport = "relay";
+        endpoint.host = options.publicHost;
+        endpoint.port = options.publicPort;
+        endpoint.room = "relay-endpoint";
+        endpoint.sessionId = "relay";
+        endpoint.sessionKey = "endpoint";
+        std::cout << "Relay code: " << dusk::multiplayer::create_invite_code(endpoint)
+                  << std::endl;
+
+        Relay relay(options);
+        return relay.run() ? 0 : 1;
+    } catch (const std::exception& error) {
+        std::cerr << "invalid relay option: " << error.what() << "\n";
+        return 2;
+    }
 }

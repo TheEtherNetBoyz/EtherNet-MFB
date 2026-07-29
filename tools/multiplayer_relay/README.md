@@ -1,48 +1,103 @@
 # TP Multiplayer Relay
 
 This is a standalone C++ relay server for relay-mode multiplayer. It accepts
-plain TCP clients, groups them by lobby name, checks the lobby password, assigns
-opaque `client_id` values, and broadcasts gameplay messages between lobby
-members.
+TCP and UDP clients, groups them by lobby name, checks the lobby password,
+assigns opaque `client_id` values, and routes gameplay and visual messages
+between lobby members.
 
 Build:
 
 ```powershell
-cmake --build .\tp_pc\build\windows-msvc --config RelWithDebInfo --target tp_multiplayer_relay
+cmake --build .\build\windows-msvc-relwithdebinfo --config RelWithDebInfo `
+    --target tp_multiplayer_relay_package
 ```
 
-Run:
+The completed friend-machine package is written to `relay-package` inside the
+build directory and to `dusklight-relay-windows.zip` beside it. Send the ZIP
+to the relay operator and have them extract it on their Windows machine. No
+source tree, development tools, or separate Visual C++ runtime installation is
+required there.
+
+On Windows, open `tp_multiplayer_relay_launcher.exe`. The relay operator enters
+the current public IP address or hostname and forwarded port, selects `Start
+Relay`, then copies the displayed relay code. The launcher remembers those
+values for the next run, runs `tp_multiplayer_relay.exe` from the same
+directory, and stops it when the launcher closes.
+
+The launcher records verbose server output in
+`%APPDATA%\TwilitRealm\Dusklight\relay\relay.log`. Its `Open Log Folder` button
+opens that location. If the server exits unexpectedly, the launcher displays
+its exit code so the operator can include it with the log when reporting the
+problem.
+
+The command-line equivalent is:
 
 ```powershell
-.\tp_pc\build\windows-msvc\RelWithDebInfo\tp_multiplayer_relay.exe --host 127.0.0.1 --port 34197 --verbose
+.\build\windows-msvc-relwithdebinfo\tp_multiplayer_relay.exe `
+    --host 0.0.0.0 `
+    --port 34197 `
+    --public-host 203.0.113.10 `
+    --public-port 34197 `
+    --verbose
 ```
 
-Run the game client against it:
+The relay prints a `Relay code` containing only its advertised public endpoint.
+The relay operator gives that same code to everyone who will create or join
+lobbies on this relay.
+
+Create a room in the game:
 
 ```powershell
-Open Online -> Relay, then enter:
+Open Online -> Relay -> Host, then enter:
 
-Relay Host: 127.0.0.1
-Relay Port: 34197
-Username: Player 1
-Lobby: dev
-Password: any shared lobby password
+Relay code: the code supplied by the relay operator
+Nickname: Player 1
+Lobby name: dev
+Password: at least 6 characters
 ```
+
+Other players use Online -> Relay -> Join and enter the same relay code, lobby
+name, password, and their nickname. The relay code is the encoded IP address
+and port, replacing separate endpoint fields in the game UI.
 
 Protocol:
 
 - UTF-8 JSON messages
 - one message per line
 - clients send `hello` first
-- `hello` contains `name`, `room_id`, and `password`
+- protocol version 2 uses explicit `create` and `join` actions
+- `hello` contains `name`, `room_id`, `password`, and the action
 - relay replies with `welcome`
-- relay broadcasts `peer_joined`, `peer_left`, `pose`, `reliable`, and the
-  current durable-state messages (`event_bit`, `tbox_bit`, `switch_bit`,
-  `item_bit`, `dungeon_item_bit`, `save_snapshot`, key/count/collect updates,
-  visited-room updates, and letter flags)
+- `welcome` includes the logical room owner and host-controlled settings
+- relay broadcasts `peer_joined`, `peer_left`, owner changes, settings,
+  `pose`, `reliable`, and the gameplay messages listed in
+  [PROTOCOL.md](PROTOCOL.md)
+- reliable gameplay uses TCP; streamed player visuals use authenticated UDP on
+  the same numbered port
 
-The first client to join a lobby creates it. Later clients must provide the same
-password. Usernames only need to be unique within that lobby.
+The creator owns the lobby settings. If they leave, the oldest remaining client
+becomes owner. Nicknames are display labels and do not need to be unique; relay
+routing uses the opaque `client_id`.
+
+The relay does not persist gameplay state. Late join state is transferred
+client-to-client.
+
+## Automated integration test
+
+The standard-library Python harness starts a real relay process and exercises
+three-client joins, framing, validation, sender authentication, targeted
+routing, reliable deduplication, queued slow-reader output, and hello timeout:
+
+```powershell
+python .\tools\multiplayer_relay\test_relay.py `
+    --relay .\build\windows-msvc-relwithdebinfo\tp_multiplayer_relay.exe
+```
+
+It can also be registered with CTest by configuring with
+`-DDUSK_BUILD_MULTIPLAYER_RELAY_TESTS=ON`.
+
+Per-packet tracing is disabled by default because pose traffic is extremely
+verbose. Set `DUSK_MP_RELAY_PACKET_TRACE=1` when a packet-size trace is needed.
 
 ## Future Public Deployment
 
@@ -56,7 +111,7 @@ Minimum early-alpha server shape:
 - 1 GB RAM
 - 20 GB disk
 - a few TB monthly transfer
-- one open TCP port for the relay
+- one TCP and one UDP firewall rule using the same relay port
 
 Before sharing publicly:
 
@@ -72,10 +127,15 @@ Before sharing publicly:
 3. Run the relay bound to the public interface:
 
    ```powershell
-   .\tp_multiplayer_relay.exe --host 0.0.0.0 --port 34197
+   .\tp_multiplayer_relay.exe `
+       --host 0.0.0.0 `
+       --port 34197 `
+       --public-host relay.example.com `
+       --public-port 34197
    ```
 
-4. Open the chosen TCP port in the VPS firewall/security group.
+4. Open the chosen port for both TCP and UDP in the VPS firewall/security
+   group.
 
 5. Point a DNS name at the VPS, for example:
 
@@ -83,27 +143,29 @@ Before sharing publicly:
    relay.example.com
    ```
 
-6. In the game, use Online -> Relay:
+6. Copy the relay code printed by the server and give it to the players.
+
+7. In the game, use Online -> Relay:
 
    ```text
-   Relay Host: relay.example.com
-   Relay Port: 34197
-   Username: any display name
-   Lobby: shared lobby name
-   Password: shared lobby password
+    Relay code: code supplied by the relay operator
+    Nickname: any display name
+    Lobby name: shared lobby name
+    Password: at least 6 characters
    ```
 
-7. Test with at least three clients from outside the server network before
+8. Test with at least three clients from outside the server network before
    announcing it.
 
 Operational checklist:
 
 - Run the relay under a service manager so it restarts after crashes/reboots.
-- Keep firewall rules narrow: expose only the relay port and SSH/RDP admin port.
+- Keep firewall rules narrow: expose only the relay TCP/UDP port and SSH/RDP
+  admin port.
 - Watch CPU, memory, bandwidth, and process restarts during playtests.
 - Keep the max lobby size conservative. The relay currently caps each lobby at
   8 clients and rejects later joins with `lobby_full`.
-- Keep message size limits enabled.
+- Keep the 512 KiB message limit and 8 MiB per-client output queue enabled.
 - Use throwaway lobby passwords. The current relay protocol is plain TCP, so
   lobby passwords are not protected from network observers.
 
@@ -113,5 +175,26 @@ Production hardening to consider later:
 - Per-IP connection limits.
 - Basic abuse logging.
 - Relay version checks.
-- A configured default relay host in the UI.
-- Optional lobby tokens/invite codes instead of typing host/port manually.
+- TLS-protected relay-code and authentication flow.
+
+## VPN-forwarded deployment note
+
+The server keeps its local listen address separate from the public endpoint
+encoded in the relay code:
+
+- Listen address: normally `0.0.0.0`, or an advanced local/VPN-interface choice.
+- Listen port: the active port allocated by the VPN provider.
+- `--public-host`: the VPN server's current public IP or hostname.
+- `--public-port`: normally the same active forwarded port.
+
+The advertised public IP generally is not assigned to a local network
+interface, so the relay must not try to bind to it. If Proton VPN reconnects,
+its public IP and forwarded port may change. The relay operator restarts the
+server with the new public values and distributes the newly printed relay code.
+That code contains the replacement IP and port. Active TCP and UDP sessions
+cannot survive the endpoint change.
+
+Proton documents the current forwarded port in its app. On Linux it is also
+available in `/run/user/$UID/Proton/VPN/forwarded_port`; no equivalent
+machine-readable Windows interface is assumed here. See Proton's
+[port-forwarding documentation](https://protonvpn.com/support/port-forwarding).
