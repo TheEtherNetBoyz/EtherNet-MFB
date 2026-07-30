@@ -550,7 +550,6 @@ namespace dusk {
             config::ImGuiMenuItem("Show Input Viewer", nullptr, getSettings().game.showInputViewer);
             config::ImGuiMenuItem("Show Gyro Input Viewer", nullptr,
                 getSettings().game.showInputViewerGyro, getSettings().game.showInputViewer);
-            config::ImGuiMenuItem("Latency Trace", nullptr, getSettings().game.enableLatencyTrace);
 
             if (!dusk::IsGameLaunched) {
                 ImGui::EndDisabled();

@@ -21,7 +21,6 @@
 #include "f_pc/f_pc_priority.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include "dusk/latency.h"
-#include "dusk/latency_trace.h"
 
 #if TARGET_PC
 #include "dusk/frame_interpolation.h"
@@ -74,9 +73,7 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
             if (!dusk::frame_interp::is_enabled() && !dusk::low_latency_presentation_enabled())
 #endif
             {
-                dusk::latency_trace::mark("cAPIGph_Painter_original_before");
                 cAPIGph_Painter();
-                dusk::latency_trace::mark("cAPIGph_Painter_original_after");
             }
 
             if (!dPa_control_c::isStatus(1)) {
@@ -113,9 +110,7 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
 
 #ifdef TARGET_PC
             if (!dusk::frame_interp::is_enabled() && dusk::low_latency_presentation_enabled()) {
-                dusk::latency_trace::mark("cAPIGph_Painter_low_latency_before");
                 cAPIGph_Painter();
-                dusk::latency_trace::mark("cAPIGph_Painter_low_latency_after");
             }
 #endif
         } else if (!l_dvdError) {

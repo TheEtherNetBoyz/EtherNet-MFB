@@ -160,7 +160,6 @@ UserSettings g_userSettings = {
         // Technical
         .restoreWiiGlitches {"game.restoreWiiGlitches", false},
         .usePpcFastInvSqrt {"game.usePpcFastInvSqrt", true},
-        .enableLatencyTrace {"game.enableLatencyTrace", false},
 
         // Controls
         .enableTurboKeybind {"game.enableTurboKeybind", false},
@@ -412,7 +411,6 @@ void registerSettings() {
     Register(g_userSettings.game.armorRupeeDrain);
     Register(g_userSettings.game.restoreWiiGlitches);
     Register(g_userSettings.game.usePpcFastInvSqrt);
-    Register(g_userSettings.game.enableLatencyTrace);
     Register(g_userSettings.game.enableLinkDollRotation);
     Register(g_userSettings.game.enableAchievementToasts);
     Register(g_userSettings.game.enableControllerToasts);

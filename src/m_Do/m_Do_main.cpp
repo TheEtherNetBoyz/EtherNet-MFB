@@ -60,15 +60,15 @@
 #include "dusk/frame_interpolation.h"
 #include "dusk/game_clock.h"
 #include "dusk/gyro.h"
-#include "dusk/mouse.h"
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/imgui/ImGuiEngine.hpp"
 #include "dusk/iso_validate.hpp"
-#include "dusk/latency_trace.h"
 #include "dusk/video_latency.h"
-#include "dusk/mod_loader.hpp"
 #include "dusk/logging.h"
 #include "dusk/main.h"
+#include "dusk/mod_loader.hpp"
+#include "dusk/mods/svc/window.hpp"
+#include "dusk/mouse.h"
 #include "dusk/os.h"
 #include "dusk/ui/menu_bar.hpp"
 #include "dusk/ui/overlay.hpp"
@@ -163,7 +163,9 @@ bool launchUILoop() {
         while (event != nullptr && event->type != AURORA_NONE) {
             switch (event->type) {
             case AURORA_SDL_EVENT:
-                dusk::latency_trace::on_sdl_event(event->sdl);
+                if (dusk::mods::svc::window_dispatch_event(event->sdl)) {
+                    break;
+                }
                 dusk::mouse::handle_event(event->sdl);
                 dusk::ui::handle_event(event->sdl);
                 dusk::g_imguiConsole.HandleSDLEvent(event->sdl);
@@ -251,7 +253,9 @@ void main01(void) {
                 dusk::mouse::on_focus_gained();
                 break;
             case AURORA_SDL_EVENT:
-                dusk::latency_trace::on_sdl_event(event->sdl);
+                if (dusk::mods::svc::window_dispatch_event(event->sdl)) {
+                    break;
+                }
                 dusk::mouse::handle_event(event->sdl);
                 dusk::ui::handle_event(event->sdl);
                 dusk::g_imguiConsole.HandleSDLEvent(event->sdl);
@@ -275,15 +279,12 @@ void main01(void) {
 
         eventsDone:;
 
-        dusk::latency_trace::mark("aurora_begin_frame_before");
         if (!aurora_begin_frame()) {
             DuskLog.debug("aurora_begin_frame returned false, skipping draw this frame");
             continue;
         }
-        dusk::latency_trace::mark("aurora_begin_frame_after");
 
         VIWaitForRetrace();
-        dusk::latency_trace::mark("vi_wait_for_retrace_after");
 
         dusk::lastFrameAuroraStats = *aurora_get_stats();
         mDoGph_gInf_c::updateRenderSize();
@@ -291,11 +292,6 @@ void main01(void) {
         dusk::ui::update();
 
         const auto pacing = dusk::game_clock::advance_main_loop();
-        const std::string pacingDetail = fmt::format("sim_ticks={} interp_buffer_ms={:.3f}",
-                                                     pacing.sim_ticks_to_run,
-                                                     pacing.interpolation_buffer_seconds * 1000.0f);
-        dusk::latency_trace::mark_detail(pacing.is_interpolating ? "advance_main_loop_interp" : "advance_main_loop_30fps",
-                                         pacingDetail.c_str());
         if (pacing.is_interpolating) {
             if (pacing.sim_ticks_to_run > 0) {
                 dusk::frame_interp::begin_frame(dusk::getSettings().game.enableFrameInterpolation.getValue() != dusk::FrameInterpMode::Off, true, 0.0f);
@@ -303,26 +299,16 @@ void main01(void) {
 
                 for (int sim_tick = 0; sim_tick < pacing.sim_ticks_to_run; ++sim_tick) {
                     dusk::frame_interp::begin_sim_tick();
-                    dusk::latency_trace::mark("mDoCPd_read_before");
                     mDoCPd_c::read();
-                    const u32 padHold = mDoCPd_c::getHold(PAD_1);
-                    const u32 padTrig = mDoCPd_c::getTrig(PAD_1);
-                    const float stickX = mDoCPd_c::getStickX(PAD_1);
-                    const float stickY = mDoCPd_c::getStickY(PAD_1);
-                    dusk::latency_trace::pad_snapshot("mDoCPd_read_after", padHold, padTrig, stickX, stickY);
                     dusk::mouse::read();
                     dusk::gyro::read(pacing.sim_pace);
-                    dusk::latency_trace::mark("fapGm_Execute_before");
                     fapGm_Execute();
-                    dusk::latency_trace::mark("fapGm_Execute_after");
                     mDoAud_Execute();
                     dusk::game_clock::commit_sim_tick();
                 }
             }
 
             const float interpolationStep = dusk::game_clock::sample_interpolation_step();
-            const std::string interpolationDetail = fmt::format("step={:.3f}", interpolationStep);
-            dusk::latency_trace::mark_detail("interp_step", interpolationDetail.c_str());
             dusk::frame_interp::begin_frame(dusk::getSettings().game.enableFrameInterpolation.getValue() != dusk::FrameInterpMode::Off, false,
                                             interpolationStep);
             static int sLastWindowStatus = -1;
@@ -339,13 +325,9 @@ void main01(void) {
                 dusk::frame_interp::interpolate();
                 dusk::frame_interp::begin_presentation_camera();
                 // run draw functions for anything specially marked to handle interp
-                dusk::latency_trace::mark("interp_draw_before");
                 fpcM_DrawIterater((fpcM_DrawIteraterFunc)fpcM_Draw);
                 cAPIGph_Painter();
-                dusk::latency_trace::mark("interp_draw_after");
                 dusk::frame_interp::end_presentation_camera();
-            } else {
-                dusk::latency_trace::mark("interp_draw_skipped");
             }
             dusk::frame_interp::set_ui_tick_pending(false);
         } else {
@@ -353,30 +335,20 @@ void main01(void) {
             dusk::frame_interp::set_ui_tick_pending(true);
 
             // Game Inputs
-            dusk::latency_trace::mark("mDoCPd_read_before");
             mDoCPd_c::read();
-            dusk::latency_trace::pad_snapshot("mDoCPd_read_after", mDoCPd_c::getHold(PAD_1),
-                                              mDoCPd_c::getTrig(PAD_1), mDoCPd_c::getStickX(PAD_1),
-                                              mDoCPd_c::getStickY(PAD_1));
             dusk::mouse::read();
             dusk::gyro::read(pacing.presentation_dt_seconds);
 
             // EXECUTE GAME LOGIC & RENDER
             // This calls mDoGph_Painter -> JFWDisplay -> GX Functions
-            dusk::latency_trace::mark("fapGm_Execute_before");
             fapGm_Execute();
-            dusk::latency_trace::mark("fapGm_Execute_after");
 
             mDoAud_Execute();
         }
 
-        dusk::latency_trace::mark("aurora_end_frame_before");
         dusk::video_latency::process();
         aurora_end_frame();
-        dusk::latency_trace::presented();
-        dusk::latency_trace::mark("finish_main_loop_before");
         dusk::game_clock::finish_main_loop();
-        dusk::latency_trace::mark("finish_main_loop_after");
 
 
         FrameMark;

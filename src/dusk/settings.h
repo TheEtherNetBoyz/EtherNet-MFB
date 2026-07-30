@@ -323,7 +323,6 @@ struct UserSettings {
         // Technical
         ConfigVar<bool> restoreWiiGlitches;
         ConfigVar<bool> usePpcFastInvSqrt;
-        ConfigVar<bool> enableLatencyTrace;
 
         // Controls
         ConfigVar<bool> enableTurboKeybind;

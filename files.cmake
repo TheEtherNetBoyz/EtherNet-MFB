@@ -1414,7 +1414,6 @@ set(DUSK_FILES
         include/helpers/batch.hpp
         include/helpers/endian_gx.hpp
         src/dusk/input_macro.h
-        src/dusk/latency_trace.h
         src/dusk/video_latency.h
         src/d/actor/d_a_alink_dusk.cpp
         src/dusk/OSContext.cpp
@@ -1449,7 +1448,6 @@ set(DUSK_FILES
         src/dusk/gyro.cpp
         src/dusk/http/http.hpp
         src/dusk/input_macro.cpp
-        src/dusk/latency_trace.cpp
         src/dusk/video_latency.cpp
         src/dusk/imgui/ImGuiActorSpawner.cpp
         src/dusk/imgui/ImGuiBloomWindow.cpp
@@ -1509,6 +1507,8 @@ set(DUSK_FILES
         src/dusk/mods/svc/texture.cpp
         src/dusk/mods/svc/ui.cpp
         src/dusk/mods/svc/ui.hpp
+        src/dusk/mods/svc/window.cpp
+        src/dusk/mods/svc/window.hpp
         src/dusk/mouse.cpp
         src/dusk/scope_guard.hpp
         src/dusk/settings.cpp
