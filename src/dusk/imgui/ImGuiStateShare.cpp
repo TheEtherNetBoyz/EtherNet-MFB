@@ -8,6 +8,8 @@
 #include "nlohmann/json.hpp"
 
 #include "d/d_com_inf_game.h"
+#include "d/d_meter2_info.h"
+#include "d/actor/d_a_player.h"
 #include "dusk/main.h"
 #include "dusk/io.hpp"
 #include "dusk/logging.h"
@@ -39,6 +41,19 @@ static constexpr size_t PACKET_SAVE_ONLY = sizeof(StateSharePacket) + sizeof(dSv
 static constexpr auto STATES_FILENAME = "states.json";
 
 static bool ValidateEncodedState(const std::string&);
+
+static bool GameplayMenuBlocksStateLoad() {
+    switch (dMeter2Info_getWindowStatus()) {
+    case 2:  // item wheel
+    case 3:
+    case 4:
+    case 5:
+    case 10:
+        return true;
+    default:
+        return dComIfGp_isPauseFlag();
+    }
+}
 
 void ImGuiStateShare::onMergeFileSelected(void* userdata, const char* path, const char* /*error*/) {
     auto* self = static_cast<ImGuiStateShare*>(userdata);
@@ -91,7 +106,7 @@ void ImGuiStateShare::saveStatesFile() {
     }
 }
 
-std::string ImGuiStateShare::encodeCurrentState() {
+std::string ImGuiStateShare::captureEncodedState() {
     StateSharePacket pkt = {};
     strncpy(pkt.stageName, dComIfGp_getStartStageName(), 7);
     pkt.roomNo     = dComIfGp_getStartStageRoomNo();
@@ -109,7 +124,15 @@ std::string ImGuiStateShare::encodeCurrentState() {
     return absl::Base64Escape(compressed);
 }
 
-bool ImGuiStateShare::applyEncodedState(const std::string& encoded, const std::string& name) {
+bool ImGuiStateShare::beginApplyEncodedState(const std::string& encoded, const std::string& name) {
+    // A gameplay menu owns live processes such as MENUWINDOW and MSG_OBJECT.
+    // Starting a stage transition while they are alive can leave one of those
+    // processes queued with an invalid execute method during scene teardown.
+    if (GameplayMenuBlocksStateLoad()) {
+        m_statusMsg = "Close the item wheel or pause menu before loading a state.";
+        return false;
+    }
+
     std::string decoded;
     if (!absl::Base64Unescape(encoded, &decoded)) {
         m_statusMsg = "Invalid base64.";
@@ -197,6 +220,38 @@ void ImGuiStateShare::tickPendingApply() {
     dComIfGp_setOxygen(600);
 }
 
+void ImGuiStateShare::updateRuntime() {
+    if (!dusk::IsGameLaunched) {
+        return;
+    }
+
+    tickPendingApply();
+    if (dusk::getTransientSettings().stateShareLoadActive) {
+        if (fopOvlpM_IsPeek()) {
+            m_stateSharePeekSeen = true;
+        } else if (m_stateSharePeekSeen ||
+                   (getSettings().game.enableInstaLoads.getValue() &&
+                    !dComIfGp_isEnableNextStage() &&
+                    daPy_getPlayerActorClass() != nullptr))
+        {
+            dusk::getTransientSettings().stateShareLoadActive = false;
+            m_stateSharePeekSeen = false;
+        }
+    }
+}
+
+bool ImGuiStateShare::loadInProgress() const {
+    return dusk::getTransientSettings().stateShareLoadActive ||
+           m_pendingInfo.has_value() || m_pendingSavedata.has_value();
+}
+
+const std::vector<SavedStateEntry>& ImGuiStateShare::savedStates() {
+    if (!m_loaded) {
+        loadStatesFile();
+    }
+    return m_states;
+}
+
 static bool ValidateEncodedState(const std::string& encoded) {
     std::string decoded;
     if (!absl::Base64Unescape(encoded, &decoded)) {
@@ -255,17 +310,7 @@ void ImGuiStateShare::mergeFromFile(const std::string& path) {
 }
 
 void ImGuiStateShare::draw(bool& open) {
-    if (dusk::IsGameLaunched) {
-        tickPendingApply();
-        if (dusk::getTransientSettings().stateShareLoadActive) {
-            if (fopOvlpM_IsPeek()) {
-                m_stateSharePeekSeen = true;
-            } else if (m_stateSharePeekSeen) {
-                dusk::getTransientSettings().stateShareLoadActive = false;
-                m_stateSharePeekSeen = false;
-            }
-        }
-    }
+    updateRuntime();
 
     if (!m_loaded) {
         loadStatesFile();
@@ -330,7 +375,7 @@ void ImGuiStateShare::draw(bool& open) {
         ImGui::SameLine();
         if (!gameRunning || loadInProgress) { ImGui::BeginDisabled(); }
         if (ImGui::Button("Load")) {
-            applyEncodedState(m_states[i].encoded, m_states[i].name);
+            beginApplyEncodedState(m_states[i].encoded, m_states[i].name);
         }
         if (!gameRunning || loadInProgress) { ImGui::EndDisabled(); }
 
@@ -361,7 +406,7 @@ void ImGuiStateShare::draw(bool& open) {
     if (ImGui::Button("Save")) {
         SavedStateEntry entry;
         entry.name    = fmt::format("State {}", m_states.size() + 1);
-        entry.encoded = encodeCurrentState();
+        entry.encoded = captureEncodedState();
         m_states.push_back(std::move(entry));
         saveStatesFile();
         m_statusMsg = fmt::format("Saved as '{}'.", m_states.back().name);

@@ -3191,7 +3191,8 @@ void mDoExt_cubePacket::draw() {
     drawCube(mDoMtx_stack_c::get(), l_pos, mColor);
 }
 
-mDoExt_quadPacket::mDoExt_quadPacket(cXyz* i_points, const GXColor& i_color, u8 i_clipZ) {
+mDoExt_quadPacket::mDoExt_quadPacket(cXyz* i_points, const GXColor& i_color,
+                                     u8 i_clipZ) {
     cXyz* pnt_array = mPoints;
 
     for (int i = 0; i < 4; i++) {
@@ -3527,34 +3528,43 @@ void mDoExt_circlePacket::draw() {
     GXEnd();
 }
 
-mDoExt_spherePacket::mDoExt_spherePacket(cXyz& i_position, f32 i_size, const GXColor& i_color, u8 i_clipZ) {
+mDoExt_spherePacket::mDoExt_spherePacket(
+    cXyz& i_position, f32 i_size, const GXColor& i_color, u8 i_clipZ,
+    u8 i_depthWrite)
+{
     mPosition = i_position;
     mSize = i_size;
     mColor = i_color;
     mClipZ = i_clipZ;
+    mDepthWrite = i_depthWrite;
 }
 
 void mDoExt_spherePacket::draw() {
     GXSetNumChans(1);
-    GXSetChanCtrl(GX_COLOR0, GX_ENABLE, GX_SRC_REG, GX_SRC_REG, GX_LIGHT0, GX_DF_CLAMP, GX_AF_NONE);
+    // Debug geometry must use the requested colour directly. Depending on the
+    // previously bound raster-light state made spheres render black in the PC
+    // renderer, unlike the constant-colour cube and line packets.
+    GXSetChanCtrl(GX_COLOR0, GX_DISABLE, GX_SRC_REG, GX_SRC_REG, GX_LIGHT_NULL, GX_DF_CLAMP, GX_AF_NONE);
     GXSetNumTexGens(0);
     GXSetNumTevStages(1);
     GXSetTevColor(GX_TEVREG0, mColor);
     GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
-    GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_RASC, GX_CC_C0, GX_CC_ZERO);
+    GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_C0);
     GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_ENABLE, GX_TEVPREV);
     GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_A0);
     GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_ENABLE, GX_TEVPREV);
 
     if (mClipZ) {
-        GXSetZMode(GX_ENABLE, GX_LEQUAL, GX_ENABLE);
+        GXSetZMode(GX_ENABLE, GX_LEQUAL, mDepthWrite);
     } else {
         GXSetZMode(GX_DISABLE, GX_LEQUAL, GX_DISABLE);
     }
 
     GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
     GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_OR, GX_ALWAYS, 0);
-    GXSetCullMode(GX_CULL_BACK);
+    // Translucent debug volumes must remain visible from both outside and
+    // inside. Opaque packets retain normal back-face culling.
+    GXSetCullMode(mDepthWrite ? GX_CULL_BACK : GX_CULL_NONE);
     GXSetClipMode(GX_CLIP_ENABLE);
 
     mDoMtx_stack_c::copy(j3dSys.getViewMtx());
@@ -3570,35 +3580,43 @@ void mDoExt_spherePacket::draw() {
     GXDrawSphere(8, 8);
 }
 
-mDoExt_cylinderPacket::mDoExt_cylinderPacket(cXyz& i_position, f32 i_radius, f32 i_height, const GXColor& i_color, u8 i_clipZ) {
+mDoExt_cylinderPacket::mDoExt_cylinderPacket(
+    cXyz& i_position, f32 i_radius, f32 i_height, const GXColor& i_color,
+    u8 i_clipZ, u8 i_depthWrite)
+{
     mPosition = i_position;
     mRadius = i_radius;
     mHeight = i_height;
     mColor = i_color;
     mClipZ = i_clipZ;
+    mDepthWrite = i_depthWrite;
 }
 
 void mDoExt_cylinderPacket::draw() {
     GXSetNumChans(1);
-    GXSetChanCtrl(GX_COLOR0, GX_ENABLE, GX_SRC_REG, GX_SRC_REG, 1, GX_DF_CLAMP, GX_AF_NONE);
+    // Match the other debug packets' deterministic, unlit colour path. The
+    // raster-light channel is not guaranteed to contain a usable colour here.
+    GXSetChanCtrl(GX_COLOR0, GX_DISABLE, GX_SRC_REG, GX_SRC_REG, GX_LIGHT_NULL, GX_DF_CLAMP, GX_AF_NONE);
     GXSetNumTexGens(0);
     GXSetNumTevStages(1);
     GXSetTevColor(GX_TEVREG0, mColor);
     GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
-    GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_RASC, GX_CC_C0, GX_CC_ZERO);
+    GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_C0);
     GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
     GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_A0);
     GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
 
     if (mClipZ) {
-        GXSetZMode(GX_ENABLE, GX_LEQUAL, GX_ENABLE);
+        GXSetZMode(GX_ENABLE, GX_LEQUAL, mDepthWrite);
     } else {
         GXSetZMode(GX_DISABLE, GX_LEQUAL, GX_DISABLE);
     }
 
     GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
     GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_OR, GX_ALWAYS, 0);
-    GXSetCullMode(GX_CULL_BACK);
+    // Render both sides for translucent volumes so crossing the boundary does
+    // not make its reverse face disappear.
+    GXSetCullMode(mDepthWrite ? GX_CULL_BACK : GX_CULL_NONE);
     GXSetClipMode(GX_CLIP_ENABLE);
 
     f32 var_f31 = mHeight * 0.5f;

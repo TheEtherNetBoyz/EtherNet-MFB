@@ -170,6 +170,7 @@ UserSettings g_userSettings = {
         .liveSplitEnabled {"game.liveSplitEnabled", false},
         .showSpeedrunRTATimer {"game.showSpeedrunRTATimer", true},
         .moveLink {"game.moveLink", false},
+        .teleportLink {"game.teleportLink", false},
         .gorgeVoidChecker {"game.gorgeVoidChecker", false},
         .recordingMode {"game.recordingMode", false},
         .removeQuestMapMarkers {"game.removeQuestMapMarkers", false},
@@ -177,6 +178,10 @@ UserSettings g_userSettings = {
         .showInputViewerGyro {"game.showInputViewerGyro", false},
         .nativeInputViewer {"game.nativeInputViewer", false},
         .nativeLinkDebugInfo {"game.nativeLinkDebugInfo", false},
+        .triggerViewDefinitions {
+            "tools.triggerViewDefinitions",
+            "[]"
+        },
         .nativePracticeMenu {"game.nativePracticeMenu", true}
     },
 
@@ -257,6 +262,11 @@ UserSettings g_userSettings = {
             ConfigVar<int>{"hotkeys.debugCamera.key", SDL_SCANCODE_F9},
             ConfigVar<int>{"hotkeys.debugCamera.modifiers", HOTKEY_MOD_NONE},
             ConfigVar<int>{"hotkeys.debugCamera.controllerButton", PAD_NATIVE_BUTTON_INVALID},
+        },
+        .captureCameraKeyframe = {
+            ConfigVar<int>{"hotkeys.captureCameraKeyframe.key", SDL_SCANCODE_K},
+            ConfigVar<int>{"hotkeys.captureCameraKeyframe.modifiers", HOTKEY_MOD_NONE},
+            ConfigVar<int>{"hotkeys.captureCameraKeyframe.controllerButton", PAD_NATIVE_BUTTON_INVALID},
         },
         .audioDebug = {
             ConfigVar<int>{"hotkeys.audioDebug.key", SDL_SCANCODE_F10},
@@ -467,6 +477,7 @@ void registerSettings() {
     Register(g_userSettings.game.liveSplitEnabled);
     Register(g_userSettings.game.showSpeedrunRTATimer);
     Register(g_userSettings.game.moveLink);
+    Register(g_userSettings.game.teleportLink);
     Register(g_userSettings.game.gorgeVoidChecker);
     Register(g_userSettings.game.recordingMode);
     Register(g_userSettings.game.menuScalingMode);
@@ -475,6 +486,7 @@ void registerSettings() {
     Register(g_userSettings.game.showInputViewerGyro);
     Register(g_userSettings.game.nativeInputViewer);
     Register(g_userSettings.game.nativeLinkDebugInfo);
+    Register(g_userSettings.game.triggerViewDefinitions);
     Register(g_userSettings.game.nativePracticeMenu);
     Register(g_userSettings.game.fastSpinner);
     Register(g_userSettings.game.infiniteHearts);
@@ -570,6 +582,9 @@ void registerSettings() {
     Register(g_userSettings.hotkeys.debugCamera.key);
     Register(g_userSettings.hotkeys.debugCamera.modifiers);
     Register(g_userSettings.hotkeys.debugCamera.controllerButton);
+    Register(g_userSettings.hotkeys.captureCameraKeyframe.key);
+    Register(g_userSettings.hotkeys.captureCameraKeyframe.modifiers);
+    Register(g_userSettings.hotkeys.captureCameraKeyframe.controllerButton);
     Register(g_userSettings.hotkeys.audioDebug.key);
     Register(g_userSettings.hotkeys.audioDebug.modifiers);
     Register(g_userSettings.hotkeys.audioDebug.controllerButton);
@@ -649,6 +664,7 @@ static TransientSettings g_transientSettings = {
     .collisionView = {
         .enableTerrainView = false,
         .enableWireframe = false,
+        .enableTriggerView = false,
         .enableAtView = false,
         .enableTgView = false,
         .enableCoView = false,

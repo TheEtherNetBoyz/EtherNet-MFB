@@ -26,6 +26,22 @@ float cM_rnd2();
 float cM_rndF2(float);
 float cM_rndFX2(float);
 
+#if TARGET_PC
+struct cM_RndState {
+    s32 primary[3];
+    s32 secondary[3];
+};
+
+struct cM_RndCallCounts {
+    u64 primary;
+    u64 secondary;
+};
+
+void cM_getRndState(cM_RndState*);
+void cM_setRndState(const cM_RndState*);
+void cM_getRndCallCounts(cM_RndCallCounts*);
+#endif
+
 inline f32 cM_scos(s16 x) {
     return JMASCos(x);
 }

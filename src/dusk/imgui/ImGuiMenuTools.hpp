@@ -34,6 +34,8 @@ namespace dusk {
         void ShowStateShare();
         void ShowOnline();
         void ShowInputMacro();
+        void ShowTasMovie();
+        void UpdateTasMovie();
         void ShowInputViewer();
         void ShowActorSpawner();
         void ShowCustomMusic();
@@ -71,6 +73,7 @@ namespace dusk {
         ImGuiOnline m_online;
 
         bool m_showInputMacro = false;
+        bool m_showTasMovie = false;
 
         bool m_showActorSpawner = false;
         bool m_showCustomMusic = false;

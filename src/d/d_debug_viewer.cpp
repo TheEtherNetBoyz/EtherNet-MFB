@@ -100,12 +100,14 @@ void dDbVw_drawCircle(int i_bufferType, cXyz& i_pos, f32 i_radius, const GXColor
 }
 
 void dDbVw_drawSphere(int i_bufferType, cXyz& i_pos, f32 i_size, const GXColor& i_color, u8 i_clipZ) {
-    mDoExt_spherePacket* packet = JKR_NEW mDoExt_spherePacket(i_pos, i_size, i_color, i_clipZ);
+    mDoExt_spherePacket* packet = JKR_NEW mDoExt_spherePacket(
+        i_pos, i_size, i_color, i_clipZ, i_bufferType == 0);
     dDbVw_setDrawPacketList(packet, i_bufferType);
 }
 
 void dDbVw_drawCylinder(int i_bufferType, cXyz& i_pos, f32 i_radius, f32 i_height, const GXColor& i_color, u8 i_clipZ) {
-    mDoExt_cylinderPacket* packet = JKR_NEW mDoExt_cylinderPacket(i_pos, i_radius, i_height, i_color, i_clipZ);
+    mDoExt_cylinderPacket* packet = JKR_NEW mDoExt_cylinderPacket(
+        i_pos, i_radius, i_height, i_color, i_clipZ, i_bufferType == 0);
     dDbVw_setDrawPacketList(packet, i_bufferType);
 }
 

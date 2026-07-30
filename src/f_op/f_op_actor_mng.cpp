@@ -6,6 +6,7 @@
 #if TARGET_PC
 #define PROCS_DUMP_NAMES 1
 #include "f_pc/f_pc_name.h"
+#include "dusk/tas_movie.h"
 #endif
 
 #include "d/dolzel.h" // IWYU pragma: keep
@@ -1060,18 +1061,19 @@ cull_sphere l_cullSizeSphere[fopAc_CULLSPHERE_MAX_e] = {
 #endif
 };
 
-s32 fopAcM_cullingCheck(fopAc_ac_c const* i_actor) {
+static s32 cullingCheckForView(fopAc_ac_c const* i_actor, MtxP i_viewMtx,
+                               J3DUClipper& i_clipper, f32 i_baseFar) {
     MtxP mtx_p;
 #if AVOID_UB
     Mtx concat_mtx;
 #endif
     if (fopAcM_GetMtx(i_actor) == NULL) {
-        mtx_p = j3dSys.getViewMtx();
+        mtx_p = i_viewMtx;
     } else {
 #if !AVOID_UB
         Mtx concat_mtx;
 #endif
-        cMtx_concat(j3dSys.getViewMtx(), fopAcM_GetMtx(i_actor), concat_mtx);
+        cMtx_concat(i_viewMtx, fopAcM_GetMtx(i_actor), concat_mtx);
         mtx_p = concat_mtx;
     }
 
@@ -1080,54 +1082,69 @@ s32 fopAcM_cullingCheck(fopAc_ac_c const* i_actor) {
         cullsize_far *= dComIfGp_event_getCullRate();
     }
 
+    const f32 originalFar = i_clipper.getFar();
+    if (fopAcM_getCullSizeFar(i_actor) > 0.0f) {
+        i_clipper.setFar(cullsize_far * i_baseFar);
+        i_clipper.calcViewFrustum();
+    }
+
+    s32 result;
     if (fopAcM_CULLSIZE_IS_BOX(fopAcM_GetCullSize(i_actor))) {
         if (fopAcM_GetCullSize(i_actor) == fopAc_CULLBOX_CUSTOM_e) {
-            if (fopAcM_getCullSizeFar(i_actor) > 0.0f) {
-                mDoLib_clipper::changeFar(cullsize_far * mDoLib_clipper::getFar());
-                u32 ret =
-                    mDoLib_clipper::clip(mtx_p, &i_actor->cull.box.max, &i_actor->cull.box.min);
-                mDoLib_clipper::resetFar();
-                return ret;
-            }
-
-            return mDoLib_clipper::clip(mtx_p, &i_actor->cull.box.max, &i_actor->cull.box.min);
+            result = i_clipper.clip(
+                mtx_p, const_cast<Vec*>(&i_actor->cull.box.max),
+                const_cast<Vec*>(&i_actor->cull.box.min));
+        } else {
+            cull_box* box = &l_cullSizeBox[fopAcM_CULLSIZE_IDX(fopAcM_GetCullSize(i_actor))];
+            result = i_clipper.clip(mtx_p, &box->max, &box->min);
         }
-
-        cull_box* box = &l_cullSizeBox[fopAcM_CULLSIZE_IDX(fopAcM_GetCullSize(i_actor))];
-
-        if (fopAcM_getCullSizeFar(i_actor) > 0.0f) {
-            mDoLib_clipper::changeFar(cullsize_far * mDoLib_clipper::getFar());
-            u32 ret = mDoLib_clipper::clip(mtx_p, &box->max, &box->min);
-            mDoLib_clipper::resetFar();
-            return ret;
-        }
-
-        return mDoLib_clipper::clip(mtx_p, &box->max, &box->min);
+    } else if (fopAcM_GetCullSize(i_actor) == fopAc_CULLSPHERE_CUSTOM_e) {
+        result = i_clipper.clip(
+            mtx_p, fopAcM_getCullSizeSphereCenter(i_actor),
+            fopAcM_getCullSizeSphereR(i_actor));
+    } else {
+        cull_sphere* sphere =
+            &l_cullSizeSphere[fopAcM_CULLSIZE_Q_IDX(fopAcM_GetCullSize(i_actor))];
+        result = i_clipper.clip(mtx_p, sphere->center, sphere->radius);
     }
-
-    if (fopAcM_GetCullSize(i_actor) == fopAc_CULLSPHERE_CUSTOM_e) {
-        if (fopAcM_getCullSizeFar(i_actor) > 0.0f) {
-            mDoLib_clipper::changeFar(cullsize_far * mDoLib_clipper::getFar());
-            u32 ret = mDoLib_clipper::clip(mtx_p, fopAcM_getCullSizeSphereCenter(i_actor),
-                                           fopAcM_getCullSizeSphereR(i_actor));
-            mDoLib_clipper::resetFar();
-            return ret;
-        }
-
-        return mDoLib_clipper::clip(mtx_p, fopAcM_getCullSizeSphereCenter(i_actor),
-                                    fopAcM_getCullSizeSphereR(i_actor));
-    }
-
-    cull_sphere* sphere = &l_cullSizeSphere[fopAcM_CULLSIZE_Q_IDX(fopAcM_GetCullSize(i_actor))];
 
     if (fopAcM_getCullSizeFar(i_actor) > 0.0f) {
-        mDoLib_clipper::changeFar(cullsize_far * mDoLib_clipper::getFar());
-        u32 ret = mDoLib_clipper::clip(mtx_p, sphere->center, sphere->radius);
-        mDoLib_clipper::resetFar();
-        return ret;
+        i_clipper.setFar(originalFar);
+        i_clipper.calcViewFrustum();
     }
+    return result;
+}
 
-    return mDoLib_clipper::clip(mtx_p, sphere->center, sphere->radius);
+s32 fopAcM_cullingCheck(fopAc_ac_c const* i_actor) {
+    const f32 baseFar = mDoLib_clipper::getFar();
+    s32 result =
+        cullingCheckForView(i_actor, j3dSys.getViewMtx(), mDoLib_clipper::mClipper, baseFar);
+
+#if TARGET_PC
+    // The currently installed view is the detached presentation camera.
+    // If it rejects this actor, let Link's saved gameplay camera rescue the
+    // draw. This is deliberately confined to fopAc_Draw's render culling.
+    if (result != 0) {
+        Mtx gameplayView;
+        f32 fovy;
+        f32 aspect;
+        f32 nearPlane;
+        if (dusk::tas_movie::getGameplayCullView(
+                gameplayView, &fovy, &aspect, &nearPlane))
+        {
+            J3DUClipper gameplayClipper;
+            gameplayClipper.setFovy(fovy);
+            gameplayClipper.setAspect(aspect);
+            gameplayClipper.setNear(nearPlane);
+            gameplayClipper.setFar(baseFar);
+            gameplayClipper.calcViewFrustum();
+            result = cullingCheckForView(
+                i_actor, gameplayView, gameplayClipper, baseFar);
+        }
+    }
+#endif
+
+    return result;
 }
 
 void* event_second_actor(u16 i_flag) {

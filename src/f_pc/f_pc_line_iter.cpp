@@ -10,23 +10,30 @@
 #include "f_pc/f_pc_base.h"
 #include "f_pc/f_pc_layer.h"
 #include "f_pc/f_pc_line.h"
+#if TARGET_PC
+#include "dusk/logging.h"
 #include "dusk/multiplayer/multiplayer.hpp"
 #include <cstdint>
+#endif
 
 
 static int fpcLnIt_MethodCall(create_tag_class* i_createTag, method_filter* i_filter) {
     base_process_class* process = static_cast<base_process_class*>(i_createTag->mpTagData);
 #if TARGET_PC
-    // Online state changes can remove a queued process during this traversal. Freed process
-    // memory is poisoned with all bits set on PC, leaving a stale mpTagData value of -1.
-    // Keep this additional lifecycle protection scoped to active multiplayer sessions.
-    constexpr uintptr_t kFreedProcessSentinel = static_cast<uintptr_t>(-1);
-    const bool invalidOnlineTag = dusk::multiplayer::is_enabled() &&
-                                  (!cTg_IsUse(i_createTag) ||
-                                   reinterpret_cast<uintptr_t>(process) == kFreedProcessSentinel);
-    if (process == NULL || invalidOnlineTag || process->state.init_state == 3 ||
-        process->layer_tag.layer == NULL)
+    const std::uintptr_t processAddress = reinterpret_cast<std::uintptr_t>(process);
+    if (processAddress < 0x10000 ||
+        (sizeof(std::uintptr_t) == 8 && processAddress > 0x00007FFFFFFFFFFFULL))
     {
+        DuskLog.error(
+            "fpcLnIt_MethodCall: rejecting invalid process pointer {} from line tag {}",
+            static_cast<const void*>(process), static_cast<const void*>(i_createTag));
+        return 0;
+    }
+    // Online state changes can remove a queued process during this traversal.
+    // Reject a tag which has become stale before dereferencing its process.
+    const bool invalidOnlineTag =
+        dusk::multiplayer::is_enabled() && !cTg_IsUse(i_createTag);
+    if (invalidOnlineTag || process->state.init_state == 3 || process->layer_tag.layer == NULL) {
         return 0;
     }
 #endif

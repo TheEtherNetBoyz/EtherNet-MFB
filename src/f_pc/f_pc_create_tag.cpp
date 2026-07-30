@@ -6,8 +6,14 @@
 #include "f_pc/f_pc_create_tag.h"
 
 node_list_class g_fpcCtTg_Queue = {NULL, NULL, 0};
+#if TARGET_PC
+u64 g_fpcCtTg_ActivityEpoch = 0;
+#endif
 
 void fpcCtTg_ToCreateQ(create_tag* i_createTag) {
+#if TARGET_PC
+    ++g_fpcCtTg_ActivityEpoch;
+#endif
     cTg_Addition(&g_fpcCtTg_Queue, &i_createTag->base);
 }
 

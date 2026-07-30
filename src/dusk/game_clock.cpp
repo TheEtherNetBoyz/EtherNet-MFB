@@ -21,22 +21,22 @@ Limiter s_frame_limiter;
 
 std::unordered_map<uintptr_t, clock::time_point> s_interval_last_sample;
 
-constexpr clock::duration kSimPeriodDuration =
+float s_sim_rate_hz = 30.0f;
+clock::duration s_sim_period_duration =
     std::chrono::duration_cast<clock::duration>(std::chrono::duration<float>(sim_pace()));
 constexpr clock::duration kAbnormalGapResetThreshold = std::chrono::milliseconds(250);
 constexpr int kMaxSimTicksPerFrame = 2;
 
 int selected_frame_rate_limit() {
-    if (dusk::getTransientSettings().forceThirtyFpsLimit) {
-        return 30;
-    }
-
     if (dusk::getTransientSettings().skipFrameRateLimit) {
         return 0;
     }
 
-    if (dusk::getSettings().game.enableFrameInterpolation.getValue() == FrameInterpMode::Off) {
-        return 30;
+    const bool interpolationOff =
+        dusk::getTransientSettings().forceThirtyFpsLimit ||
+        dusk::getSettings().game.enableFrameInterpolation.getValue() == FrameInterpMode::Off;
+    if (interpolationOff) {
+        return static_cast<int>(std::round(s_sim_rate_hz));
     }
 
     return dusk::getSettings().game.frameRateLimit.getValue();
@@ -53,7 +53,7 @@ void apply_frame_rate_limit() {
 }
 
 clock::duration interpolation_buffer_duration() {
-    return kSimPeriodDuration;
+    return s_sim_period_duration;
 }
 
 void ensure_initialized() {
@@ -67,9 +67,25 @@ void ensure_initialized() {
 }
 
 void reset_frame_timer() {
+    ensure_initialized();
     s_previous_sample = clock::now();
-    s_current_snapshot_time = s_previous_sample - kSimPeriodDuration;
+    s_current_snapshot_time = s_previous_sample - s_sim_period_duration;
     s_frame_limiter.Reset();
+}
+
+void set_sim_rate(float hz) {
+    const float clamped = std::clamp(hz, 1.0f, 120.0f);
+    if (std::abs(s_sim_rate_hz - clamped) < 0.001f) {
+        return;
+    }
+    s_sim_rate_hz = clamped;
+    s_sim_period_duration =
+        std::chrono::duration_cast<clock::duration>(std::chrono::duration<float>(1.0f / clamped));
+    reset_frame_timer();
+}
+
+float get_sim_rate() {
+    return s_sim_rate_hz;
 }
 
 MainLoopPacer advance_main_loop() {
@@ -87,7 +103,7 @@ MainLoopPacer advance_main_loop() {
                                     dusk::getSettings().game.enableFrameInterpolation.getValue() != FrameInterpMode::Off &&
                                     !dusk::getTransientSettings().skipFrameRateLimit;
     out.is_interpolating = should_interpolate;
-    out.sim_pace = sim_pace();
+    out.sim_pace = 1.0f / s_sim_rate_hz;
     out.interpolation_buffer_seconds = 0.0f;
 
     if (!should_interpolate) {
@@ -97,7 +113,7 @@ MainLoopPacer advance_main_loop() {
     }
 
     if (frame_gap > kAbnormalGapResetThreshold) {
-        s_current_snapshot_time = now - kSimPeriodDuration;
+        s_current_snapshot_time = now - s_sim_period_duration;
         out.sim_ticks_to_run = 0;
         return out;
     }
@@ -109,7 +125,7 @@ MainLoopPacer advance_main_loop() {
 
     const clock::time_point render_time = now - interpolation_buffer;
     while (sim_ticks_to_run < kMaxSimTicksPerFrame && projected_snapshot_time < render_time) {
-        projected_snapshot_time += kSimPeriodDuration;
+        projected_snapshot_time += s_sim_period_duration;
         sim_ticks_to_run++;
     }
     out.sim_ticks_to_run = sim_ticks_to_run;
@@ -123,7 +139,7 @@ void finish_main_loop() {
 
 void commit_sim_tick() {
     ensure_initialized();
-    s_current_snapshot_time += kSimPeriodDuration;
+    s_current_snapshot_time += s_sim_period_duration;
 }
 
 float sample_interpolation_step() {
@@ -131,8 +147,8 @@ float sample_interpolation_step() {
     const clock::duration interpolation_buffer = interpolation_buffer_duration();
     const float step =
         std::chrono::duration<float>(clock::now() - s_current_snapshot_time +
-                                     kSimPeriodDuration - interpolation_buffer).count() /
-        sim_pace();
+                                     s_sim_period_duration - interpolation_buffer).count() /
+        (1.0f / s_sim_rate_hz);
     return std::clamp(step, 0.0f, 1.0f);
 }
 
