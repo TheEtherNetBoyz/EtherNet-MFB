@@ -31,6 +31,10 @@ void notify_local_dungeon_item_set(int kind);
 void notify_local_ooccoo_acquired(int itemId);
 void notify_local_ooccoo_warp_out();
 void notify_local_ooccoo_cleared();
+// dSv_info_c::init() replaces the active save data during boot, soft reset,
+// and file selection. Ooccoo's companion runtime metadata must have the same
+// lifetime as the save inventory it describes.
+void notify_local_save_reset();
 
 // Item acquisition lane for durable inventory/progression effects that are
 // not represented by actor/chest flags alone. Keep this narrowly filtered in

@@ -799,6 +799,14 @@ struct SharedOoccooState {
 };
 
 SharedOoccooState sSharedOoccoo;
+// SharedOoccooState is companion metadata for the currently loaded save, not
+// lobby/process inventory. dSv_info_c::init() invalidates this binding before
+// vanilla clears or replaces the save data.
+bool sSharedOoccooBoundToSave = false;
+// An explicit local/remote transition is authoritative even when it says the
+// item no longer exists. A merely empty freshly loaded save is not allowed to
+// erase an unresolved, legitimate Ooccoo's Note from an existing file.
+bool sSharedOoccooAuthoritative = false;
 
 struct UdpTxDatagram {
     sockaddr_in addr{};
@@ -1987,6 +1995,14 @@ json make_shared_ooccoo_state() {
 }
 
 bool decode_shared_ooccoo_state(const json& state, const char* source) {
+    // Opening/title scenes use temporary save data. Applying a live or
+    // snapshot Ooccoo state there would bind the previous run's item to that
+    // temporary data and carry it into the next selected file.
+    if (is_opening_or_title_screen_active()) {
+        DuskLog.info("Multiplayer ignored Ooccoo state on opening/title source={}", source);
+        return false;
+    }
+
     SharedOoccooState decoded;
     decoded.exists = state.value("exists", false);
     if (!decoded.exists) {
@@ -2028,6 +2044,8 @@ bool decode_shared_ooccoo_state(const json& state, const char* source) {
     }
 
     sSharedOoccoo = decoded;
+    sSharedOoccooBoundToSave = true;
+    sSharedOoccooAuthoritative = true;
     DuskLog.info("Multiplayer accepted Ooccoo state source={} exists={} owner_stage={} "
                  "has_mark={} return_stage={} return_room={}",
                  source, decoded.exists, decoded.ownerStage, decoded.hasReturnMark,
@@ -2035,14 +2053,19 @@ bool decode_shared_ooccoo_state(const json& state, const char* source) {
     return true;
 }
 
+void hydrate_shared_ooccoo_from_local_save();
+
 void apply_shared_ooccoo_local_form() {
-    if (!sSession.welcomed || is_stage_load_unsafe_for_multiplayer()) {
+    if (!sSession.welcomed || is_opening_or_title_screen_active() ||
+        is_stage_load_unsafe_for_multiplayer())
+    {
         return;
     }
 
+    hydrate_shared_ooccoo_from_local_save();
     const int currentItem = dComIfGs_getItem(SLOT_18, false);
     if (!sSharedOoccoo.exists) {
-        if (is_ooccoo_slot_item(currentItem)) {
+        if (sSharedOoccooAuthoritative && is_ooccoo_slot_item(currentItem)) {
             ScopedRemoteSaveBitApplication applyingRemoteSaveBit;
             dComIfGs_setItem(SLOT_18, dItemNo_NONE_e);
             dComIfGs_resetLastWarpAcceptStage();
@@ -2084,10 +2107,18 @@ void apply_shared_ooccoo_local_form() {
 }
 
 void hydrate_shared_ooccoo_from_local_save() {
-    if (sSharedOoccoo.exists) {
+    if (sSharedOoccooBoundToSave) {
         return;
     }
 
+    // A Note does not serialize its owner dungeon or return data. Preserve
+    // the detached metadata across a soft reset long enough to reattach it
+    // only if the subsequently loaded save really contains that Note. A new
+    // file has an empty slot and therefore discards this candidate.
+    const SharedOoccooState detachedState = sSharedOoccoo;
+    sSharedOoccoo = {};
+    sSharedOoccooBoundToSave = true;
+    sSharedOoccooAuthoritative = false;
     const int itemId = dComIfGs_getItem(SLOT_18, false);
     if (itemId == dItemNo_DUNGEON_BACK_e) {
         const int ownerStage = dComIfGs_getLastWarpAcceptStage();
@@ -2102,6 +2133,7 @@ void hydrate_shared_ooccoo_from_local_save() {
             sSharedOoccoo.returnPos = dComIfGs_getWarpPlayerPos();
             sSharedOoccoo.returnAngle = dComIfGs_getWarpPlayerAngleY();
             sSharedOoccoo.returnRoom = dComIfGs_getWarpRoomNo();
+            sSharedOoccooAuthoritative = true;
         }
     } else if (itemId == dItemNo_DUNGEON_EXIT_e || itemId == dItemNo_LV7_DUNGEON_EXIT_e) {
         stage_stag_info_class* stagInfo = dComIfGp_getStageStagInfo();
@@ -2109,7 +2141,13 @@ void hydrate_shared_ooccoo_from_local_save() {
             sSharedOoccoo.exists = true;
             sSharedOoccoo.ownerStage = dStage_stagInfo_GetSaveTbl(stagInfo);
             sSharedOoccoo.cityVariant = itemId == dItemNo_LV7_DUNGEON_EXIT_e;
+            sSharedOoccooAuthoritative = true;
         }
+    } else if (itemId == dItemNo_TKS_LETTER_e && detachedState.exists &&
+               !detachedState.hasReturnMark)
+    {
+        sSharedOoccoo = detachedState;
+        sSharedOoccooAuthoritative = true;
     }
 }
 
@@ -13972,6 +14010,8 @@ void notify_local_ooccoo_acquired(int itemId) {
     sSharedOoccoo.exists = true;
     sSharedOoccoo.ownerStage = dStage_stagInfo_GetSaveTbl(stagInfo);
     sSharedOoccoo.cityVariant = itemId == dItemNo_LV7_DUNGEON_EXIT_e;
+    sSharedOoccooBoundToSave = true;
+    sSharedOoccooAuthoritative = true;
     send_json({{"type", "ooccoo_state"}, {"state", make_shared_ooccoo_state()}});
     DuskLog.info("Multiplayer sent Ooccoo acquisition owner_stage={} city_variant={}",
                  sSharedOoccoo.ownerStage, sSharedOoccoo.cityVariant);
@@ -14001,6 +14041,8 @@ void notify_local_ooccoo_warp_out() {
     sSharedOoccoo.returnPos = dComIfGs_getWarpPlayerPos();
     sSharedOoccoo.returnAngle = dComIfGs_getWarpPlayerAngleY();
     sSharedOoccoo.returnRoom = dComIfGs_getWarpRoomNo();
+    sSharedOoccooBoundToSave = true;
+    sSharedOoccooAuthoritative = true;
     send_json({{"type", "ooccoo_state"}, {"state", make_shared_ooccoo_state()}});
     DuskLog.info("Multiplayer sent Ooccoo warp-out owner_stage={} return_stage={} room={}",
                  ownerStage, sSharedOoccoo.returnStage,
@@ -14025,10 +14067,22 @@ void notify_local_ooccoo_cleared() {
     }
 
     sSharedOoccoo = {};
+    sSharedOoccooBoundToSave = true;
+    sSharedOoccooAuthoritative = true;
     json state = make_shared_ooccoo_state();
     state["clear_stage"] = clearStage;
     send_json({{"type", "ooccoo_state"}, {"state", state}});
     DuskLog.info("Multiplayer sent Ooccoo cleared state stage={}", clearStage);
+}
+
+void notify_local_save_reset() {
+    // Do not send a network clear here. This is the same local lifetime
+    // boundary that resets ordinary inventory, and each selected save will
+    // establish its own state after loading. Keep the old value detached only
+    // so a saved Note can recover metadata that vanilla does not serialize;
+    // hydration discards it unless the loaded save actually contains a Note.
+    sSharedOoccooBoundToSave = false;
+    sSharedOoccooAuthoritative = false;
 }
 
 void notify_local_item_get(int itemId) {

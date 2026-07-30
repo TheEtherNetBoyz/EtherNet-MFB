@@ -15,6 +15,7 @@
 #if TARGET_PC
 #include "d/actor/d_a_alink.h"
 #include "d/d_stage.h"
+#include "dusk/multiplayer/event_sync.hpp"
 #endif
 #include "f_op/f_op_scene_mng.h"
 #include <cstdio>
@@ -1852,6 +1853,9 @@ void dSv_turnRestart_c::set(const cXyz& i_position, s16 i_angleY, s8 param_3, u3
 }
 
 void dSv_info_c::init() {
+#if TARGET_PC
+    dusk::multiplayer::notify_local_save_reset();
+#endif
     mSavedata.init();
     mMemory.init();
     initDan(-1);
