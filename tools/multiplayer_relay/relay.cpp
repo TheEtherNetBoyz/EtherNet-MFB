@@ -113,6 +113,11 @@ const std::set<std::string> kGameplayRouteTypes = {
     "bottle_slots",
     "bomb_bag_slot",
     "rupee_count",
+    "poe_count",
+    "malo_fundraising",
+    "charlo_offering",
+    "fish_record",
+    "collect_smell",
     "item_get",
     "rando_item_get",
     "item_first_bit",
@@ -178,7 +183,7 @@ const char* packet_category(const std::string& type) {
     {
         return "world_state";
     }
-    if (type == "item_get" || type == "item_first_bit" ||
+    if (type == "item_get" || type == "item_first_bit" || type == "collect_smell" ||
         type == "collect_crystal" || type == "collect_mirror" ||
         type == "dark_clear_lv" || type == "transform_lv" || type == "region_bit" ||
         type == "collect" || type == "visited_room" || type == "letter_get")
@@ -186,7 +191,9 @@ const char* packet_category(const std::string& type) {
         return "inventory_progress";
     }
     if (type == "key_num" || type == "light_drop_num" || type == "light_drop_get_flag" ||
-        type == "max_life_update" || type == "bottle_slots" || type == "rupee_count")
+        type == "max_life_update" || type == "bottle_slots" || type == "rupee_count" ||
+        type == "poe_count" || type == "malo_fundraising" || type == "charlo_offering" ||
+        type == "fish_record")
     {
         return "counters";
     }
@@ -250,6 +257,7 @@ void trace_packet_tx(const std::string& clientId, const json& message, size_t by
 struct Client {
     socket_t sock = INVALID_SOCKET;
     std::string id;
+    std::string peerEndpoint;
     std::string roomId;
     std::string name;
     std::string stage;
@@ -527,6 +535,10 @@ private:
             }
 
             if (!set_nonblocking(accepted)) {
+                char peerHost[INET_ADDRSTRLEN] = {};
+                inet_ntop(AF_INET, &peerAddr.sin_addr, peerHost, sizeof(peerHost));
+                log("connection rejected: nonblocking_failed peer=" +
+                    std::string(peerHost) + ":" + std::to_string(ntohs(peerAddr.sin_port)));
                 close_socket(accepted);
                 continue;
             }
@@ -535,7 +547,12 @@ private:
             client.sock = accepted;
             client.id = make_id("client");
             client.udpToken = make_id("udp");
+            char peerHost[INET_ADDRSTRLEN] = {};
+            inet_ntop(AF_INET, &peerAddr.sin_addr, peerHost, sizeof(peerHost));
+            client.peerEndpoint =
+                std::string(peerHost) + ":" + std::to_string(ntohs(peerAddr.sin_port));
             const std::string clientId = client.id;
+            log("connection accepted client=" + clientId + " peer=" + client.peerEndpoint);
             mClients.emplace(clientId, std::move(client));
         }
     }
@@ -1037,6 +1054,9 @@ private:
         }
 
         const std::string roomId = clientIt->second.roomId;
+        log("connection closed client=" + clientId + " peer=" +
+            clientIt->second.peerEndpoint + " room=" +
+            (roomId.empty() ? std::string("<none>") : roomId));
         Client departed;
         departed.id = clientId;
         departed.roomId = roomId;
@@ -1109,6 +1129,9 @@ private:
     }
 
     void send_error(Client& client, const std::string& error) {
+        log("client error client=" + client.id + " peer=" + client.peerEndpoint +
+            " room=" + (client.roomId.empty() ? std::string("<none>") : client.roomId) +
+            " error=" + error);
         send_json(client, {{"type", "error"}, {"error", error}});
     }
 

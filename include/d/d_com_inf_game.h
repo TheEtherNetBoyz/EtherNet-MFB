@@ -1303,9 +1303,10 @@ inline u16 dComIfGs_getMaxLife() {
 }
 
 inline void dComIfGs_setMaxLife(u8 i_maxLife) {
+    const u8 previousMaxLife = static_cast<u8>(dComIfGs_getMaxLife());
     g_dComIfG_gameInfo.info.getPlayer().getPlayerStatusA().setMaxLife(i_maxLife);
 #if TARGET_PC
-    dusk::multiplayer::notify_local_max_life_set(i_maxLife);
+    dusk::multiplayer::notify_local_max_life_set(previousMaxLife, i_maxLife);
 #endif
 }
 
@@ -1366,6 +1367,9 @@ inline u8 dComIfGs_getCollectSmell() {
 
 inline void dComIfGs_setCollectSmell(u8 smell) {
     g_dComIfG_gameInfo.info.getPlayer().getPlayerStatusA().setSelectEquip(COLLECT_SMELL, smell);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_collect_smell_set(smell);
+#endif
 }
 
 inline u8 dComIfGs_getBButtonItemKey() {
@@ -1621,16 +1625,20 @@ inline u8 dComIfGs_getBottleSlotCount() {
 }
 
 inline void dComIfGs_setEmptyBottle() {
+    const u8 previousCount = dComIfGs_getBottleSlotCount();
     g_dComIfG_gameInfo.info.getPlayer().getItem().setEmptyBottle();
 #if TARGET_PC
-    dusk::multiplayer::notify_local_bottle_slot_count_set(dComIfGs_getBottleSlotCount());
+    dusk::multiplayer::notify_local_bottle_slot_count_set(previousCount,
+                                                          dComIfGs_getBottleSlotCount());
 #endif
 }
 
 inline void dComIfGs_setEmptyBottle(u8 i_itemNo) {
+    const u8 previousCount = dComIfGs_getBottleSlotCount();
     g_dComIfG_gameInfo.info.getPlayer().getItem().setEmptyBottle(i_itemNo);
 #if TARGET_PC
-    dusk::multiplayer::notify_local_bottle_slot_count_set(dComIfGs_getBottleSlotCount());
+    dusk::multiplayer::notify_local_bottle_slot_count_set(previousCount,
+                                                          dComIfGs_getBottleSlotCount());
 #endif
 }
 
@@ -1789,7 +1797,11 @@ inline u8 dComIfGs_getBombMax(u8 i_bombType) {
 }
 
 inline void dComIfGs_setPohSpiritNum(u8 i_num) {
+    const u8 previousNum = g_dComIfG_gameInfo.info.getPlayer().getCollect().getPohNum();
     g_dComIfG_gameInfo.info.getPlayer().getCollect().setPohNum(i_num);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_poe_count_set(previousNum, i_num);
+#endif
 }
 
 inline u8 dComIfGs_getPohSpiritNum() {
@@ -1797,7 +1809,14 @@ inline u8 dComIfGs_getPohSpiritNum() {
 }
 
 inline void dComIfGs_addPohSpiritNum() {
+    const u8 previousNum = dComIfGs_getPohSpiritNum();
     g_dComIfG_gameInfo.info.getPlayer().getCollect().addPohNum();
+    const u8 currentNum = dComIfGs_getPohSpiritNum();
+    if (currentNum != previousNum) {
+#if TARGET_PC
+        dusk::multiplayer::notify_local_poe_count_set(previousNum, currentNum);
+#endif
+    }
 }
 
 inline BOOL dComIfGs_isCollectClothes(u8 i_clothesNo) {
@@ -1932,7 +1951,13 @@ inline void dComIfGs_setAllLetterRead() {
 }
 #endif
 inline void dComIfGs_addFishNum(u8 param_0) {
-    g_dComIfG_gameInfo.info.getPlayer().getFishingInfo().addFishCount(param_0);
+    dSv_fishing_info_c& fishingInfo =
+        g_dComIfG_gameInfo.info.getPlayer().getFishingInfo();
+    fishingInfo.addFishCount(param_0);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_fish_caught(
+        param_0, fishingInfo.getFishCount(param_0), fishingInfo.getMaxSize(param_0));
+#endif
 }
 
 inline u16 dComIfGs_getFishNum(u8 param_0) {
@@ -1944,7 +1969,13 @@ inline u8 dComIfGs_getFishSize(u8 param_0) {
 }
 
 inline void dComIfGs_setFishSize(u8 param_0, u8 param_1) {
-    g_dComIfG_gameInfo.info.getPlayer().getFishingInfo().setMaxSize(param_0, param_1);
+    dSv_fishing_info_c& fishingInfo =
+        g_dComIfG_gameInfo.info.getPlayer().getFishingInfo();
+    fishingInfo.setMaxSize(param_0, param_1);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_fish_size_set(
+        param_0, fishingInfo.getFishCount(param_0), param_1);
+#endif
 }
 
 inline OSTime dComIfGs_getTotalTime() {

@@ -103,8 +103,8 @@ The following messages may be broadcast or may include `target_client_id`:
 | Area | Message types |
 | --- | --- |
 | World flags | `event_bit`, `tbox_bit`, `switch_bit`, `room_switch_bit`, `item_bit`, `dungeon_item_bit` |
-| Inventory/progression | `save_snapshot`, `item_get`, `rando_item_get`, `item_first_bit`, `collect_crystal`, `collect_mirror`, `dark_clear_lv`, `transform_lv`, `region_bit`, `collect`, `visited_room`, `letter_get`, `ooccoo_state` |
-| Counts and slots | `key_num`, `light_drop_num`, `light_drop_get_flag`, `max_life_update`, `bottle_slots`, `bomb_bag_slot`, `rupee_count` |
+| Inventory/progression | `save_snapshot`, `item_get`, `rando_item_get`, `item_first_bit`, `collect_crystal`, `collect_mirror`, `dark_clear_lv`, `transform_lv`, `region_bit`, `collect`, `visited_room`, `letter_get`, `ooccoo_state`, `collect_smell` |
+| Counts and slots | `key_num`, `light_drop_num`, `light_drop_get_flag`, `max_life_update`, `bottle_slots`, `bomb_bag_slot`, `rupee_count`, `poe_count`, `malo_fundraising`, `charlo_offering`, `fish_record` |
 | Peer status/preferences | `presence`, `progression_state`, `puppet_preference`, `midna_preference` |
 | Visual/PvP | `midna_pose`, `pvp_hit` |
 | Ganondorf encounter | `ganondorf_owner_claim`, `ganondorf_owner`, `ganondorf_hit`, `ganondorf_reaction`, `ganondorf_player_damage`, `ganondorf_state` |

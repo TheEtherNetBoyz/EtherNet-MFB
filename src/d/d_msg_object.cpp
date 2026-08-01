@@ -2658,6 +2658,9 @@ u16 dMsgObject_getFundRaising() {
 void dMsgObject_setFundRaising(u16 price) {
     dComIfGs_setEventReg(0xf9ff, (price & 0xff00) >> 8);
     dComIfGs_setEventReg(0xfaff, price & 0xff);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_malo_fundraising_set(price);
+#endif
 }
 
 void dMsgObject_addFundRaising(s16 price) {
@@ -2665,8 +2668,7 @@ void dMsgObject_addFundRaising(s16 price) {
     if (price < 0) {
         price = 0;
     }
-    dComIfGs_setEventReg(0xf9ff, ((u16)price & 0xff00) >> 8);
-    dComIfGs_setEventReg(0xfaff, (u16)price & 0xff);
+    dMsgObject_setFundRaising(static_cast<u16>(price));
 }
 
 u16 dMsgObject_getOffering() {
@@ -2680,8 +2682,7 @@ void dMsgObject_addOffering(s16 price) {
     if (offering < 0) {
         offering = 0;
     }
-    dComIfGs_setEventReg(0xf7ff, ((u16)offering & 0xff00) >> 8);
-    dComIfGs_setEventReg(0xf8ff, (u16)offering & 0xff);
+    dMsgObject_setOffering(static_cast<u16>(offering));
 }
 
 static leafdraw_method_class l_dMsgObject_Method = {

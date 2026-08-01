@@ -573,6 +573,9 @@ inline bool dMsgObject_isSelectTalkNowCheck() {
 inline void dMsgObject_setOffering(u16 i_num) {
     dComIfGs_setEventReg(0xF7FF, i_num >> 8);
     dComIfGs_setEventReg(0xF8FF, i_num & 0xFF);
+#if TARGET_PC
+    dusk::multiplayer::notify_local_charlo_offering_set(i_num);
+#endif
 }
 
 inline void dMsgObject_setLetterNameID(u16 id) {

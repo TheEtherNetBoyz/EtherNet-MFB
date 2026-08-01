@@ -134,31 +134,50 @@ void notify_local_light_drop_get_flag_set(uint8_t area);
 // repeatable pickups sharing one item ID each (dItemNo_KAKERA_HEART_e/
 // dItemNo_UTAWA_HEART_e), so the item_get lane's !isItemFirstBit() replay
 // guard only lets the first one of each type apply remotely -- every
-// later one is silently swallowed. Fixed the same way as small keys/Light
-// Drop: broadcast the absolute current value on every real change. Unlike
-// keys/tears (last-write-wins), the receiver applies this with a
-// monotonic max-merge (only raise, never lower) -- max life should never
-// decrease from a remote update, so there is no race-condition tradeoff
-// to accept here, matching the rule save_snapshot's own max_life field
-// already used for late-join catch-up.
-void notify_local_max_life_set(uint8_t maxLife);
+// later one is silently swallowed. Live updates include both the previous
+// and current value so two different pickups made from the same shared
+// starting value can be merged additively instead of collapsing under a
+// plain monotonic max. Snapshots still use max-merge for late-join catch-up.
+void notify_local_max_life_set(uint8_t previousMaxLife, uint8_t maxLife);
 
 // Total occupied bottle slots (0-4), NOT bottle contents. In vanilla,
 // empty-bottle grants are repeatable pickups sharing one item ID
 // (dItemNo_EMPTY_BOTTLE_e) across up to 4 different NPCs/quests, the same
-// shape as the max-life bug above. Broadcasts the absolute slot count
-// (how many of the 4 slots are occupied by any bottle item, regardless of
-// what liquid each currently holds) and applies it on receive as a
-// monotonic max-merge, filling additional empty slots locally to match.
+// shape as the max-life bug above. Live updates carry the previous and
+// current slot counts so concurrent distinct grants are additive; snapshots
+// retain the monotonic count merge. Additional slots are filled locally as
+// generic empty bottles and existing contents are never touched.
 // Randomizer live rewards use rando_item_get instead so the count and item
 // lanes cannot both apply the same bottle. Snapshots still carry the count.
 // Deliberately does not sync bottle contents (what liquid is in which
 // slot) -- that stays local/volatile per the existing consumables rule.
-void notify_local_bottle_slot_count_set(uint8_t count);
+void notify_local_bottle_slot_count_set(uint8_t previousCount, uint8_t count);
 
 // Current wallet rupee total. Freestanding/hidden rupees use ordinary
 // memory-item flags for "collected", so the wallet value needs an absolute
 // companion lane or peers can lose the money while still losing the pickup.
 void notify_local_rupee_count_set(uint16_t rupees);
+
+// Save-backed progression counters which are not represented correctly by
+// the generic item/event-bit lanes. Poe souls and Charlo's offering total are
+// monotonic; Malo Mart's fundraiser may also reset when a vanilla funding
+// phase completes, so its live updates carry the exact current value. Live
+// Poe updates are suppressed in randomizer because rando_item_get already
+// owns those rewards; snapshots still carry the total for catch-up.
+void notify_local_poe_count_set(uint8_t previousCount, uint8_t count);
+void notify_local_malo_fundraising_set(uint16_t value);
+void notify_local_charlo_offering_set(uint16_t value);
+
+// Fishing-journal records. Catch notifications are distinct from size-only
+// updates so repeatable catches can be merged once per peer while largest
+// sizes remain monotonic. Only the six species displayed by the journal are
+// accepted on the wire.
+void notify_local_fish_caught(uint8_t fishIndex, uint16_t count, uint8_t maxSize);
+void notify_local_fish_size_set(uint8_t fishIndex, uint16_t count, uint8_t maxSize);
+
+// The saved scent occupying the collection-screen scent slot. NONE means the
+// slot does not exist; validated scent IDs merge in vanilla story order so a
+// clean/stale peer cannot erase or regress an acquired scent.
+void notify_local_collect_smell_set(uint8_t smell);
 
 }  // namespace dusk::multiplayer

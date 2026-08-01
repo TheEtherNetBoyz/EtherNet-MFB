@@ -900,6 +900,10 @@ struct LocalLightDropTboxContext {
 
 LocalLightDropTboxContext sLastLocalLightDropTbox;
 std::set<std::string> sAppliedRemoteLightDropTearEvents;
+uint32_t sLocalPermanentPickupSequence = 0;
+std::map<std::string, uint32_t> sPermanentPickupLastSequenceByPeerAndType;
+uint32_t sLocalFishCatchSequence = 0;
+std::map<std::string, uint32_t> sFishCatchLastSequenceByPeer;
 constexpr auto kLightDropTboxAssociationWindow = std::chrono::seconds(2);
 bool sNetworkStackStarted = false;
 
@@ -998,11 +1002,13 @@ bool sManualSyncFullStateTransitionActive = false;
 bool sOrdonDayBoundaryReloadPending = false;
 std::string sOrdonDayBoundaryReloadPeerId;
 uint16_t sOrdonDayBoundaryReloadFlag = 0;
+std::set<uint16_t> sOrdonDayBoundaryReloadFlags;
 uint32_t sOrdonDayBoundaryReloadWaitTicks = 0;
+uint32_t sOrdonDayBoundaryReloadSafeTicks = 0;
 bool sOrdonDayBoundaryReloadTransitionActive = false;
 bool sOrdonDayBoundaryReloadSawStageLoad = false;
 constexpr uint32_t kOrdonDayBoundaryReloadStableTicks = 3;
-constexpr uint32_t kOrdonDayBoundaryReloadTimeoutTicks = 180;
+constexpr uint32_t kOrdonDayBoundaryReloadWarningTicks = 180;
 bool sMirrorCompleteReloadPending = false;
 std::string sMirrorCompleteReloadPeerId;
 uint16_t sMirrorCompleteReloadFlag = 0;
@@ -1082,6 +1088,49 @@ public:
 private:
     bool mPrevious;
 };
+
+constexpr int kMaxSyncedDonationTotal = 10000;
+constexpr int kSyncedFishSpeciesCount = 6;
+constexpr int kMaxSyncedFishCount = 999;
+
+int malo_fundraising_phase() {
+    // M_091: Malo is bought out; F_0376: bridge-repair funding completed.
+    if (dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[124])) {
+        return 2;
+    }
+    return dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[376]) ? 1 : 0;
+}
+
+u8 raw_collect_smell() {
+    return g_dComIfG_gameInfo.info.getPlayer().getPlayerStatusA().getSelectEquip(COLLECT_SMELL);
+}
+
+bool is_valid_collect_smell(int smell) {
+    return smell == dItemNo_NONE_e ||
+           (smell >= dItemNo_SMELL_YELIA_POUCH_e && smell <= dItemNo_SMELL_MEDICINE_e);
+}
+
+int collect_smell_snapshot_priority(int smell) {
+    // Scent IDs are not ordered chronologically (Youth is numerically after
+    // Reekfish), so use vanilla acquisition order for deterministic merging.
+    switch (smell) {
+    case dItemNo_SMELL_PUMPKIN_e: return 0;
+    case dItemNo_SMELL_CHILDREN_e: return 1;
+    case dItemNo_SMELL_YELIA_POUCH_e: return 2;
+    case dItemNo_SMELL_POH_e: return 3;
+    case dItemNo_SMELL_FISH_e: return 4;
+    case dItemNo_SMELL_MEDICINE_e: return 5;
+    default: return -1;
+    }
+}
+
+void apply_remote_collect_smell(u8 smell) {
+    ScopedRemoteSaveBitApplication applyingCounter;
+    if (smell != dItemNo_NONE_e) {
+        dComIfGs_onItemFirstBit(smell);
+    }
+    dComIfGs_setCollectSmell(smell);
+}
 
 constexpr int kProgressionCueSewersStage = dStage_SaveTbl_PRISON;
 constexpr int kProgressionCueWakeUpInJailSwitch = 27; // ImGui flag 08:08 / "wake up in jail cs".
@@ -1420,7 +1469,10 @@ bool is_sync_flags_message_type(const std::string& type) {
            type == "collect" || type == "visited_room" || type == "letter_get" ||
            type == "key_num" || type == "light_drop_num" ||
            type == "light_drop_get_flag" || type == "max_life_update" ||
-           type == "bottle_slots" || type == "rupee_count" || type == "bomb_bag_slot" ||
+           type == "bottle_slots" || type == "rupee_count" || type == "poe_count" ||
+           type == "malo_fundraising" || type == "charlo_offering" ||
+           type == "fish_record" || type == "collect_smell" ||
+           type == "bomb_bag_slot" ||
            type == "ganondorf_hit" || type == "rando_item_get" || type == "ooccoo_state";
 }
 
@@ -2374,6 +2426,8 @@ const char* remote_switch_policy_mode_name(RemoteSwitchPolicyMode mode) {
     }
 }
 
+void apply_remote_event_bit(uint16_t flag, bool set);
+
 void queue_ordon_day_boundary_reload(const std::string& peerId, uint16_t flag) {
     const char* stage = current_stage_name();
     if (!is_ordon_day_boundary_stage(stage)) {
@@ -2384,17 +2438,21 @@ void queue_ordon_day_boundary_reload(const std::string& peerId, uint16_t flag) {
     }
 
     if (sOrdonDayBoundaryReloadPending) {
+        sOrdonDayBoundaryReloadFlags.insert(flag);
         DuskLog.info("Multiplayer Ordon day boundary reload already pending peer={} flag={} "
-                     "existingPeer={} existingFlag={} stage={}",
+                     "existingPeer={} existingFlag={} pendingFlags={} stage={}",
                      peerId, flag, sOrdonDayBoundaryReloadPeerId, sOrdonDayBoundaryReloadFlag,
-                     stage);
+                     sOrdonDayBoundaryReloadFlags.size(), stage);
         return;
     }
 
     sOrdonDayBoundaryReloadPending = true;
     sOrdonDayBoundaryReloadPeerId = peerId;
     sOrdonDayBoundaryReloadFlag = flag;
+    sOrdonDayBoundaryReloadFlags.clear();
+    sOrdonDayBoundaryReloadFlags.insert(flag);
     sOrdonDayBoundaryReloadWaitTicks = 0;
+    sOrdonDayBoundaryReloadSafeTicks = 0;
     sOrdonDayBoundaryReloadTransitionActive = true;
     sOrdonDayBoundaryReloadSawStageLoad = false;
     push_notification("Ordon state changed; reloading area", 4.0f);
@@ -2416,7 +2474,9 @@ bool flush_ordon_day_boundary_reload() {
         sOrdonDayBoundaryReloadPending = false;
         sOrdonDayBoundaryReloadPeerId.clear();
         sOrdonDayBoundaryReloadFlag = 0;
+        sOrdonDayBoundaryReloadFlags.clear();
         sOrdonDayBoundaryReloadWaitTicks = 0;
+        sOrdonDayBoundaryReloadSafeTicks = 0;
         sOrdonDayBoundaryReloadTransitionActive = false;
         sOrdonDayBoundaryReloadSawStageLoad = false;
         return false;
@@ -2440,13 +2500,21 @@ bool flush_ordon_day_boundary_reload() {
     }
 
     const bool deleteQueueBusy = !fpcDt_IsComplete();
+    if (affectedPeerUnsafe || deleteQueueBusy) {
+        sOrdonDayBoundaryReloadSafeTicks = 0;
+    } else if (sOrdonDayBoundaryReloadSafeTicks < kOrdonDayBoundaryReloadStableTicks) {
+        ++sOrdonDayBoundaryReloadSafeTicks;
+    }
     const bool stableLongEnough =
-        sOrdonDayBoundaryReloadWaitTicks >= kOrdonDayBoundaryReloadStableTicks;
-    if ((!stableLongEnough || affectedPeerUnsafe || deleteQueueBusy) &&
-        sOrdonDayBoundaryReloadWaitTicks < kOrdonDayBoundaryReloadTimeoutTicks)
-    {
-        if (sOrdonDayBoundaryReloadWaitTicks == 1 ||
-            (sOrdonDayBoundaryReloadWaitTicks % 30) == 0)
+        sOrdonDayBoundaryReloadSafeTicks >= kOrdonDayBoundaryReloadStableTicks;
+    if (!stableLongEnough || affectedPeerUnsafe || deleteQueueBusy) {
+        if (sOrdonDayBoundaryReloadWaitTicks == kOrdonDayBoundaryReloadWarningTicks) {
+            DuskLog.warn("Multiplayer Ordon day boundary reload remains deferred peer={} "
+                         "flag={} ticks={} unsafePeer={} deleteQueueBusy={} reason=safety",
+                         sOrdonDayBoundaryReloadPeerId, sOrdonDayBoundaryReloadFlag,
+                         sOrdonDayBoundaryReloadWaitTicks, unsafePeerId, deleteQueueBusy);
+        } else if (sOrdonDayBoundaryReloadWaitTicks == 1 ||
+                   (sOrdonDayBoundaryReloadWaitTicks % 300) == 0)
         {
             DuskLog.info("Multiplayer Ordon day boundary reload waiting peer={} flag={} "
                          "ticks={} stable={} unsafePeer={} deleteQueueBusy={}",
@@ -2457,22 +2525,26 @@ bool flush_ordon_day_boundary_reload() {
         return false;
     }
 
-    if (affectedPeerUnsafe || deleteQueueBusy) {
-        DuskLog.warn("Multiplayer Ordon day boundary reload safety wait timed out peer={} "
-                        "flag={} unsafePeer={} deleteQueueBusy={}",
-                        sOrdonDayBoundaryReloadPeerId, sOrdonDayBoundaryReloadFlag,
-                        unsafePeerId, deleteQueueBusy);
+    // Do not mutate an Ordon layer-selection bit while its old actor set is
+    // still live. Commit every boundary bit accumulated during the wait only
+    // after all Ordon participants and the process deletion queue are safe,
+    // immediately before the controlled room restart.
+    for (uint16_t pendingFlag : sOrdonDayBoundaryReloadFlags) {
+        apply_remote_event_bit(pendingFlag, true);
     }
 
     DuskLog.info("Multiplayer Ordon day boundary reload restarting current room peer={} flag={} "
-                 "stage={} room={} layer={}",
+                 "pendingFlags={} stage={} room={} layer={}",
                  sOrdonDayBoundaryReloadPeerId, sOrdonDayBoundaryReloadFlag,
-                 current_stage_name(), dComIfGp_roomControl_getStayNo(),
+                 sOrdonDayBoundaryReloadFlags.size(), current_stage_name(),
+                 dComIfGp_roomControl_getStayNo(),
                  static_cast<int>(dComIfGp_getStartStageLayer()));
     sOrdonDayBoundaryReloadPending = false;
     sOrdonDayBoundaryReloadPeerId.clear();
     sOrdonDayBoundaryReloadFlag = 0;
+    sOrdonDayBoundaryReloadFlags.clear();
     sOrdonDayBoundaryReloadWaitTicks = 0;
+    sOrdonDayBoundaryReloadSafeTicks = 0;
     daPy_py_c::forceRestartRoom(0, 5, 0xC9);
     return true;
 }
@@ -4468,7 +4540,9 @@ void reset_connection_state() {
     sOrdonDayBoundaryReloadPending = false;
     sOrdonDayBoundaryReloadPeerId.clear();
     sOrdonDayBoundaryReloadFlag = 0;
+    sOrdonDayBoundaryReloadFlags.clear();
     sOrdonDayBoundaryReloadWaitTicks = 0;
+    sOrdonDayBoundaryReloadSafeTicks = 0;
     sOrdonDayBoundaryReloadTransitionActive = false;
     sOrdonDayBoundaryReloadSawStageLoad = false;
     sMirrorCompleteReloadPending = false;
@@ -4622,9 +4696,14 @@ const char* packet_category(const std::string& type) {
         return "inventory_progress";
     }
     if (type == "key_num" || type == "light_drop_num" || type == "light_drop_get_flag" ||
-        type == "max_life_update" || type == "bottle_slots" || type == "rupee_count")
+        type == "max_life_update" || type == "bottle_slots" || type == "rupee_count" ||
+        type == "poe_count" || type == "malo_fundraising" || type == "charlo_offering" ||
+        type == "fish_record")
     {
         return "counters";
+    }
+    if (type == "collect_smell") {
+        return "inventory_progress";
     }
     if (type == "reliable") {
         return "reliable_envelope";
@@ -5461,6 +5540,15 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
     }
     const json bombBagSlots = make_bomb_bag_slots_snapshot();
 
+    json fishRecords = json::array();
+    for (int fishIndex = 0; fishIndex < kSyncedFishSpeciesCount; ++fishIndex) {
+        fishRecords.push_back({
+            {"index", fishIndex},
+            {"count", dComIfGs_getFishNum(static_cast<u8>(fishIndex))},
+            {"max_size", dComIfGs_getFishSize(static_cast<u8>(fishIndex))},
+        });
+    }
+
     json crystals = json::array();
     json mirrors = json::array();
     json darkClearLevels = json::array();
@@ -5521,6 +5609,14 @@ void send_save_snapshot(DirectPeer* peer = nullptr, const std::string& targetCli
         {"max_life", dComIfGs_getMaxLife()},
         {"bottle_slots", dComIfGs_getBottleSlotCount()},
         {"rupees", dComIfGs_getRupee()},
+        {"poe_count", dComIfGs_getPohSpiritNum()},
+        {"malo_fundraising", {
+            {"phase", malo_fundraising_phase()},
+            {"value", dMsgObject_getFundRaising()},
+        }},
+        {"charlo_offering", dMsgObject_getOffering()},
+        {"fish_records", fishRecords},
+        {"collect_smell", raw_collect_smell()},
         {"ooccoo_state", make_shared_ooccoo_state()},
     };
     if (!targetClientId.empty()) {
@@ -7675,6 +7771,7 @@ void forget_peer_state(const std::string& peerId) {
     sGanondorfRemotePlayerDamageLastSequenceByPeer.erase(peerId);
     sGanondorfRemotePlayerDamageCooldownByPeer.erase(peerId);
     sPvpRemoteHitLastSequenceByPeer.erase(peerId);
+    sFishCatchLastSequenceByPeer.erase(peerId);
     sPendingGanondorfRemoteHitEvents.erase(
         std::remove_if(sPendingGanondorfRemoteHitEvents.begin(),
                        sPendingGanondorfRemoteHitEvents.end(),
@@ -8165,6 +8262,7 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             return;
         }
 
+        const int localMaloPhaseBeforeSnapshot = malo_fundraising_phase();
         std::optional<ScopedRemoteSaveBitApplication> applyingRemoteSaveBit;
         applyingRemoteSaveBit.emplace();
         if (message.contains("ooccoo_state")) {
@@ -8338,6 +8436,73 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             dComIfGs_setRupee(static_cast<u16>(remoteRupees));
             sApplyingRemoteSaveBit = false;
             DuskLog.info("Multiplayer snapshot rupees set to {}", remoteRupees);
+        }
+        const int remotePoeCount = message.value("poe_count", -1);
+        if (remotePoeCount > dComIfGs_getPohSpiritNum() && remotePoeCount <= MAX_POH_NUM) {
+            ScopedRemoteSaveBitApplication applyingCounter;
+            dComIfGs_setPohSpiritNum(static_cast<u8>(remotePoeCount));
+            DuskLog.info("Multiplayer snapshot Poe count set to {}", remotePoeCount);
+        }
+        const json maloFundraising = message.value("malo_fundraising", json::object());
+        const int remoteMaloPhase = maloFundraising.is_object() ?
+                                        maloFundraising.value("phase", -1) : -1;
+        const int remoteMaloValue = maloFundraising.is_object() ?
+                                        maloFundraising.value("value", -1) : -1;
+        const int localMaloPhase = malo_fundraising_phase();
+        if (remoteMaloPhase >= 0 && remoteMaloPhase <= 2 && remoteMaloValue >= 0 &&
+            remoteMaloValue <= kMaxSyncedDonationTotal && remoteMaloPhase == localMaloPhase)
+        {
+            const int localMaloValue = dMsgObject_getFundRaising();
+            if (remoteMaloPhase > localMaloPhaseBeforeSnapshot ||
+                remoteMaloValue > localMaloValue)
+            {
+                ScopedRemoteSaveBitApplication applyingCounter;
+                dMsgObject_setFundRaising(static_cast<u16>(remoteMaloValue));
+                DuskLog.info("Multiplayer snapshot Malo fundraising set phase={} value={}",
+                             remoteMaloPhase, remoteMaloValue);
+            }
+        }
+        const int remoteCharloOffering = message.value("charlo_offering", -1);
+        if (remoteCharloOffering > dMsgObject_getOffering() &&
+            remoteCharloOffering <= kMaxSyncedDonationTotal)
+        {
+            ScopedRemoteSaveBitApplication applyingCounter;
+            dMsgObject_setOffering(static_cast<u16>(remoteCharloOffering));
+            DuskLog.info("Multiplayer snapshot Charlo offering set to {}",
+                         remoteCharloOffering);
+        }
+        for (const json& entry : message.value("fish_records", json::array())) {
+            if (!entry.is_object()) {
+                continue;
+            }
+            const int fishIndex = entry.value("index", -1);
+            const int remoteCount = entry.value("count", -1);
+            const int remoteMaxSize = entry.value("max_size", -1);
+            if (fishIndex < 0 || fishIndex >= kSyncedFishSpeciesCount || remoteCount < 0 ||
+                remoteCount > kMaxSyncedFishCount || remoteMaxSize < 0 || remoteMaxSize > 0xFF)
+            {
+                continue;
+            }
+
+            dSv_fishing_info_c& fishingInfo =
+                g_dComIfG_gameInfo.info.getPlayer().getFishingInfo();
+            const u16 mergedCount = std::max<u16>(
+                fishingInfo.getFishCount(fishIndex), static_cast<u16>(remoteCount));
+            const u8 mergedMaxSize = std::max<u8>(
+                fishingInfo.getMaxSize(fishIndex), static_cast<u8>(remoteMaxSize));
+            ScopedRemoteSaveBitApplication applyingCounter;
+            fishingInfo.mFishCount[fishIndex] = mergedCount;
+            fishingInfo.setMaxSize(fishIndex, mergedMaxSize);
+            DuskLog.info("Multiplayer snapshot fish record index={} count={} max_size={}",
+                         fishIndex, mergedCount, mergedMaxSize);
+        }
+        const int remoteSmell = message.value("collect_smell", -1);
+        if (is_valid_collect_smell(remoteSmell) &&
+            collect_smell_snapshot_priority(remoteSmell) >
+                collect_smell_snapshot_priority(raw_collect_smell()))
+        {
+            apply_remote_collect_smell(static_cast<u8>(remoteSmell));
+            DuskLog.info("Multiplayer snapshot collection scent set to {}", remoteSmell);
         }
         if (message.value("manual_sync", false)) {
             sManualSyncReloadPending = true;
@@ -8844,13 +9009,26 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             queue_zora_thaw_reload(peerId, flag, parse_zora_thaw_destination(routedMessage));
             return;
         }
-        if (set && is_ordon_day_boundary_event_bit(flag) &&
-            is_local_faron_cage_sequence_active())
-        {
-            sDeferredFaronDayBoundaryEvents.push_back(routedMessage);
-            DuskLog.info("Multiplayer deferred remote Ordon day event peer={} flag={} "
-                         "reason=local_faron_cage_sequence", peerId, flag);
-            return;
+        if (set && is_ordon_day_boundary_event_bit(flag)) {
+            if (dComIfGs_isEventBit(flag)) {
+                DuskLog.info("Multiplayer ignored duplicate remote Ordon day event peer={} "
+                             "flag={}", peerId, flag);
+                return;
+            }
+            if (is_local_faron_cage_sequence_active()) {
+                sDeferredFaronDayBoundaryEvents.push_back(routedMessage);
+                DuskLog.info("Multiplayer deferred remote Ordon day event peer={} flag={} "
+                             "reason=local_faron_cage_sequence", peerId, flag);
+                return;
+            }
+            if (is_ordon_day_boundary_stage(current_stage_name())) {
+                // The bit selects a different actor/layer set throughout
+                // Ordon. Queue it without mutating the live save; the reload
+                // path commits it only once every affected participant and
+                // the process deletion queue are safe.
+                queue_ordon_day_boundary_reload(peerId, flag);
+                return;
+            }
         }
         if (is_faron_warp_sequence_event_bit(flag) && should_defer_faron_warp_sequence()) {
             sDeferredFaronWarpSequenceEvents.push_back(routedMessage);
@@ -8859,9 +9037,6 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             return;
         }
         apply_remote_event_bit(flag, set);
-        if (set && is_ordon_day_boundary_event_bit(flag)) {
-            queue_ordon_day_boundary_reload(peerId, flag);
-        }
     } else if (type == "tbox_bit") {
         const int stage = routedMessage.value("stage", -1);
         const int flag = routedMessage.value("flag", -1);
@@ -8967,20 +9142,45 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             DuskLog.info("Multiplayer applied remote light drop get flag area={}", area);
         }
     } else if (type == "max_life_update") {
-        // Monotonic max-merge, not last-write-wins: max life should never
-        // decrease from a remote update, so only raise it, never lower it.
         const int value = message.value("value", -1);
+        const int previousValue = message.value("previous_value", -1);
+        const uint32_t eventSequence = message.value("event_sequence", 0U);
+        bool newPickupEvent = false;
+        if (eventSequence != 0 && previousValue >= 0 && value > previousValue) {
+            const std::string peerAndType =
+                fmt::format("{}:max_life", resolve_peer_id(routedMessage));
+            uint32_t& lastSequence = sPermanentPickupLastSequenceByPeerAndType[peerAndType];
+            if (eventSequence > lastSequence) {
+                lastSequence = eventSequence;
+                newPickupEvent = true;
+            }
+        }
+
         const int pending = dComIfGp_getItemMaxLifeCount();
         const int projected = std::clamp<int>(dComIfGs_getMaxLife() + pending, 15, 100);
-        if (pending != 0 && value == projected) {
+        if (eventSequence != 0 && !newPickupEvent) {
+            DuskLog.info("Multiplayer ignored duplicate remote max life event sequence={}",
+                         eventSequence);
+        } else if (pending != 0 && value == projected) {
             sPendingMaxLifePublicationToSuppress = static_cast<uint8_t>(value);
             DuskLog.info("Multiplayer coalesced remote max life value={} pending_delta={}",
                          value, pending);
-        } else if (value >= 0 && value <= 100 && value > dComIfGs_getMaxLife()) {
+        } else if (value >= 0 && value <= 100) {
+            const int currentValue = dComIfGs_getMaxLife();
+            int mergedValue = std::max(currentValue, value);
+            if (newPickupEvent && currentValue > previousValue) {
+                mergedValue = std::min(currentValue + (value - previousValue), 100);
+            }
+            if (mergedValue <= currentValue) {
+                return;
+            }
             sApplyingRemoteSaveBit = true;
-            dComIfGs_setMaxLife(static_cast<u8>(value));
+            dComIfGs_setMaxLife(static_cast<u8>(mergedValue));
             sApplyingRemoteSaveBit = false;
-            DuskLog.info("Multiplayer applied remote max life value={}", value);
+            DuskLog.info("Multiplayer applied remote max life previous_value={} value={} "
+                         "merged_value={} concurrent_merge={}",
+                         previousValue, value, mergedValue,
+                         newPickupEvent && currentValue > previousValue);
         }
     } else if (type == "bottle_slots") {
         const int count = message.value("count", -1);
@@ -8991,17 +9191,39 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             DuskLog.info("Multiplayer ignored live bottle slots count={} during randomizer",
                          count);
         } else if (count >= 0 && count <= 4) {
-            // Same monotonic max-merge as max_life. Fills additional empty
-            // slots locally (always as a generic empty bottle) to match the
-            // remote count -- never touches existing slot contents.
+            const int previousCount = message.value("previous_count", -1);
+            const uint32_t eventSequence = message.value("event_sequence", 0U);
+            bool newPickupEvent = false;
+            if (eventSequence != 0 && previousCount >= 0 && count > previousCount) {
+                const std::string peerAndType =
+                    fmt::format("{}:bottle_slots", resolve_peer_id(routedMessage));
+                uint32_t& lastSequence = sPermanentPickupLastSequenceByPeerAndType[peerAndType];
+                if (eventSequence > lastSequence) {
+                    lastSequence = eventSequence;
+                    newPickupEvent = true;
+                }
+            }
+            if (eventSequence != 0 && !newPickupEvent) {
+                DuskLog.info("Multiplayer ignored duplicate remote bottle event sequence={}",
+                             eventSequence);
+                return;
+            }
+
             const int localCount = dComIfGs_getBottleSlotCount();
-            if (count > localCount) {
+            int mergedCount = std::max(localCount, count);
+            if (newPickupEvent && localCount > previousCount) {
+                mergedCount = std::min(localCount + (count - previousCount), 4);
+            }
+            if (mergedCount > localCount) {
                 sApplyingRemoteSaveBit = true;
-                for (int i = localCount; i < count; ++i) {
+                for (int i = localCount; i < mergedCount; ++i) {
                     dComIfGs_setEmptyBottle();
                 }
                 sApplyingRemoteSaveBit = false;
-                DuskLog.info("Multiplayer applied remote bottle slots count={}", count);
+                DuskLog.info("Multiplayer applied remote bottle slots previous_count={} count={} "
+                             "merged_count={} concurrent_merge={}",
+                             previousCount, count, mergedCount,
+                             newPickupEvent && localCount > previousCount);
             }
         }
     } else if (type == "rupee_count") {
@@ -9018,6 +9240,109 @@ void handle_message(const json& message, DirectPeer* sender = nullptr) {
             dComIfGs_setRupee(static_cast<u16>(value));
             sApplyingRemoteSaveBit = false;
             DuskLog.info("Multiplayer applied remote rupee count value={}", value);
+        }
+    } else if (type == "poe_count") {
+        const int value = message.value("value", -1);
+        if (randomizer_multiplayer_sync_active()) {
+            // Resolved randomizer rewards already carry Poe souls through
+            // rando_item_get. Applying this companion as well can count one
+            // reward twice when the absolute update arrives first.
+            DuskLog.info("Multiplayer ignored live Poe count value={} during randomizer", value);
+        } else if (value >= 0 && value <= MAX_POH_NUM) {
+            const int previousValue = message.value("previous_value", -1);
+            const uint32_t eventSequence = message.value("event_sequence", 0U);
+            bool newPickupEvent = false;
+            if (eventSequence != 0 && previousValue >= 0 && value > previousValue) {
+                const std::string peerAndType =
+                    fmt::format("{}:poe_count", resolve_peer_id(routedMessage));
+                uint32_t& lastSequence = sPermanentPickupLastSequenceByPeerAndType[peerAndType];
+                if (eventSequence > lastSequence) {
+                    lastSequence = eventSequence;
+                    newPickupEvent = true;
+                }
+            }
+            if (eventSequence != 0 && !newPickupEvent) {
+                DuskLog.info("Multiplayer ignored duplicate remote Poe event sequence={}",
+                             eventSequence);
+                return;
+            }
+
+            const int currentValue = dComIfGs_getPohSpiritNum();
+            int mergedValue = std::max(currentValue, value);
+            if (newPickupEvent && currentValue > previousValue) {
+                mergedValue = std::min(currentValue + (value - previousValue),
+                                       static_cast<int>(MAX_POH_NUM));
+            }
+            if (mergedValue > currentValue) {
+                ScopedRemoteSaveBitApplication applyingCounter;
+                dComIfGs_setPohSpiritNum(static_cast<u8>(mergedValue));
+                DuskLog.info("Multiplayer applied remote Poe count previous_value={} value={} "
+                             "merged_value={} concurrent_merge={}",
+                             previousValue, value, mergedValue,
+                             newPickupEvent && currentValue > previousValue);
+            }
+        }
+    } else if (type == "malo_fundraising") {
+        const int phase = message.value("phase", -1);
+        const int value = message.value("value", -1);
+        const int localPhase = malo_fundraising_phase();
+        if (phase >= 0 && phase <= 2 && value >= 0 && value <= kMaxSyncedDonationTotal &&
+            phase == localPhase)
+        {
+            ScopedRemoteSaveBitApplication applyingCounter;
+            dMsgObject_setFundRaising(static_cast<u16>(value));
+            DuskLog.info("Multiplayer applied remote Malo fundraising phase={} value={}",
+                         phase, value);
+        }
+    } else if (type == "charlo_offering") {
+        const int value = message.value("value", -1);
+        if (value >= 0 && value <= kMaxSyncedDonationTotal && value > dMsgObject_getOffering()) {
+            ScopedRemoteSaveBitApplication applyingCounter;
+            dMsgObject_setOffering(static_cast<u16>(value));
+            DuskLog.info("Multiplayer applied remote Charlo offering value={}", value);
+        }
+    } else if (type == "fish_record") {
+        const int fishIndex = message.value("index", -1);
+        const int remoteCount = message.value("count", -1);
+        const int remoteMaxSize = message.value("max_size", -1);
+        const uint32_t catchSequence = message.value("catch_sequence", 0U);
+        if (fishIndex >= 0 && fishIndex < kSyncedFishSpeciesCount && remoteCount >= 0 &&
+            remoteCount <= kMaxSyncedFishCount && remoteMaxSize >= 0 && remoteMaxSize <= 0xFF)
+        {
+            dSv_fishing_info_c& fishingInfo =
+                g_dComIfG_gameInfo.info.getPlayer().getFishingInfo();
+            const int localCount = fishingInfo.getFishCount(fishIndex);
+            int mergedCount = std::max(localCount, remoteCount);
+            bool mergedNewCatch = false;
+            if (catchSequence != 0) {
+                const std::string peerId = resolve_peer_id(routedMessage);
+                if (!peerId.empty()) {
+                    uint32_t& lastSequence = sFishCatchLastSequenceByPeer[peerId];
+                    if (catchSequence > lastSequence) {
+                        lastSequence = catchSequence;
+                        mergedCount = std::max(mergedCount,
+                                               std::min(localCount + 1, kMaxSyncedFishCount));
+                        mergedNewCatch = true;
+                    }
+                }
+            }
+            const int mergedMaxSize = std::max<int>(
+                fishingInfo.getMaxSize(fishIndex), remoteMaxSize);
+            ScopedRemoteSaveBitApplication applyingCounter;
+            fishingInfo.mFishCount[fishIndex] = static_cast<u16>(mergedCount);
+            fishingInfo.setMaxSize(fishIndex, static_cast<u8>(mergedMaxSize));
+            DuskLog.info("Multiplayer applied remote fish record index={} count={} max_size={} "
+                         "catch_sequence={} merged_new_catch={}",
+                         fishIndex, mergedCount, mergedMaxSize, catchSequence, mergedNewCatch);
+        }
+    } else if (type == "collect_smell") {
+        const int smell = message.value("value", -1);
+        if (is_valid_collect_smell(smell) &&
+            collect_smell_snapshot_priority(smell) >
+                collect_smell_snapshot_priority(raw_collect_smell()))
+        {
+            apply_remote_collect_smell(static_cast<u8>(smell));
+            DuskLog.info("Multiplayer applied remote collection scent value={}", smell);
         }
     } else if (type == "switch_bit") {
         const int stage = message.value("stage", -1);
@@ -11407,6 +11732,13 @@ void update_connected() {
     tick_pending_manual_sync_apply();
     apply_shared_ooccoo_local_form();
 
+    if (sOrdonDayBoundaryReloadPending && is_stage_load_unsafe_for_multiplayer()) {
+        // flush_ordon_day_boundary_reload() is deliberately not called while
+        // the local engine is unsafe. Reset the consecutive-safe window here
+        // so two safe frames separated by a cutscene/load cannot qualify.
+        sOrdonDayBoundaryReloadSafeTicks = 0;
+    }
+
     if (sOrdonDayBoundaryReloadTransitionActive) {
         if (is_engine_stage_load_unsafe_for_multiplayer()) {
             sOrdonDayBoundaryReloadSawStageLoad = true;
@@ -12711,7 +13043,9 @@ void apply_sync_flags_enabled(bool enabled) {
         sOrdonDayBoundaryReloadPending = false;
         sOrdonDayBoundaryReloadPeerId.clear();
         sOrdonDayBoundaryReloadFlag = 0;
+        sOrdonDayBoundaryReloadFlags.clear();
         sOrdonDayBoundaryReloadWaitTicks = 0;
+        sOrdonDayBoundaryReloadSafeTicks = 0;
         sOrdonDayBoundaryReloadTransitionActive = false;
         sOrdonDayBoundaryReloadSawStageLoad = false;
         sMirrorCompleteReloadPending = false;
@@ -14662,9 +14996,9 @@ void notify_local_light_drop_get_flag_set(uint8_t area) {
 // Heart pieces/containers share one item ID each across many pickups, so
 // the item_get lane's first-bit guard only lets the first one of each type
 // replay remotely. Broadcast the absolute value instead, same as key_num/
-// light_drop_num, but merged as monotonic-max on receive since max life
-// should never decrease.
-void notify_local_max_life_set(uint8_t maxLife) {
+// light_drop_num. Include the previous value so receivers can distinguish a
+// redundant absolute update from a different pickup made concurrently.
+void notify_local_max_life_set(uint8_t previousMaxLife, uint8_t maxLife) {
     if (sPendingMaxLifePublicationToSuppress.has_value()) {
         const bool matches = *sPendingMaxLifePublicationToSuppress == maxLife;
         sPendingMaxLifePublicationToSuppress.reset();
@@ -14674,33 +15008,47 @@ void notify_local_max_life_set(uint8_t maxLife) {
         }
     }
 
-    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit ||
+        maxLife <= previousMaxLife)
+    {
         return;
     }
 
+    if (++sLocalPermanentPickupSequence == 0) {
+        ++sLocalPermanentPickupSequence;
+    }
     send_json({
         {"type", "max_life_update"},
+        {"previous_value", previousMaxLife},
         {"value", maxLife},
+        {"event_sequence", sLocalPermanentPickupSequence},
     });
-    DuskLog.info("Multiplayer sent local max life value={}", maxLife);
+    DuskLog.info("Multiplayer sent local max life previous_value={} value={} sequence={}",
+                 previousMaxLife, maxLife, sLocalPermanentPickupSequence);
 }
 
 // Vanilla empty-bottle grants share one item ID across up to 4 NPCs/quests,
 // so the item_get lane swallows every one after the first. Randomizer instead
 // carries every resolved reward through rando_item_get; sending this companion
 // lane as well would apply one bottle twice on receivers.
-void notify_local_bottle_slot_count_set(uint8_t count) {
+void notify_local_bottle_slot_count_set(uint8_t previousCount, uint8_t count) {
     if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit ||
-        randomizer_multiplayer_sync_active())
+        randomizer_multiplayer_sync_active() || count <= previousCount)
     {
         return;
     }
 
+    if (++sLocalPermanentPickupSequence == 0) {
+        ++sLocalPermanentPickupSequence;
+    }
     send_json({
         {"type", "bottle_slots"},
+        {"previous_count", previousCount},
         {"count", count},
+        {"event_sequence", sLocalPermanentPickupSequence},
     });
-    DuskLog.info("Multiplayer sent local bottle slot count={}", count);
+    DuskLog.info("Multiplayer sent local bottle slot previous_count={} count={} sequence={}",
+                 previousCount, count, sLocalPermanentPickupSequence);
 }
 
 void notify_local_rupee_count_set(uint16_t rupees) {
@@ -14722,6 +15070,108 @@ void notify_local_rupee_count_set(uint16_t rupees) {
         {"value", rupees},
     });
     DuskLog.info("Multiplayer sent local rupee count value={}", rupees);
+}
+
+void notify_local_poe_count_set(uint8_t previousCount, uint8_t count) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit ||
+        count > MAX_POH_NUM || count <= previousCount || randomizer_multiplayer_sync_active())
+    {
+        return;
+    }
+
+    if (++sLocalPermanentPickupSequence == 0) {
+        ++sLocalPermanentPickupSequence;
+    }
+    send_json({
+        {"type", "poe_count"},
+        {"previous_value", previousCount},
+        {"value", count},
+        {"event_sequence", sLocalPermanentPickupSequence},
+    });
+    DuskLog.info("Multiplayer sent local Poe count previous_value={} value={} sequence={}",
+                 previousCount, count, sLocalPermanentPickupSequence);
+}
+
+void notify_local_malo_fundraising_set(uint16_t value) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit ||
+        value > kMaxSyncedDonationTotal)
+    {
+        return;
+    }
+
+    const int phase = malo_fundraising_phase();
+    send_json({
+        {"type", "malo_fundraising"},
+        {"phase", phase},
+        {"value", value},
+    });
+    DuskLog.info("Multiplayer sent local Malo fundraising phase={} value={}", phase, value);
+}
+
+void notify_local_charlo_offering_set(uint16_t value) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit ||
+        value > kMaxSyncedDonationTotal)
+    {
+        return;
+    }
+
+    send_json({
+        {"type", "charlo_offering"},
+        {"value", value},
+    });
+    DuskLog.info("Multiplayer sent local Charlo offering value={}", value);
+}
+
+void notify_local_fish_caught(uint8_t fishIndex, uint16_t count, uint8_t maxSize) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit ||
+        fishIndex >= kSyncedFishSpeciesCount || count > kMaxSyncedFishCount)
+    {
+        return;
+    }
+
+    if (++sLocalFishCatchSequence == 0) {
+        ++sLocalFishCatchSequence;
+    }
+    send_json({
+        {"type", "fish_record"},
+        {"index", fishIndex},
+        {"count", count},
+        {"max_size", maxSize},
+        {"catch_sequence", sLocalFishCatchSequence},
+    });
+    DuskLog.info("Multiplayer sent local fish catch index={} count={} max_size={} sequence={}",
+                 fishIndex, count, maxSize, sLocalFishCatchSequence);
+}
+
+void notify_local_fish_size_set(uint8_t fishIndex, uint16_t count, uint8_t maxSize) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit ||
+        fishIndex >= kSyncedFishSpeciesCount || count > kMaxSyncedFishCount)
+    {
+        return;
+    }
+
+    send_json({
+        {"type", "fish_record"},
+        {"index", fishIndex},
+        {"count", count},
+        {"max_size", maxSize},
+    });
+    DuskLog.info("Multiplayer sent local fish size index={} count={} max_size={}",
+                 fishIndex, count, maxSize);
+}
+
+void notify_local_collect_smell_set(uint8_t smell) {
+    if (!sync_flags_enabled() || !sSession.welcomed || sApplyingRemoteSaveBit ||
+        !is_valid_collect_smell(smell))
+    {
+        return;
+    }
+
+    send_json({
+        {"type", "collect_smell"},
+        {"value", smell},
+    });
+    DuskLog.info("Multiplayer sent local collection scent value={}", smell);
 }
 
 }  // namespace dusk::multiplayer
