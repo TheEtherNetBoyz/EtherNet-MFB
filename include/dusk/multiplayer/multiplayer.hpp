@@ -326,6 +326,7 @@ struct RelayHostOptions {
     std::string room = "dev";
     std::string password;
     std::string relayCode;
+    bool connectLocally = false;
     bool dummyModel = true;
     bool nameLabels = true;
     bool syncFlags = true;
@@ -340,6 +341,7 @@ struct RelayJoinOptions {
     std::string room = "dev";
     std::string password;
     std::string relayCode;
+    bool connectLocally = false;
     bool dummyModel = true;
     bool nameLabels = true;
     bool syncFlags = true;

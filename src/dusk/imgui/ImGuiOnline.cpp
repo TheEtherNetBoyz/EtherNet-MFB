@@ -431,6 +431,9 @@ void ImGuiOnline::draw(bool& open) {
         }
 
         if (ImGui::BeginTabItem("Relay")) {
+            ImGui::Checkbox("Relay is running on this PC", &m_relayLocal);
+            ImGui::TextDisabled("Uses this PC instead of routing back through the public address.");
+            ImGui::Separator();
             if (ImGui::CollapsingHeader("Host", ImGuiTreeNodeFlags_DefaultOpen)) {
                 ImGui::TextUnformatted("Relay code");
                 ImGui::SetNextItemWidth(-1.0f);
@@ -458,6 +461,7 @@ void ImGuiOnline::draw(bool& open) {
                     options.room = m_relayRoom;
                     options.password = m_relayPassword;
                     options.relayCode = m_relayCode;
+                    options.connectLocally = m_relayLocal;
                     options.dummyModel = m_dummyModel;
                     options.nameLabels = m_nameLabels;
                     options.syncFlags = m_syncFlags;
@@ -503,6 +507,7 @@ void ImGuiOnline::draw(bool& open) {
                     options.room = m_relayRoom;
                     options.password = m_relayPassword;
                     options.relayCode = m_relayCode;
+                    options.connectLocally = m_relayLocal;
                     options.dummyModel = m_dummyModel;
                     options.nameLabels = m_nameLabels;
                     options.syncFlags = m_syncFlags;

@@ -32,6 +32,7 @@ private:
     bool m_displayMidna = true;
     bool m_remoteCollision = true;
     bool m_pvp = false;
+    bool m_relayLocal = false;
     int m_syncPeerIndex = 0;
     int m_lastManualSyncRequestState = -1;
     bool m_namesLoaded = false;

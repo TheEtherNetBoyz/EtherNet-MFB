@@ -206,6 +206,10 @@ constexpr uint8_t kUdpPacketTypeRemoteObject = 3;
 constexpr uint8_t kUdpPacketTypeMidnaMsgpack = 4;
 constexpr uint8_t kUdpPacketTypePoseAck = 5;
 constexpr uint8_t kUdpPacketTypeRelayRegister = 6;
+// Keep the relay's authenticated UDP/NAT endpoint fresh. This must remain
+// shorter than the remote-pose lifetime so a changed or short-lived VPN/NAT
+// mapping cannot make puppets repeatedly expire between registrations.
+constexpr uint32_t kRelayUdpRegisterIntervalTicks = 30;
 constexpr uint32_t kGanondorfTargetMaxAgeTicks = 30;
 constexpr const char* kGanondorfFinalSyncId = "D_MN09B:GANONDORF_FINAL";
 constexpr float kGanondorfRemoteLinkEyeOffsetY = 150.0f;
@@ -11776,8 +11780,7 @@ void update_connected() {
     update_local_faron_cage_sequence_state();
     if (sSession.mode == NetworkMode::RelayHarness && sSession.welcomed) {
         ++sSession.relayUdpRegisterTicks;
-        const uint32_t registerInterval = sSession.relayUdpReady ? 600 : 30;
-        if ((sSession.relayUdpRegisterTicks % registerInterval) == 0) {
+        if ((sSession.relayUdpRegisterTicks % kRelayUdpRegisterIntervalTicks) == 0) {
             send_relay_udp_registration();
         }
     }
@@ -12666,7 +12669,7 @@ bool host_relay(const RelayHostOptions& options, std::string* errorOut) {
     sEnabled = true;
     sSession.mode = NetworkMode::RelayHarness;
     sSession.name = options.name.empty() ? "Host" : options.name;
-    sSession.host = payload->host;
+    sSession.host = options.connectLocally ? "127.0.0.1" : payload->host;
     sSession.port = payload->port;
     sSession.room = options.room;
     sSession.sessionId = payload->sessionId;
@@ -12751,7 +12754,7 @@ bool join_relay(const RelayJoinOptions& options, std::string* errorOut) {
     sEnabled = true;
     sSession.mode = NetworkMode::RelayHarness;
     sSession.name = options.name.empty() ? "Player" : options.name;
-    sSession.host = payload->host;
+    sSession.host = options.connectLocally ? "127.0.0.1" : payload->host;
     sSession.port = payload->port;
     sSession.room = options.room;
     sSession.sessionId = payload->sessionId;
