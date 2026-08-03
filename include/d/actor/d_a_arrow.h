@@ -29,6 +29,9 @@ public:
     void setBlur();
     void setLightArrowHitMark(cXyz const*);
     void setLightChargeEffect(int);
+#if TARGET_PC
+    void prepareLightArrowEffectInterpolation();
+#endif
     int setArrowWaterNextPos(cXyz*, cXyz*);
     void setArrowAt(f32);
     void arrowShooting();

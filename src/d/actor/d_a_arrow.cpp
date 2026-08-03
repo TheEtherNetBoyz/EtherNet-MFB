@@ -19,6 +19,7 @@
 #include "d/actor/d_a_hozelda.h"
 #if TARGET_PC
 #include "dusk/achievements.h"
+#include "dusk/frame_interpolation.h"
 #endif
 
 int daArrow_c::createHeap() {
@@ -172,6 +173,34 @@ void daArrow_c::setLightChargeEffect(int param_0) {
         }
     }
 }
+
+#if TARGET_PC
+void daArrow_c::prepareLightArrowEffectInterpolation() {
+    Mtx emitterMtx;
+
+    for (int i = 0; i < field_0x946; ++i) {
+        JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(field_0x97c[i]);
+        if (emitter != NULL) {
+            MTXCopy(emitter->mGlobalRot, emitterMtx);
+            emitterMtx[0][3] = emitter->mGlobalTrs.x;
+            emitterMtx[1][3] = emitter->mGlobalTrs.y;
+            emitterMtx[2][3] = emitter->mGlobalTrs.z;
+            dusk::frame_interp::record_final_mtx(emitterMtx, emitter);
+        }
+    }
+
+    for (int i = 0; i < 4; ++i) {
+        JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(field_0x96c[i]);
+        if (emitter != NULL) {
+            MTXCopy(emitter->mGlobalRot, emitterMtx);
+            emitterMtx[0][3] = emitter->mGlobalTrs.x;
+            emitterMtx[1][3] = emitter->mGlobalTrs.y;
+            emitterMtx[2][3] = emitter->mGlobalTrs.z;
+            dusk::frame_interp::record_final_mtx(emitterMtx, emitter);
+        }
+    }
+}
+#endif
 
 int daArrow_c::setArrowWaterNextPos(cXyz* i_start, cXyz* i_end) {
     field_0x5dc.Set(i_start, i_end, this);
@@ -1053,6 +1082,9 @@ int daArrow_c::execute() {
 
         if (mArrowType == 2) {
             setLightChargeEffect(0);
+#if TARGET_PC
+            prepareLightArrowEffectInterpolation();
+#endif
         }
 
         attention_info.position = current.pos;
