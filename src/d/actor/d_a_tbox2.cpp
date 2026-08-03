@@ -73,9 +73,11 @@ static dCcD_SrcCyl l_cyl_src = {
 
 int daTbox2_c::Create() {
 #if TARGET_PC
-    // If the flag for this box is set, open it
+    // TBOX2 rewards are repeatable in vanilla and their upper parameter byte is
+    // not a unique persistent chest ID. Randomizer patches that byte to a unique
+    // ID, so only interpret it as a Tbox flag while randomizer is active.
     u8 tboxId = getTboxNo();
-    if (tboxId != 0xFF && dComIfGs_isTbox(tboxId)) {
+    if (randomizer_IsActive() && tboxId != 0xFF && dComIfGs_isTbox(tboxId)) {
         // Set the action for not allowing the player to open it
         init_actionWait();
         // Set the animation frame to open
@@ -414,7 +416,10 @@ int daTbox2_c::setGetDemoItem() {
     } else {
 #if TARGET_PC
         u8 tboxId = getTboxNo();
-        if (tboxId != 0xFF) {
+        // Vanilla TBOX2 rewards are repeatable and can share this parameter
+        // value with unrelated persistent chests. Randomizer assigns unique
+        // IDs, so it is the only mode in which this is a real Tbox flag.
+        if (randomizer_IsActive() && tboxId != 0xFF) {
             dComIfGs_onTbox(tboxId);
         }
 #endif
