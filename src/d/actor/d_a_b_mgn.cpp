@@ -12,6 +12,9 @@
 #include "f_op/f_op_msg_mng.h"
 #include "m_Do/m_Do_graphic.h"
 #include "f_op/f_op_actor_enemy.h"
+#if TARGET_PC
+#include "dusk/frame_interpolation.h"
+#endif
 
 enum B_MGN_RES_FILE_ID {
     /* BCK */
@@ -578,6 +581,14 @@ void daB_MGN_c::setHeadLightEffect() {
     JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(mHeadLightEmitterID);
     if (emitter != NULL) {
         emitter->setGlobalSRTMatrix(mpMgnModelMorf->getModel()->getAnmMtx(JNT_HEAD));
+#if TARGET_PC
+        Mtx emitterMtx;
+        MTXCopy(emitter->mGlobalRot, emitterMtx);
+        emitterMtx[0][3] = emitter->mGlobalTrs.x;
+        emitterMtx[1][3] = emitter->mGlobalTrs.y;
+        emitterMtx[2][3] = emitter->mGlobalTrs.z;
+        dusk::frame_interp::record_final_mtx(emitterMtx, emitter);
+#endif
     }
 }
 
