@@ -65,6 +65,9 @@ public:
 class dPa_modelPcallBack : public JPAParticleCallBack {
 public:
     virtual void draw(JPABaseEmitter*, JPABaseParticle*);
+#if TARGET_PC
+    virtual void interp(JPABaseEmitter*, JPABaseParticle*);
+#endif
 };
 
 class dPa_modelEcallBack : public dPa_levelEcallBack {

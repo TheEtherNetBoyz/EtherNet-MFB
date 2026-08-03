@@ -216,6 +216,10 @@ void JPABaseParticle::interp(JPAEmitterWorkData* work, void const* drawFunc) {
     if (mAge == 0)
         return;
 
+    if (work->mpEmtr->mpPtclCallBack != NULL) {
+        work->mpEmtr->mpPtclCallBack->interp(work->mpEmtr, this);
+    }
+
     // Stripe renderers consume particles as a group and do not call a per-particle draw
     // function, so retain a translation sample for every supported resource.
     JPAInterpTranslation(work, this);
