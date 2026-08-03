@@ -533,6 +533,7 @@ static bool JPAIsPresentationParticleResource(JPAEmitterWorkData* work) {
     case 0x8976: // ZI_S_garw_relord_b (scene resource)
     case 0x8977: // ZI_S_garw_relord_c (scene resource)
     case 0x8978: // ZI_S_garw_relord_d (scene resource)
+    case 0x8C1F: // ZI_S_mgn_headcore_a (scene resource)
     case 0x9F3: // ZI_J_lk_warp_app_a
     case 0x9F4: // ZI_J_lk_warp_disapp_a
     case 0x9F5: // ZI_J_wl_warp_app_a
