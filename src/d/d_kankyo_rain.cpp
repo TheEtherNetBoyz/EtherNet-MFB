@@ -1013,6 +1013,9 @@ void dKyr_housi_move() {
     for (int i = housi_packet->mHousiCount - 1; i >= 0; i--) {
         f32 var_f26 = 0.4f * housi_packet->field_0x5de8;
         effect = &housi_packet->mHousiEff[i];
+#if TARGET_PC
+        bool skipInterpolation = effect->mStatus == 0;
+#endif
 
         switch (housi_packet->mHousiEff[i].mStatus) {
         case 0:
@@ -1167,6 +1170,9 @@ void dKyr_housi_move() {
 
             if (effect->field_0x3c == 0) {
                 if (var_f1_4 > 1000.0f || sp6C.y < -99979.9f) {
+#if TARGET_PC
+                    skipInterpolation = true;
+#endif
                     effect->field_0x3c = 10;
                     effect->mBasePos = sp84;
 
@@ -1260,6 +1266,13 @@ void dKyr_housi_move() {
         f32 var_f1_8 = sp6C.abs(camera->view.lookat.eye);
         f32 temp_f25 = var_f1_8 / 2000.0f;
         effect->field_0x48 = 1.0f - (temp_f25 * temp_f25);
+#if TARGET_PC
+        if (!skipInterpolation) {
+            Mtx effectMtx;
+            MTXTrans(effectMtx, sp6C.x, sp6C.y, sp6C.z);
+            dusk::frame_interp::record_final_mtx(effectMtx, effect);
+        }
+#endif
     }
 }
 
@@ -3489,6 +3502,12 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
     Vec spB8;
 
     bool isPalaceOfTwilight = 0;
+#if TARGET_PC
+    f32 presentationCounter = g_Counter.mCounter0;
+    if (dusk::frame_interp::is_enabled() && !dusk::frame_interp::is_sim_frame()) {
+        presentationCounter -= 1.0f - dusk::frame_interp::get_interpolation_step();
+    }
+#endif
     if (housi_packet->mHousiCount != 0) {
         if (strcmp(dComIfGp_getStartStageName(), "D_MN08") == 0) {
             isPalaceOfTwilight = 1;
@@ -3637,6 +3656,15 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
                         housi_packet->mHousiEff[j].mBasePos.y + housi_packet->mHousiEff[j].mPosition.y;
                     spD0.z =
                         housi_packet->mHousiEff[j].mBasePos.z + housi_packet->mHousiEff[j].mPosition.z;
+#if TARGET_PC
+                    Mtx presentationMtx;
+                    if (dusk::frame_interp::lookup_replacement(&housi_packet->mHousiEff[j],
+                                                                presentationMtx))
+                    {
+                        spD0.set(presentationMtx[0][3], presentationMtx[1][3],
+                                 presentationMtx[2][3]);
+                    }
+#endif
 
                     if (i == 1 && j == 0) {
 #if TARGET_PC
@@ -3698,7 +3726,13 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
                                 cXyz spAC;
                                 cXyz spA0;
 
-                                f32 temp_f26_2 = cM_ssin((f32)j * 123.0f + (f32)(g_Counter.mCounter0 * 600));
+#if TARGET_PC
+                                f32 temp_f26_2 =
+                                    cM_ssin((f32)j * 123.0f + presentationCounter * 600.0f);
+#else
+                                f32 temp_f26_2 = cM_ssin(
+                                    (f32)j * 123.0f + (f32)(g_Counter.mCounter0 * 600));
+#endif
 
                                 cXyz* temp_r3 = &sp7C[k];
                                 spAC.x = temp_r3->x * (8.0f * (1.0f + (temp_f26_2 * 0.3f)));
