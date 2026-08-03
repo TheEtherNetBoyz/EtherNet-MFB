@@ -66,6 +66,10 @@ struct JPAEmitterWorkData {
     /* 0x210 */ u32 mPrjType;
     /* 0x214 */ s16 mClrKeyFrame;
     /* 0x216 */ u8 mDrawCount;
+#if TARGET_PC
+    Mtx mPresentationCorrection;
+    bool mUsePresentationCorrection;
+#endif
 };
 
 /**

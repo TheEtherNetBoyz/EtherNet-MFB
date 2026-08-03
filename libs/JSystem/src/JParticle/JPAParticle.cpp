@@ -216,6 +216,10 @@ void JPABaseParticle::interp(JPAEmitterWorkData* work, void const* drawFunc) {
     if (mAge == 0)
         return;
 
+    // Stripe renderers consume particles as a group and do not call a per-particle draw
+    // function, so retain a translation sample for every supported resource.
+    JPAInterpTranslation(work, this);
+
     if (drawFunc == JPADrawBillboard) {
         JPAInterpBillboard(work, this);
     } else if (drawFunc == JPADrawRotBillboard) {
