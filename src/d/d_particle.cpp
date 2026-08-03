@@ -25,6 +25,9 @@
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_lib.h"
 #include "tracy/Tracy.hpp"
+#if TARGET_PC
+#include "dusk/frame_interpolation.h"
+#endif
 
 #ifndef __MWERKS__
 #include "dusk/math.h"
@@ -440,6 +443,58 @@ static void dPa_setWindPower(JPABaseParticle* param_0) {
     param_0->setOffsetPosition(sp3C);
 }
 
+#if TARGET_PC
+static void dPa_getModelParticleMtx(JPABaseEmitter* i_emitter, JPABaseParticle* i_particle,
+                                    Mtx o_mtx) {
+    Mtx local_74;
+    Mtx local_44;
+    JGeometry::TVec3<f32> local_cc;
+    JGeometry::TVec3<f32> aTStack_24;
+    JGeometry::TVec3<f32> aTStack_30;
+    JGeometry::TVec3<f32> aTStack_36;
+    JGeometry::TVec3<f32> local_fc;
+    MTXIdentity(local_74);
+    MTXIdentity(local_44);
+    f32 f31 = -90.0f / 16384.0f * i_particle->getRotateAngle();
+    if (f31) {
+        switch(dPa_modelEcallBack::getRotAxis(i_emitter)) {
+        case 0:
+            MTXRotRad(local_44, 0x79, DEG_TO_RAD(f31));
+            break;
+        case 1:
+            MTXRotRad(local_44, 0x78, DEG_TO_RAD(f31));
+            break;
+        case 2:
+            MTXRotRad(local_44, 0x7a, DEG_TO_RAD(f31));
+            break;
+        case 3:
+            Vec vec = {1.0f, 1.0f, 1.0f};
+            MTXRotAxisRad(local_44, &vec, DEG_TO_RAD(f31));
+        }
+
+        MTXConcat(local_74, local_44, local_74);
+    }
+    i_particle->getGlobalPosition(&local_cc);
+    local_74[0][3] = local_cc.x;
+    local_74[1][3] = local_cc.y;
+    local_74[2][3] = local_cc.z;
+    i_emitter->getGlobalParticleScale(&local_fc);
+    local_fc.x *= i_particle->getParticleScaleX();
+    local_fc.y *= i_particle->getParticleScaleY();
+    Mtx auStack_c0;
+    local_fc.z = local_fc.x;
+    MTXScale(auStack_c0, local_fc.x, local_fc.y, local_fc.z);
+    MTXConcat(local_74, auStack_c0, local_74);
+    MTXCopy(local_74, o_mtx);
+}
+
+void dPa_modelPcallBack::interp(JPABaseEmitter* i_emitter, JPABaseParticle* i_particle) {
+    Mtx particleMtx;
+    dPa_getModelParticleMtx(i_emitter, i_particle, particleMtx);
+    dusk::frame_interp::record_final_mtx(particleMtx, i_particle);
+}
+#endif
+
 void dPa_modelPcallBack::draw(JPABaseEmitter* i_emitter, JPABaseParticle* param_1) {
     Mtx local_74;
     Mtx local_44;
@@ -480,6 +535,12 @@ void dPa_modelPcallBack::draw(JPABaseEmitter* i_emitter, JPABaseParticle* param_
     local_fc.z = local_fc.x;
     MTXScale(auStack_c0, local_fc.x, local_fc.y, local_fc.z);
     MTXConcat(local_74, auStack_c0, local_74);
+#if TARGET_PC
+    Mtx presentationMtx;
+    if (dusk::frame_interp::lookup_replacement(param_1, presentationMtx)) {
+        MTXCopy(presentationMtx, local_74);
+    }
+#endif
     dPa_modelEcallBack::drawModel(i_emitter, local_74);
     param_1->setInvisibleParticleFlag();
 }
