@@ -534,6 +534,10 @@ static bool JPAIsPresentationParticleResource(JPAEmitterWorkData* work) {
     case 0x9F9: // ZI_J_wl_warp_app_e
     case 0x9FA: // ZI_J_wl_warp_app_f
     case 0x9FB: // ZI_J_wl_warp_disapp_a
+    case 0xA58: // ZI_J_lk_swl_a
+    case 0xA59: // ZI_J_lk_swl_b
+    case 0xB9D: // ZI_J_lk_swl_c
+    case 0xB9E: // ZI_S_lk_swl_get_a
     case 0xC3D: // ZF_S_demo28_02_warpFilter_a
     case 0xC3E: // ZF_S_demo28_02_warpFilter_b
     case 0xC3F: // ZF_S_demo28_02_warpFilter_c

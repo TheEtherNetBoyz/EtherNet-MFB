@@ -2874,6 +2874,10 @@ public:
     void setCutLargeJumpLandEffect();
     void setBootsLightEffect();
     void setLightningSwordEffect();
+#if TARGET_PC
+    void prepareLightningSwordEffectInterpolation();
+    static void lightningSwordEffectInterpCallback(bool i_isSimFrame, void* i_userWork);
+#endif
     void setWolfRollAttackEffect();
     void setWolfDigEffect();
     void setWolfSwimEndEffect(JPABaseEmitter**, JPABaseEmitter**);

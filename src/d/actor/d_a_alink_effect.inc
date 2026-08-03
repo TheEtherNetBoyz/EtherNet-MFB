@@ -1213,6 +1213,51 @@ void daAlink_c::setLightningSwordEffect() {
     }
 }
 
+#if TARGET_PC
+void daAlink_c::lightningSwordEffectInterpCallback(bool i_isSimFrame, void* i_userWork) {
+    if (i_isSimFrame) {
+        return;
+    }
+
+    daAlink_c* link = static_cast<daAlink_c*>(i_userWork);
+    Mtx swordMtx;
+    if (link->mSwordModel == NULL ||
+        !dusk::frame_interp::lookup_replacement(link->mSwordModel, swordMtx))
+    {
+        return;
+    }
+
+    JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(link->field_0x3294);
+    if (emitter != NULL) {
+        emitter->setGlobalRTMatrix(swordMtx);
+    }
+
+    for (int i = 0; i < 3; ++i) {
+        emitter = dComIfGp_particle_getEmitter(link->field_0x327c[i]);
+        if (emitter != NULL) {
+            emitter->setGlobalRTMatrix(swordMtx);
+        }
+    }
+}
+
+void daAlink_c::prepareLightningSwordEffectInterpolation() {
+    if (mSwordModel == NULL) {
+        return;
+    }
+
+    bool hasLightSwordEmitter = dComIfGp_particle_getEmitter(field_0x3294) != NULL;
+    for (int i = 0; i < 3 && !hasLightSwordEmitter; ++i) {
+        hasLightSwordEmitter = dComIfGp_particle_getEmitter(field_0x327c[i]) != NULL;
+    }
+
+    if (hasLightSwordEmitter) {
+        dusk::frame_interp::record_final_mtx(mSwordModel->getBaseTRMtx(), mSwordModel);
+        dusk::frame_interp::add_interpolation_callback(
+            &daAlink_c::lightningSwordEffectInterpCallback, this);
+    }
+}
+#endif
+
 void daAlink_c::setWolfRollAttackEffect() {
     cXyz pos(current.pos.x, current.pos.y + 80.0f, current.pos.z);
     csXyz rot(shape_angle.x, shape_angle.y, 0);

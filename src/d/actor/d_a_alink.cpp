@@ -19844,6 +19844,12 @@ int daAlink_c::draw() {
         return 1;
     }
 
+#if TARGET_PC
+    // The sword model is interpolated during presentation, while attached particle emitters
+    // otherwise retain their last 30 Hz simulation transform.
+    prepareLightningSwordEffectInterpolation();
+#endif
+
     BOOL var_r29 = FALSE;
     BOOL var_r31 = TRUE;
 
