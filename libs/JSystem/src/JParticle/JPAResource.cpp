@@ -19,6 +19,8 @@
 #include "tracy/Tracy.hpp"
 
 #if TARGET_PC
+#include "dusk/frame_interpolation.h"
+
 #define JPA_DRAW_CTX_ARG , &ctx
 #else
 #define JPA_DRAW_CTX_ARG
@@ -872,6 +874,26 @@ void JPAResource::draw(JPAEmitterWorkData* work, JPABaseEmitter* emtr) {
     work->mpEmtr = emtr;
     work->mpRes = this;
     work->mDrawCount = 0;
+#if TARGET_PC
+    Mtx authoritativeMtx;
+    Mtx presentationMtx;
+    work->mUsePresentationCorrection = false;
+    const bool usePresentationMtx =
+        dusk::frame_interp::lookup_replacement(emtr, presentationMtx);
+    if (usePresentationMtx) {
+        MTXCopy(emtr->mGlobalRot, authoritativeMtx);
+        authoritativeMtx[0][3] = emtr->mGlobalTrs.x;
+        authoritativeMtx[1][3] = emtr->mGlobalTrs.y;
+        authoritativeMtx[2][3] = emtr->mGlobalTrs.z;
+        Mtx inverseAuthoritativeMtx;
+        if (MTXInverse(authoritativeMtx, inverseAuthoritativeMtx)) {
+            MTXConcat(presentationMtx, inverseAuthoritativeMtx,
+                      work->mPresentationCorrection);
+            work->mUsePresentationCorrection = true;
+        }
+        emtr->setGlobalRTMatrix(presentationMtx);
+    }
+#endif
     calcWorkData_d(work);
     pBsp->setGX(work);
     for (s32 i = 1; i <= emtr->getDrawTimes(); i++) {
@@ -882,6 +904,11 @@ void JPAResource::draw(JPAEmitterWorkData* work, JPABaseEmitter* emtr) {
         if (!pBsp->isDrawPrntAhead() && pCsp != NULL)
             drawC(work);
     }
+#if TARGET_PC
+    if (usePresentationMtx) {
+        emtr->setGlobalRTMatrix(authoritativeMtx);
+    }
+#endif
 }
 
 #if TARGET_PC

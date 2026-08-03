@@ -2875,8 +2875,7 @@ public:
     void setBootsLightEffect();
     void setLightningSwordEffect();
 #if TARGET_PC
-    void prepareLightningSwordEffectInterpolation();
-    static void lightningSwordEffectInterpCallback(bool i_isSimFrame, void* i_userWork);
+    void prepareSwordEffectInterpolation();
 #endif
     void setWolfRollAttackEffect();
     void setWolfDigEffect();

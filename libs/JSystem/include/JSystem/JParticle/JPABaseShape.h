@@ -233,6 +233,7 @@ void JPARegistPrmAlphaEnv(JPA_DRAW_PARTICLE_ARGS);
 #undef JPA_DRAW_PARTICLE_ARGS
 
 #if TARGET_PC
+void JPAInterpTranslation(JPAEmitterWorkData*, JPABaseParticle*);
 void JPAInterpBillboard(JPAEmitterWorkData*, JPABaseParticle*);
 void JPAInterpRotBillboard(JPAEmitterWorkData*, JPABaseParticle*);
 void JPAInterpDirection(JPAEmitterWorkData*, JPABaseParticle*);
