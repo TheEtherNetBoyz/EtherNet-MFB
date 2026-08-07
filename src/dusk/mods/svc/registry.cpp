@@ -211,6 +211,8 @@ void ModLoader::init_services() {
             &svc::g_cameraModule,
             &svc::g_windowModule,
             &svc::g_gfxModule,
+            &svc::g_saveModule,
+            &svc::g_stageModule,
         })
     {
         svc::register_module(*module);

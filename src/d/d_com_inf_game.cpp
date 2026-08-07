@@ -2479,7 +2479,7 @@ struct field_data {
 };
 
 void dComIfGp_calcNowRegion() {
-    u8 buffer[0x800] ATTRIBUTE_ALIGN(32);
+    ATTRIBUTE_ALIGN(32) u8 buffer[0x800];
 
     dComIfGp_getFieldMapArchive2()->readResource(buffer, 0x800, "dat/field.dat");
     u8* entry_num_p = &buffer[((field_data_header*)buffer)->field_0x4];
@@ -2535,7 +2535,7 @@ void dComIfGp_calcNowRegion() {
 }
 
 u8 dComIfG_getNowCalcRegion() {
-    u8 buffer[0x800] ATTRIBUTE_ALIGN(32);
+    ATTRIBUTE_ALIGN(32) u8 buffer[0x800];
 
     dComIfGp_getFieldMapArchive2()->readResource(buffer, 0x800, "dat/field.dat");
     u8* entry_num_p = &buffer[((field_data_header*)buffer)->field_0x4];

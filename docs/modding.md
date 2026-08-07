@@ -209,8 +209,8 @@ if (svc_resource->load(mod_ctx, "config.txt", &buf) == MOD_OK) {
 }
 ```
 
-Missing files return `MOD_UNAVAILABLE`. Always `free` what you `load`. Note that the bundle is read-only; for writable
-storage, use the directory from `svc_host->mod_dir(mod_ctx)`.
+Missing files return `MOD_UNAVAILABLE`. Always `free` what you `load`. The bundle is read-only; use
+`HostService::data_dir` for persistent storage.
 
 ### HostService (`mods/svc/host.h`)
 
@@ -219,9 +219,17 @@ Mod metadata and runtime interaction with the loader:
 ```cpp
 IMPORT_SERVICE(HostService, svc_host);
 
-const char* id  = svc_host->mod_id(mod_ctx);
-const char* dir = svc_host->mod_dir(mod_ctx);  // writable per-mod directory
-svc_host->fail(mod_ctx, MOD_ERROR, "something unrecoverable happened");  // disables the mod
+// Temporary mod data directory, wiped on startup
+const char* cacheDir = svc_host->mod_dir(mod_ctx);
+
+// Persistent mod data directory
+const char* dataDir = nullptr;
+if (svc_host->data_dir(mod_ctx, &dataDir) == MOD_OK) {
+    // ...
+}
+
+// Report an error and disable the mod
+svc_host->fail(mod_ctx, MOD_ERROR, "something unrecoverable happened");
 ```
 
 `get_service`/`publish_service` provide dynamic service lookup; see [Exporting Services](#exporting-services).
@@ -339,6 +347,88 @@ typed and must match the registration.
 Change callbacks fire on the game thread whenever the value changes at runtime (your own `set_*` calls included).
 Writes that store the same value are silent. Values applied from `config.json` or `--cvar` at registration do
 **not** fire callbacks; read the value after `register_var` for the starting state.
+
+### SaveService (`mods/svc/save.h`)
+
+Stores named binary blobs for each save slot. Blob names are scoped to the calling mod, and each mod may store up to
+`SAVE_BLOB_BUDGET_BYTES` per slot. The service copies data passed to `set_blob`.
+
+```cpp
+IMPORT_SERVICE(SaveService, svc_save);
+
+struct MySaveData {
+    uint32_t version;
+    uint32_t counter;
+};
+
+MySaveData state{1, 42};
+svc_save->set_blob(mod_ctx, "state", &state, sizeof(state));
+
+MySaveData loaded{};
+size_t loadedSize = sizeof(loaded);
+if (svc_save->get_blob(mod_ctx, "state", &loaded, &loadedSize) == MOD_OK &&
+    loadedSize == sizeof(loaded)) {
+    apply_state(loaded);
+}
+```
+
+`set_blob`, `get_blob`, and `delete_blob` operate on the current slot, which is available after creating or loading a
+save and unavailable at file select. Blob changes are written with the next game save. File-select copy and erase
+operations update the blob data as well. Use `peek_blob` to read the calling mod's data from any slot; it uses the same
+buffer contract as `get_blob`. Pass a `NULL` buffer to either read function to query the blob size.
+
+`observe_saves` registers callbacks for new, loaded, and written saves. New-save callbacks run after the slot's blobs
+are cleared. Observers are removed automatically when the mod is detached, so the output handle is only needed for
+manual unregistration. Save callbacks run on the game thread.
+
+### StageService (`mods/svc/stage.h`)
+
+Allows making changes to a stage's "stage info" (contents of .dzs/.dzr files).
+(Currently only supports editing actor nodes.)
+
+```cpp
+IMPORT_SERVICE(StageService, svc_stage);
+
+stage_actor_data_class record = {
+    "carry00",
+    0xFF000000,
+    cXyz(0.0f, 0.0f, 0.0f),
+    csXyz(0, 0, 0),
+    0,
+};
+
+StageActorHandle handle{};
+svc_stage->patch_actor(mod_ctx, "F_SP102", 0, -1, record_crc, &record, sizeof(record), &handle);
+```
+
+```
+StageActorHandle handle{};
+svc_stage->delete_actor(mod_ctx, "F_SP102", 0, -1, record_crc, &handle);
+```
+
+Patch or remove actors from the original actor list as the room loads.
+Given records must be of either `stage_actor_data_class` or `stage_tgsc_data_class` types.
+`record_crc` is the CRC-32 of the unmodified original record used to identify the record to replace or remove.
+
+```
+stage_actor_data_class record = {
+    "carry00",
+    0xFF000000,
+    cXyz(0.0f, 0.0f, 0.0f),
+    csXyz(0, 0, 0),
+    0,
+};
+
+StageActorHandle handle{};
+svc_stage->add_actor(mod_ctx, "F_SP102", 0, -1, &record, sizeof(record), &handle);
+```
+
+Add a new actor to the actor list as the room loads.
+Given records must be of either `stage_actor_data_class` or `stage_tgsc_data_class` types.
+
+Stage names may contain up to 8 characters. For patches and deletions, room `0xff` and layer `-1` match any room or
+layer; additions require a specific room. Edits are removed when the mod is detached. If multiple mods edit the same
+record, the later-loaded mod wins.
 
 ### UiService (`mods/svc/ui.h`)
 
@@ -542,6 +632,9 @@ if (svc_camera->get_camera(mod_ctx, game_view, &camera) == MOD_OK) {
 `get_camera` returns `MOD_UNAVAILABLE` while the view is not a valid perspective camera, such as before the
 first in-game frame. Projection matrices match the renderer's WebGPU clip convention and renderer depth convention
 (reversed-Z by default).
+
+Camera operators allow overriding the main camera. When an operator callback returns true, its values replace the camera
+state for the current frame. Register and unregister using `register_camera_operator` / `unregister_camera_operator`.
 
 ---
 
@@ -845,6 +938,6 @@ const char* nativeDir = svc_host->native_dir(mod_ctx);  // read-only
 ```
 
 Libraries loaded explicitly by the mod remain its responsibility: stop their threads and unload them during
-`mod_shutdown`. Do not write into `native_dir`; use `mod_dir` for writable state. Native library namespaces are
-process-wide on some platforms, so two mods cannot safely assume that incompatible libraries with the same filename
-will remain isolated.
+`mod_shutdown`. Do not write into `native_dir`; use `data_dir` for persistent storage or `mod_dir` for temporary
+(session) storage. Native library namespaces are process-wide on some platforms, so two mods cannot safely assume that
+incompatible libraries with the same filename will remain isolated.
