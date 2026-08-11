@@ -444,6 +444,57 @@ static void dPa_setWindPower(JPABaseParticle* param_0) {
     param_0->setOffsetPosition(sp3C);
 }
 
+#if TARGET_PC
+static void dPa_getModelParticleMtx(JPABaseEmitter* i_emitter, JPABaseParticle* i_particle,
+                                    Mtx o_mtx) {
+    Mtx rotationMtx;
+    MTXIdentity(o_mtx);
+    MTXIdentity(rotationMtx);
+
+    f32 rotation = -90.0f / 16384.0f * i_particle->getRotateAngle();
+    if (rotation) {
+        switch (dPa_modelEcallBack::getRotAxis(i_emitter)) {
+        case 0:
+            MTXRotRad(rotationMtx, 'y', DEG_TO_RAD(rotation));
+            break;
+        case 1:
+            MTXRotRad(rotationMtx, 'x', DEG_TO_RAD(rotation));
+            break;
+        case 2:
+            MTXRotRad(rotationMtx, 'z', DEG_TO_RAD(rotation));
+            break;
+        case 3: {
+            Vec axis = {1.0f, 1.0f, 1.0f};
+            MTXRotAxisRad(rotationMtx, &axis, DEG_TO_RAD(rotation));
+            break;
+        }
+        }
+        MTXConcat(o_mtx, rotationMtx, o_mtx);
+    }
+
+    JGeometry::TVec3<f32> position;
+    i_particle->getGlobalPosition(&position);
+    o_mtx[0][3] = position.x;
+    o_mtx[1][3] = position.y;
+    o_mtx[2][3] = position.z;
+
+    JGeometry::TVec3<f32> scale;
+    i_emitter->getGlobalParticleScale(&scale);
+    scale.x *= i_particle->getParticleScaleX();
+    scale.y *= i_particle->getParticleScaleY();
+    scale.z = scale.x;
+    Mtx scaleMtx;
+    MTXScale(scaleMtx, scale.x, scale.y, scale.z);
+    MTXConcat(o_mtx, scaleMtx, o_mtx);
+}
+
+void dPa_modelPcallBack::interp(JPABaseEmitter* i_emitter, JPABaseParticle* i_particle) {
+    Mtx particleMtx;
+    dPa_getModelParticleMtx(i_emitter, i_particle, particleMtx);
+    dusk::frame_interp::record_final_mtx(particleMtx, i_particle);
+}
+#endif
+
 void dPa_modelPcallBack::draw(JPABaseEmitter* i_emitter, JPABaseParticle* param_1) {
     Mtx local_74;
     Mtx local_44;
@@ -484,6 +535,12 @@ void dPa_modelPcallBack::draw(JPABaseEmitter* i_emitter, JPABaseParticle* param_
     local_fc.z = local_fc.x;
     MTXScale(auStack_c0, local_fc.x, local_fc.y, local_fc.z);
     MTXConcat(local_74, auStack_c0, local_74);
+#if TARGET_PC
+    Mtx presentationMtx;
+    if (dusk::frame_interp::lookup_replacement(param_1, presentationMtx)) {
+        MTXCopy(presentationMtx, local_74);
+    }
+#endif
     dPa_modelEcallBack::drawModel(i_emitter, local_74);
     param_1->setInvisibleParticleFlag();
 }

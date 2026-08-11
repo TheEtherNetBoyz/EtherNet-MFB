@@ -1200,6 +1200,31 @@ void daAlink_c::setLightningSwordEffect() {
     }
 }
 
+#if TARGET_PC
+void daAlink_c::prepareSwordEffectInterpolation() {
+    if (mSwordModel == NULL) {
+        return;
+    }
+
+    JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(field_0x321c);
+    if (emitter != NULL) {
+        dusk::frame_interp::record_final_mtx(mSwordModel->getBaseTRMtx(), emitter);
+    }
+
+    emitter = dComIfGp_particle_getEmitter(field_0x3294);
+    if (emitter != NULL) {
+        dusk::frame_interp::record_final_mtx(mSwordModel->getBaseTRMtx(), emitter);
+    }
+
+    for (int i = 0; i < 3; ++i) {
+        emitter = dComIfGp_particle_getEmitter(field_0x327c[i]);
+        if (emitter != NULL) {
+            dusk::frame_interp::record_final_mtx(mSwordModel->getBaseTRMtx(), emitter);
+        }
+    }
+}
+#endif
+
 void daAlink_c::setWolfRollAttackEffect() {
     cXyz pos(current.pos.x, current.pos.y + 80.0f, current.pos.z);
     csXyz rot(shape_angle.x, shape_angle.y, 0);

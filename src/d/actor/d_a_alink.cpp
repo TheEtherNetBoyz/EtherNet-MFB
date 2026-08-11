@@ -19745,6 +19745,12 @@ int daAlink_c::draw() {
         return 1;
     }
 
+#if TARGET_PC
+    // These emitters are attached to the interpolated sword model, not just world-space
+    // particles, so give the particle renderer the sword's presentation transform.
+    prepareSwordEffectInterpolation();
+#endif
+
     BOOL isPlayerNoDraw = checkPlayerNoDraw();
     BOOL var_r29 = FALSE;
     BOOL var_r31 = TRUE;

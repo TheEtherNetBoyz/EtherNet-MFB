@@ -700,6 +700,9 @@ void dKyr_rain_move() {
 
         for (int i = rain_packet->raincnt - 1; i >= 0; i--) {
             rain_packet->mRainEff[i].mBasePos.y = spFC.y;
+#if TARGET_PC
+            bool skipInterpolation = rain_packet->mRainEff[i].mStatus == 0;
+#endif
 
             switch (rain_packet->mRainEff[i].mStatus) {
             case 0:
@@ -747,6 +750,9 @@ void dKyr_rain_move() {
 
                 if (rain_packet->mRainEff[i].mTimer == 0) {
                     if (var_f1 > 800.0f) {
+#if TARGET_PC
+                        skipInterpolation = true;
+#endif
                         rain_packet->mRainEff[i].mTimer = 10;
                         rain_packet->mRainEff[i].field_0x24 = -(cM_rndF(10.0f) + 35.5f);
                         rain_packet->mRainEff[i].mBasePos = spFC;
@@ -770,6 +776,9 @@ void dKyr_rain_move() {
 
                     spC0.y = rain_packet->mRainEff[i].mBasePos.y + rain_packet->mRainEff[i].mPosition.y;
                     if (spC0.y < rain_packet->mRainEff[i].field_0x30 + 20.0f) {
+#if TARGET_PC
+                        skipInterpolation = true;
+#endif
                         rain_packet->mRainEff[i].mBasePos = spFC;
                         rain_packet->mRainEff[i].mPosition.x = cM_rndFX(800.0f);
                         rain_packet->mRainEff[i].mPosition.y = 200.0f;
@@ -899,6 +908,13 @@ void dKyr_rain_move() {
             }
 
             rain_packet->mRainEff[i].mAlpha = var_f31 * (1.0f + cM_rndFX(0.5f));
+#if TARGET_PC
+            if (!skipInterpolation) {
+                Mtx effectMtx;
+                MTXTrans(effectMtx, spC0.x, spC0.y, spC0.z);
+                dusk::frame_interp::record_final_mtx(effectMtx, &rain_packet->mRainEff[i]);
+            }
+#endif
         }
     }
 }
@@ -1015,6 +1031,9 @@ void dKyr_housi_move() {
     for (int i = housi_packet->mHousiCount - 1; i >= 0; i--) {
         f32 var_f26 = 0.4f * housi_packet->field_0x5de8;
         effect = &housi_packet->mHousiEff[i];
+#if TARGET_PC
+        bool skipInterpolation = effect->mStatus == 0;
+#endif
 
         switch (housi_packet->mHousiEff[i].mStatus) {
         case 0:
@@ -1169,6 +1188,9 @@ void dKyr_housi_move() {
 
             if (effect->field_0x3c == 0) {
                 if (var_f1_4 > 1000.0f || sp6C.y < -99979.9f) {
+#if TARGET_PC
+                    skipInterpolation = true;
+#endif
                     effect->field_0x3c = 10;
                     effect->mBasePos = sp84;
 
@@ -1262,6 +1284,13 @@ void dKyr_housi_move() {
         f32 var_f1_8 = sp6C.abs(camera->view.lookat.eye);
         f32 temp_f25 = var_f1_8 / 2000.0f;
         effect->field_0x48 = 1.0f - (temp_f25 * temp_f25);
+#if TARGET_PC
+        if (!skipInterpolation) {
+            Mtx effectMtx;
+            MTXTrans(effectMtx, sp6C.x, sp6C.y, sp6C.z);
+            dusk::frame_interp::record_final_mtx(effectMtx, effect);
+        }
+#endif
     }
 }
 
@@ -1360,6 +1389,10 @@ void dKyr_snow_move() {
     for (int i = snow_packet->field_0x6d88 - 1; i >= 0; i--) {
         f32 gravity = -(2.0f + cM_rndF(6.5f));
         f32 speed = 2.0f * (5.0f + (f32)(i & 15));
+#if TARGET_PC
+        bool skipPositionInterpolation = snow_packet->mSnowEff[i].mStatus == 0;
+        bool skipBaseInterpolation = skipPositionInterpolation;
+#endif
 
         switch (snow_packet->mSnowEff[i].mStatus) {
         case 0:
@@ -1438,6 +1471,9 @@ void dKyr_snow_move() {
 
             if (snow_packet->mSnowEff[i].mTimer == 0) {
                 if (var_f1_6 > 550.0f) {
+#if TARGET_PC
+                    skipPositionInterpolation = true;
+#endif
                     snow_packet->mSnowEff[i].mTimer = 10;
                     snow_packet->mSnowEff[i].mWindSpeed = speed;
                     snow_packet->mSnowEff[i].mGravity = gravity;
@@ -1462,6 +1498,9 @@ void dKyr_snow_move() {
             sp7C = snow_packet->mSnowEff[i].mBasePos;
             f32 sp18 = sp7C.abs(spAC);
             if (sp18 > 1100.0f) {
+#if TARGET_PC
+                skipBaseInterpolation = true;
+#endif
                 if (sp7C.abs(spAC) > 1150.0f) {
                     snow_packet->mSnowEff[i].mBasePos.x = spAC.x + cM_rndFX(1100.0f);
                     snow_packet->mSnowEff[i].mBasePos.y = spAC.y + cM_rndFX(1100.0f);
@@ -1556,6 +1595,24 @@ void dKyr_snow_move() {
                 snow_packet->mSnowEff[i].field_0x30 = 0.0f;
             }
         }
+#if TARGET_PC
+        if (!skipPositionInterpolation) {
+            Mtx effectMtx;
+            MTXTrans(effectMtx, snow_packet->mSnowEff[i].mPosition.x,
+                     snow_packet->mSnowEff[i].mPosition.y,
+                     snow_packet->mSnowEff[i].mPosition.z);
+            dusk::frame_interp::record_final_mtx(effectMtx,
+                                                  &snow_packet->mSnowEff[i].mPosition);
+        }
+        if (!skipBaseInterpolation) {
+            Mtx effectMtx;
+            MTXTrans(effectMtx, snow_packet->mSnowEff[i].mBasePos.x,
+                     snow_packet->mSnowEff[i].mBasePos.y,
+                     snow_packet->mSnowEff[i].mBasePos.z);
+            dusk::frame_interp::record_final_mtx(effectMtx,
+                                                  &snow_packet->mSnowEff[i].mBasePos);
+        }
+#endif
     }
 }
 
@@ -3267,6 +3324,15 @@ void dKyr_drawRain(Mtx drawMtx, u8** tex) {
                     sp3C.x = rain_packet->mRainEff[i].mBasePos.x + rain_packet->mRainEff[i].mPosition.x;
                     sp3C.y = rain_packet->mRainEff[i].mBasePos.y + rain_packet->mRainEff[i].mPosition.y;
                     sp3C.z = rain_packet->mRainEff[i].mBasePos.z + rain_packet->mRainEff[i].mPosition.z;
+#if TARGET_PC
+                    Mtx presentationMtx;
+                    if (dusk::frame_interp::lookup_replacement(&rain_packet->mRainEff[i],
+                                                                presentationMtx))
+                    {
+                        sp3C.set(presentationMtx[0][3], presentationMtx[1][3],
+                                 presentationMtx[2][3]);
+                    }
+#endif
 
                     f32 dist = 0.1f + (sp3C.abs(camera->view.lookat.eye) / 1500.0f);
                     if (dist > 1.0f) {
@@ -3495,6 +3561,12 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
     Vec spB8;
 
     bool isPalaceOfTwilight = 0;
+#if TARGET_PC
+    f32 presentationCounter = g_Counter.mCounter0;
+    if (dusk::frame_interp::is_enabled() && !dusk::frame_interp::is_sim_frame()) {
+        presentationCounter -= 1.0f - dusk::frame_interp::get_interpolation_step();
+    }
+#endif
     if (housi_packet->mHousiCount != 0) {
         if (strcmp(dComIfGp_getStartStageName(), "D_MN08") == 0) {
             isPalaceOfTwilight = 1;
@@ -3643,6 +3715,15 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
                         housi_packet->mHousiEff[j].mBasePos.y + housi_packet->mHousiEff[j].mPosition.y;
                     spD0.z =
                         housi_packet->mHousiEff[j].mBasePos.z + housi_packet->mHousiEff[j].mPosition.z;
+#if TARGET_PC
+                    Mtx presentationMtx;
+                    if (dusk::frame_interp::lookup_replacement(&housi_packet->mHousiEff[j],
+                                                                presentationMtx))
+                    {
+                        spD0.set(presentationMtx[0][3], presentationMtx[1][3],
+                                 presentationMtx[2][3]);
+                    }
+#endif
 
                     if (i == 1 && j == 0) {
 #if TARGET_PC
@@ -3704,7 +3785,13 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
                                 cXyz spAC;
                                 cXyz spA0;
 
-                                f32 temp_f26_2 = cM_ssin((f32)j * 123.0f + (f32)(g_Counter.mCounter0 * 600));
+#if TARGET_PC
+                                f32 temp_f26_2 =
+                                    cM_ssin((f32)j * 123.0f + presentationCounter * 600.0f);
+#else
+                                f32 temp_f26_2 = cM_ssin(
+                                    (f32)j * 123.0f + (f32)(g_Counter.mCounter0 * 600));
+#endif
 
                                 cXyz* temp_r3 = &sp7C[k];
                                 spAC.x = temp_r3->x * (8.0f * (1.0f + (temp_f26_2 * 0.3f)));
@@ -3905,6 +3992,12 @@ void dKyr_drawSnow(Mtx drawMtx, u8** tex) {
     };
 
     static f32 S_fubuki_ratio = 0.0f;
+#if TARGET_PC
+    f32 presentationCounter = g_Counter.mCounter0;
+    if (dusk::frame_interp::is_enabled() && !dusk::frame_interp::is_sim_frame()) {
+        presentationCounter -= 1.0f - dusk::frame_interp::get_interpolation_step();
+    }
+#endif
 
     if (camera != NULL) {
         j3dSys.reinitGX();
@@ -4010,7 +4103,12 @@ void dKyr_drawSnow(Mtx drawMtx, u8** tex) {
                             if (g_env_light.mpSnowPacket->mSnowEff[i].mStatus != 0) {
                                 f32 var_f30;
                                 f32 temp_f29;
+#if TARGET_PC
+                                f32 temp_f31 =
+                                    1.5f + (((i & 15) / 15.0f) * cM_ssin(presentationCounter));
+#else
                                 f32 temp_f31 = 1.5f + (((i & 15) / 15.0f) * cM_ssin(g_Counter.mCounter0));
+#endif
                                 temp_f29 = 0.3f * ((i & 15) / 15.0f);
 
                                 color_reg0.r = (255.0f * temp_f29) + (sp60.r * (1.0f - temp_f29));
@@ -4031,6 +4129,18 @@ void dKyr_drawSnow(Mtx drawMtx, u8** tex) {
 
                                     color_reg0.a = S_fubuki_ratio * (220.0f * ((0.8f * (snow_packet->mSnowEff[i].field_0x30)) + temp_f29));
                                 }
+#if TARGET_PC
+                                Mtx presentationMtx;
+                                const void* interpolationKey =
+                                    j == 0 ? (const void*)&snow_packet->mSnowEff[i].mPosition :
+                                             (const void*)&snow_packet->mSnowEff[i].mBasePos;
+                                if (dusk::frame_interp::lookup_replacement(interpolationKey,
+                                                                            presentationMtx))
+                                {
+                                    sp7C.set(presentationMtx[0][3], presentationMtx[1][3],
+                                             presentationMtx[2][3]);
+                                }
+#endif
 
                                 if (strcmp(dComIfGp_getStartStageName(), "D_MN11") == 0) {
                                     if (dComIfGp_roomControl_getStayNo() == 4) {
