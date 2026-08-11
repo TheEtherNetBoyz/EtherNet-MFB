@@ -506,11 +506,54 @@ static projectionFunc p_prj[3] = {
     loadPrjAnm,
 };
 
+#if TARGET_PC
+static bool JPAUsesExtendedPresentation(JPAEmitterWorkData* work) {
+    switch (work->mpRes->getUsrIdx()) {
+    case 0x243: // ZI_J_yamiFilter_a
+    case 0x262: // ZI_S_warpholeApp_a
+    case 0x263: // ZI_S_warpholeApp_b
+    case 0x264: // ZI_S_warpholeApp_c
+    case 0x275: // ZI_S_warpholeAppDemo1_a
+    case 0x454: // ZI_S_lk_warp_disapp_a
+    case 0x4B2: // ZI_S_lk_warp_app_a
+    case 0x4B3: // ZI_S_wl_warp_app_a
+    case 0x4B4: // ZI_S_wl_warp_app_b
+    case 0x4B5: // ZI_S_wl_warp_app_c
+    case 0x4B6: // ZI_S_wl_warp_app_d
+    case 0x4B7: // ZI_S_wl_warp_app_e
+    case 0x4B8: // ZI_S_wl_warp_app_f
+    case 0x4B9: // ZI_S_wl_warp_disapp_a
+    case 0x8C7: // ZI_S_lk_warp2_disapp_a
+    case 0x8C8: // ZI_S_wl_warp2_disapp_a
+    case 0x9F3: // ZI_J_lk_warp_app_a
+    case 0x9F4: // ZI_J_lk_warp_disapp_a
+    case 0x9F5: // ZI_J_wl_warp_app_a
+    case 0x9F6: // ZI_J_wl_warp_app_b
+    case 0x9F7: // ZI_J_wl_warp_app_c
+    case 0x9F8: // ZI_J_wl_warp_app_d
+    case 0x9F9: // ZI_J_wl_warp_app_e
+    case 0x9FA: // ZI_J_wl_warp_app_f
+    case 0x9FB: // ZI_J_wl_warp_disapp_a
+    case 0xC3D: // ZF_S_demo28_02_warpFilter_a
+    case 0xC3E: // ZF_S_demo28_02_warpFilter_b
+    case 0xC3F: // ZF_S_demo28_02_warpFilter_c
+    case 0xC40: // ZF_S_demo28_02_warpFilter_d
+        return true;
+    default:
+        return false;
+    }
+}
+#endif
+
 static bool JPAGetPresentationParticlePos(JPAEmitterWorkData* work, JPABaseParticle* ptcl, JGeometry::TVec3<f32>* pos) {
 #if TARGET_PC
     if (work->mUsePresentationCorrection) {
         MTXMultVec(work->mPresentationCorrection, &ptcl->mPosition, pos);
         return true;
+    }
+
+    if (!JPAUsesExtendedPresentation(work)) {
+        return false;
     }
 
     Mtx particleMtx;
@@ -519,17 +562,10 @@ static bool JPAGetPresentationParticlePos(JPAEmitterWorkData* work, JPABaseParti
         return true;
     }
 
-    if (!dusk::frame_interp::is_enabled() || dusk::frame_interp::is_sim_frame() ||
-        ptcl->mAge == 0)
-    {
-        return false;
-    }
-
-    const f32 step = dusk::frame_interp::get_interpolation_step();
-    pos->set(ptcl->mPosition.x + ptcl->mVelocity.x * step,
-             ptcl->mPosition.y + ptcl->mVelocity.y * step,
-             ptcl->mPosition.z + ptcl->mVelocity.z * step);
-    return true;
+    // A particle without both a previous and current sample cannot be interpolated safely.
+    // Predicting from velocity makes newly created particles jump into the future for one
+    // presentation interval and then snap back once normal interpolation becomes available.
+    return false;
 #else
     return false;
 #endif
@@ -537,6 +573,10 @@ static bool JPAGetPresentationParticlePos(JPAEmitterWorkData* work, JPABaseParti
 
 static s16 JPAGetPresentationRotateAngle(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
 #if TARGET_PC
+    if (!JPAUsesExtendedPresentation(work)) {
+        return ptcl->mRotateAngle;
+    }
+
     if (!dusk::frame_interp::is_enabled() || dusk::frame_interp::is_sim_frame() ||
         ptcl->mAge == 0)
     {
@@ -592,6 +632,10 @@ static void submit_particle_quad(
 }
 
 void JPAInterpTranslation(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
+    if (!JPAUsesExtendedPresentation(work)) {
+        return;
+    }
+
     Mtx ptclPosMtx;
     MTXTrans(ptclPosMtx, ptcl->mPosition.x, ptcl->mPosition.y, ptcl->mPosition.z);
     dusk::frame_interp::record_final_mtx(ptclPosMtx, ptcl);
