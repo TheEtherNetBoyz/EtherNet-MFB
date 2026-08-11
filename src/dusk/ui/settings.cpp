@@ -200,6 +200,7 @@ enum class HotkeyAction {
     SaveEditor,
     StateShare,
     DebugCamera,
+    CaptureCameraKeyframe,
     AudioDebug,
     UseTexturePack,
     GyroAim,
@@ -226,6 +227,7 @@ constexpr std::array kHotkeyEntries = {
     HotkeyEntry{HotkeyAction::SaveEditor, "Save Editor", "Open the save editor."},
     HotkeyEntry{HotkeyAction::StateShare, "State Share", "Open the state share window."},
     HotkeyEntry{HotkeyAction::DebugCamera, "Debug Camera", "Show the developer camera tools."},
+    HotkeyEntry{HotkeyAction::CaptureCameraKeyframe, "Capture Camera Keyframe", "Capture the current Fly Mode camera transform."},
     HotkeyEntry{HotkeyAction::AudioDebug, "Audio Debug", "Open the audio debug window."},
     HotkeyEntry{HotkeyAction::UseTexturePack, "Use Texture Pack", "Enable or disable texture replacements."},
     HotkeyEntry{HotkeyAction::GyroAim, "Gyro Aim", "Enable or disable gyro aiming for supported actions."},
@@ -260,6 +262,8 @@ UserSettings::HotkeyBinding& hotkey_binding(HotkeyAction action) {
         return hotkeys.stateShare;
     case HotkeyAction::DebugCamera:
         return hotkeys.debugCamera;
+    case HotkeyAction::CaptureCameraKeyframe:
+        return hotkeys.captureCameraKeyframe;
     case HotkeyAction::AudioDebug:
         return hotkeys.audioDebug;
     case HotkeyAction::UseTexturePack:

@@ -61,6 +61,7 @@
 #include "dusk/data.hpp"
 #include "dusk/dusk.h"
 #include "dusk/frame_interpolation.h"
+#include "dusk/tas_movie.h"
 #include "dusk/game_clock.h"
 #include "dusk/gyro.h"
 #include "dusk/imgui/ImGuiConsole.hpp"
@@ -296,18 +297,26 @@ void main01(void) {
 
         const auto pacing = dusk::game_clock::advance_main_loop();
         if (pacing.is_interpolating) {
-            if (pacing.sim_ticks_to_run > 0) {
+            const int tasSimTicks =
+                dusk::tas_movie::simulationTicksForHostFrame(pacing.sim_ticks_to_run);
+            const bool tasBatchActive = dusk::tas_movie::active();
+            if (tasSimTicks > 0) {
                 dusk::frame_interp::begin_frame(dusk::getSettings().game.enableFrameInterpolation.getValue() != dusk::FrameInterpMode::Off, true, 0.0f);
                 dusk::frame_interp::set_ui_tick_pending(true);
 
-                for (int sim_tick = 0; sim_tick < pacing.sim_ticks_to_run; ++sim_tick) {
+                for (int sim_tick = 0; sim_tick < tasSimTicks; ++sim_tick) {
                     dusk::frame_interp::begin_sim_tick();
                     mDoCPd_c::read();
                     dusk::mouse::read();
                     dusk::gyro::read(pacing.sim_pace);
                     fapGm_Execute();
+                    dusk::tas_movie::restorePresentationCamera();
                     mDoAud_Execute();
                     dusk::game_clock::commit_sim_tick();
+                    if (tasBatchActive &&
+                        (!dusk::tas_movie::active() || dusk::tas_movie::paused())) {
+                        break;
+                    }
                 }
             }
 
@@ -327,26 +336,45 @@ void main01(void) {
             if (!dusk::frame_interp::presentation_skip_active()) {
                 dusk::frame_interp::interpolate();
                 dusk::frame_interp::begin_presentation_camera();
+                dusk::tas_movie::applyPresentationCamera(dComIfGd_getView());
                 // run draw functions for anything specially marked to handle interp
-                fpcM_DrawIterater((fpcM_DrawIteraterFunc)fpcM_Draw);
-                cAPIGph_Painter();
-                dusk::frame_interp::end_presentation_camera();
+                 fpcM_DrawIterater((fpcM_DrawIteraterFunc)fpcM_Draw);
+                 cAPIGph_Painter();
+                 dusk::tas_movie::restorePresentationCamera();
+                 dusk::frame_interp::end_presentation_camera();
             }
             dusk::frame_interp::set_ui_tick_pending(false);
         } else {
             dusk::frame_interp::begin_frame(false, true, 0.0f);
             dusk::frame_interp::set_ui_tick_pending(true);
 
-            // Game Inputs
-            mDoCPd_c::read();
-            dusk::mouse::read();
-            dusk::gyro::read(pacing.presentation_dt_seconds);
+            const int tasSimTicks = dusk::tas_movie::simulationTicksForHostFrame(1);
+            const bool tasBatchActive = dusk::tas_movie::active();
+            for (int simTick = 0; simTick < tasSimTicks; ++simTick) {
+                // Game Inputs
+                mDoCPd_c::read();
+                dusk::mouse::read();
+                dusk::gyro::read(pacing.presentation_dt_seconds);
 
-            // EXECUTE GAME LOGIC & RENDER
-            // This calls mDoGph_Painter -> JFWDisplay -> GX Functions
-            fapGm_Execute();
+                // EXECUTE GAME LOGIC & RENDER
+                // This calls mDoGph_Painter -> JFWDisplay -> GX Functions
+                fapGm_Execute();
+                dusk::tas_movie::restorePresentationCamera();
 
-            mDoAud_Execute();
+                mDoAud_Execute();
+                if (tasBatchActive &&
+                    (!dusk::tas_movie::active() || dusk::tas_movie::paused())) {
+                    break;
+                }
+            }
+            if (tasSimTicks == 0 && tasBatchActive) {
+                // Keep the world and detached presentation camera drawable while
+                // TAS simulation is paused.
+                dusk::tas_movie::applyPresentationCamera(dComIfGd_getView());
+                fpcM_DrawIterater((fpcM_DrawIteraterFunc)fpcM_Draw);
+                cAPIGph_Painter();
+                dusk::tas_movie::restorePresentationCamera();
+            }
         }
 
         dusk::video_latency::process();

@@ -747,7 +747,8 @@ public:
 
 class mDoExt_spherePacket : public J3DPacket {
 public:
-    mDoExt_spherePacket(cXyz& i_position, f32 i_size, const GXColor& i_color, u8 i_clipZ);
+    mDoExt_spherePacket(cXyz& i_position, f32 i_size, const GXColor& i_color,
+                        u8 i_clipZ, u8 i_depthWrite);
 
     virtual void draw();
     virtual ~mDoExt_spherePacket() {}
@@ -756,11 +757,13 @@ public:
     /* 0x1C */ f32 mSize;
     /* 0x20 */ GXColor mColor;
     /* 0x24 */ u8 mClipZ;
+    /* 0x25 */ u8 mDepthWrite;
 };
 
 class mDoExt_cylinderPacket : public J3DPacket {
 public:
-    mDoExt_cylinderPacket(cXyz& i_position, f32 i_radius, f32 i_height, const GXColor& i_color, u8 i_clipZ);
+    mDoExt_cylinderPacket(cXyz& i_position, f32 i_radius, f32 i_height,
+                          const GXColor& i_color, u8 i_clipZ, u8 i_depthWrite);
 
     virtual void draw();
     virtual ~mDoExt_cylinderPacket() {}
@@ -770,6 +773,7 @@ public:
     /* 0x20 */ f32 mHeight;
     /* 0x24 */ GXColor mColor;
     /* 0x28 */ u8 mClipZ;
+    /* 0x29 */ u8 mDepthWrite;
 };
 
 class mDoExt_cylinderMPacket : public J3DPacket {

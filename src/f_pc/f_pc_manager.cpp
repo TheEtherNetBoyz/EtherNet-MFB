@@ -21,9 +21,9 @@
 #include "f_pc/f_pc_priority.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include "dusk/latency.h"
-
 #if TARGET_PC
 #include "dusk/frame_interpolation.h"
+#include "dusk/tas_movie.h"
 #endif
 
 #include "tracy/Tracy.hpp"
@@ -73,7 +73,13 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
             if (!dusk::frame_interp::is_enabled() && !dusk::low_latency_presentation_enabled())
 #endif
             {
+#ifdef TARGET_PC
+                dusk::tas_movie::applyPresentationCamera(dComIfGd_getView());
+#endif
                 cAPIGph_Painter();
+#ifdef TARGET_PC
+                dusk::tas_movie::restorePresentationCamera();
+#endif
             }
 
             if (!dPa_control_c::isStatus(1)) {
@@ -99,7 +105,19 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
             }
 
             if (!fapGm_HIO_c::isCaptureScreen() || fapGm_HIO_c::getCaptureScreenDivH() != 1) {
+#ifdef TARGET_PC
+                // Gameplay execution is finished. Switch only now, before the
+                // first actor builds render and culling state.
+                dusk::tas_movie::applyPresentationCamera(dComIfGd_getView());
+#endif
                 fpcDw_Handler((fpcDw_HandlerFuncFunc)fpcM_DrawIterater, (fpcDw_HandlerFunc)fpcM_Draw);
+#ifdef TARGET_PC
+                if (!dusk::frame_interp::is_enabled() &&
+                    !dusk::low_latency_presentation_enabled())
+                {
+                    dusk::tas_movie::restorePresentationCamera();
+                }
+#endif
             }
 
             if (i_postExecuteFn != NULL) {
@@ -111,6 +129,9 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
 #ifdef TARGET_PC
             if (!dusk::frame_interp::is_enabled() && dusk::low_latency_presentation_enabled()) {
                 cAPIGph_Painter();
+                dusk::tas_movie::restorePresentationCamera();
+            } else {
+                dusk::tas_movie::restorePresentationCamera();
             }
 #endif
         } else if (!l_dvdError) {

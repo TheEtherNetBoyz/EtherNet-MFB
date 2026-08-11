@@ -4,6 +4,8 @@ namespace dusk::game_clock {
 
 void ensure_initialized();
 void reset_frame_timer();
+void set_sim_rate(float hz);
+float get_sim_rate();
 
 constexpr float sim_pace() { return 1.0f / 30.0f; }
 constexpr float period_for_original_frames(float frame_count) { return frame_count * sim_pace(); }

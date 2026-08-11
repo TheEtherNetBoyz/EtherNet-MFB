@@ -44,6 +44,7 @@ void resetForSpeedrunMode() {
     getSettings().game.recordingMode.setSpeedrunValue(false);
     getSettings().game.debugFlyCam.setSpeedrunValue(false);
     getSettings().game.moveLink.setSpeedrunValue(false);
+    getSettings().game.teleportLink.setSpeedrunValue(false);
 }
 
 static void clearSpeedrunOverrides() {

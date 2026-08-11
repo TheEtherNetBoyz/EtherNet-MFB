@@ -885,7 +885,6 @@ void JPAResource::draw(JPAEmitterWorkData* work, JPABaseEmitter* emtr) {
         authoritativeMtx[0][3] = emtr->mGlobalTrs.x;
         authoritativeMtx[1][3] = emtr->mGlobalTrs.y;
         authoritativeMtx[2][3] = emtr->mGlobalTrs.z;
-
         Mtx inverseAuthoritativeMtx;
         if (MTXInverse(authoritativeMtx, inverseAuthoritativeMtx)) {
             MTXConcat(presentationMtx, inverseAuthoritativeMtx,

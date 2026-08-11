@@ -15,6 +15,7 @@
 #ifdef TARGET_PC
 #include "dusk/dusk.h"
 #include "dusk/frame_interpolation.h"
+#include "dusk/latency.h"
 #include "dusk/logging.h"
 #include "dusk/settings.h"
 #include "dusk/time.h"
@@ -381,7 +382,9 @@ static void waitForTick(u32 p1, u16 p2) {
 #if TARGET_PC
     static Limiter limiter;
 
-    if (dusk::frame_interp::is_enabled() && !dusk::getTransientSettings().skipFrameRateLimit) {
+    if ((dusk::frame_interp::is_enabled() || dusk::low_latency_presentation_enabled()) &&
+        !dusk::getTransientSettings().skipFrameRateLimit)
+    {
         dusk::frameUsagePct = 0.f;
         return;
     }

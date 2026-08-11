@@ -16,14 +16,19 @@ struct SavedStateEntry {
 class ImGuiStateShare {
 public:
     void draw(bool& open);
+    void updateRuntime();
+    std::string captureEncodedState();
+    bool beginApplyEncodedState(const std::string& encoded, const std::string& name = {});
+    bool loadInProgress() const;
+    const std::vector<SavedStateEntry>& savedStates();
 
 private:
-    std::string encodeCurrentState();
-    bool applyEncodedState(const std::string& encoded, const std::string& name = {});
     void tickPendingApply();
     void loadStatesFile();
     void saveStatesFile();
     void mergeFromFile(const std::string& path);
+    static void onMergeFileSelected(void* userdata, const char* path, const char* error);
+
     std::vector<SavedStateEntry> m_states;
     std::string m_statusMsg;
     std::optional<dSv_info_c>  m_pendingInfo;

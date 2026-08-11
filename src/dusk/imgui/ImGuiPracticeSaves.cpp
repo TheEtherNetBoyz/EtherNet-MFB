@@ -2258,6 +2258,12 @@ void ImGuiPracticeSaves::drawNative(bool menuOpen) {
     // the active scene's graphics port. The scene port may not exist while a
     // load-zone transition is replacing the play scene.
     static J2DOrthoGraph sNativeOrtho(0.0f, 0.0f, 608.0f, 448.0f, -1.0f, 1.0f);
+    // Match the game's 2D coordinate space. A fixed 608-wide projection stretches
+    // the overlay on wider viewports and makes the aspect-aware edge offsets use
+    // coordinates outside that projection.
+    sNativeOrtho.setOrtho(mDoGph_gInf_c::getMinXF(), mDoGph_gInf_c::getMinYF(),
+                          mDoGph_gInf_c::getWidthF(), mDoGph_gInf_c::getHeightF(),
+                          -1.0f, 1.0f);
     sNativeOrtho.setPort();
 
     // Retain one reference to the game font once its archive becomes available.

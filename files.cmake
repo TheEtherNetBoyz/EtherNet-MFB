@@ -1441,6 +1441,9 @@ set(DUSK_FILES
         src/dusk/input_macro.cpp
         src/dusk/video_latency.cpp
         src/dusk/imgui/ImGuiActorSpawner.cpp
+        src/dusk/tas_movie.cpp
+        src/dusk/trigger_view.h
+        src/dusk/trigger_view.cpp
         src/dusk/imgui/ImGuiBloomWindow.cpp
         src/dusk/imgui/ImGuiBloomWindow.hpp
         src/dusk/imgui/ImGuiCameraOverlay.cpp
@@ -1455,6 +1458,7 @@ set(DUSK_FILES
         src/dusk/imgui/ImGuiMenuTools.hpp
         src/dusk/imgui/ImGuiProcessOverlay.cpp
         src/dusk/imgui/ImGuiInputMacro.cpp
+        src/dusk/imgui/ImGuiTasMovie.cpp
         src/dusk/imgui/ImGuiPracticeSaves.hpp
         src/dusk/imgui/ImGuiPracticeSaves.cpp
         src/dusk/imgui/ImGuiSaveEditor.cpp

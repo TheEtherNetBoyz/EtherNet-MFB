@@ -31,6 +31,8 @@ namespace dusk {
         void ShowPracticeSaves();
         void ShowStateShare();
         void ShowInputMacro();
+        void ShowTasMovie();
+        void UpdateTasMovie();
         void ShowInputViewer();
         void ShowActorSpawner();
 
@@ -64,6 +66,7 @@ namespace dusk {
         ImGuiStateShare m_stateShare;
 
         bool m_showInputMacro = false;
+        bool m_showTasMovie = false;
 
         bool m_showActorSpawner = false;
         int m_inputOverlayCorner = 3;
