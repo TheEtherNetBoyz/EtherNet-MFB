@@ -909,6 +909,7 @@ void JPAResource::draw(JPAEmitterWorkData* work, JPABaseEmitter* emtr) {
     if (usePresentationMtx) {
         emtr->setGlobalRTMatrix(authoritativeMtx);
     }
+    work->mUsePresentationCorrection = false;
 #endif
 }
 

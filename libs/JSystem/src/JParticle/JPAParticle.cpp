@@ -220,13 +220,15 @@ void JPABaseParticle::interp(JPAEmitterWorkData* work, void const* drawFunc) {
     if (mAge == 0)
         return;
 
-    if (work->mpEmtr->mpPtclCallBack != NULL) {
-        work->mpEmtr->mpPtclCallBack->interp(work->mpEmtr, this);
-    }
-
     // Stripe renderers consume the list as a group, so retain a translation sample even
     // though they do not provide a per-particle draw function.
     JPAInterpTranslation(work, this);
+
+    // A custom renderer may need more than translation (for example model-particle
+    // rotation and scale), so let its complete matrix replace the generic sample.
+    if (work->mpEmtr->mpPtclCallBack != NULL) {
+        work->mpEmtr->mpPtclCallBack->interp(work->mpEmtr, this);
+    }
 
     if (drawFunc == JPADrawBillboard) {
         JPAInterpBillboard(work, this);
