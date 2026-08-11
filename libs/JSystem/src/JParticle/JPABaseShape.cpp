@@ -507,16 +507,13 @@ static projectionFunc p_prj[3] = {
 };
 
 #if TARGET_PC
-static bool JPAIsPresentationParticleResource(JPAEmitterWorkData* work) {
+static bool JPAUsesExtendedPresentation(JPAEmitterWorkData* work) {
     switch (work->mpRes->getUsrIdx()) {
     case 0x243: // ZI_J_yamiFilter_a
     case 0x262: // ZI_S_warpholeApp_a
     case 0x263: // ZI_S_warpholeApp_b
     case 0x264: // ZI_S_warpholeApp_c
     case 0x275: // ZI_S_warpholeAppDemo1_a
-    case 0x368: // ZI_J_swa_kirari_a
-    case 0x36A: // ZI_J_swa_kirari_b
-    case 0x36B: // ZI_J_swa_kirari_c
     case 0x454: // ZI_S_lk_warp_disapp_a
     case 0x4B2: // ZI_S_lk_warp_app_a
     case 0x4B3: // ZI_S_wl_warp_app_a
@@ -528,12 +525,6 @@ static bool JPAIsPresentationParticleResource(JPAEmitterWorkData* work) {
     case 0x4B9: // ZI_S_wl_warp_disapp_a
     case 0x8C7: // ZI_S_lk_warp2_disapp_a
     case 0x8C8: // ZI_S_wl_warp2_disapp_a
-    case 0x896E: // ZI_S_garw_blur_a (scene resource)
-    case 0x8975: // ZI_S_garw_relord_a (scene resource)
-    case 0x8976: // ZI_S_garw_relord_b (scene resource)
-    case 0x8977: // ZI_S_garw_relord_c (scene resource)
-    case 0x8978: // ZI_S_garw_relord_d (scene resource)
-    case 0x8C1F: // ZI_S_mgn_headcore_a (scene resource)
     case 0x9F3: // ZI_J_lk_warp_app_a
     case 0x9F4: // ZI_J_lk_warp_disapp_a
     case 0x9F5: // ZI_J_wl_warp_app_a
@@ -543,10 +534,6 @@ static bool JPAIsPresentationParticleResource(JPAEmitterWorkData* work) {
     case 0x9F9: // ZI_J_wl_warp_app_e
     case 0x9FA: // ZI_J_wl_warp_app_f
     case 0x9FB: // ZI_J_wl_warp_disapp_a
-    case 0xA58: // ZI_J_lk_swl_a
-    case 0xA59: // ZI_J_lk_swl_b
-    case 0xB9D: // ZI_J_lk_swl_c
-    case 0xB9E: // ZI_S_lk_swl_get_a
     case 0xC3D: // ZF_S_demo28_02_warpFilter_a
     case 0xC3E: // ZF_S_demo28_02_warpFilter_b
     case 0xC3F: // ZF_S_demo28_02_warpFilter_c
@@ -560,13 +547,13 @@ static bool JPAIsPresentationParticleResource(JPAEmitterWorkData* work) {
 
 static bool JPAGetPresentationParticlePos(JPAEmitterWorkData* work, JPABaseParticle* ptcl, JGeometry::TVec3<f32>* pos) {
 #if TARGET_PC
-    if (!JPAIsPresentationParticleResource(work)) {
-        return false;
-    }
-
     if (work->mUsePresentationCorrection) {
         MTXMultVec(work->mPresentationCorrection, &ptcl->mPosition, pos);
         return true;
+    }
+
+    if (!JPAUsesExtendedPresentation(work)) {
+        return false;
     }
 
     Mtx particleMtx;
@@ -575,17 +562,10 @@ static bool JPAGetPresentationParticlePos(JPAEmitterWorkData* work, JPABaseParti
         return true;
     }
 
-    if (!dusk::frame_interp::is_enabled() || dusk::frame_interp::is_sim_frame() ||
-        ptcl->mAge == 0)
-    {
-        return false;
-    }
-
-    const f32 step = dusk::frame_interp::get_interpolation_step();
-    pos->set(ptcl->mPosition.x + ptcl->mVelocity.x * step,
-             ptcl->mPosition.y + ptcl->mVelocity.y * step,
-             ptcl->mPosition.z + ptcl->mVelocity.z * step);
-    return true;
+    // A particle without both a previous and current sample cannot be interpolated safely.
+    // Predicting from velocity makes newly created particles jump into the future for one
+    // presentation interval and then snap back once normal interpolation becomes available.
+    return false;
 #else
     return false;
 #endif
@@ -593,7 +573,7 @@ static bool JPAGetPresentationParticlePos(JPAEmitterWorkData* work, JPABaseParti
 
 static s16 JPAGetPresentationRotateAngle(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
 #if TARGET_PC
-    if (!JPAIsPresentationParticleResource(work)) {
+    if (!JPAUsesExtendedPresentation(work)) {
         return ptcl->mRotateAngle;
     }
 
@@ -652,7 +632,7 @@ static void submit_particle_quad(
 }
 
 void JPAInterpTranslation(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
-    if (!JPAIsPresentationParticleResource(work)) {
+    if (!JPAUsesExtendedPresentation(work)) {
         return;
     }
 
@@ -662,20 +642,12 @@ void JPAInterpTranslation(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
 }
 
 void JPAInterpBillboard(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
-    if (!JPAIsPresentationParticleResource(work)) {
-        return;
-    }
-
     Mtx ptclPosMtx;
     MTXTrans(ptclPosMtx, ptcl->mPosition.x, ptcl->mPosition.y, ptcl->mPosition.z);
     dusk::frame_interp::record_final_mtx(ptclPosMtx, ptcl);
 }
 
 void JPAInterpRotBillboard(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
-    if (!JPAIsPresentationParticleResource(work)) {
-        return;
-    }
-
     Mtx ptclPosMtx;
     f32 sinRot = JMASSin(ptcl->mRotateAngle);
     f32 cosRot = JMASCos(ptcl->mRotateAngle);
@@ -1125,10 +1097,6 @@ static bool make_rot_direction_mtx(JPAEmitterWorkData* work, JPABaseParticle* pt
 }
 
 void JPAInterpDirection(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
-    if (!JPAIsPresentationParticleResource(work)) {
-        return;
-    }
-
     JGeometry::TVec3<f32> axisY;
     JGeometry::TVec3<f32> axisZ;
     p_direction[work->mDirType](work, ptcl, &axisY);
@@ -1167,10 +1135,6 @@ void JPAInterpDirection(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
 }
 
 void JPAInterpRotDirection(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
-    if (!JPAIsPresentationParticleResource(work)) {
-        return;
-    }
-
     f32 sinRot = JMASSin(ptcl->mRotateAngle);
     f32 cosRot = JMASCos(ptcl->mRotateAngle);
     JGeometry::TVec3<f32> axisY;
@@ -1852,36 +1816,36 @@ static void makeColorTable(GXColor** o_color_table, JPAClrAnmKeyData const* i_da
     *o_color_table = p_clr_tbl;
 }
 
-GXBlendMode JPABaseShape::st_bm[3] = {
+DUSK_GAME_DATA GXBlendMode JPABaseShape::st_bm[3] = {
     GX_BM_NONE,
     GX_BM_BLEND,
     GX_BM_LOGIC,
 };
 
-GXBlendFactor JPABaseShape::st_bf[10] = {
+DUSK_GAME_DATA GXBlendFactor JPABaseShape::st_bf[10] = {
     GX_BL_ZERO,      GX_BL_ONE,           GX_BL_SRCCLR, GX_BL_INVSRCCLR,
     GX_BL_DSTCLR, GX_BL_INVDSTCLR, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA,
     GX_BL_DSTALPHA, GX_BL_INVDSTALPHA,
 };
 
-GXLogicOp JPABaseShape::st_lo[16] = {
+DUSK_GAME_DATA GXLogicOp JPABaseShape::st_lo[16] = {
     GX_LO_CLEAR,   GX_LO_SET,     GX_LO_COPY,   GX_LO_INVCOPY, GX_LO_NOOP, GX_LO_INV,
     GX_LO_AND,     GX_LO_NAND,    GX_LO_OR,     GX_LO_NOR,      GX_LO_XOR,  GX_LO_EQUIV,
     GX_LO_REVAND, GX_LO_INVAND, GX_LO_REVOR, GX_LO_INVOR,
 };
 
-GXCompare JPABaseShape::st_c[8] = {
+DUSK_GAME_DATA GXCompare JPABaseShape::st_c[8] = {
     GX_NEVER, GX_LESS, GX_LEQUAL, GX_EQUAL, GX_NEQUAL, GX_GEQUAL, GX_GREATER, GX_ALWAYS,
 };
 
-GXAlphaOp JPABaseShape::st_ao[4] = {
+DUSK_GAME_DATA GXAlphaOp JPABaseShape::st_ao[4] = {
     GX_AOP_AND,
     GX_AOP_OR,
     GX_AOP_XOR,
     GX_AOP_XNOR,
 };
 
-GXTevColorArg JPABaseShape::st_ca[6][4] = {
+DUSK_GAME_DATA GXTevColorArg JPABaseShape::st_ca[6][4] = {
     {
         GX_CC_ZERO,
         GX_CC_TEXC,
@@ -1920,7 +1884,7 @@ GXTevColorArg JPABaseShape::st_ca[6][4] = {
     },
 };
 
-GXTevAlphaArg JPABaseShape::st_aa[2][4] = {
+DUSK_GAME_DATA GXTevAlphaArg JPABaseShape::st_aa[2][4] = {
     {
         GX_CA_ZERO,
         GX_CA_TEXA,

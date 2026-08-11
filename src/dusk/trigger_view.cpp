@@ -403,7 +403,7 @@ void Save() {
     }
     sLoadedConfig = values.dump();
     getSettings().game.triggerViewDefinitions.setValue(sLoadedConfig);
-    config::Save();
+    config::save();
 }
 
 bool IsActorNameValid(const std::string& name) {

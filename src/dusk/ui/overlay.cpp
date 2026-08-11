@@ -1,6 +1,6 @@
 #include "overlay.hpp"
 
-#include "aurora/lib/logging.hpp"
+#include <borealis/log.hpp>
 #include "controller_config.hpp"
 #include "dusk/achievements.h"
 #include "dusk/action_bindings.h"
@@ -24,7 +24,7 @@
 
 namespace dusk::ui {
 namespace {
-aurora::Module Log{"dusk::ui::overlay"};
+constexpr borealis::Log Log{"dusk::ui::overlay"};
 
 const Rml::String kDocumentSource = R"RML(
 <rml>
@@ -71,6 +71,9 @@ Rml::Element* create_toast(Rml::Element* parent, const Toast& toast) {
     }
 
     auto* elem = append(parent, "toast");
+    if (!toast.modId.empty()) {
+        elem->SetAttribute("mod-id", toast.modId);
+    }
     if (!toast.type.empty()) {
         elem->SetClass(toast.type, true);
     }
@@ -89,6 +92,9 @@ Rml::Element* create_toast(Rml::Element* parent, const Toast& toast) {
         } else if (toast.type == "controller") {
             auto* icon = append(heading, "icon");
             icon->SetClass("controller", true);
+        } else if (toast.type == "warning") {
+            auto* icon = append(heading, "icon");
+            icon->SetClass("warning", true);
         }
     }
     {
@@ -203,7 +209,7 @@ static std::string FormatTime(OSTime ticks) {
     return fmt::format("{0:02}:{1:02}:{2:02}.{3:03}", t.hour, t.min, t.sec, t.msec);
 }
 
-Overlay::Overlay() : Document(kDocumentSource, true) {
+Overlay::Overlay() : Document(kDocumentSource, true, DocumentScope::Overlay) {
     mFpsCounter = mDocument->GetElementById("fps");
     mPipelineProgress = mDocument->GetElementById("pipeline-progress");
     mPipelineProgressLabel = mDocument->GetElementById("pipeline-progress-label");
@@ -249,7 +255,21 @@ void Overlay::update() {
         if (getSettings().video.enableFpsOverlay.getValue()) {
             const int idx = getSettings().video.fpsOverlayCorner.getValue();
             mFpsCounter->SetAttribute("open", "");
+            mFpsCounter->RemoveProperty(Rml::PropertyId::Bottom);
             mFpsCounter->SetAttribute("corner", kFpsCorners[idx]);
+
+            if (idx == 2) {
+                if (mPipelineProgress && mPipelineProgress->GetAttribute("open")) {
+                    // 12 (height of pipeline box off bottom) + height of pipeline box + 3 (padding
+                    // space)
+                    mFpsCounter->SetProperty(Rml::PropertyId::Bottom,
+                        Rml::Property(15 + mPipelineProgress->GetOffsetHeight(), Rml::Unit::PX));
+                } else {
+                    // Return fps counter to default height off the bottom
+                    mFpsCounter->SetProperty(
+                        Rml::PropertyId::Bottom, Rml::Property(12, Rml::Unit::PX));
+                }
+            }
 
             const Uint64 perfFreq = SDL_GetPerformanceFrequency();
             float fps = aurora_get_fps();

@@ -21,8 +21,8 @@
 #include "f_pc/f_pc_priority.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include "dusk/latency.h"
-#include "dusk/latency_trace.h"
-#ifdef TARGET_PC
+#if TARGET_PC
+#include "dusk/frame_interpolation.h"
 #include "dusk/tas_movie.h"
 #endif
 
@@ -73,7 +73,6 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
             if (!dusk::frame_interp::is_enabled() && !dusk::low_latency_presentation_enabled())
 #endif
             {
-                dusk::latency_trace::mark("cAPIGph_Painter_original_before");
 #ifdef TARGET_PC
                 dusk::tas_movie::applyPresentationCamera(dComIfGd_getView());
 #endif
@@ -81,7 +80,6 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
 #ifdef TARGET_PC
                 dusk::tas_movie::restorePresentationCamera();
 #endif
-                dusk::latency_trace::mark("cAPIGph_Painter_original_after");
             }
 
             if (!dPa_control_c::isStatus(1)) {
@@ -130,10 +128,8 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
 
 #ifdef TARGET_PC
             if (!dusk::frame_interp::is_enabled() && dusk::low_latency_presentation_enabled()) {
-                dusk::latency_trace::mark("cAPIGph_Painter_low_latency_before");
                 cAPIGph_Painter();
                 dusk::tas_movie::restorePresentationCamera();
-                dusk::latency_trace::mark("cAPIGph_Painter_low_latency_after");
             } else {
                 dusk::tas_movie::restorePresentationCamera();
             }

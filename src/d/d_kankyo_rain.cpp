@@ -12,6 +12,8 @@
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_lib.h"
 #include <cstring>
+
+#include "dusk/version.hpp"
 #if TARGET_PC
 #include "dusk/frame_interpolation.h"
 #endif
@@ -2443,10 +2445,12 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
     u8 draw_sun = false;
     u16 date = dComIfGs_getDate();
 
-#if VERSION == VERSION_GCN_JPN
+#if TARGET_PC || VERSION == VERSION_GCN_JPN
+    IF_DUSK_BLOCK(dusk::version::isRegionJpn())
     if (g_env_light.hide_vrbox) {
         return;
     }
+    IF_DUSK_BLOCK_END
 #endif
 
     if (strcmp(dComIfGp_getStartStageName(), "F_SP200") == 0) {
@@ -2811,10 +2815,12 @@ void dKyr_drawLenzflare(Mtx drawMtx, cXyz* ppos, GXColor& param_2, u8** tex) {
     static s16 S_rot_work1 = 0;
     static s16 S_rot_work2 = 0;
 
-#if VERSION == VERSION_GCN_JPN
+#if TARGET_PC || VERSION == VERSION_GCN_JPN
+    IF_DUSK_BLOCK(dusk::version::isRegionJpn())
     if (g_env_light.hide_vrbox) {
         return;
     }
+    IF_DUSK_BLOCK_END
 #endif
 
     Mtx camMtx;
@@ -3429,7 +3435,19 @@ void dKyr_drawSibuki(Mtx drawMtx, u8** tex) {
         alpha = 200.0f;
     }
 
+#if TARGET_PC
+    static u32 sSibukiCounter = 0;
+    static bool sSibukiInitialized = false;
+    const bool newSimulationTick =
+        !sSibukiInitialized || sSibukiCounter != g_Counter.mCounter0;
+    if (newSimulationTick) {
+        sSibukiCounter = g_Counter.mCounter0;
+        sSibukiInitialized = true;
+        cLib_addCalc(&rain_packet->mSibukiAlpha, alpha, 0.2f, 30.0f, 0.001f);
+    }
+#else
     cLib_addCalc(&rain_packet->mSibukiAlpha, alpha, 0.2f, 30.0f, 0.001f);
+#endif
     dKy_set_eyevect_calc(camera, &eyevect, 7000.0f, 4000.0f);
     cXyz camdir;
     dKyr_get_vectle_calc(&camera->view.lookat.eye, &camera->view.lookat.center, &camdir);
@@ -3489,14 +3507,42 @@ void dKyr_drawSibuki(Mtx drawMtx, u8** tex) {
         scale = 0.2f;
     }
 
-    for (int i = 0; i < g_env_light.raincnt >> 1; i++) {
-        cXyz pos[4];
-        f32 size = scale * (15.0f + cM_rndF(10.0f));
-        cXyz sp20;
+    int splashCount = g_env_light.raincnt >> 1;
+#if TARGET_PC
+    struct SibukiSample {
+        f32 sizeOffset;
+        f32 x;
+        f32 y;
+        f32 z;
+    };
+    static SibukiSample sSibukiSamples[125];
+    if (splashCount > 125) {
+        splashCount = 125;
+    }
+    if (newSimulationTick) {
+        for (int i = 0; i < splashCount; i++) {
+            sSibukiSamples[i].sizeOffset = cM_rndF(10.0f);
+            sSibukiSamples[i].x = cM_rndFX(3600.0f);
+            sSibukiSamples[i].y = cM_rndFX(1500.0f);
+            sSibukiSamples[i].z = cM_rndFX(3600.0f);
+        }
+    }
+#endif
 
+    for (int i = 0; i < splashCount; i++) {
+        cXyz pos[4];
+#if TARGET_PC
+        f32 size = scale * (15.0f + sSibukiSamples[i].sizeOffset);
+        f32 local_x = sSibukiSamples[i].x;
+        f32 local_y = sSibukiSamples[i].y;
+        f32 local_z = sSibukiSamples[i].z;
+#else
+        f32 size = scale * (15.0f + cM_rndF(10.0f));
         f32 local_x = cM_rndFX(3600.0f);
         f32 local_y = cM_rndFX(1500.0f);
         f32 local_z = cM_rndFX(3600.0f);
+#endif
+        cXyz sp20;
 
         sp20.x = eyevect.x + local_x;
         sp20.y = eyevect.y + local_y;
@@ -4333,10 +4379,12 @@ void dKyr_drawStar(Mtx drawMtx, u8** tex) {
         csXyz(0, 30000, 19000),
     };
 
-#if VERSION == VERSION_GCN_JPN
+#if TARGET_PC || VERSION == VERSION_GCN_JPN
+    IF_DUSK_BLOCK(dusk::version::isRegionJpn())
     if (g_env_light.hide_vrbox) {
         return;
     }
+    IF_DUSK_BLOCK_END
 #endif
 
     if (star_packet->mEffectNum != 0) {
@@ -4880,10 +4928,12 @@ void drawVrkumo(Mtx drawMtx, GXColor& color, u8** tex) {
     int pass = 1;
     f32 spC4 = 0.0f;
 
-#if VERSION == VERSION_GCN_JPN
+#if TARGET_PC || VERSION == VERSION_GCN_JPN
+    IF_DUSK_BLOCK(dusk::version::isRegionJpn())
     if (g_env_light.hide_vrbox) {
         return;
     }
+    IF_DUSK_BLOCK_END
 #endif
 
     cXyz sp15C;

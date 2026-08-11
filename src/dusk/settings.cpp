@@ -1,5 +1,6 @@
 #include "dusk/settings.h"
 #include "dusk/config.hpp"
+#include <aurora/aurora.h>
 
 #include <SDL3/SDL_scancode.h>
 
@@ -58,6 +59,7 @@ UserSettings g_userSettings = {
         .sunsSong {"game.sunsSong", false},
         .autoSave {"game.autoSave", false},
         .enhancedMapMenus {"game.enhancedMapMenus", false},
+        .aimingReticle {"game.aimingReticle", false},
 
         // Preferences
         .enableMirrorMode {"game.enableMirrorMode", false},
@@ -159,7 +161,6 @@ UserSettings g_userSettings = {
         // Technical
         .restoreWiiGlitches {"game.restoreWiiGlitches", false},
         .usePpcFastInvSqrt {"game.usePpcFastInvSqrt", true},
-        .enableLatencyTrace {"game.enableLatencyTrace", false},
 
         // Controls
         .enableTurboKeybind {"game.enableTurboKeybind", false},
@@ -384,6 +385,7 @@ void registerSettings() {
     Register(g_userSettings.game.sunsSong);
     Register(g_userSettings.game.autoSave);
     Register(g_userSettings.game.enhancedMapMenus);
+    Register(g_userSettings.game.aimingReticle);
     Register(g_userSettings.game.enableMirrorMode);
     Register(g_userSettings.game.invertCameraXAxis);
     Register(g_userSettings.game.invertCameraYAxis);
@@ -402,7 +404,8 @@ void registerSettings() {
     Register(g_userSettings.game.touchCameraYSensitivity);
     Register(g_userSettings.game.minimalHUD);
     Register(g_userSettings.game.hudScale);
-    Register(g_userSettings.game.pauseOnFocusLost);
+    Register(g_userSettings.game.pauseOnFocusLost,
+        [](const bool& value, const bool&) { aurora_set_pause_on_focus_lost(value); });
     Register(g_userSettings.game.enableDiscordPresence);
     Register(g_userSettings.game.bloomMode);
     Register(g_userSettings.game.bloomMultiplier);
@@ -420,7 +423,6 @@ void registerSettings() {
     Register(g_userSettings.game.armorRupeeDrain);
     Register(g_userSettings.game.restoreWiiGlitches);
     Register(g_userSettings.game.usePpcFastInvSqrt);
-    Register(g_userSettings.game.enableLatencyTrace);
     Register(g_userSettings.game.enableLinkDollRotation);
     Register(g_userSettings.game.enableAchievementToasts);
     Register(g_userSettings.game.enableControllerToasts);

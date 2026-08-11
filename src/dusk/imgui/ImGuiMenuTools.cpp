@@ -22,6 +22,7 @@
 #include "dusk/ui/menu_bar.hpp"
 #include "dusk/ui/ui.hpp"
 #include "dusk/vector_rsqrt.h"
+#include "dusk/os.h"
 #include "m_Do/m_Do_main.h"
 
 #include <aurora/lib/internal.hpp>
@@ -125,7 +126,7 @@ namespace dusk {
                 }
             }
             RefreshRmlMenuBar();
-            config::Save();
+            config::save();
             return true;
         }
 
@@ -142,7 +143,7 @@ namespace dusk {
             } else {
                 speedrun::disconnectLiveSplit();
             }
-            config::Save();
+            config::save();
             return true;
         }
 
@@ -153,7 +154,7 @@ namespace dusk {
                 if (copy) {
                     other.setValue(false);
                 }
-                config::Save();
+                config::save();
             }
         }
 
@@ -162,7 +163,7 @@ namespace dusk {
             ImGui::SetNextItemWidth(160.0f);
             if (ImGui::SliderInt(label, &copy, min, max)) {
                 value.setValue(std::clamp(copy, min, max));
-                config::Save();
+                config::save();
             }
         }
 
@@ -175,7 +176,7 @@ namespace dusk {
             }
             if (ImGui::SliderFloat(label, &copy, min, max, format)) {
                 value.setValue(copy);
-                config::Save();
+                config::save();
             }
             if (!enabled) {
                 ImGui::EndDisabled();
@@ -243,7 +244,7 @@ namespace dusk {
                     break;
                 }
                 ApplyAspectRatioSettings();
-                config::Save();
+                config::save();
             }
         }
 
@@ -256,7 +257,7 @@ namespace dusk {
             if (ImGui::SliderInt("##InternalResolution", &copy, 0, 12, copy == 0 ? "Auto" : "%dx")) {
                 value.setValue(copy);
                 VISetFrameBufferScale(static_cast<float>(copy));
-                config::Save();
+                config::save();
             }
         }
 
@@ -268,7 +269,7 @@ namespace dusk {
             ImGui::SetNextItemWidth(150.0f);
             if (ImGui::SliderInt("##ShadowResolution", &copy, 1, 8, "%dx")) {
                 value.setValue(copy);
-                config::Save();
+                config::save();
             }
         }
 
@@ -281,7 +282,7 @@ namespace dusk {
             ImGui::SetNextItemWidth(150.0f);
             if (ImGui::Combo("##BloomMode", &copy, items, IM_ARRAYSIZE(items))) {
                 value.setValue(static_cast<BloomMode>(copy));
-                config::Save();
+                config::save();
             }
         }
 
@@ -293,7 +294,7 @@ namespace dusk {
             ImGui::SetNextItemWidth(150.0f);
             if (ImGui::SliderFloat("##BloomMultiplier", &copy, 0.0f, 3.0f, "%.2f")) {
                 value.setValue(copy);
-                config::Save();
+                config::save();
             }
         }
 
@@ -306,7 +307,7 @@ namespace dusk {
             ImGui::SetNextItemWidth(150.0f);
             if (ImGui::Combo("##DepthOfFieldMode", &copy, items, IM_ARRAYSIZE(items))) {
                 value.setValue(static_cast<DepthOfFieldMode>(copy));
-                config::Save();
+                config::save();
             }
         }
 
@@ -341,7 +342,7 @@ namespace dusk {
                 s.game.enableFrameInterpolation.setValue(index == 0 ? FrameInterpMode::Off :
                     (kFrameRateLimitValues[index] == 0 ? FrameInterpMode::Unlimited : FrameInterpMode::Capped));
                 s.game.frameRateLimit.setValue(index == 0 ? 0 : kFrameRateLimitValues[index]);
-                config::Save();
+                config::save();
             }
         }
 
@@ -486,7 +487,7 @@ namespace dusk {
             if (ImGui::SliderInt("##MasterVolume", &masterVolume, 0, 100, "%d%%")) {
                 s.audio.masterVolume.setValue(masterVolume);
                 audio::SetMasterVolume(audio::MasterVolumeToLinear(masterVolume / 100.0f));
-                config::Save();
+                config::save();
             }
             ImGui::Separator();
             if (MenuCheckbox("Enable Reverb", s.audio.enableReverb)) {
@@ -557,7 +558,6 @@ namespace dusk {
             config::ImGuiMenuItem("Show Input Viewer", nullptr, getSettings().game.showInputViewer);
             config::ImGuiMenuItem("Show Gyro Input Viewer", nullptr,
                 getSettings().game.showInputViewerGyro, getSettings().game.showInputViewer);
-            config::ImGuiMenuItem("Latency Trace", nullptr, getSettings().game.enableLatencyTrace);
 
             if (!dusk::IsGameLaunched) {
                 ImGui::EndDisabled();
@@ -596,7 +596,7 @@ namespace dusk {
                 bool disableWaterRefraction = getSettings().game.disableWaterRefraction;
                 if (ImGui::Checkbox("Disable Water Refraction", &disableWaterRefraction)) {
                     getSettings().game.disableWaterRefraction.setValue(disableWaterRefraction);
-                    config::Save();
+                    config::save();
                 }
                 ImGui::Checkbox("Enable LOD Bias", &aurora::gx::enableLodBias);
                 ImGui::EndMenu();

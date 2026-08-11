@@ -15,7 +15,7 @@
 #include "dusk/logging.h"
 #include "dusk/settings.h"
 #include "f_op/f_op_overlap_mng.h"
-#include "../file_select.hpp"
+#include <borealis/file_select.hpp>
 #include "aurora/lib/window.hpp"
 
 #include <unordered_set>
@@ -61,9 +61,6 @@ void ImGuiStateShare::onMergeFileSelected(void* userdata, const char* path, cons
         self->m_pendingMergePath = path;
     }
 }
-
-
-
 static std::filesystem::path GetStatesFilePath() {
     return ConfigPath / STATES_FILENAME;
 }
@@ -435,8 +432,18 @@ void ImGuiStateShare::draw(bool& open) {
 
     ImGui::SameLine();
     if (ImGui::Button("Load Pack")) {
-        static constexpr SDL_DialogFileFilter filter = {"State pack", "json"};
-        ShowFileSelect(&onMergeFileSelected, this, aurora::window::get_sdl_window(), &filter, 1, nullptr, false);
+        borealis::file_select::open_file(
+            {
+                .parentWindow = aurora::window::get_sdl_window(),
+                .filters = {{"State pack", "json"}},
+            },
+            [this](borealis::file_select::Result result) {
+                if (result.status == borealis::file_select::Status::Selected &&
+                    !result.locations.empty())
+                {
+                    m_pendingMergePath = std::move(result.locations.front());
+                }
+            });
     }
 
     if (!m_states.empty()) {

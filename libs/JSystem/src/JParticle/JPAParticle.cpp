@@ -10,6 +10,10 @@
 #include "dusk/frame_interpolation.h"
 #endif
 
+#if TARGET_PC
+#include "dusk/frame_interpolation.h"
+#endif
+
 JPAParticleCallBack::~JPAParticleCallBack() {
     /* empty function */
 }
@@ -216,12 +220,8 @@ void JPABaseParticle::interp(JPAEmitterWorkData* work, void const* drawFunc) {
     if (mAge == 0)
         return;
 
-    if (work->mpEmtr->mpPtclCallBack != NULL) {
-        work->mpEmtr->mpPtclCallBack->interp(work->mpEmtr, this);
-    }
-
-    // Stripe renderers consume particles as a group and do not call a per-particle draw
-    // function, so retain a translation sample for every supported resource.
+    // Stripe renderers consume the list as a group, so retain a translation sample even
+    // though they do not provide a per-particle draw function.
     JPAInterpTranslation(work, this);
 
     if (drawFunc == JPADrawBillboard) {
@@ -232,6 +232,12 @@ void JPABaseParticle::interp(JPAEmitterWorkData* work, void const* drawFunc) {
         JPAInterpDirection(work, this);
     } else if (drawFunc == JPADrawRotDirection) {
         JPAInterpRotDirection(work, this);
+    }
+
+    // A custom renderer may need more than the standard draw type records (for example
+    // model-particle rotation and scale), so its complete matrix must be recorded last.
+    if (work->mpEmtr->mpPtclCallBack != NULL) {
+        work->mpEmtr->mpPtclCallBack->interp(work->mpEmtr, this);
     }
 }
 #endif

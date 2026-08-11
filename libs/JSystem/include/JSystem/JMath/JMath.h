@@ -4,8 +4,10 @@
 #include <mtx.h>
 #include <cmath>
 
-#include "dusk/math.h"
+#include "helpers/math.h"
+#if defined(DUSK_BUILDING_GAME)
 #include "dusk/vector_rsqrt.h"
+#endif
 
 typedef f32 Mtx33[3][3];
 typedef f32 Mtx23[2][3];
@@ -57,7 +59,11 @@ inline float __frsqrtes(__REGISTER double f) {
     // clang-format on
     return out;
 #else
+#if defined(DUSK_BUILDING_GAME)
     return dusk_vector_rsqrt((float)f);
+#else
+    return 1.0f / sqrtf((float)f);
+#endif
 #endif
 }
 
@@ -74,7 +80,11 @@ inline f32 JMAFastSqrt(__REGISTER const f32 input) {
     }
 #else
     if (input > 0.0f) {
+#if defined(DUSK_BUILDING_GAME)
         return dusk_fast_sqrt(input);
+#else
+        return frsqrte(input) * input;
+#endif
     } else {
         return input;
     }
