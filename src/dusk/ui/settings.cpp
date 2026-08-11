@@ -1875,6 +1875,8 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Transform instantly by pressing R and Y simultaneously.");
         addOption("Warp as Human", getSettings().game.humanMidnaWarp,
             "Map/Midna warps no longer force Wolf Link transformation.");
+        addOption("Aiming Reticle", getSettings().game.aimingReticle,
+            "Shows the aiming reticle for bow and slingshot.");
 
         leftPane.add_section("Speedrunning");
         config_bool_select(leftPane, rightPane, getSettings().game.speedrunMode,
