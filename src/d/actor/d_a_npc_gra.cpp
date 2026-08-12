@@ -18,7 +18,7 @@
 #include "dusk/randomizer/game/verify_item_functions.h"
 #endif
 
-const daNpc_grA_HIOParam daNpc_grA_Param_c::m = {
+DUSK_GAME_DATA const daNpc_grA_HIOParam daNpc_grA_Param_c::m = {
     {90.0f,  -4.0f,  1.0f,   850.0f,  255.0f, 280.0f, 40.0f, 100.0f, 0.0f, 0.0f, 20.0f,
      -20.0f, 40.0f,  -30.0f, 40.0f,   -40.0f, 0.4f,   12.0f, 4,      6,    6,    6,
      60.0f,  500.0f, 300.0f, -300.0f, 0x3c,   8,      0,     0,      0,    0,    0},
@@ -292,7 +292,7 @@ void daNpc_grA_HIO_c::genMessage(JORMContext* context) {
 }
 #endif
 
-char DUSK_CONST* DUSK_CONST daNpc_grA_c::mEvtCutNameList[12] = {
+DUSK_GAME_DATA char DUSK_CONST* DUSK_CONST daNpc_grA_c::mEvtCutNameList[12] = {
     "",
     "TALK_SPA",
     "GRDS_ROLL",
@@ -307,7 +307,7 @@ char DUSK_CONST* DUSK_CONST daNpc_grA_c::mEvtCutNameList[12] = {
     "ROLL_ROCK_CRASH",
 };
 
-daNpc_grA_c::cut_type DUSK_CONST daNpc_grA_c::mEvtCutList[] = {
+DUSK_GAME_DATA daNpc_grA_c::cut_type DUSK_CONST daNpc_grA_c::mEvtCutList[] = {
     NULL, 
     &daNpc_grA_c::ECut_talkSpa,
     &daNpc_grA_c::ECut_grDSRoll,

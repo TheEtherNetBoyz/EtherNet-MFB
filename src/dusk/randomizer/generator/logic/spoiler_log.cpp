@@ -6,7 +6,7 @@
 #include "../utility/platform.hpp"
 #include "../utility/yaml.hpp"
 
-#include <version.h>
+#include <borealis/version.h>
 
 #include <algorithm>
 #include <fstream>
@@ -33,7 +33,7 @@ namespace randomizer::logic::spoiler_log
 
     void LogBasicInfo(std::ofstream& log, Randomizer* randomizer)
     {
-        log << "Dusklight Version: " << DUSK_WC_DESCRIBE << std::endl;
+        log << "Dusklight Version: " << BOREALIS_APP_DESCRIBE << std::endl;
         log << "Seed: " << randomizer->GetConfig().GetSeed() << std::endl;
         log << "Permalink: " << randomizer->GetConfig().GetPermalink() << std::endl;
         log << "Hash: " << randomizer->GetConfig().GetHash() << std::endl;

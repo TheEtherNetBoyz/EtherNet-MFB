@@ -92,7 +92,7 @@ void ImGuiOnline::rememberPlayerName(const char* name) {
     copy_string(m_hostName, sizeof(m_hostName), name);
     copy_string(m_joinName, sizeof(m_joinName), name);
     copy_string(m_relayName, sizeof(m_relayName), name);
-    config::Save();
+    config::save();
 }
 
 void ImGuiOnline::rememberLobbyName(const char* name) {
@@ -100,7 +100,7 @@ void ImGuiOnline::rememberLobbyName(const char* name) {
     lobbyName.setValue(name);
     copy_string(m_room, sizeof(m_room), name);
     copy_string(m_relayRoom, sizeof(m_relayRoom), name);
-    config::Save();
+    config::save();
 }
 
 void ImGuiOnline::draw(bool& open) {

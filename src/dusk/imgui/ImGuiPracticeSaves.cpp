@@ -575,7 +575,7 @@ bool alphabetical_less(const char* a, const char* b) {
 void gz_set_bool(ConfigVar<bool>& value, bool enabled = true) {
     if (!enabled) return;
     value.setValue(!value.getValue());
-    config::Save();
+    config::save();
 }
 
 bool gz_activate_generic_row(ImGuiPracticeSaves::MainCategory category, int row) {
@@ -700,7 +700,7 @@ bool gz_config_checkbox(const char* label, ConfigVar<bool>& value, bool enabled 
     gz_end_row(selected);
     if (changed) {
         value.setValue(copy);
-        config::Save();
+        config::save();
         return true;
     }
     return false;

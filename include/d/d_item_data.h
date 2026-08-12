@@ -152,13 +152,13 @@ struct dItem_data {
     // garbage resource names, which the model/animation loader then choked on (OOB
     // construct in J3DAnmFullLoader, only triggered under insta-load). One extra
     // defined-empty entry makes every accessor in-bounds for all u8 indices.
-    static dItem_itemResource item_resource[256];
-    static dItem_fieldItemResource field_item_res[256];
-    static dItem_itemInfo item_info[256];
+    static DUSK_GAME_DATA dItem_itemResource item_resource[256];
+    static DUSK_GAME_DATA dItem_fieldItemResource field_item_res[256];
+    static DUSK_GAME_DATA dItem_itemInfo item_info[256];
 #else
-    static dItem_itemResource item_resource[255];
-    static dItem_fieldItemResource field_item_res[255];
-    static dItem_itemInfo item_info[255];
+    static DUSK_GAME_DATA dItem_itemResource item_resource[255];
+    static DUSK_GAME_DATA dItem_fieldItemResource field_item_res[255];
+    static DUSK_GAME_DATA dItem_itemInfo item_info[255];
 #endif
 #if TARGET_PC
     static dItem_itemResource item_resource_randomizer[256];

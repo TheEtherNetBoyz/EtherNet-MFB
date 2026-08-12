@@ -66,7 +66,7 @@
 #include "res/Object/Alink.h"
 #include <algorithm>
 #include <cstring>
-#include <dusk/string.hpp>
+#include <helpers/string.hpp>
 #include "dusk/cosmetics/color_utils.hpp"
 #include "dusk/randomizer/game/flags.h"
 #include "dusk/randomizer/game/stages.h"
@@ -364,7 +364,7 @@ static s16 const l_insectNameList[12] = {
 f32 l_jumpTop;
 #endif
 
-daAlink_BckData const daAlink_c::m_mainBckShield[20] = {
+DUSK_GAME_DATA daAlink_BckData const daAlink_c::m_mainBckShield[20] = {
     {dRes_ID_ALANM_BCK_ATRFWS_e, dRes_ID_ALANM_BCK_ATRFWS_e},
     {dRes_ID_ALANM_BCK_ATRFDS_e, dRes_ID_ALANM_BCK_ATRFDS_e},
     {dRes_ID_ALANM_BCK_ATBW_e, dRes_ID_ALANM_BCK_ATLS_e},
@@ -387,7 +387,7 @@ daAlink_BckData const daAlink_c::m_mainBckShield[20] = {
     {dRes_ID_ALANM_BCK_DASHS_e, dRes_ID_ALANM_BCK_ATLS_e},
 };
 
-daAlink_BckData const daAlink_c::m_mainBckSword[5] = {
+DUSK_GAME_DATA daAlink_BckData const daAlink_c::m_mainBckSword[5] = {
     {dRes_ID_ALANM_BCK_ATL_e, dRes_ID_ALANM_BCK_ATL_e},
     {dRes_ID_ALANM_BCK_ATR_e, dRes_ID_ALANM_BCK_ATR_e},
     {dRes_ID_ALANM_BCK_WALKS_e, dRes_ID_ALANM_BCK_WALKS_e},
@@ -395,7 +395,7 @@ daAlink_BckData const daAlink_c::m_mainBckSword[5] = {
     {dRes_ID_ALANM_BCK_SWIMWAIT_e, dRes_ID_ALANM_BCK_SWIMWAITS_e},
 };
 
-daAlink_BckData const daAlink_c::m_mainBckFishing[28] = {
+DUSK_GAME_DATA daAlink_BckData const daAlink_c::m_mainBckFishing[28] = {
     {dRes_ID_ALANM_BCK_ATRFWS_e, dRes_ID_ALANM_BCK_WALKFISHR_e},
     {dRes_ID_ALANM_BCK_ATRFDS_e, dRes_ID_ALANM_BCK_DASHFISHR_e},
     {dRes_ID_ALANM_BCK_ATBW_e, dRes_ID_ALANM_BCK_WALKFISHR_e},
@@ -426,7 +426,7 @@ daAlink_BckData const daAlink_c::m_mainBckFishing[28] = {
     {dRes_ID_ALANM_BCK_WAITBTOA_e, dRes_ID_ALANM_BCK_WALKFISHR_e},
 };
 
-daAlink_AnmData const daAlink_c::m_anmDataTable[daAlink_c::ANM_MAX] = {
+DUSK_GAME_DATA daAlink_AnmData const daAlink_c::m_anmDataTable[daAlink_c::ANM_MAX] = {
     {dRes_ID_ALANM_BCK_ATRFWS_e, dRes_ID_ALANM_BCK_ATRFW_e, 0xFE, 0xFE, FTANM_0, dRes_ID_ALANM_BCK_FAT_e, 0x0},
     {dRes_ID_ALANM_BCK_ATRFDS_e, dRes_ID_ALANM_BCK_ATRFD_e, 0xFE, 0xFE, FTANM_0, dRes_ID_ALANM_BCK_FAT_e, 0x0},
     {dRes_ID_ALANM_BCK_ATBW_e, dRes_ID_ALANM_BCK_ATBW_e, 0xFE, 0xFE, FTANM_0, dRes_ID_ALANM_BCK_FAT_e, 0x0},
@@ -843,7 +843,7 @@ daAlink_AnmData const daAlink_c::m_anmDataTable[daAlink_c::ANM_MAX] = {
     {dRes_ID_ALANM_BCK_ASHIMOTO_e, dRes_ID_ALANM_BCK_ASHIMOTO_e, 0xFE, 0xFE, FTANM_ASHIMOTO, dRes_ID_ALANM_BCK_FASHIMOTO_e, 0x0},
 };
 
-daAlink_WlAnmData const daAlink_c::m_wlAnmDataTable[daAlink_c::WANM_MAX] = {
+DUSK_GAME_DATA daAlink_WlAnmData const daAlink_c::m_wlAnmDataTable[daAlink_c::WANM_MAX] = {
     {dRes_ID_ALANM_BCK_WL_WAITA_e, 0x0, 0x1, 10, 40, -1, -1},
     {dRes_ID_ALANM_BCK_WL_WALKA_e, 0x0, 0x2, 1, 14, -1, -1},
     {dRes_ID_ALANM_BCK_WL_WALKB_e, 0x0, 0x2, 1, 14, -1, -1},
@@ -993,7 +993,7 @@ daAlink_WlAnmData const daAlink_c::m_wlAnmDataTable[daAlink_c::WANM_MAX] = {
     {0x802B, 0xC, 0xC, -1, -1, -1, -1},
 };
 
-daAlink_FaceTexData const daAlink_c::m_faceTexDataTable[] = {
+DUSK_GAME_DATA daAlink_FaceTexData const daAlink_c::m_faceTexDataTable[] = {
     {dRes_ID_ALANM_BTP_FMABA01_e, dRes_ID_ALANM_BTK_FMABA01_e},
     {dRes_ID_ALANM_BTP_FMABA02_e, dRes_ID_ALANM_BTK_FMABA02_e},
     {dRes_ID_ALANM_BTP_FMABA03_e, dRes_ID_ALANM_BTK_FMABA03_e},
@@ -1159,7 +1159,7 @@ daAlink_FaceTexData const daAlink_c::m_faceTexDataTable[] = {
     {dRes_ID_ALANM_BTP_WL_FC_e, dRes_ID_ALANM_BTK_WL_FA_e},
 };
 
-const daAlink_procInitTable daAlink_c::m_procInitTable[] = {
+DUSK_GAME_DATA const daAlink_procInitTable daAlink_c::m_procInitTable[] = {
     { &daAlink_c::procPreActionUnequip, 0x21 },
     { &daAlink_c::procServiceWait, 0x10000085 },
     { &daAlink_c::procTiredWait, 0x10001185 },
@@ -1514,7 +1514,7 @@ const daAlink_procInitTable daAlink_c::m_procInitTable[] = {
     { &daAlink_c::procDemoCommon, 0x1 },
 };
 
-daAlink_procFunc daAlink_c::m_demoInitTable[] = {
+DUSK_GAME_DATA daAlink_procFunc daAlink_c::m_demoInitTable[] = {
     NULL,
     NULL,
     NULL,
@@ -2150,9 +2150,9 @@ daAlinkHIO_cut_c::~daAlinkHIO_cut_c() {}
 
 daAlinkHIO_c::~daAlinkHIO_c() {}
 
-bool daAlink_matAnm_c::m_eye_move_flg;
+DUSK_GAME_DATA bool daAlink_matAnm_c::m_eye_move_flg;
 
-u8 daAlink_matAnm_c::m_morf_frame;
+DUSK_GAME_DATA u8 daAlink_matAnm_c::m_morf_frame;
 
 void daAlink_matAnm_c::init() {
     field_0xf4 = 0.0f;
@@ -19845,11 +19845,10 @@ int daAlink_c::draw() {
     }
 
 #if TARGET_PC
-    // The sword model is interpolated during presentation, while attached particle emitters
-    // otherwise retain their last 30 Hz simulation transform.
+    // These emitters are attached to the interpolated sword model, not just world-space
+    // particles, so give the particle renderer the sword's presentation transform.
     prepareSwordEffectInterpolation();
 #endif
-
     BOOL var_r29 = FALSE;
     BOOL var_r31 = TRUE;
 

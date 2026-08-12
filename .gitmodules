@@ -2,3 +2,6 @@
 	path = extern/aurora
 	url = https://github.com/matthewdavidrichardanderson/aurora.git
 	branch = dusk-aspect-ratio-ram
+[submodule "extern/borealis"]
+	path = extern/borealis
+	url = https://github.com/encounter/borealis.git

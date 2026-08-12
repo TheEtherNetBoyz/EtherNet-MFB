@@ -20,8 +20,8 @@
 #include "m_Do/m_Do_ext.h"
 #include <cstring>
 
+#include "helpers/string.hpp"
 #if TARGET_PC
-#include "dusk/string.hpp"
 #include "dusk/randomizer/game/verify_item_functions.h"
 #endif
 
@@ -160,7 +160,7 @@ static DUSK_CONSTEXPR daNpcT_MotionSeqMngr_c::sequenceStepData_c l_motionSequenc
     {23, 0, 1}, {24, 0, 0}, {-1, 0, 0}, {-1, 0, 0},
 };
 
-const char* daNpc_ykW_c::mCutNameList[8] = {
+DUSK_GAME_DATA const char* daNpc_ykW_c::mCutNameList[8] = {
     "",
     "SHOW_DOOR",
     "GO_INTO_BOSSROOM",
@@ -171,7 +171,7 @@ const char* daNpc_ykW_c::mCutNameList[8] = {
     "HUG",
 };
 
-daNpc_ykW_c::cutFunc DUSK_CONST daNpc_ykW_c::mCutList[8] = {
+DUSK_GAME_DATA daNpc_ykW_c::cutFunc DUSK_CONST daNpc_ykW_c::mCutList[8] = {
     NULL,
     &daNpc_ykW_c::cutShowDoor,
     &daNpc_ykW_c::cutGoIntoBossRoom,
@@ -275,7 +275,7 @@ daNpc_ykW_c::~daNpc_ykW_c() {
     daNpcT_offTmpBit(0x55);
 }
 
-const daNpc_ykW_HIOParam daNpc_ykW_Param_c::m = {
+DUSK_GAME_DATA const daNpc_ykW_HIOParam daNpc_ykW_Param_c::m = {
     {
         250.0f, -3.0f, 1.0f, 500.0f, 255.0f, 230.0f, 35.0f, 60.0f,
         0.0f, 0.0f, 20.0f, -20.0f, 15.0f, -15.0f, 20.0f, -20.0f,

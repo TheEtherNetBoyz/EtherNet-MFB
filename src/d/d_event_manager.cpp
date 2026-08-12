@@ -18,7 +18,7 @@
 #include "dusk/randomizer/game/verify_item_functions.h"
 #endif
 
-#include "dusk/string.hpp"
+#include "helpers/string.hpp"
 
 #if DEBUG
 static dEvM_HIO_c l_HIO;

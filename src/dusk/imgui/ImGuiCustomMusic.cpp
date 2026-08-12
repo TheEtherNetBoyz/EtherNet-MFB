@@ -1,9 +1,9 @@
 #include "ImGuiMenuTools.hpp"
 
 #include "ImGuiEngine.hpp"
+#include "borealis/file_select.hpp"
 #include "dusk/custom_music/CustomMusicService.h"
 #include "dusk/custom_music/CustomMusicIsoTransaction.h"
-#include "dusk/file_select.hpp"
 #include "dusk/main.h"
 #include "dusk/settings.h"
 
@@ -11,15 +11,11 @@
 
 #include <aurora/aurora.h>
 #include <aurora/lib/window.hpp>
-#include <SDL3/SDL_dialog.h>
-#include <SDL3/SDL_init.h>
-
 #include <algorithm>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
 #include <map>
-#include <memory>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -31,48 +27,28 @@ using custom_music::CustomMusicService;
 using custom_music::CustomSong;
 fs::path s_pendingIsoRestore;
 
-struct DialogResult {
-    std::string path;
-    std::string error;
-};
-
-void applyImportResult(void* userdata) {
-    std::unique_ptr<DialogResult> result(static_cast<DialogResult*>(userdata));
+void applyImportResult(borealis::file_select::Result result) {
     auto& service = CustomMusicService::instance();
-    if (!result->error.empty()) {
-        service.report("Import failed: " + result->error);
+    if (result.status == borealis::file_select::Status::Failed) {
+        service.report("Import failed: " + result.message);
         return;
     }
-    if (!result->path.empty()) {
+    if (result.status == borealis::file_select::Status::Selected && !result.locations.empty()) {
         try {
-            service.importPath(result->path);
+            service.importPath(result.locations.front());
         } catch (const std::exception& e) {
             service.report(std::string("Import failed: ") + e.what());
         }
     }
 }
 
-void applyRestoreResult(void* userdata) {
-    std::unique_ptr<DialogResult> result(static_cast<DialogResult*>(userdata));
+void applyRestoreResult(borealis::file_select::Result result) {
     auto& service = CustomMusicService::instance();
-    if (!result->error.empty()) service.report("Restore ISO selection failed: " + result->error);
-    else if (!result->path.empty()) s_pendingIsoRestore = result->path;
-}
-
-void dispatchDialogResult(void (*apply)(void*), const char* path, const char* error) {
-    auto result = std::make_unique<DialogResult>();
-    if (path != nullptr) result->path = path;
-    if (error != nullptr) result->error = error;
-    DialogResult* raw = result.release();
-    if (!SDL_RunOnMainThread(apply, raw, false)) apply(raw);
-}
-
-void importCallback(void*, const char* path, const char* error) {
-    dispatchDialogResult(applyImportResult, path, error);
-}
-
-void restoreCallback(void*, const char* path, const char* error) {
-    dispatchDialogResult(applyRestoreResult, path, error);
+    if (result.status == borealis::file_select::Status::Failed) {
+        service.report("Restore ISO selection failed: " + result.message);
+    } else if (result.status == borealis::file_select::Status::Selected && !result.locations.empty()) {
+        s_pendingIsoRestore = result.locations.front();
+    }
 }
 
 const char* poolName(tpcm::MusicBgmPoolMode mode) {
@@ -336,9 +312,13 @@ void drawIsoTools(CustomMusicService& service) {
     if (ImGui::SmallButton("Snapshot")) service.startCreateSnapshot();
     ImGui::SameLine();
     if (ImGui::SmallButton("Restore ISO")) {
-        static constexpr SDL_DialogFileFilter filter = {"ISO image", "iso;gcm"};
-        ShowFileSelect(restoreCallback, nullptr, aurora::window::get_sdl_window(), &filter, 1,
-            fs::path(configured).parent_path().string().c_str(), false);
+        borealis::file_select::open_file(
+            {
+                .parentWindow = aurora::window::get_sdl_window(),
+                .filters = {{"ISO image", "iso;gcm"}},
+                .defaultLocation = fs::path(configured).parent_path().string(),
+            },
+            applyRestoreResult);
     }
     ImGui::EndDisabled();
     ImGui::TextDisabled("Clean source:");
@@ -506,16 +486,24 @@ void ImGuiMenuTools::ShowCustomMusic() {
         auto& project = service.project();
         ImGui::SameLine();
         if (ImGui::Button("Import File")) {
-            static constexpr SDL_DialogFileFilter filter = {"MIDI / TPRS", "mid;midi;tprs"};
             const std::string directory = project.lastImportDirectory.string();
-            ShowFileSelect(importCallback, nullptr, aurora::window::get_sdl_window(), &filter, 1,
-                directory.empty() ? nullptr : directory.c_str(), false);
+            borealis::file_select::open_file(
+                {
+                    .parentWindow = aurora::window::get_sdl_window(),
+                    .filters = {{"MIDI / TPRS", "mid;midi;tprs"}},
+                    .defaultLocation = directory,
+                },
+                applyImportResult);
         }
         ImGui::SameLine();
         if (ImGui::Button("Import Folder")) {
             const std::string directory = project.lastImportDirectory.string();
-            ShowFolderSelect(importCallback, nullptr, aurora::window::get_sdl_window(),
-                directory.empty() ? nullptr : directory.c_str());
+            borealis::file_select::open_folder(
+                {
+                    .parentWindow = aurora::window::get_sdl_window(),
+                    .defaultLocation = directory,
+                },
+                applyImportResult);
         }
         ImGui::SameLine();
         if (ImGui::Button("Refresh Library")) service.refreshLibrary();

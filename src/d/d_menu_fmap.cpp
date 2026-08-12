@@ -21,12 +21,14 @@
 #include "d/d_msg_object.h"
 #include "d/d_msg_scrn_explain.h"
 #include "d/d_stage.h"
+#include "dusk/version.hpp"
+#include "f_op/f_op_msg_mng.h"
+#include "helpers/string.hpp"
+
 #if TARGET_PC
 #include "dusk/frame_interpolation.h"
-#endif
 #include "dusk/memory.h"
-#include "dusk/string.hpp"
-#include "f_op/f_op_msg_mng.h"
+#endif
 
 static dMf_HIO_c g_fmHIO;
 
@@ -96,7 +98,7 @@ static dMenu_Fmap_c::process move_process[30] = {
     &dMenu_Fmap_c::howl_demo3_move,
 };
 
-dMf_HIO_c* dMf_HIO_c::mMySelfPointer;
+DUSK_GAME_DATA dMf_HIO_c* dMf_HIO_c::mMySelfPointer;
 
 dMf_HIO_c::dMf_HIO_c() {
     mMySelfPointer = this;
@@ -139,7 +141,7 @@ const char* dMenuFmap_getStartStageName(void* i_fieldData) {
     return dComIfGp_getStartStageName();
 }
 
-dMenu_Fmap_c* dMenu_Fmap_c::MyClass;
+DUSK_GAME_DATA dMenu_Fmap_c* dMenu_Fmap_c::MyClass;
 
 dMenu_Fmap_c::dMenu_Fmap_c(JKRExpHeap* i_heap, STControl* i_stick, CSTControl* i_cstick,
                            u8 i_process, u8 i_regionCursor, u8 i_stageCursor, f32 i_stageTransX,
@@ -937,17 +939,8 @@ void dMenu_Fmap_c::region_map_proc() {
         mpDraw2DBack->regionMapMove(mpStick);
         int stage_no, room_no;
 
-#if TARGET_PC
-        f32 arrow_pos_x = mpDraw2DBack->getArrowPos2DX();
-        if (dusk::getSettings().game.enableMirrorMode) {
-            arrow_pos_x = mpDraw2DBack->getMirrorPosX(arrow_pos_x, 0.0f);
-        }
-
-        f32 pos_x = arrow_pos_x - mDoGph_gInf_c::getMinXF() - mDoGph_gInf_c::getWidthF() * 0.5f;
-#else
         f32 pos_x = mpDraw2DBack->getArrowPos2DX() - mDoGph_gInf_c::getMinXF()
                                                     - mDoGph_gInf_c::getWidthF() * 0.5f;
-#endif
         f32 pos_y = mpDraw2DBack->getArrowPos2DY() - mDoGph_gInf_c::getHeightF() * 0.5f;
 
         mpMenuFmapMap->getPointStagePathInnerNo(getNowFmapRegionData(), pos_x, pos_y,
@@ -1228,7 +1221,8 @@ void dMenu_Fmap_c::spot_map_proc() {
     {
         mpDraw2DBack->stageMapMove(mpStick, 1, true);
     } else if (dMw_Z_TRIGGER() && mpDraw2DTop->isWarpAccept()) {
-#if VERSION >= VERSION_GCN_JPN
+#if TARGET_PC || VERSION >= VERSION_GCN_JPN
+        IF_DUSK_BLOCK(dusk::version::isRegionJpn())
         //! JPN version added a check to make sure if Arbiter's Grounds is cleared that
         //! the Mirror Chamber Statue has been spun before allowing portal warping from the map screen.
         if (dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[265]) && !dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[361])) {
@@ -1238,7 +1232,7 @@ void dMenu_Fmap_c::spot_map_proc() {
             mPrevProcessAlt = mProcess;
             setProcess(PROC_PORTAL_WARP_FORBID);
             Z2GetAudioMgr()->seStart(Z2SE_SYS_ERROR, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
-        } else 
+        } IF_DUSK_BLOCK_END else
 #endif
         if (mpDraw2DTop->checkPlayerWarpAccept()) {
             mIsWarpMap = true;
@@ -2525,12 +2519,6 @@ void dMenu_Fmap_c::portalWarpMapMove(STControl* i_stick) {
     f32 arrow_y = mpDraw2DBack->getArrowPos2DY();
     u8 uVar6 = 0xff;
 
-#if TARGET_PC
-    if (dusk::getSettings().game.enableMirrorMode) {
-        arrow_x = mpDraw2DBack->getMirrorPosX(arrow_x, 0.0f);
-    }
-#endif
-
 
     for (int i = 0; i < portal_dat->mCount; i++) {
         if (portals[i].mRegionNo == mpDraw2DBack->getRegionCursor() + 1
@@ -2600,6 +2588,11 @@ void dMenu_Fmap_c::drawIcon(f32 param_0, bool param_1) {
     if (mProcess == PROC_PORTAL_DEMO1) {
         is_portal_demo1 = 1;
     }
+    #if TARGET_PC
+    if(dusk::getSettings().game.enableMirrorMode) {
+        angle = 0x10000 - angle;
+    }
+    #endif
     mpDraw2DBack->setIcon2DPos(0x11, stage_name, pos.x, pos.z, cM_sht2d(angle),
                                is_portal_demo1, param_1);
     
@@ -2688,6 +2681,11 @@ void dMenu_Fmap_c::drawPlayEnterIcon() {
             angle = dComIfGs_getPlayerFieldLastStayAngleY();
             SAFE_STRCPY(stage_name, dComIfGs_getPlayerFieldLastStayName());
         }
+        #if TARGET_PC
+        if(dusk::getSettings().game.enableMirrorMode) {
+            angle = 0x10000 - angle;
+        }
+        #endif
         mpDraw2DBack->setIcon2DPos(0x15, stage_name, pos.x, pos.z, cM_sht2d(angle), 0, false);
     }
 }

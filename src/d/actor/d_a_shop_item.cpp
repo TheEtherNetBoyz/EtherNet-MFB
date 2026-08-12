@@ -154,7 +154,7 @@ const char* daShopItem_c::getShopArcname() {
     return M_SHOP_DATA[mShopItemID].get_arcName();
 }
 
-const f32 daShopItem_c::m_cullfar_max = 5000.0f;
+DUSK_GAME_DATA const f32 daShopItem_c::m_cullfar_max = 5000.0f;
 
 u16 daShopItem_c::getHeapSize() {
     static const u16 HeapSizeTbl[] = {

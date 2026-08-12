@@ -13,7 +13,7 @@
 #include "dusk/randomizer/game/verify_item_functions.h"
 #endif
 
-daNpcImpal_HIOParam const daNpcImpal_Param_c::m = {
+DUSK_GAME_DATA daNpcImpal_HIOParam const daNpcImpal_Param_c::m = {
     135.0f,        // attention_offset
     -3.0f,         // gravity
     1.0f,          // scale
@@ -95,7 +95,7 @@ void daNpcImpal_HIO_c::genMessage(JORMContext* ctext) {
 }
 #endif
 
-daNpcImpal_c::EventFn daNpcImpal_c::mEvtSeqList[4] = {
+DUSK_GAME_DATA daNpcImpal_c::EventFn daNpcImpal_c::mEvtSeqList[4] = {
     NULL,
     &daNpcImpal_c::EvCut_ImpalAppear1,
     &daNpcImpal_c::EvCut_ImpalAppear2,

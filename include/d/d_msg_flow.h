@@ -2,7 +2,7 @@
 #define D_MSG_D_MSG_FLOW_H
 
 #include <types.h>
-#include "dusk/endian.h"
+#include "helpers/endian.h"
 
 enum {
     NODETYPE_MESSAGE_e = 1,
@@ -196,8 +196,8 @@ public:
     void setMsg(u32 msg) { mMsg = msg; }
     bool checkEndFlow() { return (u32)field_0x26 == 1; }
 
-    static queryFunc mQueryList[DUSK_IF_ELSE(54, 53)];
-    static eventFunc mEventList[DUSK_IF_ELSE(45, 43)];
+    static DUSK_GAME_DATA queryFunc mQueryList[DUSK_IF_ELSE(54, 53)];
+    static DUSK_GAME_DATA eventFunc mEventList[DUSK_IF_ELSE(45, 43)];
 
 #if TARGET_PC
     // patch funcs for rando

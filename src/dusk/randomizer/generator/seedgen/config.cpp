@@ -12,7 +12,7 @@
 
 #include <fmt/format.h>
 #include <iostream>
-#include <version.h>
+#include <borealis/version.h>
 
 // Fields which aren't part of settings_list.yaml
 constexpr std::string_view SEED = "Seed";
@@ -375,7 +375,7 @@ namespace randomizer::seedgen::config
 
         std::string permalink{};
 
-        permalink += DUSK_WC_DESCRIBE;
+        permalink += BOREALIS_APP_DESCRIBE;
         permalink += '\0';
         permalink += std::to_string(settings::GetSettingInfoHash());
         permalink += '\0';
@@ -481,7 +481,7 @@ namespace randomizer::seedgen::config
 
         if (permaSettingsInfoHash != std::to_string(settings::GetSettingInfoHash())) {
             return fmt::format("Pasted permalink was generated with an incompatible Dusklight version.\n"
-                                  "Your version: {}\nPermalink version: {}", DUSK_WC_DESCRIBE, permaVersion);
+                                  "Your version: {}\nPermalink version: {}", BOREALIS_APP_DESCRIBE, permaVersion);
         }
 
         const std::vector<char> bytes(permaPackedSettings.begin(), permaPackedSettings.end());

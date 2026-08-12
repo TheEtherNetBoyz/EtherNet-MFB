@@ -159,7 +159,7 @@ namespace dusk {
             bool randoEnabled = getSettings().randomizer.enabled.getValue();
             if (ImGui::Checkbox("Randomizer Enabled", &randoEnabled)) {
                 getSettings().randomizer.enabled.setValue(randoEnabled);
-                config::Save();
+                config::save();
                 // When turning it off, clear the loaded seed if it's safe to do so
                 // (i.e. we're not mid-playthrough on an active randomizer save).
                 if (!randoEnabled && !randomizer_IsActive()) {

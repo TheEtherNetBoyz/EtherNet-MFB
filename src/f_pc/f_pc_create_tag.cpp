@@ -5,7 +5,7 @@
 
 #include "f_pc/f_pc_create_tag.h"
 
-node_list_class g_fpcCtTg_Queue = {NULL, NULL, 0};
+DUSK_GAME_DATA node_list_class g_fpcCtTg_Queue = {NULL, NULL, 0};
 #if TARGET_PC
 u64 g_fpcCtTg_ActivityEpoch = 0;
 #endif

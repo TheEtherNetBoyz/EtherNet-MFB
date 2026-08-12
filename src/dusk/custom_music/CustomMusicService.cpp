@@ -516,7 +516,7 @@ void CustomMusicService::resetMusicRandomizer() {
     if (!clean.empty() && configured != clean
         && configured == CustomMusicIsoTransaction::stagedPathFor(clean)) {
         getSettings().backend.isoPath.setValue(clean.string());
-        config::Save();
+        config::save();
         switchedToClean = true;
     }
     if (removedSpecific || switchedToClean) {
@@ -596,7 +596,7 @@ void CustomMusicService::acceptPendingIsoSwitch() {
     }
     if (path.empty()) return;
     getSettings().backend.isoPath.setValue(path.string());
-    config::Save();
+    config::save();
     log("Staged ISO selected. Restart Dusklight when ready to use it.");
 }
 
@@ -619,7 +619,7 @@ void CustomMusicService::switchToCleanIso() {
         return;
     }
     getSettings().backend.isoPath.setValue(clean.string());
-    config::Save();
+    config::save();
     log("Switched to clean ISO. Restart Dusklight, then re-run the randomizer.");
 }
 

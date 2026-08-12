@@ -15,7 +15,7 @@
 #include "dusk/cutscene_skip.h"
 #include "Z2AudioLib/Z2Instances.h"
 
-daObjMasterSword_Attr_c const daObjMasterSword_c::mAttr = {1.0f};
+DUSK_GAME_DATA daObjMasterSword_Attr_c const daObjMasterSword_c::mAttr = {1.0f};
 
 static daObjMasterSword_c* s_activeMasterSwordSkipActor;
 
@@ -162,7 +162,7 @@ static int daObjMasterSword_Create(fopAc_ac_c* i_this) {
     return static_cast<daObjMasterSword_c*>(i_this)->create();
 }
 
-actionFunc daObjMasterSword_c::ActionTable[] = {
+DUSK_GAME_DATA actionFunc daObjMasterSword_c::ActionTable[] = {
     &daObjMasterSword_c::initWait, &daObjMasterSword_c::executeWait,
 };
 

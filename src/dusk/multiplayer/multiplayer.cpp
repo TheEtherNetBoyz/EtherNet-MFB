@@ -48,6 +48,7 @@
 #include "m_Do/m_Do_mtx.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include "absl/strings/escaping.h"
+#include <borealis/io.hpp>
 #include "imgui.h"
 #include "nlohmann/json.hpp"
 #include <filesystem>
@@ -4281,10 +4282,10 @@ struct NameLabelFontAtlas {
 
 std::string name_label_font_path() {
 #ifdef DUSK_ASSET_DIR
-    return dusk::io::fs_path_to_string(std::filesystem::path(DUSK_ASSET_DIR) /
+    return borealis::io::fs_path_to_string(std::filesystem::path(DUSK_ASSET_DIR) /
                                        "AlegreyaSC-Bold.ttf");
 #else
-    return dusk::io::fs_path_to_string(std::filesystem::current_path() / "res" /
+    return borealis::io::fs_path_to_string(std::filesystem::current_path() / "res" /
                                        "AlegreyaSC-Bold.ttf");
 #endif
 }

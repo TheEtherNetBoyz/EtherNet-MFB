@@ -21,7 +21,15 @@
 #include "m_Do/m_Do_graphic.h"
 #include <cstring>
 
-#include "tracy/Tracy.hpp"
+#if defined(DUSK_BUILDING_GAME)
+#include <tracy/Tracy.hpp>
+#include "dusk/settings.h"
+#else
+#ifndef ZoneScoped
+#define ZoneScoped
+#define ZoneScopedN(name)
+#endif
+#endif
 
 #if TARGET_PC
 #include "dusk/multiplayer/event_sync.hpp"
@@ -1048,7 +1056,7 @@ public:
     /* 0x1DE09 */ u8 field_0x1de09;
     /* 0x1DE0A */ u8 field_0x1de0a;
     /* 0x1DE0B */ u8 mIsDebugMode;
-    #if DEBUG
+    #if PARTIAL_DEBUG || DEBUG
     /* 0x1DE0C */ OSStopwatch mStopwatch;
     #endif
 
@@ -1060,11 +1068,11 @@ public:
 
 STATIC_ASSERT(122384 == sizeof(dComIfG_inf_c));
 
-extern dComIfG_inf_c g_dComIfG_gameInfo;
-extern GXColor g_blackColor;
-extern GXColor g_clearColor;
-extern GXColor g_whiteColor;
-extern GXColor g_saftyWhiteColor;
+DUSK_GAME_EXTERN dComIfG_inf_c g_dComIfG_gameInfo;
+DUSK_GAME_EXTERN GXColor g_blackColor;
+DUSK_GAME_EXTERN GXColor g_clearColor;
+DUSK_GAME_EXTERN GXColor g_whiteColor;
+DUSK_GAME_EXTERN GXColor g_saftyWhiteColor;
 
 int dComLbG_PhaseHandler(request_of_phase_process_class*, request_of_phase_process_fn*,
                          void*);
@@ -5082,27 +5090,23 @@ inline void dComIfGd_drawXluListDark() {
     g_dComIfG_gameInfo.drawlist.drawXluListDark();
 }
 
+#if TARGET_PC
+void dComIfGd_drawXluListInvisible();
+#else
 inline void dComIfGd_drawXluListInvisible() {
     ZoneScoped;
-#ifdef TARGET_PC
-    if (!dusk::getSettings().game.disableWaterRefraction) {
-#endif
-        g_dComIfG_gameInfo.drawlist.drawXluListInvisible();
-#ifdef TARGET_PC
-    }
-#endif
+    g_dComIfG_gameInfo.drawlist.drawXluListInvisible();
 }
+#endif
 
+#if TARGET_PC
+void dComIfGd_drawOpaListInvisible();
+#else
 inline void dComIfGd_drawOpaListInvisible() {
     ZoneScoped;
-#ifdef TARGET_PC
-    if (!dusk::getSettings().game.disableWaterRefraction) {
-#endif
-        g_dComIfG_gameInfo.drawlist.drawOpaListInvisible();
-#ifdef TARGET_PC
-        }
-#endif
+    g_dComIfG_gameInfo.drawlist.drawOpaListInvisible();
 }
+#endif
 
 inline void dComIfGd_drawXluListZxlu() {
     ZoneScoped;

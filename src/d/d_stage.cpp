@@ -25,11 +25,13 @@
 
 #if TARGET_PC
 #include "dusk/logging.h"
-#include "dusk/string.hpp"
+#include "helpers/string.hpp"
 #include "dusk/randomizer/game/randomizer_context.hpp"
 #include "dusk/randomizer/game/flags.h"
 #include "dusk/randomizer/game/stages.h"
 #include "dusk/randomizer/game/tools.h"
+#include "dusk/mods/svc/stage.hpp"
+#include "dusk/utilities.hpp"
 #include <format>
 #include <fmt/ranges.h>
 #endif
@@ -162,7 +164,7 @@ void dStage_startStage_c::set(const char* i_Name, s8 i_RoomNo, s16 i_Point, s8 i
 #if TARGET_PC
     // UB fix.
     if (mName != i_Name) {
-        dusk::SafeStringCopy(mName, i_Name);
+        SafeStringCopy(mName, i_Name);
     }
 #else
     strcpy(mName, i_Name);
@@ -172,7 +174,7 @@ void dStage_startStage_c::set(const char* i_Name, s8 i_RoomNo, s16 i_Point, s8 i
     mLayer = i_Layer;
 }
 
-dStage_roomStatus_c dStage_roomControl_c::mStatus[0x40];
+DUSK_GAME_DATA dStage_roomStatus_c dStage_roomControl_c::mStatus[0x40];
 
 void dStage_roomControl_c::init() {
     mStayNo = -1;
@@ -1570,88 +1572,107 @@ const char* dStage_getName2(s16 procName, s8 argument) {
     return dStage_getName(procName, argument);
 }
 
-u8 data_8074C568_debug;
-u8 data_8074C569_debug;
-u8 data_8074C56A_debug;
-u8 data_8074C56B_debug;
-u8 data_8074C56C_debug;
+DUSK_GAME_DATA u8 data_8074C568_debug;
+DUSK_GAME_DATA u8 data_8074C569_debug;
+DUSK_GAME_DATA u8 data_8074C56A_debug;
+DUSK_GAME_DATA u8 data_8074C56B_debug;
+DUSK_GAME_DATA u8 data_8074C56C_debug;
 
-fpc_ProcID dStage_roomControl_c::mProcID;
+DUSK_GAME_DATA fpc_ProcID dStage_roomControl_c::mProcID;
 
-s8 dStage_roomControl_c::mStayNo;
+DUSK_GAME_DATA s8 dStage_roomControl_c::mStayNo;
 
-s8 dStage_roomControl_c::mOldStayNo;
+DUSK_GAME_DATA s8 dStage_roomControl_c::mOldStayNo;
 
-s8 dStage_roomControl_c::mNextStayNo;
+DUSK_GAME_DATA s8 dStage_roomControl_c::mNextStayNo;
 
-u8 dStage_roomControl_c::m_time_pass;
+DUSK_GAME_DATA u8 dStage_roomControl_c::m_time_pass;
 
-u8 dStage_roomControl_c::mNoChangeRoom;
+DUSK_GAME_DATA u8 dStage_roomControl_c::mNoChangeRoom;
 
-dStage_roomControl_c::dStage_bankName* dStage_roomControl_c::mArcBankName;
+DUSK_GAME_DATA dStage_roomControl_c::dStage_bankName* dStage_roomControl_c::mArcBankName;
 
-dStage_roomControl_c::dStage_bankData* dStage_roomControl_c::mArcBankData;
+DUSK_GAME_DATA dStage_roomControl_c::dStage_bankData* dStage_roomControl_c::mArcBankData;
 
-dStage_roomControl_c::roomDzs_c dStage_roomControl_c::m_roomDzs;
+DUSK_GAME_DATA dStage_roomControl_c::roomDzs_c dStage_roomControl_c::m_roomDzs;
 #if DEBUG
 u8 dStage_roomControl_c::mNoArcBank;
 #endif
 
-static void dStage_actorCreate(stage_actor_data_class* i_actorData, fopAcM_prm_class* i_actorPrm) {
 #if TARGET_PC
-    // In rando, potentially override this object's data
-    if (randomizer_IsActive()) {
-
-        s8 roomNo = i_actorPrm->room_no;
-        // certain objects (like PLYR spawns) have the room set to -1.
-        // In this case, use dComIfGp_getStartStageRoomNo()
-        if (roomNo == -1) {
-            roomNo = dComIfGp_getStartStageRoomNo();
-        }
-
-        // Get the current stage/room/layer key
-        auto currentStageKey = getActorPatchesCurrentStageKey(roomNo);
-        // Iterate twice, once with the current room number, and once with the room set to 0xFF
-        // to indicate overriding an actor in the stage file instead of room file
-        for (auto i = 0; i < 2; ++i) {
-            // change to check for stage objects for 2nd iteration
-            if (i == 1) {
-                currentStageKey |= RandomizerContext::ROOM_STAGE << 8;
-            }
-            // If we have patches for this stage/room/layer
-            if (randomizer_GetContext().mObjectPatches.contains(currentStageKey)) {
-                auto& patches = randomizer_GetContext().mObjectPatches.at(currentStageKey);
-
-                auto actrKey = getStageObjCRC32(reinterpret_cast<u8*>(i_actorData), RandomizerContext::ACTR_CRC_SIZE);
-                auto tgscKey = getStageObjCRC32(reinterpret_cast<u8*>(i_actorData), RandomizerContext::TGSC_CRC_SIZE);
-                std::vector<u8>* bytes = NULL;
-                // See if the patches contain either key and the correct size for the key
-                if (patches.contains(actrKey) &&
-                    (patches[actrKey].size() == RandomizerContext::ACTR_CRC_SIZE || patches[actrKey].size() == RandomizerContext::OBJ_DELETE_SIZE))
-                {
-                    bytes = &patches.at(actrKey);
-                } else if (patches.contains(tgscKey) &&
-                        (patches[tgscKey].size() == RandomizerContext::TGSC_CRC_SIZE  || patches[tgscKey].size() == RandomizerContext::OBJ_DELETE_SIZE))
-                {
-                    bytes = &patches.at(tgscKey);
-                }
-
-                // If we found a match with a size of OBJ_DELETE_SIZE, this is a signal to delete the actor.
-                // Return early so we just don't spawn it
-                if (bytes != NULL && bytes->size() == RandomizerContext::OBJ_DELETE_SIZE) {
-                    return;
-                }
-                // If we found a match, override the actor data
-                if (bytes != NULL) {
-                    std::memcpy(i_actorPrm, bytes->data() + 8, bytes->size() - 8);
-                    std::memcpy(i_actorData, bytes->data(), bytes->size());
-                }
-            }
-        }
-
+static dusk::mods::svc::StageActorEditResult dStage_applyRandomizerActorEdits(
+    stage_actor_data_class* i_actorData, fopAcM_prm_class* i_actorPrm) {
+    using dusk::mods::svc::StageActorEditResult;
+    if (!randomizer_IsActive()) {
+        return StageActorEditResult::Unchanged;
     }
-#endif
 
+    s8 roomNo = i_actorPrm->room_no;
+    // Certain objects (like PLYR spawns) have the room set to -1.
+    // In this case, use dComIfGp_getStartStageRoomNo().
+    if (roomNo == -1) {
+        roomNo = dComIfGp_getStartStageRoomNo();
+    }
+
+    auto currentStageKey = getActorPatchesCurrentStageKey(roomNo);
+    auto result = StageActorEditResult::Unchanged;
+    // Iterate once for the current room and once for stage-level records.
+    for (int i = 0; i < 2; ++i) {
+        if (i == 1) {
+            currentStageKey |= RandomizerContext::ROOM_STAGE << 8;
+        }
+        if (!randomizer_GetContext().mObjectPatches.contains(currentStageKey)) {
+            continue;
+        }
+
+        auto& patches = randomizer_GetContext().mObjectPatches.at(currentStageKey);
+        const auto actrKey =
+            getStageObjCRC32(reinterpret_cast<u8*>(i_actorData), RandomizerContext::ACTR_CRC_SIZE);
+        const auto tgscKey =
+            getStageObjCRC32(reinterpret_cast<u8*>(i_actorData), RandomizerContext::TGSC_CRC_SIZE);
+        std::vector<u8>* bytes = nullptr;
+        if (patches.contains(actrKey) &&
+            (patches[actrKey].size() == RandomizerContext::ACTR_CRC_SIZE ||
+                patches[actrKey].size() == RandomizerContext::OBJ_DELETE_SIZE))
+        {
+            bytes = &patches.at(actrKey);
+        } else if (patches.contains(tgscKey) &&
+            (patches[tgscKey].size() == RandomizerContext::TGSC_CRC_SIZE ||
+                patches[tgscKey].size() == RandomizerContext::OBJ_DELETE_SIZE))
+        {
+            bytes = &patches.at(tgscKey);
+        }
+
+        if (bytes != nullptr && bytes->size() == RandomizerContext::OBJ_DELETE_SIZE) {
+            return StageActorEditResult::Deleted;
+        }
+        if (bytes != nullptr) {
+            std::memcpy(i_actorPrm, bytes->data() + 8, bytes->size() - 8);
+            std::memcpy(i_actorData, bytes->data(), bytes->size());
+            result = StageActorEditResult::Patched;
+        }
+    }
+    return result;
+}
+
+static void dStage_actorCreate(stage_actor_data_class* i_actorData, fopAcM_prm_class* i_actorPrm,
+                               size_t recordSize = sizeof(stage_actor_data_class)) {
+    const auto originalCrc = dusk::utils::crc32(i_actorData, recordSize);
+    const s8 originalRoomNo = i_actorPrm->room_no;
+    const auto randomizerResult = dStage_applyRandomizerActorEdits(i_actorData, i_actorPrm);
+    const auto modResult = dusk::mods::svc::stage_apply_actor_edits(
+        i_actorData, i_actorPrm, recordSize, originalRoomNo, originalCrc);
+    using dusk::mods::svc::StageActorEditResult;
+    if (modResult == StageActorEditResult::Deleted ||
+        (modResult == StageActorEditResult::Unchanged &&
+            randomizerResult == StageActorEditResult::Deleted))
+    {
+        JKRFree(i_actorPrm);
+        return;
+    }
+#else
+static void dStage_actorCreate(stage_actor_data_class* i_actorData, fopAcM_prm_class* i_actorPrm) {
+#endif
     dStage_objectNameInf* actorInf = dStage_searchName(i_actorData->name);
 
     if (actorInf == NULL) {
@@ -2114,7 +2135,12 @@ static int dStage_tgscCommonLayerInit(dStage_dt_c* i_stage, void* i_data, int en
                 appen->base = tgsc_data->base;
                 appen->room_no = (int)i_stage->getRoomNo();
                 appen->scale = tgsc_data->scale;
+#if TARGET_PC
+                dStage_actorCreate(actor_data, appen,
+                    sizeof(stage_actor_data_class) + sizeof(fopAcM_prmScale_class));
+#else
                 dStage_actorCreate(actor_data, appen);
+#endif
             }
         }
         tgsc_data++;
@@ -2185,7 +2211,12 @@ static int dStage_tgscInfoInit(dStage_dt_c* i_stage, void* i_data, int entryNum,
                 appen->base = actor_data->base;
                 appen->room_no = (int)i_stage->getRoomNo();
                 appen->scale = tgsc_data->scale;
+#if TARGET_PC
+                dStage_actorCreate(actor_data, appen,
+                    sizeof(stage_actor_data_class) + sizeof(fopAcM_prmScale_class));
+#else
                 dStage_actorCreate(actor_data, appen);
+#endif
             }
         }
         tgsc_data++;
@@ -2208,7 +2239,12 @@ static int dStage_doorInfoInit(dStage_dt_c* i_stage, void* i_data, int entryNum,
             appen->base = actor_data->base;
             appen->room_no = (int)i_stage->getRoomNo();
             appen->scale = tgsc_data->scale;
+#if TARGET_PC
+            dStage_actorCreate(actor_data, appen,
+                sizeof(stage_actor_data_class) + sizeof(fopAcM_prmScale_class));
+#else
             dStage_actorCreate(actor_data, appen);
+#endif
         }
         tgsc_data++;
     }
@@ -2633,6 +2669,29 @@ static void dKankyo_create() {
     fopKyM_fastCreate(fpcNm_ENVSE_e, 0, NULL, NULL, NULL);
 }
 
+#if TARGET_PC
+static void dusk_stage_svc_new_actor_create(dStage_dt_c* i_stage) {
+    dusk::mods::svc::stage_create_new_actors(i_stage->getRoomNo(),
+        [](void* user, const void* record, size_t size) {
+            auto* stage = static_cast<dStage_dt_c*>(user);
+            stage_tgsc_data_class object{};
+            std::memcpy(&object, record, size);
+
+            fopAcM_prm_class* appen = fopAcM_CreateAppend();
+            if (appen != nullptr) {
+                appen->base = object.base;
+                appen->room_no = static_cast<int>(stage->getRoomNo());
+                if (size > sizeof(stage_actor_data_class)) {
+                    appen->scale = object.scale;
+                }
+                dStage_actorCreate(
+                    reinterpret_cast<stage_actor_data_class*>(&object), appen, size);
+            }
+        },
+        i_stage);
+}
+#endif
+
 static void layerMemoryInfoLoader(void* i_data, dStage_dt_c* i_stage, int param_2) {
     UNUSED(param_2);
     static FuncTable l_layerFuncTable[] = {
@@ -2834,6 +2893,7 @@ void dStage_dt_c_roomReLoader(void* i_data, dStage_dt_c* i_stage, int param_2) {
     if (randomizer_IsActive()) {
         dStage_createObjectAdditions(i_stage);
     }
+    dusk_stage_svc_new_actor_create(i_stage);
 #endif
     layerActorLoader(i_data, i_stage, param_2);
 }
@@ -2851,12 +2911,12 @@ void dStage_dt_c_fieldMapLoader(void* i_data, dStage_dt_c* i_stage) {
     dStage_dt_c_decode(i_data, i_stage, l_funcTable, ARRAY_SIZEU(l_funcTable));
 }
 
-JKRExpHeap* dStage_roomControl_c::mMemoryBlock[MEMORY_BLOCK_MAX] = {
+DUSK_GAME_DATA JKRExpHeap* dStage_roomControl_c::mMemoryBlock[MEMORY_BLOCK_MAX] = {
     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 };
 
-char dStage_roomControl_c::mArcBank[32][10] = {0};
+DUSK_GAME_DATA char dStage_roomControl_c::mArcBank[32][10] = {0};
 
 void dStage_infoCreate() {
     OS_REPORT("dStage_Create\n");
@@ -2867,7 +2927,7 @@ void dStage_infoCreate() {
     dStage_dt_c_stageInitLoader(stageRsrc, dComIfGp_getStage());
 }
 
-char dStage_roomControl_c::mDemoArcName[10];
+DUSK_GAME_DATA char dStage_roomControl_c::mDemoArcName[10];
 
 void dStage_Create() {
     void* stageRsrc = dComIfG_getStageRes("stage.dzs");
@@ -2935,7 +2995,7 @@ void dStage_Delete() {
     dComIfGp_getStage()->init();
 }
 
-s8 dStage_roomControl_c::mRoomReadId = -1;
+DUSK_GAME_DATA s8 dStage_roomControl_c::mRoomReadId = -1;
 
 int dStage_RoomCheck(cBgS_GndChk* gndChk) {
     int roomReadId = dStage_roomControl_c::getRoomReadId();

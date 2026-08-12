@@ -30,7 +30,7 @@
 #endif
 
 #ifndef __MWERKS__
-#include "dusk/math.h"
+#include "helpers/math.h"
 #endif
 
 #if DEBUG
@@ -38,7 +38,7 @@
 #endif
 
 extern "C" {
-    extern dPa_particleTracePcallBack_c JPTracePCB4;
+    DUSK_GAME_EXTERN dPa_particleTracePcallBack_c JPTracePCB4;
 }
 
 void dPa_cleanupGX() {
@@ -128,11 +128,11 @@ u32 dummy(JPABaseEmitter* i_emitter) {
     return i_emitter->getAge();
 }
 
-dPa_modelEcallBack dPa_modelEcallBack::mEcallback;
+DUSK_GAME_DATA dPa_modelEcallBack dPa_modelEcallBack::mEcallback;
 
-dPa_modelPcallBack dPa_modelEcallBack::mPcallback;
+DUSK_GAME_DATA dPa_modelPcallBack dPa_modelEcallBack::mPcallback;
 
-dPa_modelEcallBack::model_c* dPa_modelEcallBack::mModel;
+DUSK_GAME_DATA dPa_modelEcallBack::model_c* dPa_modelEcallBack::mModel;
 
 #if DEBUG
 u8 dPa_modelEcallBack::mNum;
@@ -446,46 +446,45 @@ static void dPa_setWindPower(JPABaseParticle* param_0) {
 #if TARGET_PC
 static void dPa_getModelParticleMtx(JPABaseEmitter* i_emitter, JPABaseParticle* i_particle,
                                     Mtx o_mtx) {
-    Mtx local_74;
-    Mtx local_44;
-    JGeometry::TVec3<f32> local_cc;
-    JGeometry::TVec3<f32> aTStack_24;
-    JGeometry::TVec3<f32> aTStack_30;
-    JGeometry::TVec3<f32> aTStack_36;
-    JGeometry::TVec3<f32> local_fc;
-    MTXIdentity(local_74);
-    MTXIdentity(local_44);
-    f32 f31 = -90.0f / 16384.0f * i_particle->getRotateAngle();
-    if (f31) {
-        switch(dPa_modelEcallBack::getRotAxis(i_emitter)) {
+    Mtx rotationMtx;
+    MTXIdentity(o_mtx);
+    MTXIdentity(rotationMtx);
+
+    f32 rotation = -90.0f / 16384.0f * i_particle->getRotateAngle();
+    if (rotation) {
+        switch (dPa_modelEcallBack::getRotAxis(i_emitter)) {
         case 0:
-            MTXRotRad(local_44, 0x79, DEG_TO_RAD(f31));
+            MTXRotRad(rotationMtx, 'y', DEG_TO_RAD(rotation));
             break;
         case 1:
-            MTXRotRad(local_44, 0x78, DEG_TO_RAD(f31));
+            MTXRotRad(rotationMtx, 'x', DEG_TO_RAD(rotation));
             break;
         case 2:
-            MTXRotRad(local_44, 0x7a, DEG_TO_RAD(f31));
+            MTXRotRad(rotationMtx, 'z', DEG_TO_RAD(rotation));
             break;
-        case 3:
-            Vec vec = {1.0f, 1.0f, 1.0f};
-            MTXRotAxisRad(local_44, &vec, DEG_TO_RAD(f31));
+        case 3: {
+            Vec axis = {1.0f, 1.0f, 1.0f};
+            MTXRotAxisRad(rotationMtx, &axis, DEG_TO_RAD(rotation));
+            break;
         }
-
-        MTXConcat(local_74, local_44, local_74);
+        }
+        MTXConcat(o_mtx, rotationMtx, o_mtx);
     }
-    i_particle->getGlobalPosition(&local_cc);
-    local_74[0][3] = local_cc.x;
-    local_74[1][3] = local_cc.y;
-    local_74[2][3] = local_cc.z;
-    i_emitter->getGlobalParticleScale(&local_fc);
-    local_fc.x *= i_particle->getParticleScaleX();
-    local_fc.y *= i_particle->getParticleScaleY();
-    Mtx auStack_c0;
-    local_fc.z = local_fc.x;
-    MTXScale(auStack_c0, local_fc.x, local_fc.y, local_fc.z);
-    MTXConcat(local_74, auStack_c0, local_74);
-    MTXCopy(local_74, o_mtx);
+
+    JGeometry::TVec3<f32> position;
+    i_particle->getGlobalPosition(&position);
+    o_mtx[0][3] = position.x;
+    o_mtx[1][3] = position.y;
+    o_mtx[2][3] = position.z;
+
+    JGeometry::TVec3<f32> scale;
+    i_emitter->getGlobalParticleScale(&scale);
+    scale.x *= i_particle->getParticleScaleX();
+    scale.y *= i_particle->getParticleScaleY();
+    scale.z = scale.x;
+    Mtx scaleMtx;
+    MTXScale(scaleMtx, scale.x, scale.y, scale.z);
+    MTXConcat(o_mtx, scaleMtx, o_mtx);
 }
 
 void dPa_modelPcallBack::interp(JPABaseEmitter* i_emitter, JPABaseParticle* i_particle) {
@@ -1181,7 +1180,7 @@ void dPa_control_c::level_c::cutTable(dPa_control_c::level_c::emitter_c* i_emitt
     i_emitter->cleanup();
 }
 
-dPa_selectTexEcallBack dPa_control_c::mTsubo[] = {
+DUSK_GAME_DATA dPa_selectTexEcallBack dPa_control_c::mTsubo[] = {
     dPa_selectTexEcallBack(0),
     dPa_selectTexEcallBack(1),
     dPa_selectTexEcallBack(2),
@@ -1198,35 +1197,35 @@ static GXColor l_lifeBallColor[3] = {
     {0xEB, 0xD7, 0x2F, 0xFF},
 };
 
-dPa_setColorEcallBack dPa_control_c::mLifeBall[3] = {
+DUSK_GAME_DATA dPa_setColorEcallBack dPa_control_c::mLifeBall[3] = {
     dPa_setColorEcallBack(l_lifeBallColor[0]),
     dPa_setColorEcallBack(l_lifeBallColor[1]),
     dPa_setColorEcallBack(l_lifeBallColor[2]),
 };
 
-JPAEmitterManager* dPa_control_c::mEmitterMng;
+DUSK_GAME_DATA JPAEmitterManager* dPa_control_c::mEmitterMng;
 
-dPa_wbPcallBack_c dPa_control_c::mWaterBubblePcallBack;
+DUSK_GAME_DATA dPa_wbPcallBack_c dPa_control_c::mWaterBubblePcallBack;
 
-dPa_fsenthPcallBack dPa_control_c::mFsenthPcallBack;
+DUSK_GAME_DATA dPa_fsenthPcallBack dPa_control_c::mFsenthPcallBack;
 
-dPa_light8EcallBack dPa_control_c::mLight8EcallBack;
+DUSK_GAME_DATA dPa_light8EcallBack dPa_control_c::mLight8EcallBack;
 
-dPa_light8PcallBack dPa_control_c::mLight8PcallBack;
+DUSK_GAME_DATA dPa_light8PcallBack dPa_control_c::mLight8PcallBack;
 
-dPa_gen_b_light8EcallBack dPa_control_c::m_b_Light8EcallBack;
+DUSK_GAME_DATA dPa_gen_b_light8EcallBack dPa_control_c::m_b_Light8EcallBack;
 
-dPa_gen_b_light8PcallBack dPa_control_c::m_b_Light8PcallBack;
+DUSK_GAME_DATA dPa_gen_b_light8PcallBack dPa_control_c::m_b_Light8PcallBack;
 
-dPa_gen_d_light8EcallBack dPa_control_c::m_d_Light8EcallBack;
+DUSK_GAME_DATA dPa_gen_d_light8EcallBack dPa_control_c::m_d_Light8EcallBack;
 
-dPa_gen_d_light8PcallBack dPa_control_c::m_d_Light8PcallBack;
+DUSK_GAME_DATA dPa_gen_d_light8PcallBack dPa_control_c::m_d_Light8PcallBack;
 
-u8 dPa_control_c::mStatus;
+DUSK_GAME_DATA u8 dPa_control_c::mStatus;
 
-Mtx dPa_control_c::mWindViewMatrix;
+DUSK_GAME_DATA Mtx dPa_control_c::mWindViewMatrix;
 
-dPa_particleTracePcallBack_c dPa_control_c::mParticleTracePCB;
+DUSK_GAME_DATA dPa_particleTracePcallBack_c dPa_control_c::mParticleTracePCB;
 
 dPa_control_c::dPa_control_c() {
 #if DEBUG
