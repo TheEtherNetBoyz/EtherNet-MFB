@@ -205,9 +205,6 @@ jobs:
       - name: Build native library
         run: cmake --build --preset ${{matrix.preset}} --target dusklight
 
-      - name: Build bundled mods
-        run: cmake --build --preset ${{matrix.preset}} --target dusklight_mods
-
       - name: Build APK
         working-directory: platforms/android
         run: ./gradlew :app:assembleRelease --rerun-tasks
@@ -288,6 +285,5 @@ jobs:
             build/install/*.exe
             build/install/*.dll
             build/install/res/
-            build/install/mods/
             build/install/debug.7z
             build/install/sdk/
