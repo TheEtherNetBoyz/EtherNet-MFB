@@ -11,9 +11,6 @@
 #include "Z2AudioLib/Z2Instances.h"
 #include <cstring>
 
-#if TARGET_PC
-#include "dusk/randomizer/game/verify_item_functions.h"
-#endif
 enum Event_Cut_Nums {
     NUM_EVT_CUTS_e = 2,
 };
@@ -1193,14 +1190,9 @@ int daNpc_grS_c::talk(void* param_0) {
         if (unkFlag1 && talkProc(NULL, 1, NULL)) {
             if (mType == 0) {
                 if (mFlow.getEventId(&unkInt2) == 1) {
-#if TARGET_PC
-                    if (randomizer_IsActive()) {
-                        unkInt2 = verifyProgressiveItem(randomizer_getItemAtLocation("Goron Mines Gor Amato Key Shard"));
-                        randomizer_setTempFlagForLocation("Goron Mines Gor Amato Key Shard");
-                    }
-#endif
-                    mPresentItemId =
-                        fopAcM_createItemForPresentDemo(&current.pos, unkInt2, 0, -1, -1, 0, 0);
+                    DUSK_ITEM_CHECK("key_shard_1:D_MN04", unkInt2, this);
+                    mPresentItemId = fopAcM_createItemForPresentDemo(&current.pos, unkInt2, 0, -1,
+                        -1, 0, 0 DUSK_GIVE_TAG("key_shard_1:D_MN04"));
 
                     if (mPresentItemId != fpcM_ERROR_PROCESS_ID_e) {
                         s16 eventIdx =

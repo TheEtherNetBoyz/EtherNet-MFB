@@ -382,14 +382,6 @@ void main01(void) {
                     break;
                 }
             }
-            if (tasSimTicks == 0 && tasBatchActive) {
-                // Keep the world and detached presentation camera drawable while
-                // TAS simulation is paused.
-                dusk::tas_movie::applyPresentationCamera(dComIfGd_getView());
-                fpcM_DrawIterater((fpcM_DrawIteraterFunc)fpcM_Draw);
-                cAPIGph_Painter();
-                dusk::tas_movie::restorePresentationCamera();
-            }
         }
 
         dusk::video_latency::process();

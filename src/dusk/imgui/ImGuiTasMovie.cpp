@@ -541,6 +541,8 @@ void ImGuiMenuTools::ShowTasMovie() {
             "Preview plays at 30 movie frames/second; TAS playback follows recorded frame numbers.");
     }
 
+    int editKeyframe = -1;
+    uint32_t editedFrame = 0;
     int deleteKeyframe = -1;
     for (size_t i = 0; i < tas_movie::cameraKeyframeCount(); ++i) {
         const auto* keyframe = tas_movie::cameraKeyframe(i);
@@ -550,8 +552,12 @@ void ImGuiMenuTools::ShowTasMovie() {
         ImGui::PushID(static_cast<int>(i) + 10000);
         int frame = static_cast<int>(keyframe->frame);
         ImGui::SetNextItemWidth(110.0f);
-        if (ImGui::InputInt("Frame", &frame)) {
-            tas_movie::setCameraKeyframeFrame(i, static_cast<uint32_t>(std::max(frame, 0)));
+        ImGui::InputInt("Frame", &frame);
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            // Committing each typed digit can reorder the keyframe list while
+            // this loop is using it. Keep the edit local until focus leaves.
+            editKeyframe = static_cast<int>(i);
+            editedFrame = static_cast<uint32_t>(std::max(frame, 0));
         }
         ImGui::SameLine();
         if (ImGui::Button("Go")) {
@@ -565,6 +571,15 @@ void ImGuiMenuTools::ShowTasMovie() {
     }
     if (deleteKeyframe >= 0) {
         tas_movie::deleteCameraKeyframe(static_cast<size_t>(deleteKeyframe));
+        if (editKeyframe == deleteKeyframe) {
+            editKeyframe = -1;
+        } else if (editKeyframe > deleteKeyframe) {
+            --editKeyframe;
+        }
+    }
+    if (editKeyframe >= 0) {
+        tas_movie::setCameraKeyframeFrame(
+            static_cast<size_t>(editKeyframe), editedFrame);
     }
     if (tas_movie::cameraKeyframeCount() > 0) {
         if (ImGui::Button("Clear Camera Track")) {

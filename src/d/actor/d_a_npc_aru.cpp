@@ -1744,13 +1744,9 @@ int daNpc_Aru_c::cutSpeakTo(int i_staffID) {
                 switch (eventId) {
                     case 1:
                         if (mItemPartnerId == fpcM_ERROR_PROCESS_ID_e) {
-#if TARGET_PC
-                            if (randomizer_IsActive()) {
-                                itemNo = randomizer_getItemAtLocation("Herding Goats Reward");
-                                randomizer_setTempFlagForLocation("Herding Goats Reward");
-                            }
-#endif
-                            mItemPartnerId = fopAcM_createItemForPresentDemo(&current.pos, itemNo, 0, -1, -1, NULL, NULL);
+                            DUSK_ITEM_CHECK("goats_reward", itemNo, this);
+                            mItemPartnerId = fopAcM_createItemForPresentDemo(&current.pos, itemNo,
+                                0, -1, -1, NULL, NULL DUSK_GIVE_TAG("goats_reward"));
                         }
 
                         if (fopAcM_IsExecuting(mItemPartnerId)) {

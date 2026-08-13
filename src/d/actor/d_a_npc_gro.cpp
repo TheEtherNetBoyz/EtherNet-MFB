@@ -13,10 +13,6 @@
 #include "Z2AudioLib/Z2Instances.h"
 #include <cstring>
 
-#if TARGET_PC
-#include "dusk/randomizer/game/verify_item_functions.h"
-#endif
-
 enum grO_RES_File_ID {
     /* BCK */
     /* 0x07 */ BCK_GRO_F_TALK_A = 0x7,
@@ -1685,13 +1681,9 @@ int daNpc_grO_c::talk(void* param_1) {
             if (facePlayerFlag && talkProc(NULL, TRUE, NULL)) {
                 if (mType == TYPE_MINES) {
                     if (mFlow.getEventId(&itemId) == 1) {
-#if TARGET_PC
-                        if (randomizer_IsActive()) {
-                            itemId = verifyProgressiveItem(randomizer_getItemAtLocation("Goron Mines Gor Ebizo Key Shard"));
-                            randomizer_setTempFlagForLocation("Goron Mines Gor Ebizo Key Shard");
-                        }
-#endif
-                        mItemID = fopAcM_createItemForPresentDemo(&current.pos, itemId, 0, -1, -1, NULL, NULL);
+                        DUSK_ITEM_CHECK("key_shard_2:D_MN04", itemId, this);
+                        mItemID = fopAcM_createItemForPresentDemo(&current.pos, itemId, 0, -1, -1,
+                            NULL, NULL DUSK_GIVE_TAG("key_shard_2:D_MN04"));
                         if (mItemID != fpcM_ERROR_PROCESS_ID_e) {
                             s16 eventIdx = dComIfGp_getEventManager().getEventIdx(this, "DEFAULT_GETITEM", 0xFF);
                             dComIfGp_getEvent()->reset(this);

@@ -10,11 +10,6 @@
 #include "d/d_debug_viewer.h"
 #include <cstring>
 
-#if TARGET_PC
-#include "dusk/randomizer/game/verify_item_functions.h"
-#include "dusk/randomizer/game/flags.h"
-#endif
-
 static DUSK_CONSTEXPR daNpc_GetParam2 l_bckGetParamList[29] = {
     {-1, 2, 0},
     {9, 0, 0},
@@ -199,12 +194,7 @@ int daNpcRafrel_c::Create() {
 
         mType = 0;
     } else if (strcmp(dComIfGp_getStartStageName(), "F_SP115") == 0 && dComIfGp_getStartStageRoomNo() == 0) {
-#if TARGET_PC
-        // Only despawn Auru in randomizer if we already collected his item
-        if ((randomizer_IsActive() ? dComIfGs_isEventBit(GOT_AURUS_MEMO) : daNpcF_chkEvtBit(0x169)) || !daNpcF_chkEvtBit(0x108)) {
-#else
-        if ( daNpcF_chkEvtBit(0x169) || !daNpcF_chkEvtBit(0x108)) {
-#endif
+        if (daNpcF_chkEvtBit(0x169) || !daNpcF_chkEvtBit(0x108)) {
             return cPhs_ERROR_e;
         }
 
@@ -1320,13 +1310,9 @@ bool daNpcRafrel_c::talk(void* param_0) {
                 OS_REPORT("会話終了時 イベントID=%d アイテムNo=%d\n", eventId, itemNo);
 
                 if (eventId == 1) {
-#if TARGET_PC
-                    if (randomizer_IsActive()) {
-                        itemNo = verifyProgressiveItem(randomizer_getItemAtLocation("Auru Gift To Fyer"));
-                        randomizer_setTempFlagForLocation("Auru Gift To Fyer");
-                    }
-#endif
-                    field_0xe00 = fopAcM_createItemForPresentDemo(&current.pos, itemNo, 0, -1, -1, NULL, NULL);
+                    DUSK_ITEM_CHECK("auru_memo", itemNo, this);
+                    field_0xe00 = fopAcM_createItemForPresentDemo(&current.pos, itemNo, 0, -1, -1,
+                        NULL, NULL DUSK_GIVE_TAG("auru_memo"));
                     if (field_0xe00 != fpcM_ERROR_PROCESS_ID_e) {
                         s16 eventIdx = dComIfGp_getEventManager().getEventIdx(this, "DEFAULT_GETITEM", 0xFF);
                         dComIfGp_getEvent()->reset(this);
@@ -1578,13 +1564,9 @@ int daNpcRafrel_c::EvCut_Appear(int i_staffId) {
             int itemNo = 0;
             u16 eventId = mFlow.getEventId(&itemNo);
             if (eventId == 1) {
-#if TARGET_PC
-                if (randomizer_IsActive()) {
-                    itemNo = verifyProgressiveItem(randomizer_getItemAtLocation("Auru Gift To Fyer"));
-                    randomizer_setTempFlagForLocation("Auru Gift To Fyer");
-                }
-#endif
-                field_0xe00 = fopAcM_createItemForPresentDemo(&current.pos, itemNo, 0, -1, -1, NULL, NULL);
+                DUSK_ITEM_CHECK("auru_memo", itemNo, this);
+                field_0xe00 = fopAcM_createItemForPresentDemo(
+                    &current.pos, itemNo, 0, -1, -1, NULL, NULL DUSK_GIVE_TAG("auru_memo"));
                 dComIfGp_event_setItemPartnerId(field_0xe00);
                 field_0xe00 = fpcM_ERROR_PROCESS_ID_e;
             }

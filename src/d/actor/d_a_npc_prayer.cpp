@@ -7,9 +7,6 @@
 
 #include "d/actor/d_a_npc_prayer.h"
 #include "d/d_com_inf_game.h"
-#if TARGET_PC
-#include "dusk/randomizer/game/verify_item_functions.h"
-#endif
 
 static NPC_PRAY_HIO_CLASS l_HIO;
 
@@ -723,13 +720,8 @@ fpc_ProcID daNpcPray_c::createHeart() {
     mDoMtx_stack_c::ZXYrotS(rot);
     mDoMtx_stack_c::multVec(&offset, &offset);
     pos += offset;
-#if TARGET_PC
-    if (randomizer_IsActive()) {
-        u8 itemId = verifyProgressiveItem(randomizer_getItemAtLocation("Charlo Donation Blessing"));
-        return fopAcM_createItemForBoss(&pos, itemId, fopAcM_GetRoomNo(this), &rot, &size, 0.0f, 0.0f, 0);
-    }
-#endif
-    return fopAcM_createItemForBoss(&pos, dItemNo_KAKERA_HEART_e, fopAcM_GetRoomNo(this), &rot, &size, 0.0f, 0.0f, 0);
+    return fopAcM_createItemForBoss(&pos, dItemNo_KAKERA_HEART_e, fopAcM_GetRoomNo(this), &rot,
+        &size, 0.0f, 0.0f, 0 IF_DUSK_ARG("prayer_reward"));
 }
 
 BOOL daNpcPray_c::_Evt_GetHeart(int i_staffID) {

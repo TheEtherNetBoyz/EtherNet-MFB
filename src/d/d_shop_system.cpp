@@ -19,11 +19,6 @@
 #include "d/actor/d_a_tag_shop_item.h"
 #include <cstring>
 
-#if TARGET_PC
-#include "dusk/randomizer/game/verify_item_functions.h"
-#include "dusk/randomizer/game/tools.h"
-#include "dusk/randomizer/game/stages.h"
-#endif
 
 static daTag_ShopItem_c* dShopSystem_itemActor[7] = {
     NULL, NULL, NULL, NULL, NULL, NULL, NULL,
@@ -911,13 +906,15 @@ int dShopSystem_c::seq_start(fopAc_ac_c* actor, dMsgFlow_c* i_flow) {
                 if (mFlow.getEventId(&itemNo) == 1) {
                     if (mItemPartnerId == fpcM_ERROR_PROCESS_ID_e) {
 #if TARGET_PC
-                        // In rando, override the cat rescue item
-                        if (randomizer_IsActive() && itemNo == dItemNo_Randomizer_HALF_MILK_BOTTLE_e) {
-                            itemNo = randomizer_getItemAtLocation("Ordon Cat Rescue");
+                        const char* itemCheckName = nullptr;
+                        if (itemNo == dItemNo_HALF_MILK_BOTTLE_e) {
+                            itemCheckName = "sera_reward";
+                            itemNo = dusk::mods::item_check(itemCheckName, itemNo, actor);
                         }
 #endif
-                        mItemPartnerId = fopAcM_createItemForPresentDemo(&current.pos, itemNo, 0, -1,
-                                                                      -1, NULL, NULL);
+                        mItemPartnerId =
+                            fopAcM_createItemForPresentDemo(&current.pos, itemNo, 0, -1, -1, NULL,
+                                NULL IF_DUSK_ARG(dusk::mods::item_give_tag(itemCheckName)));
                     }
 
                     if (fpcEx_IsExist(mItemPartnerId)) {
@@ -1207,21 +1204,11 @@ int dShopSystem_c::seq_decide_yes(fopAc_ac_c* actor, dMsgFlow_c* i_flow) {
         if (i_flow->doFlow(actor, NULL, 0)) {
             if (mItemPartnerId == fpcM_ERROR_PROCESS_ID_e) {
 #if TARGET_PC
-                // In rando, override the item if it's one of our unique shop checks
-                if (randomizer_IsActive()) {
-                    u8 stageId = getStageID();
-                    u16 key = (stageId << 8) | itemNo;
-                    if (randomizer_GetContext().mShopOverrides.contains(key)) {
-                        itemNo = verifyProgressiveItem(randomizer_GetContext().mShopOverrides[key]);
-                        // Update the shop item flag no matter what in Kak Malo Mart
-                        if (playerIsInRoomStage(3, "R_SP109")) {
-                            setSoldOutFlag();
-                        }
-                    }
-                }
+                const u32 itemGiveTag = dusk::mods::item_give_tag_shop(itemNo & 0xFF);
+                itemNo = dusk::mods::item_check_shop(itemNo & 0xFF, actor);
 #endif
-                mItemPartnerId =
-                    fopAcM_createItemForPresentDemo(&current.pos, itemNo, 0, -1, -1, NULL, NULL);
+                mItemPartnerId = fopAcM_createItemForPresentDemo(
+                    &current.pos, itemNo, 0, -1, -1, NULL, NULL IF_DUSK_ARG(itemGiveTag));
             }
 
             if (fpcEx_IsExist(mItemPartnerId)) {

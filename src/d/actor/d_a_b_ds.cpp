@@ -4180,13 +4180,8 @@ void daB_DS_c::executeBattle2Dead() {
             dComIfGp_event_reset();
             dComIfGs_onStageBossEnemy(0x13);
 #if TARGET_PC
-            if (randomizer_IsActive()) {
-                // Give the boss item
-                u8 agDungeonReward = randomizer_getItemAtLocation("Arbiters Grounds Dungeon Reward");
-                g_randomizerState.addItemToEventQueue(agDungeonReward);
-                // Set custom item flag
-                dComIfGs_onItem(0x9E, -1);
-            }
+            // This reward has no original grant at this point in the cutscene.
+            dusk::mods::item_check_enqueue("Arbiters Grounds Dungeon Reward", dItemNo_NONE_e);
 #endif
             /* dSv_event_flag_c::F_0265 - Arbiter's Grounds - Arbiter's Grounds clear */
             dComIfGs_onEventBit(0x2010);

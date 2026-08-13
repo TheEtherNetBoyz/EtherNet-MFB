@@ -7,16 +7,10 @@
 #include "d/d_path.h"
 #include "d/d_bg_w.h"
 #include "f_op/f_op_camera_mng.h"
-#include "f_pc/f_pc_name.h"
 #include "SSystem/SComponent/c_math.h"
 #include "Z2AudioLib/Z2Instances.h"
 #include <cmath>
 #include <cstring>
-
-#if TARGET_PC
-#include "dusk/randomizer/game/tools.h"
-#include "dusk/randomizer/game/verify_item_functions.h"
-#endif
 
 static const f32 l_cull_size_box[6] = { -150.0f, -10.0f, -150.0f, 150.0f, 300.0f, 100.0f };
 
@@ -1482,6 +1476,10 @@ u8 daTbox_c::getBombItemNoMain(u8 i_itemNo) {
 
 int daTbox_c::setGetDemoItem() {
     u8 item_no = getItemNo();
+#if TARGET_PC
+    const u32 giveTag = dusk::mods::item_give_tag_chest(getTboxNo());
+    item_no = dusk::mods::item_check_tagged(giveTag, mOriginalItemNo, this);
+#endif
     if (item_no == dItemNo_BOMB_5_e || item_no == dItemNo_BOMB_10_e || item_no == dItemNo_BOMB_20_e || item_no == dItemNo_BOMB_30_e ||
         item_no == dItemNo_WATER_BOMB_5_e || item_no == dItemNo_WATER_BOMB_10_e || item_no == dItemNo_WATER_BOMB_20_e || item_no == dItemNo_WATER_BOMB_30_e ||
         item_no == dItemNo_BOMB_INSECT_5_e || item_no == dItemNo_BOMB_INSECT_10_e || item_no == dItemNo_BOMB_INSECT_20_e || item_no == dItemNo_BOMB_INSECT_30_e)
@@ -1491,9 +1489,11 @@ int daTbox_c::setGetDemoItem() {
 
     fpc_ProcID item_id;
     if (field_0x718) {
-        item_id = fopAcM_createItemForPresentDemo(&current.pos, item_no, 1, -1, -1, NULL, NULL);
+        item_id = fopAcM_createItemForPresentDemo(
+            &current.pos, item_no, 1, -1, -1, NULL, NULL IF_DUSK_ARG(giveTag));
     } else {
-        item_id = fopAcM_createItemForTrBoxDemo(&current.pos, item_no, -1, -1, NULL, NULL);
+        item_id = fopAcM_createItemForTrBoxDemo(
+            &current.pos, item_no, -1, -1, NULL, NULL IF_DUSK_ARG(giveTag));
     }
 
     if (item_id != fpcM_ERROR_PROCESS_ID_e) {
@@ -1878,16 +1878,9 @@ cPhs_Step daTbox_c::create1st() {
     if (!mParamsInit) {
         field_0x980 = home.angle.x;
 #if TARGET_PC
-        // The upper 8 bits of home.angle.z hold the itemId. Replace with our randomized
-        // item in randomizer
-        if (randomizer_IsActive()) {
-            home.angle.z &= ~0xFF00;
-            auto stage = getStageID();
-            auto tboxId = static_cast<u8>(getTboxNo());
-            u16 key = (stage << 8) | tboxId;
-            u8 itemId = randomizer_GetContext().mTreasureChestOverrides[key];
-            home.angle.z |= verifyProgressiveItem(itemId) << 8;
-        }
+        mOriginalItemNo = (home.angle.z >> 8) & 0xFF;
+        const u8 resolvedItem = dusk::mods::item_check_chest(getTboxNo(), mOriginalItemNo, this);
+        home.angle.z = static_cast<s16>((home.angle.z & ~0xFF00) | (resolvedItem << 8));
 #endif
         field_0x982 = home.angle.z;
         home.angle.z = 0;

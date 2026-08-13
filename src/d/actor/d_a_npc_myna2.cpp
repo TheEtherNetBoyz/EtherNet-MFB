@@ -11,10 +11,6 @@
 #include "Z2AudioLib/Z2Instances.h"
 #include <cstring>
 
-#if TARGET_PC
-#include "dusk/randomizer/game/verify_item_functions.h"
-#endif
-
 enum {
     NUM_EVT_CUTS_e = 5,
 };
@@ -1196,12 +1192,14 @@ int daNpc_myna2_c::ECut_gameGoalSuccess(int i_staffId) {
             int itemNo = 0;
             if (mFlow.getEventId(&itemNo) == 1) {
 #if TARGET_PC
-                // If plumm tries giving us the heart piece, give the randomized item instead
-                if (randomizer_IsActive() && itemNo == dItemNo_KAKERA_HEART_e) {
-                    itemNo = verifyProgressiveItem(randomizer_getItemAtLocation("Plumm Fruit Balloon Minigame"));
+                const char* itemCheckName = nullptr;
+                if (itemNo == dItemNo_KAKERA_HEART_e) {
+                    itemCheckName = "plumm_minigame_reward";
+                    itemNo = dusk::mods::item_check(itemCheckName, itemNo, this);
                 }
 #endif
-                mItemPid = fopAcM_createItemForPresentDemo(&current.pos, itemNo, 0, -1, -1, NULL, NULL);
+                mItemPid = fopAcM_createItemForPresentDemo(&current.pos, itemNo, 0, -1, -1, NULL,
+                    NULL IF_DUSK_ARG(dusk::mods::item_give_tag(itemCheckName)));
             }
             break;
         }

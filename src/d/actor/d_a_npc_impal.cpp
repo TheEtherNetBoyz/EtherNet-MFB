@@ -9,10 +9,6 @@
 #include "d/actor/d_a_npc.h"
 #include <cstring>
 
-#if TARGET_PC
-#include "dusk/randomizer/game/verify_item_functions.h"
-#endif
-
 DUSK_GAME_DATA daNpcImpal_HIOParam const daNpcImpal_Param_c::m = {
     135.0f,        // attention_offset
     -3.0f,         // gravity
@@ -975,14 +971,9 @@ BOOL daNpcImpal_c::EvCut_ImpalAppear1(int i_cut_index) {
         if (talkProc(NULL, 1, NULL)) {
             int evt_id = 0;
             if (mFlow.getEventId(&evt_id) == 1) {
-#if TARGET_PC
-                if (randomizer_IsActive()) {
-                    evt_id = verifyProgressiveItem(randomizer_getItemAtLocation("Ilia Charm"));
-                    randomizer_setTempFlagForLocation("Ilia Charm");
-                }
-#endif
-                mItemPartnerId =
-                    fopAcM_createItemForPresentDemo(&current.pos, evt_id, 0, -1, -1, 0, 0);
+                DUSK_ITEM_CHECK("ilia_charm", evt_id, this);
+                mItemPartnerId = fopAcM_createItemForPresentDemo(
+                    &current.pos, evt_id, 0, -1, -1, 0, 0 DUSK_GIVE_TAG("ilia_charm"));
                 if (mItemPartnerId != 0xffffffff) {
                     s16 evt_idx =
                         dComIfGp_getEventManager().getEventIdx(this, "DEFAULT_GETITEM", 0xff);
@@ -1070,14 +1061,9 @@ BOOL daNpcImpal_c::EvCut_CopyRod(int i_cut_index) {
         case '0003':
             int evt_id = 0;
             if (mFlow.getEventId(&evt_id) == 1) {
-#if TARGET_PC
-                if (randomizer_IsActive()) {
-                    evt_id = verifyProgressiveItem(randomizer_getItemAtLocation("Skybook From Impaz"));
-                    randomizer_setTempFlagForLocation("Skybook From Impaz");
-                }
-#endif
-                mItemPartnerId =
-                    fopAcM_createItemForPresentDemo(&current.pos, evt_id, 0, -1, -1, 0, 0);
+                DUSK_ITEM_CHECK("skybook", evt_id, this);
+                mItemPartnerId = fopAcM_createItemForPresentDemo(
+                    &current.pos, evt_id, 0, -1, -1, 0, 0 DUSK_GIVE_TAG("skybook"));
                 dComIfGp_event_setItemPartnerId(mItemPartnerId);
                 mItemPartnerId = -1;
             }

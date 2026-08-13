@@ -9,10 +9,6 @@
 #include "d/actor/d_a_e_ym.h"
 #include <cstring>
 
-#if TARGET_PC
-#include "dusk/randomizer/game/verify_item_functions.h"
-#endif
-
 static DUSK_CONSTEXPR int l_bmdData[2][2] = {
     {35, 1},
     {18, 2},
@@ -1186,16 +1182,15 @@ int daNpc_Kkri_c::talk(void*) {
                     case 1:
                         if (mItemPartnerId == fpcM_ERROR_PROCESS_ID_e) {
 #if TARGET_PC
-                            if (randomizer_IsActive()) {
-                                if (item_no == dItemNo_OIL_BOTTLE3_e) {
-                                    item_no = verifyProgressiveItem(randomizer_getItemAtLocation("Coro Bottle"));
-                                    randomizer_setTempFlagForLocation("Coro Bottle");
-                                } /*else if (item_no == dItemNo_SMALL_KEY_e) { // Might be Small Key 2
-                                    item_no = verifyProgressiveItem(randomizer_getItemAtLocation("Coro Gate Key"));
-                                }*/
+                            const char* itemCheckName = nullptr;
+                            if (item_no == dItemNo_OIL_BOTTLE3_e) {
+                                itemCheckName = "coro_bottle";
+                                item_no = dusk::mods::item_check(itemCheckName, item_no, this);
                             }
 #endif
-                            mItemPartnerId = fopAcM_createItemForPresentDemo(&current.pos, item_no, 0, -1, -1, NULL, NULL);
+                            mItemPartnerId = fopAcM_createItemForPresentDemo(&current.pos, item_no,
+                                0, -1, -1, NULL,
+                                NULL IF_DUSK_ARG(dusk::mods::item_give_tag(itemCheckName)));
                         }
 
                         if (fopAcM_IsExecuting(mItemPartnerId)) {

@@ -33,7 +33,11 @@ int fpcDt_deleteMethod(base_process_class* i_proc) {
     fpcLnTg_QueueTo(&i_proc->line_tag_);
 
     if (fpcBs_Delete(i_proc) == 1) {
-        fpcLy_DeletedMesg(layer);
+        // A process without an owning layer has no delete counter to update.
+        // A queued process can lose that association during layer teardown.
+        if (layer != nullptr) {
+            fpcLy_DeletedMesg(layer);
+        }
         fpcLd_Free(profname);
         return 1;
     }

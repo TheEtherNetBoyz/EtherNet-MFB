@@ -11,11 +11,14 @@ public:
     static DUSK_GAME_DATA u8* mData;
 };
 
-void execItemGet(u8 item_id);
-// Applies an item ID that has already passed randomizer progressive
-// resolution. Used by multiplayer so a received sword/bow/etc. tier is not
-// advanced a second time against state synchronized just before the event.
+class fopAc_ac_c;
+void execItemGet(
+    u8 item_id IF_DUSK_ARG(u32 item_give_tag = 0) IF_DUSK_ARG(fopAc_ac_c* giver = NULL));
+#if TARGET_PC
+// Applies an already-resolved item without re-running local randomizer resolution.
+// Multiplayer replication uses this to avoid resolving a remote grant twice.
 void execResolvedItemGet(u8 item_id);
+#endif
 
 void item_func_HEART();
 void item_func_GREEN_RUPEE();

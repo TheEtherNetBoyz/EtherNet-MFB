@@ -10,11 +10,6 @@
 #include "d/actor/d_a_midna.h"
 #include <cstring>
 
-#if TARGET_PC
-#include "dusk/randomizer/game/tools.h"
-#include "dusk/randomizer/game/verify_item_functions.h"
-#endif
-
 void daTbox2_c::initBaseMtx() {
     mpModel->setBaseScale(scale);
     setBaseMtx();
@@ -72,26 +67,6 @@ static dCcD_SrcCyl l_cyl_src = {
 };
 
 int daTbox2_c::Create() {
-#if TARGET_PC
-    // TBOX2 rewards are repeatable in vanilla and their upper parameter byte is
-    // not a unique persistent chest ID. Randomizer patches that byte to a unique
-    // ID, so only interpret it as a Tbox flag while randomizer is active.
-    u8 tboxId = getTboxNo();
-    if (randomizer_IsActive() && tboxId != 0xFF && dComIfGs_isTbox(tboxId)) {
-        // Set the action for not allowing the player to open it
-        init_actionWait();
-        // Set the animation frame to open
-        mpBck->setFrame(mpBck->getEndFrame());
-        // Set collision to open
-        if (mpBgW != NULL) {
-            dComIfG_Bgsp().Release(mpBgW);
-        }
-
-        if (mBoxBgW != NULL) {
-            dComIfG_Bgsp().Regist(mBoxBgW, this);
-        }
-    } else
-#endif
     init_actionOpenWait();
     initBaseMtx();
     fopAcM_SetMtx(this, mpModel->getBaseTRMtx());
@@ -164,19 +139,16 @@ int daTbox2_c::create1st() {
     mModelType = getModelType();
 
 #if TARGET_PC
-    if (randomizer_IsActive()) {
-        // Get the override item for this chest
-        auto stage = getStageID();
-        u8 tboxId = getTboxNo();
-        u16 key = (stage << 8) | tboxId;
-        u8 itemId = randomizer_GetContext().mTreasureChestOverrides[key];
-        // Set the item in the params
-        u32 params = fopAcM_GetParam(this);
-        params &= 0xFFFFFF00;
-        params |= verifyProgressiveItem(itemId);
+    if (!mParamsInit) {
+        mOriginalItemNo = getItemNo();
+        int tboxNo = fopAcM_GetParamBit(this, 16, 8);
+        const u8 resolvedItem = dusk::mods::item_check_chest(tboxNo, mOriginalItemNo, this);
+        u32 params = (fopAcM_GetParam(this) & 0xFFFFFF00) | resolvedItem;
         fopAcM_SetParam(this, params);
+        mParamsInit = true;
     }
 #endif
+
     int phase_state = dComIfG_resLoad(&mPhase, l_arcName);
     if (phase_state == cPhs_COMPLEATE_e) {
         u32 heap_size;
@@ -409,21 +381,17 @@ void daTbox2_c::actionOpenWait() {
 
 int daTbox2_c::setGetDemoItem() {
     u8 item_no = getItemNo();
+#if TARGET_PC
+    int tboxNo = fopAcM_GetParamBit(this, 16, 8);
+    const u32 giveTag = dusk::mods::item_give_tag_chest(tboxNo);
+    item_no = dusk::mods::item_check_tagged(giveTag, mOriginalItemNo, this);
+#endif
 
     u32 partner_id;
     if (mReturnRupee) {
-        partner_id = fopAcM_createItemForPresentDemo(&current.pos, item_no, 1, -1, -1, NULL, NULL);
+        partner_id = fopAcM_createItemForPresentDemo(&current.pos, item_no, 1, -1, -1, NULL, NULL IF_DUSK_ARG(giveTag));
     } else {
-#if TARGET_PC
-        u8 tboxId = getTboxNo();
-        // Vanilla TBOX2 rewards are repeatable and can share this parameter
-        // value with unrelated persistent chests. Randomizer assigns unique
-        // IDs, so it is the only mode in which this is a real Tbox flag.
-        if (randomizer_IsActive() && tboxId != 0xFF) {
-            dComIfGs_onTbox(tboxId);
-        }
-#endif
-        partner_id = fopAcM_createItemForTrBoxDemo(&current.pos, item_no, -1, -1, NULL, NULL);
+        partner_id = fopAcM_createItemForTrBoxDemo(&current.pos, item_no, -1, -1, NULL, NULL IF_DUSK_ARG(giveTag));
     }
 
     if (partner_id != -1) {

@@ -2542,12 +2542,9 @@ int daAlink_c::procCoGetItemInit() {
     BOOL var_r31 = FALSE;
     BOOL var_r30 = FALSE;
 #if TARGET_PC
-    if (randomizer_IsActive()) {
-        // If we are giving a custom item, we want to set mParam0 to 0x100 so that instead of trying to search for an item
-        // actor that doesnt exist we want the game to create one using the item id in mGtItm.
-        if (g_randomizerState.getGiveItemToPlayerStatus() == RandomizerState::ITEM_IN_QUEUE) {
-            mDemo.setParam0(0x100);
-        }
+    // Queued grants have no event partner, so create the demo item from the event's GtItm.
+    if (dusk::mods::item_give_queue_dispatching()) {
+        mDemo.setParam0(0x100);
     }
 #endif
     if (mProcID == PROC_GET_ITEM || mProcID == PROC_INSECT_CATCH ||
@@ -2594,7 +2591,7 @@ int daAlink_c::procCoGetItemInit() {
 #endif
 
         fpc_ProcID item_partner_id = fopAcM_createItemForPresentDemo(&current.pos, item_no, 0, -1,
-                                                              fopAcM_GetRoomNo(this), NULL, NULL);
+            fopAcM_GetRoomNo(this), NULL, NULL IF_DUSK_ARG(dusk::mods::item_give_queue_take_tag()));
         if (item_partner_id != fpcM_ERROR_PROCESS_ID_e) {
             dComIfGp_event_setItemPartnerId(item_partner_id);
         }

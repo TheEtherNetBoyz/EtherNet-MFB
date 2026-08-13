@@ -11,11 +11,8 @@
 #include "d/d_msg_object.h"
 #include <cstring>
 
-
-
 #if TARGET_PC
-#include "dusk/randomizer/game/randomizer_context.hpp"
-#include "dusk/randomizer/game/verify_item_functions.h"
+static u8 s_givenInsectId = dItemNo_NONE_e;
 #endif
 
 enum Ins_RES_File_ID {
@@ -298,10 +295,6 @@ static DUSK_CONSTEXPR char DUSK_CONST* l_myName = "ins";
 DUSK_GAME_DATA daNpcIns_c::eventFunc daNpcIns_c::mEvtSeqList[1] = {
     NULL,
 };
-
-#if TARGET_PC
-u8 daNpcIns_c::mGivenInsectId = 0xFF;
-#endif
 
 static insect_param_data const l_insectParams[24] = {
     {0x0191, 0x709, 0, 0},
@@ -1270,9 +1263,7 @@ int daNpcIns_c::waitPresent(void* param_1) {
                     daPy_py_c* player = daPy_getPlayerActorClass();
                     player->changeOriginalDemo();
                     player->changeDemoMode(0x25, 2, type, 0);
-#if TARGET_PC
-                    mGivenInsectId = type;
-#endif
+                    IF_DUSK(s_givenInsectId = type;)
                 } else {
                     mInsectMsgNo = 0x719;
                 }
@@ -1502,14 +1493,16 @@ int daNpcIns_c::talk(void* param_1) {
 
                         if (eventID == 1) {
 #if TARGET_PC
-                            // In rando, get the randomzied bug reward
-                            if (randomizer_IsActive()) {
-                                itemNo = randomizer_GetContext().mBugRewardOverrides[mGivenInsectId];
-                                itemNo = static_cast<int>(verifyProgressiveItem(itemNo));
-                                mGivenInsectId = 0xFF;
+                            u32 itemGiveTag = 0;
+                            if (s_givenInsectId != dItemNo_NONE_e) {
+                                itemNo = dusk::mods::item_check_bug(
+                                    s_givenInsectId, itemNo & 0xFF, this);
+                                itemGiveTag = dusk::mods::item_give_tag_bug(s_givenInsectId);
+                                s_givenInsectId = dItemNo_NONE_e;
                             }
 #endif
-                            mItemID = fopAcM_createItemForPresentDemo(&current.pos, itemNo, 0, -1, -1, NULL, NULL);
+                            mItemID = fopAcM_createItemForPresentDemo(&current.pos, itemNo, 0, -1,
+                                -1, NULL, NULL IF_DUSK_ARG(itemGiveTag));
 
                             if (mItemID != fpcM_ERROR_PROCESS_ID_e) {
                                 daPy_getPlayerActorClass()->cancelOriginalDemo();

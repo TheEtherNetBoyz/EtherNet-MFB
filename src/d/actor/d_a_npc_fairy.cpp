@@ -11,10 +11,6 @@
 #include "JSystem/JHostIO/JORFile.h"
 #include <cstring>
 
-#if TARGET_PC
-#include "dusk/randomizer/game/verify_item_functions.h"
-#endif
-
 enum fairy_RES_File_ID {
     /* BCK */
     /* 0x09 */ BCK_FAIRY_F_SAD = 0x9,
@@ -1273,7 +1269,7 @@ void daNpc_Fairy_c::AppearDemoCall() {
             } else {
                 mEvtNo = EVT_APPEAR_50F_02;
             }
-        } else if (dComIfGs_checkEmptyBottle() IF_DUSK(|| randomizer_IsActive())) {
+        } else if (dComIfGs_checkEmptyBottle()) {
             mEvtNo = EVT_APPEAR_50F_01;
         } else {
             mEvtNo = EVT_APPEAR_50F_04;
@@ -1337,15 +1333,9 @@ void daNpc_Fairy_c::PresentDemoCall() {
         item_no = 0;
     }
 
-#if TARGET_PC
-    // If we haven't visted this great fairy before, give the random item
-    if (randomizer_IsActive() && !daNpcT_chkEvtBit(505)) {
-        item_no = verifyProgressiveItem(randomizer_getItemAtLocation("Cave of Ordeals Great Fairy Reward"));
-        randomizer_setTempFlagForLocation("Cave of Ordeals Great Fairy Reward");
-    }
-#endif
-
-    fpc_ProcID id = fopAcM_createItemForPresentDemo(&current.pos, item_no, 0, -1, -1, NULL, NULL);
+    DUSK_ITEM_CHECK("fairy_reward:D_SB01", item_no, this);
+    fpc_ProcID id = fopAcM_createItemForPresentDemo(&current.pos, item_no, 0, -1, -1, NULL,
+        NULL DUSK_GIVE_TAG("fairy_reward:D_SB01"));
     if (id != fpcM_ERROR_PROCESS_ID_e) {
         dComIfGp_event_setItemPartnerId(id);
     }

@@ -556,7 +556,7 @@ void execResolvedItemGet(u8 i_itemNo) {
     getItemFunc(i_itemNo);
 }
 
-void execItemGet(u8 i_itemNo) {
+void execItemGet(u8 i_itemNo IF_DUSK_ARG(u32 i_itemGiveTag) IF_DUSK_ARG(fopAc_ac_c* i_giver)) {
 #if TARGET_PC
     const bool randomizerActive = randomizer_IsActive();
     if (randomizerActive) {
@@ -565,6 +565,7 @@ void execItemGet(u8 i_itemNo) {
 #endif
 
     execResolvedItemGet(i_itemNo);
+    IF_DUSK(dusk::mods::item_granted(i_itemNo, i_itemGiveTag, i_giver);)
 
 #if TARGET_PC
     if (randomizerActive) {
