@@ -86,6 +86,7 @@ UserSettings g_userSettings = {
         .resampler {"game.resampler", Resampler::Bilinear},
         .enableMapBackground {"game.enableMapBackground", true},
         .disableCutscenePillarboxing {"game.disableCutscenePillarboxing", false},
+        .enableHighQualityMinimapTextures {"game.enableHighQualityMinimapTextures", true},
 
         // Audio
         .noLowHpSound {"game.noLowHpSound", false},
@@ -417,6 +418,7 @@ void registerSettings() {
     Register(g_userSettings.game.shadowResolutionMultiplier);
     Register(g_userSettings.game.enableMapBackground);
     Register(g_userSettings.game.disableCutscenePillarboxing);
+    Register(g_userSettings.game.enableHighQualityMinimapTextures);
     Register(g_userSettings.game.enableFastIronBoots);
     Register(g_userSettings.game.canTransformAnywhere);
     Register(g_userSettings.game.fastRoll);
@@ -598,6 +600,7 @@ static TransientSettings g_transientSettings = {
     },
     .skipFrameRateLimit = false,
     .forceThirtyFpsLimit = false,
+    .turboMode = false,
     .moveLinkActive = false,
     .stateShareLoadActive = false,
     .practiceMenuInputCapture = false,

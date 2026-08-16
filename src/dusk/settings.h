@@ -34,6 +34,7 @@ enum class GameLanguage : u8 {
     French = OS_LANGUAGE_FRENCH,
     Spanish = OS_LANGUAGE_SPANISH,
     Italian = OS_LANGUAGE_ITALIAN,
+    Japanese = 6,
 };
 
 enum class DiscVerificationState : u8 {
@@ -109,7 +110,7 @@ struct ConfigEnumRange<Resampler> {
 template <>
 struct ConfigEnumRange<GameLanguage> {
     static constexpr auto min = GameLanguage::English;
-    static constexpr auto max = GameLanguage::Italian;
+    static constexpr auto max = GameLanguage::Japanese;
 };
 
 template <>
@@ -254,6 +255,7 @@ struct UserSettings {
         ConfigVar<Resampler> resampler;
         ConfigVar<bool> enableMapBackground;
         ConfigVar<bool> disableCutscenePillarboxing;
+        ConfigVar<bool> enableHighQualityMinimapTextures;
 
         // Audio
         ConfigVar<bool> noLowHpSound;
@@ -415,6 +417,7 @@ struct TransientSettings {
     CollisionViewSettings collisionView;
     bool skipFrameRateLimit;
     bool forceThirtyFpsLimit;
+    bool turboMode;
     bool moveLinkActive;
     bool stateShareLoadActive;
     bool practiceMenuInputCapture;

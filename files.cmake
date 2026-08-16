@@ -1440,6 +1440,7 @@ set(DUSK_FILES
         src/dusk/gyro.cpp
         src/dusk/input_macro.cpp
         src/dusk/video_latency.cpp
+        src/dusk/hq_minimap.cpp
         src/dusk/imgui/ImGuiActorSpawner.cpp
         src/dusk/tas_movie.cpp
         src/dusk/trigger_view.h
@@ -1467,6 +1468,8 @@ set(DUSK_FILES
         src/dusk/imgui/ImGuiStubLog.cpp
         src/dusk/io.cpp
         src/dusk/iso_validate.cpp
+        src/dusk/language.cpp
+        src/dusk/language.hpp
         src/dusk/layout.cpp
         src/dusk/livesplit.cpp
         src/dusk/logging.cpp

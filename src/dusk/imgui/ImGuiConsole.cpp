@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <aurora/aurora.h>
 #include <chrono>
 #include <cstring>
 #include <numeric>
@@ -31,6 +32,7 @@
 #include "dusk/livesplit.h"
 #include "dusk/texture_replacements.hpp"
 #include "dusk/main.h"
+#include "dusk/presentation.hpp"
 #include "dusk/settings.h"
 #include "dusk/ui/ui.hpp"
 #include "f_pc/f_pc_manager.h"
@@ -61,6 +63,7 @@ struct LinkTeleportPoint {
 };
 
 LinkTeleportPoint sLinkTeleportPoint;
+constexpr float kTurboTimeScale = 4.f;
 
 ImGuiWindow* FindDragScrollWindow(ImGuiWindow* window) {
     while (window != nullptr) {
@@ -379,8 +382,29 @@ namespace dusk {
     }
 
     void ImGuiConsole::UpdateSettings() {
-        getTransientSettings().skipFrameRateLimit = getSettings().game.enableTurboKeybind &&
-            (hotkey_down(getSettings().hotkeys.turboSpeed) || getActionBindHoldAnyPort(ActionBinds::TURBO_SPEED_BUTTON));
+        static bool previousTurboActive = false;
+        static bool previousSlowActive = false;
+        static float previousTimeScale = 1.0f;
+
+        const bool turboActive = getSettings().game.enableTurboKeybind &&
+            (hotkey_down(getSettings().hotkeys.turboSpeed) ||
+             getActionBindHoldAnyPort(ActionBinds::TURBO_SPEED_BUTTON));
+        const bool slowDown = turboActive && ImGui::GetIO().KeyShift;
+        getTransientSettings().skipFrameRateLimit = turboActive;
+        if (turboActive != previousTurboActive) {
+            getTransientSettings().turboMode = turboActive;
+            presentation::update_frame_rate_preference();
+            if (turboActive) {
+                previousTimeScale = aurora_get_timescale();
+                aurora_set_timescale(slowDown ? 1.f / kTurboTimeScale : kTurboTimeScale);
+            } else {
+                aurora_set_timescale(previousTimeScale);
+            }
+        } else if (turboActive && slowDown != previousSlowActive) {
+            aurora_set_timescale(slowDown ? 1.f / kTurboTimeScale : kTurboTimeScale);
+        }
+        previousTurboActive = turboActive;
+        previousSlowActive = slowDown;
 
         static int sFrameBufferScaleApplyFrames = 0;
         static int sLastFrameBufferScale = getSettings().game.internalResolutionScale.getValue();
@@ -475,6 +499,14 @@ namespace dusk {
         {
             input_macro::recordResetRequest();
             JUTGamePad::C3ButtonReset::sResetSwitchPushing = true;
+        }
+
+        if (ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_F1)) {
+            if (getSettings().backend.enableAdvancedSettings) {
+                m_isHidden = !m_isHidden;
+            } else {
+                m_isHidden = true;
+            }
         }
 
         bool showMenu = !m_isHidden;
