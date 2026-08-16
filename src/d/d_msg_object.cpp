@@ -35,7 +35,7 @@
 #include "dusk/randomizer/game/stages.h"
 #include "dusk/randomizer/game/tools.h"
 #include "dusk/randomizer/game/verify_item_functions.h"
-#include "dusk/version.hpp"
+#include "dusk/language.hpp"
 #include "dusk/menu_pointer.h"
 #include "dusk/settings.h"
 #include "dusk/version.hpp"
@@ -1783,7 +1783,9 @@ void dMsgObject_c::readMessageGroupLocal(mDoDvdThd_mountXArchive_c** p_arcMount)
 #endif
 
     int msgGroup = dStage_stagInfo_GetMsgGroup(dComIfGp_getStage()->getStagInfo());
-    #if REGION_PAL
+#if TARGET_PC
+    snprintf(arcName, sizeof(arcName), "/res/%s/bmgres%d.arc", dusk::language::msg_folder(), msgGroup);
+#elif REGION_PAL
     switch (dComIfGs_getPalLanguage()) {
     case dSv_player_config_c::LANGUAGE_GERMAN:
         sprintf(arcName, "/res/Msgde/bmgres%d.arc", msgGroup);
@@ -1800,39 +1802,11 @@ void dMsgObject_c::readMessageGroupLocal(mDoDvdThd_mountXArchive_c** p_arcMount)
     default:
         sprintf(arcName, "/res/Msguk/bmgres%d.arc", msgGroup);
     }
-    #elif REGION_JPN
+#elif REGION_JPN
     sprintf(arcName, "/res/Msgjp/bmgres%d.arc", msgGroup);
-    #else
-#if TARGET_PC
-    // Original game UB
-
-    if (dusk::version::isRegionPal()) {
-        switch (dComIfGs_getPalLanguage()) {
-        case dSv_player_config_c::LANGUAGE_GERMAN:
-            snprintf(arcName, sizeof(arcName), "/res/Msgde/bmgres%d.arc", msgGroup);
-            break;
-        case dSv_player_config_c::LANGUAGE_FRENCH:
-            snprintf(arcName, sizeof(arcName), "/res/Msgfr/bmgres%d.arc", msgGroup);
-            break;
-        case dSv_player_config_c::LANGUAGE_SPANISH:
-            snprintf(arcName, sizeof(arcName), "/res/Msgsp/bmgres%d.arc", msgGroup);
-            break;
-        case dSv_player_config_c::LANGUAGE_ITALIAN:
-            snprintf(arcName, sizeof(arcName), "/res/Msgit/bmgres%d.arc", msgGroup);
-            break;
-        default:
-            snprintf(arcName, sizeof(arcName), "/res/Msguk/bmgres%d.arc", msgGroup);
-        }
-    } else if (dusk::version::isRegionJpn()) {
-        snprintf(arcName, sizeof(arcName), "/res/Msgjp/bmgres%d.arc", msgGroup);
-    } else {
-        snprintf(arcName, sizeof(arcName), "/res/Msgus/bmgres%d.arc", msgGroup);
-    }
-
 #else
     sprintf(arcName, "/res/Msgus/bmgres%d.arc", msgGroup);
 #endif
-    #endif
 
     *p_arcMount = mDoDvdThd_mountXArchive_c::create(arcName, 0, JKRArchive::MOUNT_MEM, NULL);
 

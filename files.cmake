@@ -1452,6 +1452,7 @@ set(DUSK_FILES
         src/dusk/custom_music/CustomMusicProject.cpp
         src/dusk/custom_music/CustomMusicService.cpp
         src/dusk/custom_music/CustomMusicIsoTransaction.cpp
+        src/dusk/hq_minimap.cpp
         src/dusk/tas_movie.cpp
         src/dusk/trigger_view.h
         src/dusk/trigger_view.cpp
@@ -1484,6 +1485,8 @@ set(DUSK_FILES
         src/dusk/imgui/ImGuiStubLog.cpp
         src/dusk/io.cpp
         src/dusk/iso_validate.cpp
+        src/dusk/language.cpp
+        src/dusk/language.hpp
         src/dusk/layout.cpp
         src/dusk/livesplit.cpp
         src/dusk/logging.cpp

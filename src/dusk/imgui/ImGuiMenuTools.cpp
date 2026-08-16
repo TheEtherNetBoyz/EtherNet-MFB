@@ -36,10 +36,6 @@
 #include <TargetConditionals.h>
 #endif
 
-namespace aurora::gx {
-extern bool enableLodBias;
-}
-
 namespace dusk {
     ImGuiMenuTools::ImGuiMenuTools() {}
 
@@ -611,7 +607,6 @@ namespace dusk {
                     getSettings().game.disableWaterRefraction.setValue(disableWaterRefraction);
                     config::save();
                 }
-                ImGui::Checkbox("Enable LOD Bias", &aurora::gx::enableLodBias);
                 ImGui::EndMenu();
             }
 

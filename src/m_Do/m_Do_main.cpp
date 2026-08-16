@@ -74,6 +74,7 @@
 #include "dusk/video_latency.h"
 #include "dusk/logging.h"
 #include "dusk/main.h"
+#include "dusk/hq_minimap.hpp"
 #include "dusk/mod_loader.hpp"
 #include "dusk/mods/svc/window.hpp"
 #include "dusk/mouse.h"
@@ -248,7 +249,7 @@ void main01(void) {
 
     OSReport("Entering Main Loop (main01)...\n");
 
-    dusk::game_clock::ensure_initialized();
+    dusk::game_clock::initialize();
     dusk::multiplayer::initialize();
 
     do {
@@ -264,7 +265,7 @@ void main01(void) {
                 break;
             case AURORA_UNPAUSED:
                 dusk::audio::SetPaused(false);
-                dusk::game_clock::reset_frame_timer();
+                dusk::game_clock::reset();
                 dusk::mouse::on_focus_gained();
                 break;
             case AURORA_SDL_EVENT:
@@ -306,21 +307,22 @@ void main01(void) {
 
         dusk::ui::update();
 
-        const auto pacing = dusk::game_clock::advance_main_loop();
-        if (pacing.is_interpolating) {
-            const int tasSimTicks =
-                dusk::tas_movie::simulationTicksForHostFrame(pacing.sim_ticks_to_run);
+        const auto timing = dusk::game_clock::advance();
+        if (timing.separatePresentation) {
+            const int tasSimTicks = dusk::tas_movie::simulationTicksForHostFrame(timing.numSimTicks);
             const bool tasBatchActive = dusk::tas_movie::active();
             if (tasSimTicks > 0) {
-                dusk::frame_interp::begin_frame(dusk::getSettings().game.enableFrameInterpolation.getValue() != dusk::FrameInterpMode::Off, true, 0.0f);
+                dusk::frame_interp::begin_frame(timing.interpolating, true, 0.0f);
                 dusk::frame_interp::set_ui_tick_pending(true);
-
-                for (int sim_tick = 0; sim_tick < tasSimTicks; ++sim_tick) {
-                    dusk::frame_interp::begin_sim_tick();
+                for (int i = 0; i < tasSimTicks; ++i) {
+                    if (timing.interpolating) {
+                        dusk::frame_interp::begin_sim_tick();
+                    }
+                    dusk::game_clock::begin_sim_tick();
                     mDoCPd_c::read();
                     dusk::multiplayer::consume_progression_prompt_accept_button();
                     dusk::mouse::read();
-                    dusk::gyro::read(pacing.sim_pace);
+                    dusk::gyro::read(dusk::game_clock::sim_pace());
                     fapGm_Execute();
                     dusk::tas_movie::restorePresentationCamera();
                     dusk::multiplayer::update();
@@ -333,9 +335,9 @@ void main01(void) {
                 }
             }
 
-            const float interpolationStep = dusk::game_clock::sample_interpolation_step();
-            dusk::frame_interp::begin_frame(dusk::getSettings().game.enableFrameInterpolation.getValue() != dusk::FrameInterpMode::Off, false,
-                                            interpolationStep);
+            const float interpolationStep =
+                timing.interpolating ? dusk::game_clock::sample_interpolation_step() : 1.0f;
+            dusk::frame_interp::begin_frame(timing.interpolating, false, interpolationStep);
             static int sLastWindowStatus = -1;
             const int windowStatus = dMeter2Info_getWindowStatus();
             const auto isCaptureMenuStatus = [](int status) {
@@ -347,28 +349,31 @@ void main01(void) {
             }
             sLastWindowStatus = windowStatus;
             if (!dusk::frame_interp::presentation_skip_active()) {
-                dusk::frame_interp::interpolate();
-                dusk::frame_interp::begin_presentation_camera();
+                if (timing.interpolating) {
+                    dusk::frame_interp::interpolate();
+                    dusk::frame_interp::begin_presentation_camera();
+                }
                 dusk::tas_movie::applyPresentationCamera(dComIfGd_getView());
-                // run draw functions for anything specially marked to handle interp
-                 fpcM_DrawIterater((fpcM_DrawIteraterFunc)fpcM_Draw);
-                 cAPIGph_Painter();
-                 dusk::tas_movie::restorePresentationCamera();
-                 dusk::frame_interp::end_presentation_camera();
+                fpcM_DrawIterater((fpcM_DrawIteraterFunc)fpcM_Draw);
+                cAPIGph_Painter();
+                dusk::tas_movie::restorePresentationCamera();
+                if (timing.interpolating) {
+                    dusk::frame_interp::end_presentation_camera();
+                }
             }
             dusk::frame_interp::set_ui_tick_pending(false);
         } else {
             dusk::frame_interp::begin_frame(false, true, 0.0f);
             dusk::frame_interp::set_ui_tick_pending(true);
-
             const int tasSimTicks = dusk::tas_movie::simulationTicksForHostFrame(1);
             const bool tasBatchActive = dusk::tas_movie::active();
             for (int simTick = 0; simTick < tasSimTicks; ++simTick) {
+                dusk::game_clock::begin_sim_tick();
                 // Game Inputs
                 mDoCPd_c::read();
                 dusk::multiplayer::consume_progression_prompt_accept_button();
                 dusk::mouse::read();
-                dusk::gyro::read(pacing.presentation_dt_seconds);
+                dusk::gyro::read(timing.dt);
 
                 // EXECUTE GAME LOGIC & RENDER
                 // This calls mDoGph_Painter -> JFWDisplay -> GX Functions
@@ -377,6 +382,7 @@ void main01(void) {
                 dusk::multiplayer::update();
 
                 mDoAud_Execute();
+                dusk::game_clock::commit_sim_tick();
                 if (tasBatchActive &&
                     (!dusk::tas_movie::active() || dusk::tas_movie::paused())) {
                     break;
@@ -798,6 +804,10 @@ int game_main(int argc, char* argv[]) {
         return 0;
     }
 
+    if (dusk::getSettings().game.enableHighQualityMinimapTextures.getValue()) {
+        dusk::hq_minimap::set_active(true);
+    }
+
     dusk::texture_replacements::reload();
     dusk::ui::initialize();
     dusk::ui::push_document(std::make_unique<dusk::ui::Overlay>(), true, true);
@@ -931,7 +941,7 @@ int game_main(int argc, char* argv[]) {
 
     OSInit();
 
-    mDoMain::sPowerOnTime = OSGetTime();
+    mDoMain::sPowerOnTime = DUSK_IF_ELSE(OSGetSystemTime(), OSGetTime());
 
     // Reset Data
     static mDoRstData sResetData = {0};

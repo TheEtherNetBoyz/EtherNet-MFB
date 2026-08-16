@@ -26,6 +26,10 @@
 #include "f_op/f_op_overlap_mng.h"
 #include "m_Do/m_Do_controller_pad.h"
 
+#if TARGET_PC
+#include "dusk/frame_interpolation.h"
+#endif
+
 class dDlst_MENU_CAPTURE_c : public dDlst_base_c {
 public:
     virtual void draw() {
@@ -119,7 +123,13 @@ public:
 #endif
     }
 
-    void setCaptureFlag() { mFlag = 1; }
+    void setCaptureFlag() {
+        mFlag = 1;
+    #ifdef TARGET_PC
+        dusk::frame_interp::request_presentation_sync();
+    #endif
+    }
+
     bool checkDraw() { return mFlag; }
     u8 getAlpha() { return mAlpha; }
     u8 getTopFlag() { return mTopFlag; }

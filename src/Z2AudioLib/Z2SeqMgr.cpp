@@ -14,7 +14,10 @@
 #include "Z2AudioLib/SpotName.h"
 #include "os_report.h"
 
+#if TARGET_PC
 #include "dusk/audio.h"
+#include "dusk/version.hpp"
+#endif
 
 #if TARGET_PC
 static u32 duskLogicalSubBgmID(u32 bgmID) {
@@ -768,7 +771,7 @@ void Z2SeqMgr::bgmStreamPlay() {
     }
 
     #if !PLATFORM_SHIELD
-    else if (getStreamBgmID() == 0x2000000) {
+    else if (getStreamBgmID() == 0x2000000 IF_DUSK(&& dusk::version::isGcn())) {
         if (mStreamBgmHandle) {
             mStreamBgmHandle->stop();
         }

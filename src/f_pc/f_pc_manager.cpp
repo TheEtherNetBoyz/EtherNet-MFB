@@ -25,6 +25,7 @@
 #include "dusk/multiplayer/multiplayer.hpp"
 #include "dusk/frame_interpolation.h"
 #include "dusk/tas_movie.h"
+#include "dusk/game_clock.h"
 #endif
 
 #include "tracy/Tracy.hpp"
@@ -75,8 +76,9 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
             }
 
 #ifdef TARGET_PC
-            // FRAME INTERP NOTE: Called in m_Do_main when interp is enabled
-            if (!dusk::frame_interp::is_enabled() && !dusk::low_latency_presentation_enabled())
+            // The main loop manages painting for separate presentation and low-latency modes.
+            if (!dusk::game_clock::g_frameTiming.separatePresentation &&
+                !dusk::low_latency_presentation_enabled())
 #endif
             {
 #ifdef TARGET_PC

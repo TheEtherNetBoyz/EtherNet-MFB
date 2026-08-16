@@ -146,6 +146,10 @@ void begin_frame(bool enabled, bool is_sim_frame, float step) {
     if (!enabled || is_sim_frame) {
         g_skip_presentation = false;
     }
+    if (!g_enabled) {
+        g_interpolating = false;
+        clear_replacements();
+    }
 }
 
 bool is_enabled() {
