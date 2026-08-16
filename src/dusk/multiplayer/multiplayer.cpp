@@ -1498,7 +1498,15 @@ bool is_opening_or_title_screen_active() {
     // The opening scene initializes temporary save data for the title-screen
     // Link before the title actor itself exists. Those equipment setters are
     // presentation-only and must not be published as persistent inventory.
-    return fpcM_SearchByName(fpcNm_OPENING_SCENE_e) != nullptr ||
+    // Use the raw start layer here: the opening process is not searchable while
+    // its create callback is running, and resolving the computed layer recurses
+    // through randomizer_IsActive().
+    const char* stage = dComIfGp_getStartStageName();
+    return (stage != nullptr &&
+            (std::strcmp(stage, "S_MV000") == 0 ||
+             (std::strcmp(stage, "F_SP102") == 0 &&
+              dComIfGp_getStartStageLayer() == 10))) ||
+           fpcM_SearchByName(fpcNm_OPENING_SCENE_e) != nullptr ||
            is_title_screen_active();
 }
 
