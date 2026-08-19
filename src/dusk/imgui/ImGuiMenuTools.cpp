@@ -96,6 +96,7 @@ namespace dusk {
             s.game.debugFlyCam.setSpeedrunValue(false);
             s.game.moveLink.setSpeedrunValue(false);
             s.game.teleportLink.setSpeedrunValue(false);
+            s.game.areaReload.setSpeedrunValue(false);
             s.game.gorgeVoidChecker.setSpeedrunValue(false);
             getTransientSettings().moveLinkActive = false;
         }
@@ -544,8 +545,11 @@ namespace dusk {
             MenuCheckbox("Move Link", getSettings().game.moveLink);
             MenuCheckbox("Teleport Link", getSettings().game.teleportLink);
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "D-pad Up + R: set point\nD-pad Down + R: teleport");
+                ImGui::SetTooltip("D-pad Up + R: set point\nD-pad Down + R: teleport");
+            }
+            MenuCheckbox("Area Reload (L+R+Start+A)", getSettings().game.areaReload);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("L+R+Start+A: reload the current area at its last entrance");
             }
 
             ImGui::EndDisabled();

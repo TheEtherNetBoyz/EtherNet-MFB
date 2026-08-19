@@ -1891,6 +1891,9 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         addOption("Aiming Reticle", getSettings().game.aimingReticle,
             "Shows the aiming reticle for bow and slingshot.");
 
+        addSpeedrunDisabledOption("Area Reload (L+R+Start+A)", getSettings().game.areaReload,
+            "Reloads the current area at its last entrance while preserving temporary area state.");
+
         leftPane.add_section("Speedrunning");
         config_bool_select(leftPane, rightPane, getSettings().game.speedrunMode,
             {

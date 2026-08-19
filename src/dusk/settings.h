@@ -337,6 +337,7 @@ struct UserSettings {
         ConfigVar<bool> showSpeedrunRTATimer;
         ConfigVar<bool> moveLink;
         ConfigVar<bool> teleportLink;
+        ConfigVar<bool> areaReload;
         ConfigVar<bool> gorgeVoidChecker;
         ConfigVar<bool> recordingMode;
         ConfigVar<bool> removeQuestMapMarkers;

@@ -13,6 +13,7 @@
 #include <array>
 
 #include "dusk/action_bindings.h"
+#include "dusk/settings.h"
 
 namespace dusk::ui::input {
 namespace {
@@ -29,6 +30,7 @@ constexpr int kMenuTapFingerCount = 3;
 constexpr float kMenuTapMoveThreshold = 12.0f;
 constexpr double kMenuTapMaxDownSpan = 0.18;
 constexpr double kMenuTapMaxDuration = 0.55;
+constexpr u32 kAreaReloadMenuBlockCombo = PAD_TRIGGER_L | PAD_TRIGGER_R | PAD_BUTTON_START;
 
 struct GamepadRepeatState {
     Rml::Input::KeyIdentifier key = Rml::Input::KI_UNKNOWN;
@@ -146,6 +148,14 @@ bool is_menu_chord(u32 port) noexcept {
 bool any_menu_chord() noexcept {
     return std::any_of(sPadHoldMasks.begin(), sPadHoldMasks.end(),
         [](u32 held) { return (held & PAD_TRIGGER_R) != 0 && (held & PAD_BUTTON_START) != 0; });
+}
+
+bool area_reload_menu_blocked(u32 port) noexcept {
+    if (!getSettings().game.areaReload.getValue() || port >= sPadHoldMasks.size()) {
+        return false;
+    }
+
+    return (sPadHoldMasks[port] & kAreaReloadMenuBlockCombo) == kAreaReloadMenuBlockCombo;
 }
 
 Rml::Input::KeyIdentifier map_pad_button(PADButton button) noexcept {
@@ -328,6 +338,9 @@ Rml::Input::KeyIdentifier map_gamepad_button(const SDL_GamepadButtonEvent& event
     const auto nativeButton = static_cast<SDL_GamepadButton>(event.button);
     u32 port = 0;
     bool foundEventPort = find_event_port(event.which, port);
+    if (foundEventPort && area_reload_menu_blocked(port)) {
+        return Rml::Input::KI_UNKNOWN;
+    }
     if (foundEventPort) {
         int openMenuButton = getActionBindButton(ActionBinds::OPEN_DUSKLIGHT_MENU, port);
         if (openMenuButton != PAD_NATIVE_BUTTON_INVALID && openMenuButton == nativeButton) {
@@ -653,7 +666,8 @@ void process_axis_direction(
 
     set_pad_button_held(port, heldPadButton, true);
     const bool chorded = heldPadButton == PAD_TRIGGER_R && is_menu_chord(port) &&
-                         (port >= sMenuChordConsumed.size() || !sMenuChordConsumed[port]);
+                         (port >= sMenuChordConsumed.size() || !sMenuChordConsumed[port]) &&
+                         !area_reload_menu_blocked(port);
     if (chorded) {
         consume_menu_chord(port, context);
     }
@@ -740,7 +754,8 @@ void handle_event(const SDL_Event& event) noexcept {
     const bool hasPadButton = find_event_pad_button(event.gbutton, port, button);
     if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
         set_pad_button_held(port, button, true);
-        const bool chorded = hasPadButton && is_menu_chord_part(button) && is_menu_chord(port);
+        const bool chorded = hasPadButton && is_menu_chord_part(button) && is_menu_chord(port) &&
+                             !area_reload_menu_blocked(port);
         if (chorded) {
             consume_menu_chord(port, *context);
         }

@@ -95,6 +95,7 @@
 #include "cxxopts.hpp"
 #include "d/actor/d_a_movie_player.h"
 #include "dusk/audio/DuskAudioSystem.h"
+#include "dusk/area_reload.hpp"
 #include "dusk/audio/DuskDsp.hpp"
 #include "dusk/config.hpp"
 #include "dusk/speedrun.h"
@@ -309,6 +310,7 @@ void main01(void) {
                     }
                     dusk::game_clock::begin_sim_tick();
                     mDoCPd_c::read();
+                    dusk::update_area_reload_input();
                     dusk::mouse::read();
                     dusk::gyro::read(dusk::game_clock::sim_pace());
                     fapGm_Execute();
@@ -358,6 +360,7 @@ void main01(void) {
                 dusk::game_clock::begin_sim_tick();
                 // Game Inputs
                 mDoCPd_c::read();
+                dusk::update_area_reload_input();
                 dusk::mouse::read();
                 dusk::gyro::read(timing.dt);
 

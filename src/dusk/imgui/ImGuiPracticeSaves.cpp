@@ -765,6 +765,7 @@ void draw_gz_tools_panel() {
     ImGui::Separator();
 
     if (tab == 0) {
+        gz_config_checkbox("area reload", s.game.areaReload, !s.game.speedrunMode);
         gz_disabled_checkbox("coro td");
         gz_disabled_checkbox("ebmb");
         gz_disabled_checkbox("elevator escape");
@@ -2416,6 +2417,7 @@ void ImGuiPracticeSaves::drawNative(bool menuOpen) {
         }
         case MainCategory::Tools: {
             if (s_gzToolsTab == 0) {
+                boolRow("area reload", s.game.areaReload.getValue(), s.game.speedrunMode);
                 disabledBool("coro td");
                 disabledBool("ebmb");
                 disabledBool("elevator escape");
