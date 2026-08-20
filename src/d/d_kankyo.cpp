@@ -48,6 +48,10 @@ static int s_visual_environment_layer = -1;
 static int s_visual_environment_room = -1;
 static char s_visual_environment_stage[16] = {};
 static bool s_visual_environment_has_twilight_layer = false;
+#if TARGET_PC
+static bool s_twilight_visual_audio_state = false;
+static bool s_twilight_visual_audio_state_initialized = false;
+#endif
 static bool s_visual_environment_forced = false;
 static bool s_has_faron_twilight_sky = false;
 static GXColorS10 s_faron_twilight_sky;
@@ -8554,12 +8558,41 @@ static int dKy_Draw(sub_kankyo__class* i_this) {
     return 1;
 }
 
+#if TARGET_PC
+static void dKy_update_visual_twilight_audio() {
+    const bool enabled = dusk::getSettings().game.enableTwilightVisuals.getValue();
+
+    if (!s_twilight_visual_audio_state_initialized) {
+        s_twilight_visual_audio_state = enabled;
+        s_twilight_visual_audio_state_initialized = true;
+        return;
+    }
+
+    if (enabled == s_twilight_visual_audio_state) {
+        return;
+    }
+
+    const char* stageName = dComIfGp_getStartStageName();
+    if (stageName == NULL || stageName[0] == '\0') {
+        return;
+    }
+
+    mDoAud_setSceneName(stageName, dComIfGp_getStartStageRoomNo(),
+                        dComIfGp_getStartStageLayer());
+    mDoAud_load1stDynamicWave();
+    s_twilight_visual_audio_state = enabled;
+}
+#endif
+
 static int dKy_Execute(sub_kankyo__class* i_this) {
     UNUSED(i_this);
     dScnKy_env_light_c* kankyo = dKy_getEnvlight();
     g_env_light.exeKankyo();
     dKyw_wind_set();
     dKy_twilight_camelight_set();
+#if TARGET_PC
+    dKy_update_visual_twilight_audio();
+#endif
 
     #if DEBUG
     if (g_kankyoHIO.display_schedule_bit) {

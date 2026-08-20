@@ -1666,6 +1666,21 @@ void Z2SceneMgr::setSceneName(char* spot, s32 room, s32 layer) {
         time_proc_vol_mod = false;
     }
 
+#if TARGET_PC
+    // Twilight Visuals uses the regular Palace of Twilight dungeon theme for
+    // map music, but keeps explicit demo/cutscene audio selections intact.
+    const bool isPalaceScene = spotNo >= Z2SCENE_PALACE_OF_TWILIGHT &&
+                               spotNo <= Z2SCENE_PALACE_OF_TWILIGHT_BOSS;
+    if (dusk::getSettings().game.enableTwilightVisuals.getValue() &&
+        !inDarkness_ && !isPalaceScene && demo_wave == 0) {
+        bgm_id = Z2BGM_DUNGEON_LV8;
+        bgm_wave1 = 0x28;
+        bgm_wave2 = 0;
+        bVar2 = true;
+        field_bgm_play = false;
+    }
+#endif
+
     if (Z2GetSoundMgr()->getStreamMgr()->isActive()) {
         JAUSoundTable* sound_table = JAUSoundTable::getInstance();
 #if DUSK_AUDIO_DISABLED
@@ -1924,6 +1939,14 @@ void Z2SceneMgr::sceneBgmStart() {
             case Z2BGM_DUNGEON_LV8:
             case Z2BGM_DUNGEON_LV9_02:
             case Z2BGM_SNOW_MOUNTAIN:
+#if TARGET_PC
+                if (dusk::getSettings().game.enableTwilightVisuals.getValue() &&
+                    !inDarkness_ &&
+                    (sceneNum < Z2SCENE_PALACE_OF_TWILIGHT ||
+                     sceneNum > Z2SCENE_PALACE_OF_TWILIGHT_BOSS)) {
+                    Z2GetSeqMgr()->changeBgmStatus(0);
+                } else
+#endif
                 if (sceneNum == Z2SCENE_CASTLE_TOWN_SHOPS) {
                     Z2GetSeqMgr()->changeBgmStatus(5);
                 } else {

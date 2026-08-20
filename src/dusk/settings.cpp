@@ -1,7 +1,9 @@
 #include "dusk/settings.h"
 #include "dusk/config.hpp"
 #include <aurora/aurora.h>
+#include <aurora/dvd.h>
 
+#include <algorithm>
 #include <SDL3/SDL_scancode.h>
 
 namespace dusk {
@@ -18,6 +20,12 @@ UserSettings g_userSettings = {
         .rememberWindowSize {"video.rememberWindowSize", false},
         .lastWindowWidth {"video.lastWindowWidth", 0},
         .lastWindowHeight {"video.lastWindowHeight", 0},
+    },
+
+    .ui = {
+        .settingsFavorites {"ui.settingsFavorites", ""},
+        .menuWidthDp {"ui.menuWidthDp", 0},
+        .menuHeightDp {"ui.menuHeightDp", 0},
     },
 
     .audio = {
@@ -52,6 +60,9 @@ UserSettings g_userSettings = {
         .no2ndFishForCat {"game.no2ndFishForCat", false},
         .enableFastLoads {"game.enableFastLoads", false},
         .enableInstaLoads {"game.enableInstaLoads", false},
+        .discLoadingDelayMode {"game.loadDelayMode", DiscLoadingDelayMode::Off},
+        .discLoadingDelaySeconds {"game.discLoadingDelaySeconds", 1},
+        .theEtherNetBoyzExperience {"game.theEtherNetBoyzExperience", false},
         .instantMovement {"game.instantMovement", false},
         .buttonFishing {"game.buttonFishing", false},
         .instantSaves {"game.instantSaves", false},
@@ -300,6 +311,11 @@ UserSettings g_userSettings = {
             ConfigVar<int>{"hotkeys.cycleBloomMode.modifiers", HOTKEY_MOD_NONE},
             ConfigVar<int>{"hotkeys.cycleBloomMode.controllerButton", PAD_NATIVE_BUTTON_INVALID},
         },
+        .toggleDiscLoadingDelay = {
+            ConfigVar<int>{"hotkeys.toggleDiscLoadingDelay.key", SDL_SCANCODE_UNKNOWN},
+            ConfigVar<int>{"hotkeys.toggleDiscLoadingDelay.modifiers", HOTKEY_MOD_NONE},
+            ConfigVar<int>{"hotkeys.toggleDiscLoadingDelay.controllerButton", PAD_NATIVE_BUTTON_INVALID},
+        },
     },
 
     // Not sure if there's a better way to declare this
@@ -348,6 +364,10 @@ UserSettings& getSettings() {
 }
 
 void registerSettings() {
+    Register(g_userSettings.ui.settingsFavorites);
+    Register(g_userSettings.ui.menuWidthDp);
+    Register(g_userSettings.ui.menuHeightDp);
+
     // Video
     Register(g_userSettings.video.enableFullscreen);
     Register(g_userSettings.video.enableVsync);
@@ -389,6 +409,9 @@ void registerSettings() {
     Register(g_userSettings.game.no2ndFishForCat);
     Register(g_userSettings.game.enableFastLoads);
     Register(g_userSettings.game.enableInstaLoads);
+    Register(g_userSettings.game.discLoadingDelayMode);
+    Register(g_userSettings.game.discLoadingDelaySeconds);
+    Register(g_userSettings.game.theEtherNetBoyzExperience);
     Register(g_userSettings.game.instantMovement);
     Register(g_userSettings.game.buttonFishing);
     Register(g_userSettings.game.instantSaves);
@@ -575,6 +598,9 @@ void registerSettings() {
     Register(g_userSettings.hotkeys.cycleBloomMode.key);
     Register(g_userSettings.hotkeys.cycleBloomMode.modifiers);
     Register(g_userSettings.hotkeys.cycleBloomMode.controllerButton);
+    Register(g_userSettings.hotkeys.toggleDiscLoadingDelay.key);
+    Register(g_userSettings.hotkeys.toggleDiscLoadingDelay.modifiers);
+    Register(g_userSettings.hotkeys.toggleDiscLoadingDelay.controllerButton);
 
     Register(g_userSettings.actionBindings.firstPersonCamera[0]);
     Register(g_userSettings.actionBindings.firstPersonCamera[1]);
@@ -626,6 +652,27 @@ static TransientSettings g_transientSettings = {
 
 TransientSettings& getTransientSettings() {
     return g_transientSettings;
+}
+
+void updateDiscLoadingDelay() {
+    const int delaySeconds = std::clamp(getSettings().game.discLoadingDelaySeconds.getValue(), 1, 10);
+    const auto mode = getSettings().game.discLoadingDelayMode.getValue();
+
+    aurora_dvd_set_read_delay_seconds(static_cast<u32>(delaySeconds));
+    const u32 dvdMode = mode == DiscLoadingDelayMode::Off ? AURORA_DVD_READ_DELAY_OFF :
+        (mode == DiscLoadingDelayMode::On ? AURORA_DVD_READ_DELAY_BLOCKED :
+                                            AURORA_DVD_READ_DELAY_TIMED);
+    aurora_dvd_set_read_delay_mode(dvdMode);
+}
+
+void toggleDiscLoadingDelay() {
+    auto& mode = getSettings().game.discLoadingDelayMode;
+    const auto nextMode = static_cast<u8>(mode.getValue()) >= static_cast<u8>(DiscLoadingDelayMode::Timed)
+        ? DiscLoadingDelayMode::Off
+        : static_cast<DiscLoadingDelayMode>(static_cast<u8>(mode.getValue()) + 1);
+    mode.setValue(nextMode);
+    config::save();
+    updateDiscLoadingDelay();
 }
 
 }

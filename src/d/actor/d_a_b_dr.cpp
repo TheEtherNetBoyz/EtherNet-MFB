@@ -17,6 +17,7 @@
 #include "f_op/f_op_camera_mng.h"
 #include "Z2AudioLib/Z2Instances.h"
 #include "dusk/cutscene_skip.h"
+#include "dusk/settings.h"
 #include "m_Do/m_Do_controller_pad.h"
 
 
@@ -1842,7 +1843,13 @@ void daB_DR_c::executeWeekHit() {
                 sp44.z = 0.0f;
                 sp44.x = 0.0f;
 
-                parentActorID = fopAcM_createChild(fpcNm_B_DRE_e, fopAcM_GetID(this), 0, &sp44, fopAcM_GetRoomNo(this), &shape_angle, NULL, -1, NULL);
+                if (dusk::getSettings().game.theEtherNetBoyzExperience.getValue()) {
+                    // The normal child is the ending death cutscene.  Let the boss
+                    // disappear naturally so Link's existing hang logic releases him.
+                    parentActorID = 0;
+                } else {
+                    parentActorID = fopAcM_createChild(fpcNm_B_DRE_e, fopAcM_GetID(this), 0, &sp44, fopAcM_GetRoomNo(this), &shape_angle, NULL, -1, NULL);
+                }
                 mTimer[0] = BREG_S(3) + 20;
                 mMoveMode = 1000;
                 return;

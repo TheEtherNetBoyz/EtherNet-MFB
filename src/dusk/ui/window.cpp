@@ -2,6 +2,8 @@
 
 #include "aurora/lib/window.hpp"
 #include "aurora/rmlui.hpp"
+#include "dusk/config.hpp"
+#include "dusk/settings.h"
 #include "fmt/format.h"
 #include "magic_enum.hpp"
 #include "pane.hpp"
@@ -25,6 +27,17 @@ float base_body_padding(Rml::Context* context) noexcept {
     return 64.0f * dpRatio;
 }
 
+Rml::Vector2f resize_pointer_position(const Rml::Event& event) noexcept {
+    if (event == aurora::rmlui::TouchStartEvent || event == aurora::rmlui::TouchMoveEvent ||
+        event == aurora::rmlui::TouchEndEvent || event == aurora::rmlui::TouchCancelEvent) {
+        return {
+            event.GetParameter("x", 0.0f),
+            event.GetParameter("y", 0.0f),
+        };
+    }
+    return event.GetUnprojectedMouseScreenPos();
+}
+
 Rml::String window_document_source(const std::vector<Rml::String>& styleSheets) {
     Rml::String links;
     for (const auto& sheet : styleSheets) {
@@ -37,7 +50,9 @@ Rml::String window_document_source(const std::vector<Rml::String>& styleSheets) 
     <link type="text/rcss" href="res/rml/window.rcss" />
 {}</head>
 <body>
-    <window id="window"></window>
+    <window id="window">
+        <resize-handle id="window-resize-handle" />
+    </window>
 </body>
 </rml>
 )RML",
@@ -62,6 +77,71 @@ const Rml::String kDocumentSourceSmall = R"RML(
 Window::Window(Props props)
     : Document(window_document_source(props.styleSheets), false, DocumentScope::Window),
       mRoot(mDocument->GetElementById("window")) {
+    mPersistSize = props.persistSize;
+    mResizeHandle = mDocument->GetElementById("window-resize-handle");
+    if (mResizeHandle != nullptr) {
+        listen(mResizeHandle, Rml::EventId::Mousedown, [this](Rml::Event& event) {
+            if (event.GetParameter("button", -1) != 0 || mRoot == nullptr) {
+                return;
+            }
+            mResize.active = true;
+            mResize.startPointer = resize_pointer_position(event);
+            mResize.startWidth = mRoot->GetOffsetWidth();
+            mResize.startHeight = mRoot->GetOffsetHeight();
+            event.StopPropagation();
+        });
+        listen(mResizeHandle, aurora::rmlui::TouchStartEvent, [this](Rml::Event& event) {
+            if (mRoot == nullptr) {
+                return;
+            }
+            mResize.active = true;
+            mResize.startPointer = resize_pointer_position(event);
+            mResize.startWidth = mRoot->GetOffsetWidth();
+            mResize.startHeight = mRoot->GetOffsetHeight();
+            event.StopPropagation();
+        });
+    }
+    const auto resize = [this](Rml::Event& event) {
+        if (!mResize.active || mRoot == nullptr || mDocument == nullptr) {
+            return;
+        }
+        const auto pointer = resize_pointer_position(event);
+        const auto delta = pointer - mResize.startPointer;
+        auto* context = mDocument->GetContext();
+        const float dpRatio = context != nullptr ? context->GetDensityIndependentPixelRatio() : 1.0f;
+        const float availableWidth = context != nullptr
+                                          ? static_cast<float>(context->GetDimensions().x) -
+                                                mBodyPadding.left - mBodyPadding.right
+                                          : mResize.startWidth;
+        const float availableHeight = context != nullptr
+                                           ? static_cast<float>(context->GetDimensions().y) -
+                                                 mBodyPadding.top - mBodyPadding.bottom
+                                           : mResize.startHeight;
+        const float minWidth = std::min(640.0f * dpRatio, availableWidth);
+        const float minHeight = std::min(400.0f * dpRatio, availableHeight);
+        const float maxWidth = availableWidth;
+        const float maxHeight = availableHeight;
+        mRoot->SetProperty(Rml::PropertyId::Width,
+            Rml::Property(std::clamp(mResize.startWidth + delta.x, minWidth, maxWidth),
+                Rml::Unit::PX));
+        mRoot->SetProperty(Rml::PropertyId::Height,
+            Rml::Property(std::clamp(mResize.startHeight + delta.y, minHeight, maxHeight),
+                Rml::Unit::PX));
+        event.StopPropagation();
+    };
+    listen(mDocument, Rml::EventId::Mousemove, resize, true);
+    listen(mDocument, aurora::rmlui::TouchMoveEvent, resize, true);
+    const auto endResize = [this](Rml::Event& event) {
+        if (!mResize.active) {
+            return;
+        }
+        mResize.active = false;
+        save_persisted_size();
+        event.StopPropagation();
+    };
+    listen(mDocument, Rml::EventId::Mouseup, endResize, true);
+    listen(mDocument, aurora::rmlui::TouchEndEvent, endResize, true);
+    listen(mDocument, aurora::rmlui::TouchCancelEvent, endResize, true);
     if (props.tabBar) {
         mTabBar = std::make_unique<TabBar>(mRoot, TabBar::Props{
                                                       .onClose = [this] { request_close(); },
@@ -131,6 +211,7 @@ void Window::show() {
 }
 
 void Window::hide(bool close) {
+    save_persisted_size();
     mRoot->RemoveAttribute("open");
     mPendingClose = close;
 }
@@ -158,6 +239,7 @@ void Window::update_safe_area() noexcept {
         std::round(std::max(basePadding, safeInsets.left)),
     };
     if (safeInsets == mBodyPadding) {
+        apply_persisted_size();
         return;
     }
 
@@ -170,6 +252,58 @@ void Window::update_safe_area() noexcept {
         Rml::PropertyId::PaddingBottom, Rml::Property(safeInsets.bottom, Rml::Unit::PX));
     mDocument->SetProperty(
         Rml::PropertyId::PaddingLeft, Rml::Property(safeInsets.left, Rml::Unit::PX));
+    apply_persisted_size();
+}
+
+void Window::apply_persisted_size() noexcept {
+    if (!mPersistSize || mPersistedSizeApplied || mRoot == nullptr || mDocument == nullptr) {
+        return;
+    }
+    mPersistedSizeApplied = true;
+
+    auto* context = mDocument->GetContext();
+    if (context == nullptr) {
+        return;
+    }
+    const float dpRatio = context->GetDensityIndependentPixelRatio();
+    const float availableWidth =
+        static_cast<float>(context->GetDimensions().x) - mBodyPadding.left - mBodyPadding.right;
+    const float availableHeight =
+        static_cast<float>(context->GetDimensions().y) - mBodyPadding.top - mBodyPadding.bottom;
+    const float minWidth = std::min(640.0f * dpRatio, availableWidth);
+    const float minHeight = std::min(400.0f * dpRatio, availableHeight);
+
+    const auto& settings = getSettings().ui;
+    if (settings.menuWidthDp.getValue() > 0) {
+        const float width = std::clamp(settings.menuWidthDp.getValue() * dpRatio,
+            minWidth, availableWidth);
+        mRoot->SetProperty(Rml::PropertyId::Width, Rml::Property(width, Rml::Unit::PX));
+    }
+    if (settings.menuHeightDp.getValue() > 0) {
+        const float height = std::clamp(settings.menuHeightDp.getValue() * dpRatio,
+            minHeight, availableHeight);
+        mRoot->SetProperty(Rml::PropertyId::Height, Rml::Property(height, Rml::Unit::PX));
+    }
+}
+
+void Window::save_persisted_size() noexcept {
+    if (!mPersistSize || mRoot == nullptr || mDocument == nullptr) {
+        return;
+    }
+    auto* context = mDocument->GetContext();
+    if (context == nullptr) {
+        return;
+    }
+    const float dpRatio = context->GetDensityIndependentPixelRatio();
+    const int widthDp = static_cast<int>(std::lround(mRoot->GetOffsetWidth() / dpRatio));
+    const int heightDp = static_cast<int>(std::lround(mRoot->GetOffsetHeight() / dpRatio));
+    if (widthDp <= 0 || heightDp <= 0) {
+        return;
+    }
+    auto& settings = getSettings().ui;
+    settings.menuWidthDp.setValue(widthDp);
+    settings.menuHeightDp.setValue(heightDp);
+    config::save();
 }
 
 bool Window::set_active_tab(int index) {

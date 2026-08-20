@@ -392,6 +392,17 @@ namespace dusk {
         if (hotkey_event_pressed(event, hotkeys.cycleBloomMode)) {
             cycle_bloom_mode();
         }
+
+        if (hotkey_event_pressed(event, hotkeys.toggleDiscLoadingDelay)) {
+            toggleDiscLoadingDelay();
+            const auto mode = getSettings().game.discLoadingDelayMode.getValue();
+            DuskToast(mode == DiscLoadingDelayMode::Off
+                          ? "Disc loading delay: Off"
+                          : mode == DiscLoadingDelayMode::On
+                          ? "Disc loading delay: On"
+                          : "Disc loading delay: Timed",
+                1.5f);
+        }
     }
 
     void ImGuiConsole::UpdateSettings() {

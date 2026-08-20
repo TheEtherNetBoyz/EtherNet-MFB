@@ -741,6 +741,9 @@ int game_main(int argc, char* argv[]) {
     case dusk::Resampler::Area:
         aurora_set_resampler(SAMPLER_AREA);
         break;
+    case dusk::Resampler::Composite:
+        aurora_set_resampler(SAMPLER_COMPOSITE);
+        break;
     case dusk::Resampler::Bilinear:
     default:
         aurora_set_resampler(SAMPLER_BILINEAR);
@@ -885,6 +888,8 @@ int game_main(int argc, char* argv[]) {
 
         dusk::IsGameLaunched = true;
     }
+
+    dusk::updateDiscLoadingDelay();
 
 #if BOREALIS_HAS_SENTRY
     if (borealis::sentry::get_consent() == borealis::sentry::Consent::Unknown) {

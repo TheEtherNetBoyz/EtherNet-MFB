@@ -40,6 +40,7 @@ enum class TwilightWeather : u8 {
 enum class Resampler : int {
     Bilinear = 0,
     Area = 1,
+    Composite = 2,
 };
 
 enum class GameLanguage : u8 {
@@ -102,6 +103,12 @@ enum class MagicArmorMode : u8 {
     COSMETIC = 4,
 };
 
+enum class DiscLoadingDelayMode : u8 {
+    Off = 0,
+    On = 1,
+    Timed = 2,
+};
+
 namespace config {
 template <>
 struct ConfigEnumRange<BloomMode> {
@@ -130,7 +137,7 @@ struct ConfigEnumRange<TwilightWeather> {
 template <>
 struct ConfigEnumRange<Resampler> {
     static constexpr auto min = Resampler::Bilinear;
-    static constexpr auto max = Resampler::Area;
+    static constexpr auto max = Resampler::Composite;
 };
 
 template <>
@@ -182,6 +189,12 @@ struct ConfigEnumRange<MagicArmorMode> {
 };
 
 template <>
+struct ConfigEnumRange<DiscLoadingDelayMode> {
+    static constexpr auto min = DiscLoadingDelayMode::Off;
+    static constexpr auto max = DiscLoadingDelayMode::Timed;
+};
+
+template <>
 struct ConfigValueTraits<ui::ControlLayout> {
     static constexpr bool enabled = true;
 };
@@ -211,6 +224,12 @@ struct UserSettings {
         ConfigVar<int> lastWindowWidth;
         ConfigVar<int> lastWindowHeight;
     } video;
+
+    struct {
+        ConfigVar<std::string> settingsFavorites;
+        ConfigVar<int> menuWidthDp;
+        ConfigVar<int> menuHeightDp;
+    } ui;
 
     struct {
         // Audio
@@ -247,6 +266,9 @@ struct UserSettings {
         ConfigVar<bool> no2ndFishForCat;
         ConfigVar<bool> enableFastLoads;
         ConfigVar<bool> enableInstaLoads;
+        ConfigVar<DiscLoadingDelayMode> discLoadingDelayMode;
+        ConfigVar<int> discLoadingDelaySeconds;
+        ConfigVar<bool> theEtherNetBoyzExperience;
         ConfigVar<bool> instantMovement;
         ConfigVar<bool> buttonFishing;
         ConfigVar<bool> instantSaves;
@@ -414,6 +436,7 @@ struct UserSettings {
         HotkeyBinding showInputViewer;
         HotkeyBinding moveLink;
         HotkeyBinding cycleBloomMode;
+        HotkeyBinding toggleDiscLoadingDelay;
     } hotkeys;
 
     // Arrays of size 4 for 4 ports
@@ -456,5 +479,8 @@ struct TransientSettings {
 };
 
 TransientSettings& getTransientSettings();
+
+void updateDiscLoadingDelay();
+void toggleDiscLoadingDelay();
 
 }  // namespace dusk

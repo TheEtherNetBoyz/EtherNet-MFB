@@ -24,8 +24,6 @@ window {
     position: relative;
     height: 100%;
     width: 100%;
-    max-width: 1088dp;
-    max-height: 768dp;
     margin: auto;
     border-radius: 14dp;
     overflow: hidden;
@@ -42,6 +40,24 @@ window {
 window.small {
     height: auto;
     width: auto;
+}
+
+window > resize-handle {
+    display: block;
+    position: absolute;
+    right: 0dp;
+    bottom: 0dp;
+    z-index: 10;
+    width: 28dp;
+    height: 28dp;
+    border-right: 3dp rgba(194, 164, 45, 80%);
+    border-bottom: 3dp rgba(194, 164, 45, 80%);
+    pointer-events: auto;
+    cursor: nwse-resize;
+}
+
+window.small > resize-handle {
+    display: none;
 }
 
 window.modal {
