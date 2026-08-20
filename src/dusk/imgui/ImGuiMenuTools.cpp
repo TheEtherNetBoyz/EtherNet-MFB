@@ -90,6 +90,9 @@ namespace dusk {
 
             s.game.pauseOnFocusLost.setSpeedrunValue(false);
             aurora_set_pause_on_focus_lost(false);
+            s.game.discLoadingDelayMode.setSpeedrunValue(DiscLoadingDelayMode::Off);
+            s.game.theEtherNetBoyzExperience.setSpeedrunValue(false);
+            updateDiscLoadingDelay();
 
             s.backend.enableAdvancedSettings.setSpeedrunValue(false);
             s.game.recordingMode.setSpeedrunValue(false);
@@ -104,6 +107,7 @@ namespace dusk {
         void RestoreFromSpeedrunMode() {
             ClearSpeedrunOverrides();
             aurora_set_pause_on_focus_lost(getSettings().game.pauseOnFocusLost.getValue());
+            updateDiscLoadingDelay();
         }
 
         bool SpeedrunModeCheckbox() {
@@ -310,6 +314,8 @@ namespace dusk {
 
         void TwilightVisualsMenu() {
             auto& s = getSettings();
+            const bool speedrunRestricted = s.game.speedrunMode.getValue();
+            ImGui::BeginDisabled(speedrunRestricted);
             MenuCheckbox("Enable Twilight Visuals", s.game.enableTwilightVisuals);
             ImGui::TextUnformatted("Twilight Brightness");
             ImGui::SameLine(170.0f);
@@ -322,7 +328,11 @@ namespace dusk {
             }
 
             int skyboxMode = static_cast<int>(s.game.twilightSkyboxMode.getValue());
-            const char* skyboxModes[] = {"Day", "Night"};
+            const char* skyboxModes[] = {
+                "Day", "Night", "Sunrise", "Sunset", "Overcast / Storm",
+                "Faron Twilight", "Eldin Twilight", "Lanayru Twilight", "Palace of Twilight",
+                "Sacred Grove", "Snowpeak", "Gerudo Desert", "Lake Hylia", "Fishing Hole",
+                "Ordon", "Hyrule Field", "Castle Town"};
             ImGui::TextUnformatted("Skybox");
             ImGui::SameLine(170.0f);
             ImGui::SetNextItemWidth(150.0f);
@@ -341,6 +351,10 @@ namespace dusk {
                              IM_ARRAYSIZE(weatherModes))) {
                 s.game.twilightWeather.setValue(static_cast<TwilightWeather>(weather));
                 config::save();
+            }
+            ImGui::EndDisabled();
+            if (speedrunRestricted) {
+                ImGui::TextDisabled("Unavailable in Speedrun Mode");
             }
         }
 

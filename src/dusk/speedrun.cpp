@@ -39,6 +39,9 @@ void resetForSpeedrunMode() {
     getSettings().game.invincibleEnemies.setSpeedrunValue(false);
 
     getSettings().game.pauseOnFocusLost.setSpeedrunValue(false);
+    getSettings().game.discLoadingDelayMode.setSpeedrunValue(DiscLoadingDelayMode::Off);
+    getSettings().game.theEtherNetBoyzExperience.setSpeedrunValue(false);
+    updateDiscLoadingDelay();
 
     getSettings().backend.enableAdvancedSettings.setSpeedrunValue(false);
     getSettings().game.recordingMode.setSpeedrunValue(false);
@@ -56,6 +59,7 @@ static void clearSpeedrunOverrides() {
 void restoreFromSpeedrunMode() {
     clearSpeedrunOverrides();
     aurora_set_pause_on_focus_lost(getSettings().game.pauseOnFocusLost.getValue());
+    updateDiscLoadingDelay();
 }
 
 }  // namespace dusk

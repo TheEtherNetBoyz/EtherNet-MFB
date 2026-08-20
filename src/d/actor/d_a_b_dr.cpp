@@ -1843,7 +1843,8 @@ void daB_DR_c::executeWeekHit() {
                 sp44.z = 0.0f;
                 sp44.x = 0.0f;
 
-                if (dusk::getSettings().game.theEtherNetBoyzExperience.getValue()) {
+                if (!dusk::getSettings().game.speedrunMode.getValue() &&
+                    dusk::getSettings().game.theEtherNetBoyzExperience.getValue()) {
                     // The normal child is the ending death cutscene.  Let the boss
                     // disappear naturally so Link's existing hang logic releases him.
                     parentActorID = 0;

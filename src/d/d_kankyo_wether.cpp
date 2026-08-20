@@ -777,7 +777,8 @@ static void wether_move_housi() {
 #if TARGET_PC
 static void wether_move_twilight_housi() {
     const char* stageName = dComIfGp_getStartStageName();
-    const bool enabled = dusk::getSettings().game.enableTwilightVisuals.getValue();
+    const bool enabled = !dusk::getSettings().game.speedrunMode.getValue() &&
+                         dusk::getSettings().game.enableTwilightVisuals.getValue();
     const bool isPalaceOfTwilight = stageName != NULL && strncmp(stageName, "D_MN08", 6) == 0;
     const bool isLakebedTemple = stageName != NULL && strncmp(stageName, "D_MN05", 6) == 0;
     const int roomNo = dComIfGp_roomControl_getStayNo();

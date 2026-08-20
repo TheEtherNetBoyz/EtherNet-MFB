@@ -98,7 +98,7 @@ UserSettings g_userSettings = {
         .resampler {"game.resampler", Resampler::Bilinear},
         .enableTwilightVisuals {"game.enableTwilightVisuals", false},
         .twilightVisualBrightness {"game.twilightVisualBrightness", 1.0f},
-        .twilightSkyboxMode {"game.twilightSkyboxMode", TwilightSkyboxMode::Day},
+        .twilightSkyboxMode {"game.twilightSkyboxMode", TwilightSkyboxMode::TwilightDay},
         .twilightWeather {"game.twilightWeather", TwilightWeather::Current},
         .enableMapBackground {"game.enableMapBackground", true},
         .disableCutscenePillarboxing {"game.disableCutscenePillarboxing", false},
@@ -658,7 +658,8 @@ TransientSettings& getTransientSettings() {
 
 void updateDiscLoadingDelay() {
     const int delaySeconds = std::clamp(getSettings().game.discLoadingDelaySeconds.getValue(), 1, 10);
-    const auto mode = getSettings().game.discLoadingDelayMode.getValue();
+    const auto mode = getSettings().game.speedrunMode.getValue() ? DiscLoadingDelayMode::Off :
+                                                                   getSettings().game.discLoadingDelayMode.getValue();
 
     aurora_dvd_set_read_delay_seconds(static_cast<u32>(delaySeconds));
     const u32 dvdMode = mode == DiscLoadingDelayMode::Off ? AURORA_DVD_READ_DELAY_OFF :
@@ -668,6 +669,9 @@ void updateDiscLoadingDelay() {
 }
 
 void toggleDiscLoadingDelay() {
+    if (getSettings().game.speedrunMode.getValue()) {
+        return;
+    }
     auto& mode = getSettings().game.discLoadingDelayMode;
     const auto nextMode = static_cast<u8>(mode.getValue()) >= static_cast<u8>(DiscLoadingDelayMode::Timed)
         ? DiscLoadingDelayMode::Off

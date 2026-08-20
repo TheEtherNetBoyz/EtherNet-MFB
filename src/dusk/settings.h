@@ -24,8 +24,23 @@ enum class DepthOfFieldMode : int {
 };
 
 enum class TwilightSkyboxMode : u8 {
-    Day = 0,
-    Night = 1,
+    TwilightDay = 0,
+    TwilightNight,
+    Sunrise,
+    Sunset,
+    Overcast,
+    FaronTwilight,
+    EldinTwilight,
+    LanayruTwilight,
+    PalaceOfTwilight,
+    SacredGrove,
+    Snowpeak,
+    GerudoDesert,
+    LakeHylia,
+    FishingHole,
+    Ordon,
+    HyruleField,
+    CastleTown,
 };
 
 enum class TwilightWeather : u8 {
@@ -123,8 +138,8 @@ struct ConfigEnumRange<DepthOfFieldMode> {
 
 template <>
 struct ConfigEnumRange<TwilightSkyboxMode> {
-    static constexpr auto min = TwilightSkyboxMode::Day;
-    static constexpr auto max = TwilightSkyboxMode::Night;
+    static constexpr auto min = TwilightSkyboxMode::TwilightDay;
+    static constexpr auto max = TwilightSkyboxMode::CastleTown;
 };
 
 template <>

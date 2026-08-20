@@ -294,6 +294,51 @@ select-button input {
     font-size: 20dp;
 }
 
+button.has-favorite-star {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+button.has-favorite-star favorite-label {
+    display: block;
+    flex: 0 1 auto;
+}
+
+favorite-star {
+    display: block;
+    flex: 0 0 28dp;
+    width: 28dp;
+    margin-left: 8dp;
+    color: rgba(224, 219, 200, 55%);
+    font-family: "Material Symbols Rounded";
+    font-weight: normal;
+    font-size: 26dp;
+    line-height: 28dp;
+    text-align: center;
+    cursor: pointer;
+}
+
+favorite-star:hover,
+favorite-star.selected {
+    color: #FFD54A;
+    opacity: 1;
+}
+
+favorite-star.selected {
+    font-effect: glow(0dp 2dp 0dp 2dp rgba(194, 164, 45, 55%));
+}
+
+select-button.favorite-option {
+    cursor: move;
+}
+
+select-button.favorite-option.dragging {
+    opacity: 0.6;
+    background-color: rgba(204, 184, 119, 40%);
+    box-shadow: #C2A42D 0 0 0 2dp;
+}
+
 icon {
     width: 1em;
     height: 1em;

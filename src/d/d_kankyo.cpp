@@ -68,7 +68,8 @@ static bool dKy_visual_twilight_options_active() {
         return false;
     }
 
-    return dusk::getSettings().game.enableTwilightVisuals.getValue() &&
+    return !dusk::getSettings().game.speedrunMode.getValue() &&
+           dusk::getSettings().game.enableTwilightVisuals.getValue() &&
            strncmp(stageName, "D_MN08", 6) != 0;
 #else
     return false;
@@ -166,14 +167,15 @@ static u8 dKy_visual_twilight_bloom_id() {
 static void dKy_apply_visual_twilight_sky_fallback(
     GXColorS10& sky_col, GXColorS10& kumo_top_col, GXColorS10& kumo_bottom_col,
     GXColorS10& kumo_shadow_col, GXColorS10& kasumi_outer_col, GXColorS10& kasumi_inner_col) {
-    const bool night = dKy_visual_twilight_options_active() &&
-                       dusk::getSettings().game.twilightSkyboxMode.getValue() ==
-                           dusk::TwilightSkyboxMode::Night;
-    if (!dKy_darkworld_visual_check() || (s_visual_environment_has_twilight_layer && !night)) {
+    const u8 skyVariant = static_cast<u8>(
+        dusk::getSettings().game.twilightSkyboxMode.getValue());
+    const bool authoredOverride = skyVariant != static_cast<u8>(dusk::TwilightSkyboxMode::TwilightDay);
+    if (!dKy_darkworld_visual_check() ||
+        (s_visual_environment_has_twilight_layer && !authoredOverride)) {
         return;
     }
 
-    if (s_has_faron_twilight_sky && !night) {
+    if (s_has_faron_twilight_sky && !authoredOverride) {
         sky_col = s_faron_twilight_sky;
         kumo_top_col = s_faron_twilight_kumo_top;
         kumo_bottom_col = s_faron_twilight_kumo_bottom;
@@ -184,7 +186,7 @@ static void dKy_apply_visual_twilight_sky_fallback(
     }
 
     stage_vrboxcol_info_class twilight_vrbox;
-    if (!dStage_getVisualTwilightSky(&twilight_vrbox, night)) {
+    if (!dStage_getVisualTwilightSky(&twilight_vrbox, skyVariant)) {
         return;
     }
 
@@ -8669,7 +8671,8 @@ static int dKy_Draw(sub_kankyo__class* i_this) {
 
 #if TARGET_PC
 static void dKy_update_visual_twilight_audio() {
-    const bool enabled = dusk::getSettings().game.enableTwilightVisuals.getValue();
+    const bool enabled = !dusk::getSettings().game.speedrunMode.getValue() &&
+                         dusk::getSettings().game.enableTwilightVisuals.getValue();
 
     if (!s_twilight_visual_audio_state_initialized) {
         s_twilight_visual_audio_state = enabled;
@@ -11572,7 +11575,9 @@ u8 dKy_darkworld_visual_check() {
         return false;
     }
 
-    return dKy_darkworld_check() || dusk::getSettings().game.enableTwilightVisuals.getValue();
+    return dKy_darkworld_check() ||
+           (!dusk::getSettings().game.speedrunMode.getValue() &&
+            dusk::getSettings().game.enableTwilightVisuals.getValue());
 #else
     return dKy_darkworld_check();
 #endif

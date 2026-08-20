@@ -334,6 +334,27 @@ bool find_event_pad_button(
            find_mapped_pad_button(port, static_cast<SDL_GamepadButton>(event.button), button);
 }
 
+bool is_favorite_toggle_button(
+    const SDL_GamepadButtonEvent& event, bool hasPadButton, PADButton button) noexcept {
+    if (hasPadButton) {
+        return button == PAD_BUTTON_Y;
+    }
+    return static_cast<SDL_GamepadButton>(event.button) == SDL_GAMEPAD_BUTTON_WEST;
+}
+
+bool dispatch_favorite_toggle(Rml::Context& context) noexcept {
+    for (auto* element = context.GetFocusElement(); element != nullptr;
+         element = element->GetParentNode())
+    {
+        if (element->IsClassSet("has-favorite-star")) {
+            Rml::Dictionary parameters;
+            element->DispatchEvent("favoritetoggle", parameters);
+            return true;
+        }
+    }
+    return false;
+}
+
 Rml::Input::KeyIdentifier map_gamepad_button(const SDL_GamepadButtonEvent& event) noexcept {
     const auto nativeButton = static_cast<SDL_GamepadButton>(event.button);
     u32 port = 0;
@@ -753,6 +774,12 @@ void handle_event(const SDL_Event& event) noexcept {
     PADButton button = 0;
     const bool hasPadButton = find_event_pad_button(event.gbutton, port, button);
     if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        if (is_favorite_toggle_button(event.gbutton, hasPadButton, button) &&
+            dispatch_favorite_toggle(*context))
+        {
+            sync_input_block();
+            return;
+        }
         set_pad_button_held(port, button, true);
         const bool chorded = hasPadButton && is_menu_chord_part(button) && is_menu_chord(port) &&
                              !area_reload_menu_blocked(port);

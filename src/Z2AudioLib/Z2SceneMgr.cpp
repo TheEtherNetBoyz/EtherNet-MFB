@@ -1711,7 +1711,8 @@ void Z2SceneMgr::setSceneName(char* spot, s32 room, s32 layer) {
                                     Z2GetStatusMgr()->getDemoStatus() != 0;
     const bool isExteriorLoad = spot != NULL && strncmp(spot, "F_", 2) == 0;
     const bool isInteriorLoad = spot != NULL && strncmp(spot, "R_", 2) == 0;
-    if (dusk::getSettings().game.enableTwilightVisuals.getValue() &&
+    if (!dusk::getSettings().game.speedrunMode.getValue() &&
+        dusk::getSettings().game.enableTwilightVisuals.getValue() &&
         !inDarkness_ && !isPalaceScene && !preserveSceneMusic && demo_wave == 0 &&
         (isExteriorLoad || isInteriorLoad)) {
         bgm_id = Z2BGM_DUNGEON_LV8;

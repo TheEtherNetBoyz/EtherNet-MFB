@@ -2748,22 +2748,61 @@ bool dStage_setEnvironmentLayer(int layerNo) {
     return true;
 }
 
-bool dStage_getVisualTwilightSky(stage_vrboxcol_info_class* outSky, bool night) {
+bool dStage_getVisualTwilightSky(stage_vrboxcol_info_class* outSky, u8 variant) {
 #if TARGET_PC
-    static constexpr char kArchiveName[] = "TwFaron";
-    static constexpr char kStageName[] = "F_SP108";
+    struct SkyVariantSource {
+        const char* stageName;
+        u8 layer;
+        u8 paletteSlot;
+    };
+    static constexpr SkyVariantSource kSources[] = {
+        {"F_SP108", 14, 0}, // Twilight day
+        {"F_SP108", 0, 5},  // Twilight night
+        {"F_SP121", 0, 1},  // Hyrule Field sunrise
+        {"F_SP121", 0, 4},  // Hyrule Field sunset
+        {"F_SP114", 0, 0},  // Snowpeak overcast/storm
+        {"F_SP108", 14, 0}, // Faron Twilight
+        {"F_SP109", 14, 0}, // Eldin Twilight
+        {"F_SP115", 14, 0}, // Lanayru Twilight
+        {"D_MN08", 0, 0},   // Palace of Twilight
+        {"F_SP117", 0, 0},  // Sacred Grove
+        {"F_SP114", 0, 0},  // Snowpeak
+        {"F_SP124", 0, 0},  // Gerudo Desert
+        {"F_SP115", 0, 0},  // Lake Hylia
+        {"F_SP127", 0, 0},  // Fishing Hole
+        {"F_SP103", 0, 0},  // Ordon
+        {"F_SP121", 0, 0},  // Hyrule Field
+        {"F_SP116", 0, 0},  // Castle Town
+    };
+    static constexpr char kArchiveName[] = "TwSkyVar";
     static constexpr char kStageArchive[] = "Stg_00";
-    static dStage_stageDt_c faronTwilightStage;
-    static dStage_stageDt_c faronNormalStage;
-    static void* faronStageData = NULL;
+    static dStage_stageDt_c sourceStage;
+    static void* sourceStageData = NULL;
     static int loadState = 0;
+    static int loadedVariant = -1;
+    static stage_vrboxcol_info_class loadedSky;
 
-    if (outSky == NULL) {
+    if (outSky == NULL || variant >= ARRAY_SIZEU(kSources)) {
         return false;
     }
 
+    if (loadedVariant != variant) {
+        if (loadState != 0) {
+            dComIfG_deleteStageRes(kArchiveName);
+        }
+        loadedVariant = variant;
+        loadState = 0;
+        sourceStageData = NULL;
+    }
+
+    if (loadState == 3) {
+        *outSky = loadedSky;
+        return true;
+    }
+
     if (loadState == 0) {
-        if (!dComIfG_setStageResForStage(kArchiveName, kStageName, kStageArchive, NULL)) {
+        if (!dComIfG_setStageResForStage(kArchiveName, kSources[variant].stageName,
+                                         kStageArchive, NULL)) {
             loadState = -1;
         } else {
             loadState = 1;
@@ -2775,25 +2814,19 @@ bool dStage_getVisualTwilightSky(stage_vrboxcol_info_class* outSky, bool night) 
         if (syncResult < 0) {
             loadState = -1;
         } else if (syncResult == 0) {
-            faronStageData = dComIfG_getStageRes(kArchiveName, "stage.dzs");
-            if (faronStageData == NULL) {
+            sourceStageData = dComIfG_getStageRes(kArchiveName, "stage.dzs");
+            if (sourceStageData == NULL) {
                 loadState = -1;
             } else {
                 static FuncTable stageEnvironmentTable[] = {
                     {"EVLY", dStage_elstInfoInit},
                 };
 
-                dStage_dt_c_offsetToPtr(faronStageData);
-                faronTwilightStage.init();
-                faronNormalStage.init();
-                dStage_dt_c_decode(faronStageData, &faronTwilightStage, stageEnvironmentTable,
+                dStage_dt_c_offsetToPtr(sourceStageData);
+                sourceStage.init();
+                dStage_dt_c_decode(sourceStageData, &sourceStage, stageEnvironmentTable,
                                    ARRAY_SIZEU(stageEnvironmentTable));
-                dStage_dt_c_decode(faronStageData, &faronNormalStage, stageEnvironmentTable,
-                                   ARRAY_SIZEU(stageEnvironmentTable));
-                loadState = faronTwilightStage.getElst() != NULL &&
-                                    faronNormalStage.getElst() != NULL
-                                ? 2
-                                : -1;
+                loadState = sourceStage.getElst() != NULL ? 2 : -1;
             }
         }
     }
@@ -2802,10 +2835,9 @@ bool dStage_getVisualTwilightSky(stage_vrboxcol_info_class* outSky, bool night) 
         return false;
     }
 
-    dStage_stageDt_c* stage = night ? &faronNormalStage : &faronTwilightStage;
-    dStage_Elst_c* elst = stage->getElst();
-    const int layerNo = night ? 0 : 14;
-    const int minimumLayer = night ? 0 : 10;
+    dStage_Elst_c* elst = sourceStage.getElst();
+    const int layerNo = kSources[variant].layer;
+    const int minimumLayer = layerNo == 14 ? 10 : 0;
     int envLayer = -1;
     for (int i = 0; i < elst->m_entryNum; i++) {
         const int candidate = elst->m_entries[i].m_layerTable[layerNo];
@@ -2825,22 +2857,23 @@ bool dStage_getVisualTwilightSky(stage_vrboxcol_info_class* outSky, bool night) 
         {"VRB0", dStage_vrboxcolInfoInit},
     };
     dStage_setLayerTagName(envLayerFuncTable, ARRAY_SIZEU(envLayerFuncTable), envLayer);
-    dStage_dt_c_decode(faronStageData, stage, envLayerFuncTable,
+    dStage_dt_c_decode(sourceStageData, &sourceStage, envLayerFuncTable,
                        ARRAY_SIZEU(envLayerFuncTable));
 
-    stage_envr_info_class* envr = stage->getEnvrInfo();
-    stage_pselect_info_class* pselect = stage->getPselectInfo();
-    stage_palette_info_class* palette = stage->getPaletteInfo();
-    stage_vrboxcol_info_class* vrbox = stage->getVrboxcolInfo();
+    stage_envr_info_class* envr = sourceStage.getEnvrInfo();
+    stage_pselect_info_class* pselect = sourceStage.getPselectInfo();
+    stage_palette_info_class* palette = sourceStage.getPaletteInfo();
+    stage_vrboxcol_info_class* vrbox = sourceStage.getVrboxcolInfo();
     if (envr == NULL || pselect == NULL || palette == NULL || vrbox == NULL) {
         return false;
     }
 
     const u8 pselectId = envr->pselect_id[0];
-    // The authored stage schedule uses palette slot 5 for the night sky.
-    const u8 paletteId = pselect[pselectId].palette_id[night ? 5 : 0];
+    const u8 paletteId = pselect[pselectId].palette_id[kSources[variant].paletteSlot];
     const u8 vrboxId = palette[paletteId].vrboxcol_id;
-    *outSky = vrbox[vrboxId];
+    loadedSky = vrbox[vrboxId];
+    loadState = 3;
+    *outSky = loadedSky;
     return true;
 #else
     UNUSED(outSky);

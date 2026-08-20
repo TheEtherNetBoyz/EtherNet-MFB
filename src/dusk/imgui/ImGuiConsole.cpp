@@ -393,7 +393,8 @@ namespace dusk {
             cycle_bloom_mode();
         }
 
-        if (hotkey_event_pressed(event, hotkeys.toggleDiscLoadingDelay)) {
+        if (!getSettings().game.speedrunMode.getValue() &&
+            hotkey_event_pressed(event, hotkeys.toggleDiscLoadingDelay)) {
             toggleDiscLoadingDelay();
             const auto mode = getSettings().game.discLoadingDelayMode.getValue();
             DuskToast(mode == DiscLoadingDelayMode::Off

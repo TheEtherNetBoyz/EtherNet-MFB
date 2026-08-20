@@ -34,6 +34,8 @@ public:
 
     void listen(Rml::Element* element, Rml::EventId event, ScopedEventListener::Callback callback,
         bool capture = false);
+    void listen(Rml::Element* element, const Rml::String& event,
+        ScopedEventListener::Callback callback, bool capture = false);
     bool contains(Rml::Element* element) const;
 
     template <typename T, typename... Args>
@@ -61,6 +63,11 @@ public:
 
     Derived& listen(
         Rml::EventId event, ScopedEventListener::Callback callback, bool capture = false) {
+        Component::listen(mRoot, event, std::move(callback), capture);
+        return static_cast<Derived&>(*this);
+    }
+    Derived& listen(
+        const Rml::String& event, ScopedEventListener::Callback callback, bool capture = false) {
         Component::listen(mRoot, event, std::move(callback), capture);
         return static_cast<Derived&>(*this);
     }
