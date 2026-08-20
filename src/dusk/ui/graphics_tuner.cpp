@@ -74,14 +74,11 @@ void set_value(GraphicsOption option, int value) {
     case GraphicsOption::Resampler: {
         const auto sampler = static_cast<Resampler>(std::clamp(value,
             static_cast<int>(Resampler::Bilinear),
-            static_cast<int>(Resampler::Composite)));
+            static_cast<int>(Resampler::Area)));
         getSettings().game.resampler.setValue(sampler);
         switch (sampler) {
         case Resampler::Area:
             aurora_set_resampler(SAMPLER_AREA);
-            break;
-        case Resampler::Composite:
-            aurora_set_resampler(SAMPLER_COMPOSITE);
             break;
         case Resampler::Bilinear:
         default:
@@ -218,8 +215,6 @@ Rml::String format_graphics_setting_value(GraphicsOption option, int value) {
             return "Bilinear";
         case Resampler::Area:
             return "Area";
-        case Resampler::Composite:
-            return "Composite";
         }
         break;
     case GraphicsOption::BloomMode:

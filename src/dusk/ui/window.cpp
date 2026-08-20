@@ -18,6 +18,9 @@
 namespace dusk::ui {
 namespace {
 
+constexpr int kDefaultMenuWidthDp = 1088;
+constexpr int kDefaultMenuHeightDp = 768;
+
 float base_body_padding(Rml::Context* context) noexcept {
     const float dpRatio = context->GetDensityIndependentPixelRatio();
     const float heightDp = static_cast<float>(context->GetDimensions().y) / dpRatio;
@@ -274,14 +277,16 @@ void Window::apply_persisted_size() noexcept {
     const float minHeight = std::min(400.0f * dpRatio, availableHeight);
 
     const auto& settings = getSettings().ui;
-    if (settings.menuWidthDp.getValue() > 0) {
-        const float width = std::clamp(settings.menuWidthDp.getValue() * dpRatio,
-            minWidth, availableWidth);
+    const int savedWidthDp = settings.menuWidthDp.getValue() > 0 ?
+                                  settings.menuWidthDp.getValue() : kDefaultMenuWidthDp;
+    const int savedHeightDp = settings.menuHeightDp.getValue() > 0 ?
+                                   settings.menuHeightDp.getValue() : kDefaultMenuHeightDp;
+    if (savedWidthDp > 0) {
+        const float width = std::clamp(savedWidthDp * dpRatio, minWidth, availableWidth);
         mRoot->SetProperty(Rml::PropertyId::Width, Rml::Property(width, Rml::Unit::PX));
     }
-    if (settings.menuHeightDp.getValue() > 0) {
-        const float height = std::clamp(settings.menuHeightDp.getValue() * dpRatio,
-            minHeight, availableHeight);
+    if (savedHeightDp > 0) {
+        const float height = std::clamp(savedHeightDp * dpRatio, minHeight, availableHeight);
         mRoot->SetProperty(Rml::PropertyId::Height, Rml::Property(height, Rml::Unit::PX));
     }
 }

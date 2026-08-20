@@ -40,7 +40,6 @@ enum class TwilightWeather : u8 {
 enum class Resampler : int {
     Bilinear = 0,
     Area = 1,
-    Composite = 2,
 };
 
 enum class GameLanguage : u8 {
@@ -137,7 +136,7 @@ struct ConfigEnumRange<TwilightWeather> {
 template <>
 struct ConfigEnumRange<Resampler> {
     static constexpr auto min = Resampler::Bilinear;
-    static constexpr auto max = Resampler::Composite;
+    static constexpr auto max = Resampler::Area;
 };
 
 template <>

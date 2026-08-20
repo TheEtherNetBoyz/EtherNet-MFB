@@ -24,8 +24,8 @@ UserSettings g_userSettings = {
 
     .ui = {
         .settingsFavorites {"ui.settingsFavorites", ""},
-        .menuWidthDp {"ui.menuWidthDp", 0},
-        .menuHeightDp {"ui.menuHeightDp", 0},
+        .menuWidthDp {"ui.menuWidthDp", 1088},
+        .menuHeightDp {"ui.menuHeightDp", 768},
     },
 
     .audio = {

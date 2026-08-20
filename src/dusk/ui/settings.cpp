@@ -727,8 +727,7 @@ const Rml::String kShadowResolutionHelpText =
     "Configure the shadow-map resolution. Higher values improve shadow quality but increase GPU "
     "and memory usage.";
 const Rml::String kResamplerHelpText =
-    "Configure the sampling method used when scaling the internal resolution for final presentation. "
-    "Composite adds analog color bleed and alternating scanlines to approximate a 480i CRT display.";
+    "Configure the sampling method used when scaling the internal resolution for final presentation.";
 const Rml::String kBloomHelpText =
     "Configure the post-processing bloom effect. Classic matches the console; Dusklight uses "
     "a higher-quality bloom pass; Legacy restores the April 9 bloom rendering path.";
@@ -1559,6 +1558,18 @@ SettingsWindow::SettingsWindow(bool prelaunch)
         auto& rightPane = add_child<Pane>(content, Pane::Type::Uncontrolled);
 
         leftPane.add_section("Display");
+        leftPane.register_control(leftPane.add_button("Reset Dusk Menu Size").on_pressed([this] {
+            auto& uiSettings = getSettings().ui;
+            uiSettings.menuWidthDp.setValue(uiSettings.menuWidthDp.getDefaultValue());
+            uiSettings.menuHeightDp.setValue(uiSettings.menuHeightDp.getDefaultValue());
+            mPersistedSizeApplied = false;
+            apply_persisted_size();
+            config::save();
+        }),
+            rightPane, [](Pane& pane) {
+                pane.clear();
+                pane.add_text("Restore the Dusk menu to its original default size.");
+            });
 
         register_favorite({
             .label = "Fullscreen",
@@ -1755,7 +1766,7 @@ SettingsWindow::SettingsWindow(bool prelaunch)
                 .title = "Output Resampling",
                 .helpText = kResamplerHelpText,
                 .valueMin = static_cast<int>(Resampler::Bilinear),
-                .valueMax = static_cast<int>(Resampler::Composite),
+                .valueMax = static_cast<int>(Resampler::Area),
                 .defaultValue = static_cast<int>(Resampler::Bilinear),
             });
         leftPane.add_section("Twilight Visuals");
