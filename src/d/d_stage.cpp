@@ -2682,6 +2682,173 @@ static void layerTableLoader(void* i_data, dStage_dt_c* i_stage, int roomNo) {
 
 dStage_Elst_c* dStage_stageDt_c::getElst(void) { return mElst; }
 
+bool dStage_setEnvironmentLayer(int layerNo) {
+    if (layerNo < 0 || layerNo >= 15) {
+        return false;
+    }
+
+    dStage_stageDt_c* stage = dComIfGp_getStage();
+    if (stage == NULL) {
+        return false;
+    }
+    dStage_Elst_c* elst = stage->getElst();
+    void* stageData = dComIfG_getStageRes("stage.dzs");
+    int roomNo = dComIfGp_roomControl_getStayNo();
+
+    if (elst == NULL || elst->m_entries == NULL || stageData == NULL ||
+        roomNo < 0 || roomNo >= elst->m_entryNum) {
+        return false;
+    }
+
+    static FuncTable envLayerFuncTable[] = {
+        {"LGT0", dStage_lgtvInfoInit},     {"Env0", dStage_envrInfoInit},
+        {"Col0", dStage_pselectInfoInit},  {"PAL0", dStage_paletteInfoInit},
+        {"VRB0", dStage_vrboxcolInfoInit},
+    };
+
+    int envLayer = elst->m_entries[roomNo].m_layerTable[layerNo];
+    // Layer 14 can fall back to a normal environment index on stages that do
+    // not define a twilight environment. Twilight stage data lives in the
+    // extended environment layers (10-14); do not treat Env0-Env9 as a valid
+    // twilight payload, but keep normal layer decoding unchanged.
+    if (envLayer >= 15 || (layerNo == 14 && envLayer < 10)) {
+        return false;
+    }
+
+    char layerTag = envLayer + (envLayer < 10 ? '0' : 'W');
+    char envTag[4] = {'E', 'n', 'v', layerTag};
+    char colTag[4] = {'C', 'o', 'l', layerTag};
+    char palTag[4] = {'P', 'A', 'L', layerTag};
+    char vrbTag[4] = {'V', 'R', 'B', layerTag};
+    dStage_fileHeader* file = (dStage_fileHeader*)stageData;
+    bool hasEnv = false;
+    bool hasCol = false;
+    bool hasPal = false;
+    bool hasVrb = false;
+
+    for (int i = 0; i < file->m_chunkCount; i++) {
+        dStage_nodeHeader* node = &file->m_nodes[i];
+        hasEnv |= std::memcmp(&node->m_tag, envTag, sizeof(envTag)) == 0;
+        hasCol |= std::memcmp(&node->m_tag, colTag, sizeof(colTag)) == 0;
+        if (std::memcmp(&node->m_tag, palTag, sizeof(palTag)) == 0) {
+            hasPal = true;
+        }
+        hasVrb |= std::memcmp(&node->m_tag, vrbTag, sizeof(vrbTag)) == 0;
+    }
+
+    // An ordinary map may have an EVLY entry for layer 14 without carrying the
+    // complete twilight environment payload. Treat that as a missing layer so
+    // the renderer can use its visual-only fallback instead of mixing data.
+    if (!hasEnv || !hasCol || !hasPal || !hasVrb) {
+        return false;
+    }
+
+    dStage_setLayerTagName(envLayerFuncTable, ARRAY_SIZEU(envLayerFuncTable), envLayer);
+    dStage_dt_c_decode(stageData, stage, envLayerFuncTable, ARRAY_SIZEU(envLayerFuncTable));
+    return true;
+}
+
+bool dStage_getVisualTwilightSky(stage_vrboxcol_info_class* outSky, bool night) {
+#if TARGET_PC
+    static constexpr char kArchiveName[] = "TwFaron";
+    static constexpr char kStageName[] = "F_SP108";
+    static constexpr char kStageArchive[] = "Stg_00";
+    static dStage_stageDt_c faronTwilightStage;
+    static dStage_stageDt_c faronNormalStage;
+    static void* faronStageData = NULL;
+    static int loadState = 0;
+
+    if (outSky == NULL) {
+        return false;
+    }
+
+    if (loadState == 0) {
+        if (!dComIfG_setStageResForStage(kArchiveName, kStageName, kStageArchive, NULL)) {
+            loadState = -1;
+        } else {
+            loadState = 1;
+        }
+    }
+
+    if (loadState == 1) {
+        const int syncResult = dComIfG_syncStageRes(kArchiveName);
+        if (syncResult < 0) {
+            loadState = -1;
+        } else if (syncResult == 0) {
+            faronStageData = dComIfG_getStageRes(kArchiveName, "stage.dzs");
+            if (faronStageData == NULL) {
+                loadState = -1;
+            } else {
+                static FuncTable stageEnvironmentTable[] = {
+                    {"EVLY", dStage_elstInfoInit},
+                };
+
+                dStage_dt_c_offsetToPtr(faronStageData);
+                faronTwilightStage.init();
+                faronNormalStage.init();
+                dStage_dt_c_decode(faronStageData, &faronTwilightStage, stageEnvironmentTable,
+                                   ARRAY_SIZEU(stageEnvironmentTable));
+                dStage_dt_c_decode(faronStageData, &faronNormalStage, stageEnvironmentTable,
+                                   ARRAY_SIZEU(stageEnvironmentTable));
+                loadState = faronTwilightStage.getElst() != NULL &&
+                                    faronNormalStage.getElst() != NULL
+                                ? 2
+                                : -1;
+            }
+        }
+    }
+
+    if (loadState != 2) {
+        return false;
+    }
+
+    dStage_stageDt_c* stage = night ? &faronNormalStage : &faronTwilightStage;
+    dStage_Elst_c* elst = stage->getElst();
+    const int layerNo = night ? 0 : 14;
+    const int minimumLayer = night ? 0 : 10;
+    int envLayer = -1;
+    for (int i = 0; i < elst->m_entryNum; i++) {
+        const int candidate = elst->m_entries[i].m_layerTable[layerNo];
+        if (candidate >= minimumLayer && candidate < 15) {
+            envLayer = candidate;
+            break;
+        }
+    }
+
+    if (envLayer < minimumLayer || envLayer >= 15) {
+        return false;
+    }
+
+    static FuncTable envLayerFuncTable[] = {
+        {"LGT0", dStage_lgtvInfoInit},     {"Env0", dStage_envrInfoInit},
+        {"Col0", dStage_pselectInfoInit},  {"PAL0", dStage_paletteInfoInit},
+        {"VRB0", dStage_vrboxcolInfoInit},
+    };
+    dStage_setLayerTagName(envLayerFuncTable, ARRAY_SIZEU(envLayerFuncTable), envLayer);
+    dStage_dt_c_decode(faronStageData, stage, envLayerFuncTable,
+                       ARRAY_SIZEU(envLayerFuncTable));
+
+    stage_envr_info_class* envr = stage->getEnvrInfo();
+    stage_pselect_info_class* pselect = stage->getPselectInfo();
+    stage_palette_info_class* palette = stage->getPaletteInfo();
+    stage_vrboxcol_info_class* vrbox = stage->getVrboxcolInfo();
+    if (envr == NULL || pselect == NULL || palette == NULL || vrbox == NULL) {
+        return false;
+    }
+
+    const u8 pselectId = envr->pselect_id[0];
+    // The authored stage schedule uses palette slot 5 for the night sky.
+    const u8 paletteId = pselect[pselectId].palette_id[night ? 5 : 0];
+    const u8 vrboxId = palette[paletteId].vrboxcol_id;
+    *outSky = vrbox[vrboxId];
+    return true;
+#else
+    UNUSED(outSky);
+    UNUSED(night);
+    return false;
+#endif
+}
+
 static void layerActorLoader(void* i_data, dStage_dt_c* i_stage, int param_2) {
     UNUSED(param_2);
     static FuncTable l_layerFuncTable[] = {

@@ -4,6 +4,7 @@
  */
 
 #include <cstdio>
+#include <algorithm>
 
 #include "d/dolzel.h" // IWYU pragma: keep
 
@@ -86,6 +87,16 @@ static void drawQuad(f32 param_0, f32 param_1, f32 param_2, f32 param_3) {
     GXPosition2f32(param_0, param_3);
     GXEnd();
 }
+
+#if TARGET_PC
+static f32 twilight_bloom_brightness() {
+    if (!dKy_darkworld_visual_check()) {
+        return 1.0f;
+    }
+
+    return std::clamp(dusk::getSettings().game.twilightVisualBrightness.getValue(), 0.0f, 4.0f);
+}
+#endif
 
 #if DEBUG
 class dDlst_heapMap_c : public dDlst_base_c {
@@ -1730,7 +1741,9 @@ void mDoGph_gInf_c::bloom_c::draw2() {
         GXSetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, GX_IDENTITY);
         GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_ONE, GX_LO_OR);
         for (int i = divNum; i > divStart; i--) {
-            float alpha = 255.0f * powf(0.25f * dusk::getSettings().game.bloomMultiplier.getValue(), 1.0f / (i - divStart + 1));
+            const f32 bloomMultiplier =
+                dusk::getSettings().game.bloomMultiplier.getValue() * twilight_bloom_brightness();
+            float alpha = 255.0f * powf(0.25f * bloomMultiplier, 1.0f / (i - divStart + 1));
             GXSetTevColorS10(GX_TEVREG0, {0, 0, 0, s16(alpha)});
 
             divCopySrc(i);
@@ -1863,8 +1876,9 @@ void mDoGph_gInf_c::bloom_c::drawClassicPass(bool legacy) {
                             GX_TEVPREV);
             GXSetBlendMode(GX_BM_NONE, GX_BL_ZERO, GX_BL_ZERO, GX_LO_OR);
             s16 bloomAlpha =
-                legacy ? 0x40
-                       : s16(0x40 * dusk::getSettings().game.bloomMultiplier.getValue());
+                legacy ? s16(0x40 * twilight_bloom_brightness())
+                       : s16(0x40 * dusk::getSettings().game.bloomMultiplier.getValue() *
+                             twilight_bloom_brightness());
             GXColorS10 tevColor0 = {(s16)-mPoint, (s16)-mPoint, (s16)-mPoint,
                                     bloomAlpha};
             GXSetTevColorS10(GX_TEVREG0, tevColor0);
@@ -2093,7 +2107,8 @@ void mDoGph_gInf_c::bloom_c::draw() {
                             GX_TEVPREV);
             GXSetBlendMode(GX_BM_NONE, GX_BL_ZERO, GX_BL_ZERO, GX_LO_OR);
 #if TARGET_PC
-            s16 bloomAlpha = s16(0x40 * dusk::getSettings().game.bloomMultiplier.getValue());
+            s16 bloomAlpha = s16(0x40 * dusk::getSettings().game.bloomMultiplier.getValue() *
+                                 twilight_bloom_brightness());
 #else
             s16 bloomAlpha = 0x40;
 #endif
@@ -2694,7 +2709,7 @@ int mDoGph_Painter() {
             GX_DEBUG_GROUP(dComIfGd_drawOpaList);
 
             if (DEBUG && g_kankyoHIO.navy.field_0x30d) {
-                if (dKy_darkworld_check() != TRUE) {
+                if (dKy_darkworld_visual_effect_check() != TRUE) {
                     GX_DEBUG_GROUP(dComIfGd_drawOpaListDark);
                 }
             } else {
@@ -2742,7 +2757,7 @@ int mDoGph_Painter() {
             GX_DEBUG_GROUP(dComIfGd_drawXluList);
 
             if (DEBUG && g_kankyoHIO.navy.field_0x30d) {
-                if (dKy_darkworld_check() != TRUE) {
+                if (dKy_darkworld_visual_effect_check() != TRUE) {
                     GX_DEBUG_GROUP(dComIfGd_drawXluListDark);
                 }
             } else {
@@ -2792,7 +2807,7 @@ int mDoGph_Painter() {
                 #endif
 
                 if (!(DEBUG && g_kankyoHIO.navy.field_0x30d != 0 &&
-                      dKy_darkworld_check() == TRUE)) {
+                      dKy_darkworld_visual_effect_check() == TRUE)) {
                     if (g_env_light.is_blure == 0) {
                         GX_DEBUG_GROUP(dComIfGd_drawOpaListInvisible);
                         GX_DEBUG_GROUP(dComIfGd_drawXluListInvisible);
@@ -2831,7 +2846,7 @@ int mDoGph_Painter() {
                 GXSetClipMode(GX_CLIP_ENABLE);
 
                 if (DEBUG && g_kankyoHIO.navy.field_0x30d) {
-                    if (dKy_darkworld_check() != TRUE) {
+                    if (dKy_darkworld_visual_effect_check() != TRUE) {
                         GX_DEBUG_GROUP(dComIfGd_drawOpaListFilter);
                     }
                 } else {
@@ -2876,7 +2891,7 @@ int mDoGph_Painter() {
                 GXSetClipMode(GX_CLIP_ENABLE);
 
                 if (!(DEBUG && g_kankyoHIO.navy.field_0x30d != 0 &&
-                      dKy_darkworld_check() == TRUE)) {
+                      dKy_darkworld_visual_effect_check() == TRUE)) {
                     if (g_env_light.is_blure == 1) {
                         GX_DEBUG_GROUP(dComIfGd_drawOpaListInvisible);
                         GX_DEBUG_GROUP(dComIfGd_drawXluListInvisible);
@@ -2956,7 +2971,7 @@ int mDoGph_Painter() {
                 GXSetProjection(camera_p->view.projMtx, GX_PERSPECTIVE);
 
                 #if DEBUG
-                if (g_kankyoHIO.navy.field_0x30d != 0 && dKy_darkworld_check() == TRUE) {
+                if (g_kankyoHIO.navy.field_0x30d != 0 && dKy_darkworld_visual_effect_check() == TRUE) {
                     dComIfGd_drawOpaListDark();
                     dComIfGd_drawXluListDark();
                     retry_captue_frame(&camera_p->view, view_port,

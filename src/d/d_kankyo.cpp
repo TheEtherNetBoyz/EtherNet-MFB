@@ -44,6 +44,108 @@ static f32 timeScale = 1.0f;
 
 static void GxXFog_set();
 
+static int s_visual_environment_layer = -1;
+static int s_visual_environment_room = -1;
+static char s_visual_environment_stage[16] = {};
+static bool s_visual_environment_has_twilight_layer = false;
+static bool s_visual_environment_forced = false;
+static bool s_has_faron_twilight_sky = false;
+static GXColorS10 s_faron_twilight_sky;
+static GXColorS10 s_faron_twilight_kumo_top;
+static GXColorS10 s_faron_twilight_kumo_bottom;
+static GXColorS10 s_faron_twilight_kumo_shadow;
+static GXColorS10 s_faron_twilight_kasumi_outer;
+static GXColorS10 s_faron_twilight_kasumi_inner;
+
+static bool dKy_visual_twilight_options_active() {
+#if TARGET_PC
+    const char* stageName = dComIfGp_getStartStageName();
+    if (stageName == NULL) {
+        return false;
+    }
+
+    return dusk::getSettings().game.enableTwilightVisuals.getValue() &&
+           strncmp(stageName, "D_MN08", 6) != 0;
+#else
+    return false;
+#endif
+}
+
+static u8 dKy_visual_twilight_bloom_id() {
+    // Bloom entries 1 and 2 are the game's Twilight and Twilight Weak
+    // profiles. Use the full Twilight profile when the map has no extended
+    // twilight palette.
+    return 1;
+}
+
+static void dKy_apply_visual_twilight_sky_fallback(
+    GXColorS10& sky_col, GXColorS10& kumo_top_col, GXColorS10& kumo_bottom_col,
+    GXColorS10& kumo_shadow_col, GXColorS10& kasumi_outer_col, GXColorS10& kasumi_inner_col) {
+    const bool night = dKy_visual_twilight_options_active() &&
+                       dusk::getSettings().game.twilightSkyboxMode.getValue() ==
+                           dusk::TwilightSkyboxMode::Night;
+    if (!dKy_darkworld_visual_check() || (s_visual_environment_has_twilight_layer && !night)) {
+        return;
+    }
+
+    if (s_has_faron_twilight_sky && !night) {
+        sky_col = s_faron_twilight_sky;
+        kumo_top_col = s_faron_twilight_kumo_top;
+        kumo_bottom_col = s_faron_twilight_kumo_bottom;
+        kumo_shadow_col = s_faron_twilight_kumo_shadow;
+        kasumi_outer_col = s_faron_twilight_kasumi_outer;
+        kasumi_inner_col = s_faron_twilight_kasumi_inner;
+        return;
+    }
+
+    stage_vrboxcol_info_class twilight_vrbox;
+    if (!dStage_getVisualTwilightSky(&twilight_vrbox, night)) {
+        return;
+    }
+
+    sky_col.r = twilight_vrbox.sky_col.r;
+    sky_col.g = twilight_vrbox.sky_col.g;
+    sky_col.b = twilight_vrbox.sky_col.b;
+    sky_col.a = 255;
+    kumo_top_col.r = twilight_vrbox.kumo_top_col.r;
+    kumo_top_col.g = twilight_vrbox.kumo_top_col.g;
+    kumo_top_col.b = twilight_vrbox.kumo_top_col.b;
+    kumo_top_col.a = twilight_vrbox.kumo_shadow_col.a;
+    kumo_bottom_col.r = twilight_vrbox.kumo_bottom_col.r;
+    kumo_bottom_col.g = twilight_vrbox.kumo_bottom_col.g;
+    kumo_bottom_col.b = twilight_vrbox.kumo_bottom_col.b;
+    kumo_bottom_col.a = 255;
+    kumo_shadow_col.r = twilight_vrbox.kumo_shadow_col.r;
+    kumo_shadow_col.g = twilight_vrbox.kumo_shadow_col.g;
+    kumo_shadow_col.b = twilight_vrbox.kumo_shadow_col.b;
+    kumo_shadow_col.a = twilight_vrbox.kumo_shadow_col.a;
+    kasumi_outer_col.r = twilight_vrbox.kasumi_outer_col.r;
+    kasumi_outer_col.g = twilight_vrbox.kasumi_outer_col.g;
+    kasumi_outer_col.b = twilight_vrbox.kasumi_outer_col.b;
+    kasumi_outer_col.a = twilight_vrbox.kasumi_outer_col.a;
+    kasumi_inner_col.r = twilight_vrbox.kasumi_inner_col.r;
+    kasumi_inner_col.g = twilight_vrbox.kasumi_inner_col.g;
+    kasumi_inner_col.b = twilight_vrbox.kasumi_inner_col.b;
+    kasumi_inner_col.a = twilight_vrbox.kasumi_inner_col.a;
+}
+
+static void dKy_capture_faron_twilight_sky(
+    const GXColorS10& sky_col, const GXColorS10& kumo_top_col,
+    const GXColorS10& kumo_bottom_col, const GXColorS10& kumo_shadow_col,
+    const GXColorS10& kasumi_outer_col, const GXColorS10& kasumi_inner_col) {
+    if (!dKy_darkworld_check() || strcmp(dComIfGp_getStartStageName(), "F_SP108") != 0) {
+        return;
+    }
+
+    s_faron_twilight_sky = sky_col;
+    s_faron_twilight_kumo_top = kumo_top_col;
+    s_faron_twilight_kumo_bottom = kumo_bottom_col;
+    s_faron_twilight_kumo_shadow = kumo_shadow_col;
+    s_faron_twilight_kasumi_outer = kasumi_outer_col;
+    s_faron_twilight_kasumi_inner = kasumi_inner_col;
+    s_has_faron_twilight_sky = true;
+}
+
 #if TARGET_PC
 static bool dKy_shouldRefreshAcceleratedRoomBgm() {
     return (dusk::getSettings().game.enableFastLoads.getValue() ||
@@ -1229,7 +1331,7 @@ void dKy_light_size_get(char const* stageName) {
     dKydata_lightsizeInfo_c* size_tbl = dKyd_light_size_tbl_getp();
     dKydata_lightsizeInfo_c* tw_size_tbl = dKyd_light_tw_size_tbl_getp();
 
-    if (!dKy_darkworld_check()) {
+    if (!dKy_darkworld_visual_effect_check()) {
         for (int i = 0; i < 36; i++) {
             if (!strcmp(stageName, size_tbl->stageName)) {
                 g_env_light.light_size = size_tbl->size;
@@ -1248,7 +1350,204 @@ void dKy_light_size_get(char const* stageName) {
     }
 }
 
+static void dKy_reset_visual_environment_patterns() {
+    // Match the initialization performed by envcolor_init(). This clears any
+    // weather/gather transition that was started while the normal layer was
+    // active before selecting the Twilight palette set.
+    g_env_light.wether_pat0 = g_env_light.mColpatWeather;
+    g_env_light.wether_pat1 = g_env_light.mColpatWeather;
+    g_env_light.mColpatPrevGather = 0xFF;
+    g_env_light.mColpatCurrGather = 0xFF;
+    g_env_light.mColPatBlendGather = -1.0f;
+    g_env_light.mColPatMode = 0;
+    g_env_light.mColPatModeGather = 0;
+}
+
+void dKy_apply_visual_twilight_weather() {
+#if TARGET_PC
+    struct VisualWeatherState {
+        bool saved = false;
+        int rainCount = 0;
+        int baseRainCount = 0;
+        int snowCount = 0;
+        u8 weather = 0;
+        u8 weatherPat0 = 0;
+        u8 weatherPat1 = 0;
+        u8 prevGather = 0xFF;
+        u8 currGather = 0xFF;
+        f32 gatherRatio = -1.0f;
+        u8 patMode = 0;
+        u8 patModeGather = 0;
+        f32 patternRatio = 1.0f;
+        int thunderMode = 0;
+        u8 thunderStatus = 0;
+        cXyz* windOverride = NULL;
+        f32 customWindPower = 0.0f;
+        u8 teachWindExistence = 0;
+    };
+    static VisualWeatherState saved;
+    static cXyz visual_twilight_storm_wind(1.0f, 0.0f, 0.0f);
+    static int wind_gust_timer = 0;
+    static bool wind_gust_active = false;
+
+    const bool active = dKy_visual_twilight_options_active();
+    const dusk::TwilightWeather weather = dusk::getSettings().game.twilightWeather.getValue();
+    if (!active || weather == dusk::TwilightWeather::Current) {
+        wind_gust_timer = 0;
+        wind_gust_active = false;
+        if (saved.saved) {
+            dKyw_rain_set(saved.rainCount);
+            g_env_light.base_raincnt = saved.baseRainCount;
+            g_env_light.mSnowCount = saved.snowCount;
+            g_env_light.mColpatWeather = saved.weather;
+            g_env_light.wether_pat0 = saved.weatherPat0;
+            g_env_light.wether_pat1 = saved.weatherPat1;
+            g_env_light.mColpatPrevGather = saved.prevGather;
+            g_env_light.mColpatCurrGather = saved.currGather;
+            g_env_light.mColPatBlendGather = saved.gatherRatio;
+            g_env_light.mColPatMode = saved.patMode;
+            g_env_light.mColPatModeGather = saved.patModeGather;
+            g_env_light.pat_ratio = saved.patternRatio;
+            g_env_light.mThunderEff.mMode = saved.thunderMode;
+            g_env_light.mThunderEff.mStatus = saved.thunderStatus;
+            g_env_light.global_wind_influence.vec_override = saved.windOverride;
+            g_env_light.custom_windpower = saved.customWindPower;
+            g_env_light.TeachWind_existence = saved.teachWindExistence;
+            saved.saved = false;
+        }
+        return;
+    }
+
+    if (!saved.saved) {
+        saved.saved = true;
+        saved.rainCount = g_env_light.raincnt;
+        saved.baseRainCount = g_env_light.base_raincnt;
+        saved.snowCount = g_env_light.mSnowCount;
+        saved.weather = g_env_light.mColpatWeather;
+        saved.weatherPat0 = g_env_light.wether_pat0;
+        saved.weatherPat1 = g_env_light.wether_pat1;
+        saved.prevGather = g_env_light.mColpatPrevGather;
+        saved.currGather = g_env_light.mColpatCurrGather;
+        saved.gatherRatio = g_env_light.mColPatBlendGather;
+        saved.patMode = g_env_light.mColPatMode;
+        saved.patModeGather = g_env_light.mColPatModeGather;
+        saved.patternRatio = g_env_light.pat_ratio;
+        saved.thunderMode = g_env_light.mThunderEff.mMode;
+        saved.thunderStatus = g_env_light.mThunderEff.mStatus;
+        saved.windOverride = g_env_light.global_wind_influence.vec_override;
+        saved.customWindPower = g_env_light.custom_windpower;
+        saved.teachWindExistence = g_env_light.TeachWind_existence;
+    }
+
+    const bool windStorm = weather == dusk::TwilightWeather::WindStorm;
+    if (windStorm) {
+        if (wind_gust_timer <= 0) {
+            wind_gust_active = !wind_gust_active;
+            wind_gust_timer = wind_gust_active ?
+                30 + static_cast<int>(cM_rndF(45.0f)) :
+                60 + static_cast<int>(cM_rndF(120.0f));
+        }
+        --wind_gust_timer;
+    } else {
+        wind_gust_timer = 0;
+        wind_gust_active = false;
+    }
+
+    const bool wetWeather = weather == dusk::TwilightWeather::Rain ||
+                            weather == dusk::TwilightWeather::Lightning ||
+                            weather == dusk::TwilightWeather::WindStorm;
+    const u8 weatherPattern = wetWeather ? 1 :
+                              weather == dusk::TwilightWeather::Snow ? 2 : 0;
+    g_env_light.mColpatWeather = weatherPattern;
+    g_env_light.wether_pat0 = weatherPattern;
+    g_env_light.wether_pat1 = weatherPattern;
+    g_env_light.mColpatPrevGather = 0xFF;
+    g_env_light.mColpatCurrGather = 0xFF;
+    g_env_light.mColPatBlendGather = -1.0f;
+    g_env_light.mColPatMode = 0;
+    g_env_light.mColPatModeGather = 0;
+    g_env_light.pat_ratio = 1.0f;
+
+    if (wetWeather) {
+        dKyw_rain_set(250);
+        g_env_light.mSnowCount = 0;
+    } else if (weather == dusk::TwilightWeather::Snow) {
+        dKyw_rain_set(0);
+        g_env_light.mSnowCount = 500;
+    } else {
+        dKyw_rain_set(0);
+        g_env_light.mSnowCount = 0;
+    }
+
+    const int thunderMode = weather == dusk::TwilightWeather::Lightning ? 1 : 0;
+    if (thunderMode == 0 && g_env_light.mThunderEff.mMode != 0) {
+        g_env_light.mThunderEff.mStatus = 0;
+    }
+    g_env_light.mThunderEff.mMode = thunderMode;
+
+    if (windStorm) {
+        g_env_light.global_wind_influence.vec_override = &visual_twilight_storm_wind;
+        g_env_light.custom_windpower = wind_gust_active ? 1.0f : 0.0f;
+        g_env_light.TeachWind_existence = 1;
+    } else {
+        g_env_light.global_wind_influence.vec_override = saved.windOverride;
+        g_env_light.custom_windpower = saved.customWindPower;
+        g_env_light.TeachWind_existence = saved.teachWindExistence;
+    }
+#endif
+}
+
+static void dKy_update_visual_environment() {
+    dKy_apply_visual_twilight_weather();
+
+    const char* stageName = dComIfGp_getStartStageName();
+    const int roomNo = dComIfGp_roomControl_getStayNo();
+    const bool forceTwilight = dKy_darkworld_visual_check();
+    const int layerNo = forceTwilight ? 14 : dComIfG_play_c::getLayerNo(0);
+
+    if (layerNo == s_visual_environment_layer && roomNo == s_visual_environment_room &&
+        forceTwilight == s_visual_environment_forced &&
+        stageName != NULL && strcmp(s_visual_environment_stage, stageName) == 0) {
+        return;
+    }
+
+    const bool wasForced = s_visual_environment_forced;
+    s_visual_environment_layer = layerNo;
+    s_visual_environment_room = roomNo;
+    s_visual_environment_forced = forceTwilight;
+    if (stageName != NULL) {
+        strncpy(s_visual_environment_stage, stageName, sizeof(s_visual_environment_stage) - 1);
+        s_visual_environment_stage[sizeof(s_visual_environment_stage) - 1] = '\0';
+    } else {
+        s_visual_environment_stage[0] = '\0';
+    }
+    s_visual_environment_has_twilight_layer = dStage_setEnvironmentLayer(layerNo);
+
+    if (forceTwilight || wasForced || s_visual_environment_has_twilight_layer) {
+        if (dComIfGp_getStageEnvrInfo() != NULL) {
+            g_env_light.stage_envr_info = dComIfGp_getStageEnvrInfo();
+        }
+        if (dComIfGp_getStagePaletteInfo() != NULL) {
+            g_env_light.stage_palette_info = dComIfGp_getStagePaletteInfo();
+        }
+        if (dComIfGp_getStagePselectInfo() != NULL) {
+            g_env_light.stage_pselect_info = dComIfGp_getStagePselectInfo();
+        }
+        if (dComIfGp_getStageVrboxcolInfo() != NULL) {
+            g_env_light.stage_vrboxcol_info = dComIfGp_getStageVrboxcolInfo();
+        }
+
+        g_env_light.light_init_timer = 1;
+        g_env_light.PrevCol = roomNo;
+        g_env_light.UseCol = roomNo;
+        g_env_light.pat_ratio = 1.0f;
+        dKy_reset_visual_environment_patterns();
+    }
+}
+
 static void envcolor_init() {
+    dKy_update_visual_environment();
+
     stage_palette_info_class* stage_palette_p = dComIfGp_getStagePaletteInfo();
     stage_pselect_info_class* stage_psel_p = dComIfGp_getStagePselectInfo();
     stage_envr_info_class* stage_envr_p = dComIfGp_getStageEnvrInfo();
@@ -1449,7 +1748,7 @@ static void envcolor_init() {
     g_kankyoHIO.navy.influence_multiplier = 1.0f;
     g_kankyoHIO.navy.cutoff_multiplier = 1.0f;
 
-    if (dKy_darkworld_check()) {
+    if (dKy_darkworld_visual_effect_check()) {
         g_kankyoHIO.navy.cloud_sunny_wind_influence_rate = 80.0f;
         g_kankyoHIO.navy.cloud_sunny_bottom_height = 0.0f;
         g_kankyoHIO.navy.cloud_sunny_top_height = 0.0f;
@@ -2509,6 +2808,12 @@ void dScnKy_env_light_c::setLight() {
                 color_ratio = g_env_light.field_0x1278;
             }
 
+            if (dKy_darkworld_visual_check() && !daPy_py_c::checkNowWolfPowerUp() &&
+                g_env_light.field_0x12fc < 0) {
+                prev_bloom_start_id = next_bloom_start_id = prev_bloom_end_id = next_bloom_end_id =
+                    dKy_visual_twilight_bloom_id();
+            }
+
             GXColor bloom_blend_col;
 
             dKydata_BloomInfo_c* bloomInf0_p;
@@ -2538,7 +2843,7 @@ void dScnKy_env_light_c::setLight() {
 
             GXColor bloom_mono_col;
 
-            if (dKy_darkworld_check()) {
+            if (dKy_darkworld_visual_effect_check()) {
                 static s16 S_fuwan_sin;
 
                 f32 sin = cM_ssin(S_fuwan_sin);
@@ -2665,7 +2970,7 @@ void dScnKy_env_light_c::setLight() {
                 field_0x123c = 0.65f;
             }
 
-            if (dKy_darkworld_check()) {
+            if (dKy_darkworld_visual_effect_check()) {
                 var_f30 = 0.55f;
                 field_0x123c = 0.55f;
             }
@@ -2810,6 +3115,13 @@ void dScnKy_env_light_c::setLight() {
                 prev_vrboxcol_start_p->kasumi_inner_col.a, prev_vrboxcol_end_p->kasumi_inner_col.a,
                 color_ratio, next_vrboxcol_start_p->kasumi_inner_col.a,
                 next_vrboxcol_end_p->kasumi_inner_col.a, g_env_light.pat_ratio, 0, 1.0f);
+
+            dKy_capture_faron_twilight_sky(vrbox_sky_col, vrbox_kumo_top_col, vrbox_kumo_bottom_col,
+                                           vrbox_kumo_shadow_col, vrbox_kasumi_outer_col,
+                                           vrbox_kasumi_inner_col);
+            dKy_apply_visual_twilight_sky_fallback(vrbox_sky_col, vrbox_kumo_top_col, vrbox_kumo_bottom_col,
+                                                   vrbox_kumo_shadow_col, vrbox_kasumi_outer_col,
+                                                   vrbox_kasumi_inner_col);
 
             if (daPy_py_c::checkNowWolfPowerUp()) {
                 vrbox_sky_col.r = 0;
@@ -3152,9 +3464,9 @@ void dScnKy_env_light_c::settingTevStruct_colget_actor(cXyz* unused, dKy_tevstr_
     }
 
     if ((tevstr_p->Type >= 1 && tevstr_p->Type <= 7) ||
-        (tevstr_p->Type == 9 && dKy_darkworld_check()))
+        (tevstr_p->Type == 9 && dKy_darkworld_visual_effect_check()))
     {
-        if ((tevstr_p->Type != 2 && tevstr_p->Type != 3) || dKy_darkworld_check()) {
+        if ((tevstr_p->Type != 2 && tevstr_p->Type != 3) || dKy_darkworld_visual_effect_check()) {
             tevstr_p->field_0x374 = 0.0f;
         }
     }
@@ -3276,11 +3588,11 @@ void dScnKy_env_light_c::settingTevStruct_plightcol_plus(cXyz* pos_p, dKy_tevstr
 
         if (tevstr_p->Type == 7 || tevstr_p->Type == 1 ||
             ((tevstr_p->Type == 2 || tevstr_p->Type == 6 || tevstr_p->Type == 3) &&
-             dKy_darkworld_check()) ||
+             dKy_darkworld_visual_effect_check()) ||
             tevstr_p->Type == 4 || tevstr_p->Type == 5)
         {
             light_inf_id = -2;
-        } else if (tevstr_p->Type == 9 && dKy_darkworld_check()) {
+        } else if (tevstr_p->Type == 9 && dKy_darkworld_visual_effect_check()) {
             light_inf_id = -2;
         }
 
@@ -3417,7 +3729,7 @@ void dScnKy_env_light_c::settingTevStruct_plightcol_plus(cXyz* pos_p, dKy_tevstr
                     light_power = 5000.0f;
                     break;
                 case 2:
-                    if (dKy_darkworld_check()) {
+                    if (dKy_darkworld_visual_effect_check()) {
                         field_0x10f8.r = 103;
                         field_0x10f8.g = 129;
                         field_0x10f8.b = 199;
@@ -3426,7 +3738,7 @@ void dScnKy_env_light_c::settingTevStruct_plightcol_plus(cXyz* pos_p, dKy_tevstr
                     }
                     break;
                 case 3:
-                    if (dKy_darkworld_check()) {
+                    if (dKy_darkworld_visual_effect_check()) {
                         field_0x10f8.r = 53;
                         field_0x10f8.g = 53;
                         field_0x10f8.b = 80;
@@ -3435,7 +3747,7 @@ void dScnKy_env_light_c::settingTevStruct_plightcol_plus(cXyz* pos_p, dKy_tevstr
                     }
                     break;
                 case 9:
-                    if (dKy_darkworld_check()) {
+                    if (dKy_darkworld_visual_effect_check()) {
                         field_0x10f8.r = 110;
                         field_0x10f8.g = 110;
                         field_0x10f8.b = 140;
@@ -3466,7 +3778,7 @@ void dScnKy_env_light_c::settingTevStruct_plightcol_plus(cXyz* pos_p, dKy_tevstr
                     break;
                 }
                 case 6:
-                    if (dKy_darkworld_check()) {
+                    if (dKy_darkworld_visual_effect_check()) {
                         field_0x10f8.r = 255;
                         field_0x10f8.g = 255;
                         field_0x10f8.b = 255;
@@ -3752,7 +4064,7 @@ void dScnKy_env_light_c::settingTevStruct(int tevstrType, cXyz* pos_p, dKy_tevst
             tevstr_p->UseCol = tevstr_p->room_no;
         }
 
-        if (!dKy_darkworld_check()) {
+        if (!dKy_darkworld_visual_effect_check()) {
             field_0x10f0.r = 24;
             field_0x10f0.g = 24;
             field_0x10f0.b = 24;
@@ -3784,7 +4096,7 @@ void dScnKy_env_light_c::settingTevStruct(int tevstrType, cXyz* pos_p, dKy_tevst
             J3DLightInfo& light_info = *tevstr_p->mLights[i].getLightInfo();
 
             if (i == 0) {
-                if (!dKy_darkworld_check()) {
+                if (!dKy_darkworld_visual_effect_check()) {
                     light_info.mColor.r = 126;
                     light_info.mColor.g = 110;
                     light_info.mColor.b = 89;
@@ -3802,7 +4114,7 @@ void dScnKy_env_light_c::settingTevStruct(int tevstrType, cXyz* pos_p, dKy_tevst
                 }
                 #endif
             } else if (i == 1) {
-                if (!dKy_darkworld_check()) {
+                if (!dKy_darkworld_visual_effect_check()) {
                     light_info.mColor.r = 24;
                     light_info.mColor.g = 41;
                     light_info.mColor.b = 50;
@@ -4268,8 +4580,8 @@ static void setLightTevColorType_MAJI_sub(J3DMaterial* material_p, dKy_tevstr_c*
         amb_col.a = tevstr_p->AmbCol.a;
 
         if (((tevstr_p->Type >= 1 && tevstr_p->Type <= 7) || tevstr_p->Type == 5 ||
-             tevstr_p->Type == 15 || (tevstr_p->Type == 9 && dKy_darkworld_check())) &&
-            ((tevstr_p->Type != 2 && tevstr_p->Type != 3) || dKy_darkworld_check()))
+             tevstr_p->Type == 15 || (tevstr_p->Type == 9 && dKy_darkworld_visual_effect_check())) &&
+            ((tevstr_p->Type != 2 && tevstr_p->Type != 3) || dKy_darkworld_visual_effect_check()))
         {
             amb_col.r = 0;
             amb_col.g = 0;
@@ -4309,7 +4621,7 @@ static void setLightTevColorType_MAJI_sub(J3DMaterial* material_p, dKy_tevstr_c*
 
             #if DEBUG
             if ((tevstr_p->Type == 4 || tevstr_p->Type == 2 || tevstr_p->Type == 1 || tevstr_p->Type == 7 ||
-                tevstr_p->Type == 6 || tevstr_p->Type == 5 || tevstr_p->Type == 15 || (tevstr_p->Type == 9 && dKy_darkworld_check())))
+                tevstr_p->Type == 6 || tevstr_p->Type == 5 || tevstr_p->Type == 15 || (tevstr_p->Type == 9 && dKy_darkworld_visual_effect_check())))
             {
                 if (g_kankyoHIO.navy.adjust_light_mode == 2) {
                     amb_col.r = g_kankyoHIO.navy.adjust_light_ambcol.r & 0xFF;
@@ -4733,6 +5045,8 @@ void dScnKy_env_light_c::SetBaseLight() {
 
 void dScnKy_env_light_c::exeKankyo() {
     int sp18 = 0;
+
+    dKy_update_visual_environment();
 
     for (int i = 0; i < 6; i++) {
         field_0x0c18[i].field_0x26 = 0;
@@ -9074,7 +9388,7 @@ void dKy_Global_amb_set(dKy_tevstr_c* tevstr_p) {
     color.a = tevstr_p->AmbCol.a;
 
     if (tevstr_p->Type == 2 || tevstr_p->Type == 3) {
-        if (dKy_darkworld_check()) {
+        if (dKy_darkworld_visual_effect_check()) {
             if (tevstr_p->Type == 2) {
                 color.r = 18;
                 color.g = 18;
@@ -9088,7 +9402,7 @@ void dKy_Global_amb_set(dKy_tevstr_c* tevstr_p) {
             }
         }
     } else if ((tevstr_p->Type >= 1 && tevstr_p->Type <= 7) ||
-               (tevstr_p->Type == 9 && dKy_darkworld_check()))
+               (tevstr_p->Type == 9 && dKy_darkworld_visual_effect_check()))
     {
         color.r = 0;
         color.g = 0;
@@ -9397,7 +9711,7 @@ void dKy_SordFlush_set(cXyz light_pos, int light_type) {
     dScnKy_env_light_c* light = dKy_getEnvlight();
     EF_THUNDER* thunder = &light->mThunderEff;
 
-    if (!dKy_darkworld_check() && (thunder->mState >= 10 || thunder->mFlashTimer <= 0.0f)) {
+    if (!dKy_darkworld_visual_effect_check() && (thunder->mState >= 10 || thunder->mFlashTimer <= 0.0f)) {
         if (g_env_light.eflight.mState == 0) {
             g_env_light.eflight.mState = 1;
             g_env_light.eflight.mLightType = light_type;
@@ -10300,7 +10614,7 @@ void dKy_twilight_camelight_set() {
     if (strcmp(dComIfGp_getStartStageName(), "R_SP107") != 0 ||
         dComIfGp_roomControl_getStayNo() != 3 || dComIfGp_getStartStageLayer() != 12)
     {
-        if (!dKy_darkworld_check() || memcmp(dComIfGp_getStartStageName(), "D_MN08", 6) == 0) {
+        if (!dKy_darkworld_visual_check() || memcmp(dComIfGp_getStartStageName(), "D_MN08", 6) == 0) {
             return;
         }
 
@@ -10997,7 +11311,7 @@ BOOL dKy_TeachWind_existence_chk() {
 
 BOOL dKy_SunMoon_Light_Check() {
     BOOL check = false;
-    if (g_env_light.mSunInitialized && !dKy_darkworld_check()) {
+    if (g_env_light.mSunInitialized && !dKy_darkworld_visual_effect_check()) {
         // stage is not City in the Sky, Hyrule Castle, or Hidden Skill area
         if (memcmp(dComIfGp_getStartStageName(), "D_MN07", 6) &&
             memcmp(dComIfGp_getStartStageName(), "D_MN09", 6) &&
@@ -11101,6 +11415,44 @@ u8 dKy_darkworld_check() {
     }
 
     return check;
+}
+
+u8 dKy_darkworld_visual_check() {
+#if TARGET_PC
+    const char* stageName = dComIfGp_getStartStageName();
+    if (stageName == NULL) {
+        return dKy_darkworld_check();
+    }
+
+    // Palace of Twilight has its own outdoor sky/fog treatment. The universal
+    // visual toggle must not replace that with the field Twilight treatment.
+    if (strncmp(stageName, "D_MN08", 6) == 0) {
+        return false;
+    }
+
+    return dKy_darkworld_check() || dusk::getSettings().game.enableTwilightVisuals.getValue();
+#else
+    return dKy_darkworld_check();
+#endif
+}
+
+u8 dKy_darkworld_visual_effect_check() {
+#if TARGET_PC
+    const char* stageName = dComIfGp_getStartStageName();
+    if (stageName == NULL) {
+        return dKy_darkworld_check();
+    }
+
+    // Existing engine paths must retain Palace of Twilight's authored
+    // behavior. The visual-only override is intentionally disabled there.
+    if (strncmp(stageName, "D_MN08", 6) == 0) {
+        return dKy_darkworld_check();
+    }
+
+    return dKy_darkworld_visual_check();
+#else
+    return dKy_darkworld_check();
+#endif
 }
 
 /**
@@ -11511,7 +11863,7 @@ void dKy_bg_MAxx_proc(void* bg_model_p) {
 
                 if (memcmp(&mat_name[3], "MA11", 4) == 0) {
                     GXColorS10 sp90;
-                    if (dKy_darkworld_check()) {
+                    if (dKy_darkworld_visual_effect_check()) {
                         dComIfGd_setListDarkBG();
 
                         sp90.r = 170;

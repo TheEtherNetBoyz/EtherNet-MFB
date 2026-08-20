@@ -156,6 +156,15 @@ void toggle_texture_pack() {
     toggle_config_bool(dusk::getSettings().game.enableTextureReplacements);
     dusk::texture_replacements::set_enabled(dusk::getSettings().game.enableTextureReplacements.getValue());
 }
+
+void cycle_bloom_mode() {
+    auto& bloomMode = dusk::getSettings().game.bloomMode;
+    constexpr std::array<const char*, 4> names = {"Off", "Classic", "Dusklight", "Legacy"};
+    const int next = (static_cast<int>(bloomMode.getValue()) + 1) % static_cast<int>(names.size());
+    bloomMode.setValue(static_cast<dusk::BloomMode>(next));
+    dusk::config::save();
+    dusk::DuskToast(fmt::format("Bloom: {}", names[next]), 1.5f);
+}
 }  // namespace
 
 namespace dusk {
@@ -378,6 +387,10 @@ namespace dusk {
             if (!getSettings().game.moveLink.getValue()) {
                 getTransientSettings().moveLinkActive = false;
             }
+        }
+
+        if (hotkey_event_pressed(event, hotkeys.cycleBloomMode)) {
+            cycle_bloom_mode();
         }
     }
 

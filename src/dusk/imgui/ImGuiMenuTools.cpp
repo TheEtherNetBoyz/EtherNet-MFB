@@ -308,6 +308,35 @@ namespace dusk {
             }
         }
 
+        void TwilightVisualsMenu() {
+            auto& s = getSettings();
+            MenuCheckbox("Enable Twilight Visuals", s.game.enableTwilightVisuals);
+            SliderFloatItem("Twilight Brightness", s.game.twilightVisualBrightness, 0.0f, 4.0f,
+                            "%.2fx");
+
+            int skyboxMode = static_cast<int>(s.game.twilightSkyboxMode.getValue());
+            const char* skyboxModes[] = {"Day", "Night"};
+            ImGui::TextUnformatted("Skybox");
+            ImGui::SameLine(170.0f);
+            ImGui::SetNextItemWidth(150.0f);
+            if (ImGui::Combo("##TwilightSkybox", &skyboxMode, skyboxModes,
+                             IM_ARRAYSIZE(skyboxModes))) {
+                s.game.twilightSkyboxMode.setValue(static_cast<TwilightSkyboxMode>(skyboxMode));
+                config::save();
+            }
+
+            int weather = static_cast<int>(s.game.twilightWeather.getValue());
+            const char* weatherModes[] = {"Current", "Clear", "Rain", "Snow", "Lightning", "Wind Storm"};
+            ImGui::TextUnformatted("Weather");
+            ImGui::SameLine(170.0f);
+            ImGui::SetNextItemWidth(150.0f);
+            if (ImGui::Combo("##TwilightWeather", &weather, weatherModes,
+                             IM_ARRAYSIZE(weatherModes))) {
+                s.game.twilightWeather.setValue(static_cast<TwilightWeather>(weather));
+                config::save();
+            }
+        }
+
         constexpr int kFrameRateLimitValues[] = {30, 60, 120, 240, 360, 480, 0};
         constexpr const char* kFrameRateLimitNames[] = {
             "30 FPS", "60 FPS", "120 FPS", "240 FPS", "360 FPS", "480 FPS", "Unlocked",
@@ -468,6 +497,10 @@ namespace dusk {
             MenuCheckbox("Disable Water Refraction", s.game.disableWaterRefraction);
             MenuCheckbox("Disable Cutscene Pillarboxing", s.game.disableCutscenePillarboxing);
             ImGui::Separator();
+            if (ImGui::BeginMenu("Twilight Visuals")) {
+                TwilightVisualsMenu();
+                ImGui::EndMenu();
+            }
             InternalResolutionSlider();
             ShadowResolutionSlider();
             ForcedAspectRatioControl();

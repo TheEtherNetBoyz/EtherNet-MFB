@@ -14,8 +14,12 @@
 #include "f_op/f_op_camera_mng.h"
 #include <cstring>
 #include "m_Do/m_Do_audio.h"
+#if TARGET_PC
+#include "dusk/settings.h"
+#endif
 
 static void dKyw_pntlight_set(WIND_INFLUENCE* pntwind);
+static dKankyo_housi_Packet* s_twilightVisualHousiPacket = NULL;
 
 static J3DPacket* dKyw_setDrawPacketList(J3DPacket* i_packet, int i_type) {
     if (i_packet == NULL) {
@@ -103,6 +107,16 @@ HOUSI_EFF::~HOUSI_EFF() {}
 HOUSI_EFF::HOUSI_EFF() {}
 
 void dKankyo_housi_Packet::draw() {
+    if (this == s_twilightVisualHousiPacket) {
+        Mtx drawMtx;
+        MTXCopy(j3dSys.getViewMtx(), drawMtx);
+        if (g_env_light.camera_water_in_status != 0) {
+            MTXCopy(dComIfGd_getView()->viewMtx, drawMtx);
+        }
+        dKyr_drawHousiVisual(drawMtx, &mpResTex, this);
+        return;
+    }
+
     GX_DEBUG_GROUP(dKyr_drawHousi, j3dSys.getViewMtx(), &mpResTex);
 }
 
@@ -432,7 +446,7 @@ static void wether_move_sun() {
 
         switch (g_env_light.mSunInitialized) {
         case FALSE:
-            if (sunVisible && dKy_darkworld_check() != true) {
+            if (sunVisible && dKy_darkworld_visual_effect_check() != true) {
                 g_env_light.mpSunPacket = JKR_NEW_ARGS (0x20) dKankyo_sun_Packet;
                 g_env_light.mpSunLenzPacket = JKR_NEW_ARGS (0x20) dKankyo_sunlenz_Packet;
                 if (g_env_light.mpSunPacket != NULL && g_env_light.mpSunLenzPacket != NULL) {
@@ -594,7 +608,7 @@ static void wether_move_star() {
                 starsVisible = true;
             }
 
-            if (starsVisible && dKy_darkworld_check() != true) {
+            if (starsVisible && dKy_darkworld_visual_effect_check() != true) {
                 f32 density;
                 f32 time = g_env_light.getDaytime();
                 if (time >= 330.0f || time < 45.0f) {
@@ -760,6 +774,57 @@ static void wether_move_housi() {
     }
 }
 
+#if TARGET_PC
+static void wether_move_twilight_housi() {
+    const char* stageName = dComIfGp_getStartStageName();
+    const bool enabled = dusk::getSettings().game.enableTwilightVisuals.getValue();
+    const bool isPalaceOfTwilight = stageName != NULL && strncmp(stageName, "D_MN08", 6) == 0;
+    const bool isLakebedTemple = stageName != NULL && strncmp(stageName, "D_MN05", 6) == 0;
+    const int roomNo = dComIfGp_roomControl_getStayNo();
+    const bool nativePacketOwnsTwilight =
+        dKy_darkworld_check() && g_env_light.camera_water_in_status == 0 &&
+        !isLakebedTemple && (!isPalaceOfTwilight || roomNo == 0 || roomNo == 11);
+    const bool needVisualPacket = enabled && !nativePacketOwnsTwilight;
+
+    if (!needVisualPacket) {
+        if (s_twilightVisualHousiPacket != NULL) {
+            JKR_DELETE(s_twilightVisualHousiPacket);
+            s_twilightVisualHousiPacket = NULL;
+        }
+        return;
+    }
+
+    if (s_twilightVisualHousiPacket == NULL) {
+        s_twilightVisualHousiPacket = JKR_NEW_ARGS (32) dKankyo_housi_Packet;
+        if (s_twilightVisualHousiPacket == NULL) {
+            return;
+        }
+
+        s_twilightVisualHousiPacket->mpResTex =
+            (u8*)dComIfG_getObjectRes("Always", 0x5E);
+        s_twilightVisualHousiPacket->field_0x5de8 = 0.0f;
+        s_twilightVisualHousiPacket->field_0x10.set(0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 300; i++) {
+            s_twilightVisualHousiPacket->mHousiEff[i].mStatus = 0;
+        }
+    }
+
+    dKankyo_housi_Packet* nativePacket = g_env_light.mpHousiPacket;
+    const int nativeHousiCount = g_env_light.mHousiCount;
+    const u8 nativeEffectType = g_env_light.field_0xea9;
+
+    g_env_light.mpHousiPacket = s_twilightVisualHousiPacket;
+    g_env_light.mHousiCount = 200;
+    g_env_light.field_0xea9 = 0;
+    dKyr_housi_move_visual();
+
+    g_env_light.mpHousiPacket = nativePacket;
+    g_env_light.mHousiCount = nativeHousiCount;
+    g_env_light.field_0xea9 = nativeEffectType;
+}
+
+#endif
+
 static void wether_move_odour() {
     switch (g_env_light.mOdourData.mOdourPacketStatus) {
     case 0:
@@ -865,7 +930,7 @@ static void wether_move_vrkumo() {
         g_env_light.mVrkumoCount = 0;
     }
 
-    if (dKy_darkworld_check()) {
+    if (dKy_darkworld_visual_effect_check()) {
         g_env_light.mVrkumoCount = 30;
     }
 
@@ -1029,6 +1094,10 @@ void dKyw_wether_move_draw() {
         wether_move_evil();
         wether_move_odour();
     }
+
+#if TARGET_PC
+    wether_move_twilight_housi();
+#endif
 }
 
 void dKyw_wether_move_draw2() {
@@ -1080,6 +1149,22 @@ void dKyw_wether_draw() {
         }
 
         dKy_undwater_filter_draw();
+
+#if TARGET_PC
+        if (s_twilightVisualHousiPacket != NULL) {
+            if (g_env_light.camera_water_in_status != 0) {
+                dComIfGd_setXluList2DScreen();
+                j3dSys.getDrawBuffer(J3DSysDrawBuf_Xlu)->entryImm(
+                    s_twilightVisualHousiPacket, 0);
+                dComIfGd_setList();
+            } else if (dComIfGp_getStartStageName() != NULL &&
+                       strncmp(dComIfGp_getStartStageName(), "D_MN05", 6) == 0) {
+                dComIfGd_getOpaListIndScreen()->entryImm(s_twilightVisualHousiPacket, 0);
+            } else {
+                dKyw_setDrawPacketList(s_twilightVisualHousiPacket, J3DSysDrawBuf_Xlu);
+            }
+        }
+#endif
     }
 }
 
@@ -1096,7 +1181,7 @@ void dKyw_wether_proc() {
         (!strcmp(dComIfGp_getStartStageName(), "F_SP121") &&
          g_env_light.dice_wether_time != 0.0f))
     {
-        if (!dKy_darkworld_check()) {
+        if (!dKy_darkworld_visual_effect_check()) {
             // Stage is Hyrule Field
             if (!strcmp(dComIfGp_getStartStageName(), "F_SP121") ||
                 !(g_env_light.daytime >= 75.0f) || !(g_env_light.daytime <= 120.0f))
@@ -1167,10 +1252,12 @@ void dKyw_wind_set() {
     } else {
         dStage_FileList_dt_c* fili_p = NULL;
         int wind_level = 0;
+        const int stayNo = dComIfGp_roomControl_getStayNo();
+        dStage_roomDt_c* roomDt = stayNo >= 0 ?
+            dComIfGp_roomControl_getStatusRoomDt(stayNo) : NULL;
 
-        if (dComIfGp_roomControl_getStayNo() >= 0) {
-            fili_p = dComIfGp_roomControl_getStatusRoomDt(dComIfGp_roomControl_getStayNo())
-                         ->getFileListInfo();
+        if (roomDt != NULL) {
+            fili_p = roomDt->getFileListInfo();
         }
 
         var_r30 = 0;
@@ -1179,9 +1266,8 @@ void dKyw_wind_set() {
             var_r28 = dStage_FileList_dt_GlobalWindDir(fili_p);
         }
 
-        if (dComIfGp_roomControl_getStatusRoomDt(dComIfGp_roomControl_getStayNo()) != NULL) {
-            dStage_Lbnk_c* lbnk_p =
-                dComIfGp_roomControl_getStatusRoomDt(dComIfGp_roomControl_getStayNo())->getLbnk();
+        if (roomDt != NULL) {
+            dStage_Lbnk_c* lbnk_p = roomDt->getLbnk();
             if (lbnk_p != NULL) {
                 dStage_Lbnk_dt_c* data_p = lbnk_p->entries;
 
@@ -1226,9 +1312,8 @@ void dKyw_wind_set() {
             wind_level = dStage_FileList_dt_GlobalWindLevel(fili_p);
         }
 
-        if (dComIfGp_roomControl_getStatusRoomDt(dComIfGp_roomControl_getStayNo()) != NULL) {
-            dStage_Lbnk_c* lbnk_p =
-                dComIfGp_roomControl_getStatusRoomDt(dComIfGp_roomControl_getStayNo())->getLbnk();
+        if (roomDt != NULL) {
+            dStage_Lbnk_c* lbnk_p = roomDt->getLbnk();
             if (lbnk_p != NULL) {
                 dStage_Lbnk_dt_c* data_p = lbnk_p->entries;
 
@@ -1262,7 +1347,8 @@ void dKyw_wind_set() {
         strength = 1.0f;
     }
 
-    if (strcmp(dComIfGp_getStartStageName(), "D_MN07") == 0 &&
+    const char* stageName = dComIfGp_getStartStageName();
+    if (stageName != NULL && strcmp(stageName, "D_MN07") == 0 &&
         (dComIfGp_roomControl_getStayNo() == 0 || dComIfGp_roomControl_getStayNo() == 3 ||
          dComIfGp_roomControl_getStayNo() == 6 || dComIfGp_roomControl_getStayNo() == 13))
     {

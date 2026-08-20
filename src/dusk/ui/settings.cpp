@@ -206,6 +206,7 @@ enum class HotkeyAction {
     GyroAim,
     ShowInputViewer,
     MoveLink,
+    CycleBloomMode,
 };
 
 struct HotkeyEntry {
@@ -233,6 +234,7 @@ constexpr std::array kHotkeyEntries = {
     HotkeyEntry{HotkeyAction::GyroAim, "Gyro Aim", "Enable or disable gyro aiming for supported actions."},
     HotkeyEntry{HotkeyAction::ShowInputViewer, "Show Input Viewer", "Show or hide the controller input overlay."},
     HotkeyEntry{HotkeyAction::MoveLink, "Move Link", "Allow or block the Move Link activation combo."},
+    HotkeyEntry{HotkeyAction::CycleBloomMode, "Cycle Bloom Mode", "Cycle through Off, Classic, Dusklight, and Legacy bloom modes."},
 };
 
 UserSettings::HotkeyBinding& hotkey_binding(HotkeyAction action) {
@@ -274,6 +276,8 @@ UserSettings::HotkeyBinding& hotkey_binding(HotkeyAction action) {
         return hotkeys.showInputViewer;
     case HotkeyAction::MoveLink:
         return hotkeys.moveLink;
+    case HotkeyAction::CycleBloomMode:
+        return hotkeys.cycleBloomMode;
     }
     return hotkeys.toggleImGuiMenu;
 }
@@ -923,6 +927,36 @@ SelectButton& config_percent_select(Pane& leftPane, Pane& rightPane, ConfigVar<f
     return button;
 }
 
+template <typename T>
+SelectButton& config_enum_select(Pane& leftPane, Pane& rightPane, ConfigVar<T>& var,
+    Rml::String key, Rml::String helpText, const char* const* labels, int labelCount) {
+    auto& button = leftPane.add_select_button({
+        .key = std::move(key),
+        .getValue = [&var, labels, labelCount] {
+            const int index = static_cast<int>(var.getValue());
+            return Rml::String{index >= 0 && index < labelCount ? labels[index] : "Unknown"};
+        },
+        .isModified = [&var] { return var.getValue() != var.getDefaultValue(); },
+        .submit = true,
+    });
+    leftPane.register_control(button, rightPane,
+        [&var, labels, labelCount, helpText = std::move(helpText)](Pane& pane) {
+            pane.clear();
+            for (int i = 0; i < labelCount; ++i) {
+                pane.add_button({
+                    .text = labels[i],
+                    .isSelected = [&var, i] { return static_cast<int>(var.getValue()) == i; },
+                }).on_pressed([&var, i] {
+                    mDoAud_seStartMenu(kSoundItemChange);
+                    var.setValue(static_cast<T>(i));
+                    config::save();
+                });
+            }
+            pane.add_text(helpText);
+        });
+    return button;
+}
+
 SelectButton& config_int_select(Pane& leftPane, Pane& rightPane, ConfigVar<int>& var,
     Rml::String key, Rml::String helpText, int min, int max, int step = 5,
     std::function<bool()> isDisabled = {}, std::function<void(int)> onChange = {},
@@ -1388,6 +1422,25 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .valueMax = static_cast<int>(Resampler::Area),
                 .defaultValue = static_cast<int>(Resampler::Bilinear),
             });
+        leftPane.add_section("Twilight Visuals");
+        config_bool_select(leftPane, rightPane, getSettings().game.enableTwilightVisuals,
+            {
+                .key = "Enable Twilight Visuals",
+                .helpText = "Apply the Faron, Eldin, and Lanayru twilight environment layers anywhere. "
+                            "This changes visuals only; actors, gameplay, audio, and time remain unchanged."
+            });
+        config_percent_select(leftPane, rightPane, getSettings().game.twilightVisualBrightness,
+            "Twilight Visual Brightness",
+            "Adjusts the strength of the Twilight bloom when Twilight Visuals is enabled. 100% matches the vanilla Twilight strength.",
+            0, 400, 10);
+        static constexpr const char* kTwilightSkyboxModes[] = {"Day", "Night"};
+        config_enum_select(leftPane, rightPane, getSettings().game.twilightSkyboxMode,
+            "Twilight Skybox", "Choose the authored Twilight skybox time of day.",
+            kTwilightSkyboxModes, ARRAY_SIZEU(kTwilightSkyboxModes));
+        static constexpr const char* kTwilightWeather[] = {"Current", "Clear", "Rain", "Snow", "Lightning", "Wind Storm"};
+        config_enum_select(leftPane, rightPane, getSettings().game.twilightWeather,
+            "Twilight Weather", "Choose whether Twilight uses the current map weather or a visual weather override.",
+            kTwilightWeather, ARRAY_SIZEU(kTwilightWeather));
 
         leftPane.add_section("Post-Processing");
         graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.bloomMode,

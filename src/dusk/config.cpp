@@ -312,6 +312,8 @@ template class ConfigImpl<f64>;
 template class ConfigImpl<std::string>;
 template class ConfigImpl<BloomMode>;
 template class ConfigImpl<DepthOfFieldMode>;
+template class ConfigImpl<TwilightSkyboxMode>;
+template class ConfigImpl<TwilightWeather>;
 template class ConfigImpl<DiscVerificationState>;
 template class ConfigImpl<GameLanguage>;
 template class ConfigImpl<GyroMode>;

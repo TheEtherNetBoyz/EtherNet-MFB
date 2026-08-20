@@ -51,14 +51,20 @@ dRes_info_c::~dRes_info_c() {
 }
 
 int dRes_info_c::set(char const* i_arcName, char const* i_path, u8 i_mountDirection, JKRHeap* i_heap) {
+    char path[40];
+
+    snprintf(path, sizeof(path), "%s%s.arc", i_path, i_arcName);
+    return setFile(i_arcName, path, i_mountDirection, i_heap);
+}
+
+int dRes_info_c::setFile(char const* i_arcName, char const* i_filePath, u8 i_mountDirection,
+                         JKRHeap* i_heap) {
 #ifdef __MWERKS__
     JUT_ASSERT(120, strlen(i_arcName) <= NAME_MAX);
 #endif
 
-    if (*i_path != '\0') {
-        char path[40];
-        snprintf(path, sizeof(path), "%s%s.arc", i_path, i_arcName);
-        mDMCommand = mDoDvdThd_mountArchive_c::create(path, i_mountDirection, i_heap);
+    if (*i_filePath != '\0') {
+        mDMCommand = mDoDvdThd_mountArchive_c::create(i_filePath, i_mountDirection, i_heap);
 
         if (mDMCommand == NULL) {
             return false;
@@ -1040,6 +1046,27 @@ int dRes_control_c::setStageRes(char const* i_arcName, JKRHeap* i_heap) {
 
     snprintf(path, sizeof(path), "/res/Stage/%s/", dComIfGp_getStartStageName());
     return setRes(i_arcName, mStageInfo, ARRAY_SIZEU(mStageInfo), path, mDoDvd_MOUNT_DIRECTION_TAIL, i_heap);
+}
+
+int dRes_control_c::setStageResForStage(char const* i_arcName, char const* i_stageName,
+                                        char const* i_fileName, JKRHeap* i_heap) {
+    char path[64];
+
+    snprintf(path, sizeof(path), "/res/Stage/%s/%s.arc", i_stageName, i_fileName);
+    dRes_info_c* resInfo = getResInfo(i_arcName, mStageInfo, ARRAY_SIZEU(mStageInfo));
+    if (resInfo == NULL) {
+        resInfo = newResInfo(mStageInfo, ARRAY_SIZEU(mStageInfo));
+        if (resInfo == NULL ||
+            resInfo->setFile(i_arcName, path, mDoDvd_MOUNT_DIRECTION_TAIL, i_heap) == 0) {
+            if (resInfo != NULL) {
+                resInfo->~dRes_info_c();
+            }
+            return 0;
+        }
+    }
+
+    resInfo->incCount();
+    return 1;
 }
 
 void dRes_control_c::dump() {

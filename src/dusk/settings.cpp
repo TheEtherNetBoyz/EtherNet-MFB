@@ -84,6 +84,10 @@ UserSettings g_userSettings = {
         .internalResolutionScale {"game.internalResolutionScale", 0},
         .shadowResolutionMultiplier {"game.shadowResolutionMultiplier", 1},
         .resampler {"game.resampler", Resampler::Bilinear},
+        .enableTwilightVisuals {"game.enableTwilightVisuals", false},
+        .twilightVisualBrightness {"game.twilightVisualBrightness", 1.0f},
+        .twilightSkyboxMode {"game.twilightSkyboxMode", TwilightSkyboxMode::Day},
+        .twilightWeather {"game.twilightWeather", TwilightWeather::Current},
         .enableMapBackground {"game.enableMapBackground", true},
         .disableCutscenePillarboxing {"game.disableCutscenePillarboxing", false},
         .enableHighQualityMinimapTextures {"game.enableHighQualityMinimapTextures", true},
@@ -291,6 +295,11 @@ UserSettings g_userSettings = {
             ConfigVar<int>{"hotkeys.moveLink.modifiers", HOTKEY_MOD_NONE},
             ConfigVar<int>{"hotkeys.moveLink.controllerButton", PAD_NATIVE_BUTTON_INVALID},
         },
+        .cycleBloomMode = {
+            ConfigVar<int>{"hotkeys.cycleBloomMode.key", SDL_SCANCODE_UNKNOWN},
+            ConfigVar<int>{"hotkeys.cycleBloomMode.modifiers", HOTKEY_MOD_NONE},
+            ConfigVar<int>{"hotkeys.cycleBloomMode.controllerButton", PAD_NATIVE_BUTTON_INVALID},
+        },
     },
 
     // Not sure if there's a better way to declare this
@@ -417,6 +426,10 @@ void registerSettings() {
     Register(g_userSettings.game.internalResolutionScale);
     Register(g_userSettings.game.resampler);
     Register(g_userSettings.game.shadowResolutionMultiplier);
+    Register(g_userSettings.game.enableTwilightVisuals);
+    Register(g_userSettings.game.twilightVisualBrightness);
+    Register(g_userSettings.game.twilightSkyboxMode);
+    Register(g_userSettings.game.twilightWeather);
     Register(g_userSettings.game.enableMapBackground);
     Register(g_userSettings.game.disableCutscenePillarboxing);
     Register(g_userSettings.game.enableHighQualityMinimapTextures);
@@ -559,6 +572,9 @@ void registerSettings() {
     Register(g_userSettings.hotkeys.moveLink.key);
     Register(g_userSettings.hotkeys.moveLink.modifiers);
     Register(g_userSettings.hotkeys.moveLink.controllerButton);
+    Register(g_userSettings.hotkeys.cycleBloomMode.key);
+    Register(g_userSettings.hotkeys.cycleBloomMode.modifiers);
+    Register(g_userSettings.hotkeys.cycleBloomMode.controllerButton);
 
     Register(g_userSettings.actionBindings.firstPersonCamera[0]);
     Register(g_userSettings.actionBindings.firstPersonCamera[1]);

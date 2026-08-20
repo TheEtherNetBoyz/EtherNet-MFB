@@ -919,6 +919,8 @@ void dKyr_rain_move() {
     }
 }
 
+static bool s_forceTwilightHousiMove = false;
+
 static BOOL d_krain_cut_turn_check() {
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
     BOOL ret = FALSE;
@@ -965,7 +967,7 @@ void dKyr_housi_move() {
         var_f30 = dComIfG_Bgsp().GroundCross(&cam_gndchk);
     }
 
-    if (dKy_darkworld_check() == true || var_r24 == 1) {
+    if (dKy_darkworld_check() == true || var_r24 == 1 || s_forceTwilightHousiMove) {
         sp78.x = 0.0f;
         sp78.y = 2.8f;
         sp78.z = 0.0f;
@@ -1264,7 +1266,7 @@ void dKyr_housi_move() {
             effect->mAlpha = 0.0f;
         }
 
-        if (dKy_darkworld_check() == true || var_r24 == 1) {
+        if (dKy_darkworld_check() == true || var_r24 == 1 || s_forceTwilightHousiMove) {
             f32 var_f1_6 = sp6C.abs(camera->view.lookat.eye);
             effect->field_0x48 = var_f1_6;
 
@@ -1292,6 +1294,12 @@ void dKyr_housi_move() {
         }
 #endif
     }
+}
+
+void dKyr_housi_move_visual() {
+    s_forceTwilightHousiMove = true;
+    dKyr_housi_move();
+    s_forceTwilightHousiMove = false;
 }
 
 void dKyr_snow_init() {
@@ -1910,7 +1918,7 @@ void vrkumo_move() {
 
     f32 sp70, sp6C, sp68, sp64, sp60;
     f32 sp5C, sp58, sp54, sp50, sp4C;
-    if (dKy_darkworld_check()) {
+    if (dKy_darkworld_visual_effect_check()) {
         sp70 = 80.0f;
         sp6C = 0.0f;
         sp68 = 0.0f;
@@ -3312,7 +3320,7 @@ void dKyr_drawRain(Mtx drawMtx, u8** tex) {
                 f32 temp_f30 = -1.0f;
 
                 if (!(rain_packet->mRainEff[i].mAlpha <= 0.0f)) {
-                    if (dKy_darkworld_check()) {
+                    if (dKy_darkworld_visual_effect_check()) {
                         color_reg0.a = 34.0f * rain_packet->mRainEff[i].mAlpha;
                     } else if (strcmp(dComIfGp_getStartStageName(), "D_MN07A") == 0) {
                         color_reg0.a = 9.0f * rain_packet->mRainEff[i].mAlpha;
@@ -3583,9 +3591,9 @@ void dKyr_drawSibuki(Mtx drawMtx, u8** tex) {
     J3DShape::resetVcdVatCache();
 }
 
-void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
+static void dKyr_drawHousiImpl(Mtx drawMtx, u8** tex,
+                               dKankyo_housi_Packet* housi_packet, bool forceTwilight) {
     ZoneScoped;
-    dKankyo_housi_Packet* housi_packet = g_env_light.mpHousiPacket;
     static f32 rot = 0.0f;
 
     Mtx camMtx;
@@ -3613,14 +3621,15 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
         }
 
         if (strcmp(dComIfGp_getStartStageName(), "D_MN08") != 0 ||
-            dComIfGp_roomControl_getStayNo() == 0 || dComIfGp_roomControl_getStayNo() == 11)
+            dComIfGp_roomControl_getStayNo() == 0 || dComIfGp_roomControl_getStayNo() == 11 ||
+            forceTwilight)
         {
             j3dSys.reinitGX();
             f32 var_f25 = 120.0f;
 
             if (g_env_light.field_0xea9 == 1) {
                 var_f25 = 140.0f;
-            } else if (g_env_light.camera_water_in_status != 0) {
+            } else if (g_env_light.camera_water_in_status != 0 && !forceTwilight) {
                 return;
             }
 
@@ -3636,7 +3645,7 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
             color_reg1.b = 0xCA;
             color_reg1.a = 0xFF;
 
-            if (dKy_darkworld_check() == 1 || isPalaceOfTwilight == 1) {
+            if (dKy_darkworld_check() == 1 || isPalaceOfTwilight == 1 || forceTwilight) {
                 color_reg0.r = 0;
                 color_reg0.g = 0;
                 color_reg0.b = 0;
@@ -3725,6 +3734,8 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
 
                 if (i == 1) {
                     GXSetZMode(GX_TRUE, GX_GEQUAL, GX_FALSE);
+                } else if (forceTwilight && g_env_light.camera_water_in_status != 0) {
+                    GXSetZMode(GX_FALSE, GX_LEQUAL, GX_FALSE);
                 } else {
                     GXSetZMode(GX_TRUE, GX_LEQUAL, GX_FALSE);
                 }
@@ -3813,7 +3824,7 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
                         f32 temp_f30 =
                             (var_f27 * 0.2f) * cM_fcos(housi_packet->mHousiEff[j].mScale.y * 6.0f);
 
-                        if (dKy_darkworld_check() == 1 || isPalaceOfTwilight == 1) {
+                        if (dKy_darkworld_check() == 1 || isPalaceOfTwilight == 1 || forceTwilight) {
                             cXyz sp7C[] = {
                                 cXyz(-1.0f, -0.5f, 0.0f),
                                 cXyz(-1.0f, 1.5f, 0.0f),
@@ -3967,7 +3978,7 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
                         IF_NOT_DUSK(GXBegin(GX_QUADS, GX_VTXFMT0, 4));
 
                         s16 var_r17 = 0x1FF;
-                        if (dKy_darkworld_check() == true || isPalaceOfTwilight == 1) {
+                        if (dKy_darkworld_check() == true || isPalaceOfTwilight == 1 || forceTwilight) {
                             var_r17 = 0xFA;
                         }
 
@@ -3997,6 +4008,16 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
             GXSetClipMode(GX_CLIP_ENABLE);
             J3DShape::resetVcdVatCache();
         }
+    }
+}
+
+void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
+    dKyr_drawHousiImpl(drawMtx, tex, g_env_light.mpHousiPacket, false);
+}
+
+void dKyr_drawHousiVisual(Mtx drawMtx, u8** tex, dKankyo_housi_Packet* packet) {
+    if (packet != NULL) {
+        dKyr_drawHousiImpl(drawMtx, tex, packet, true);
     }
 }
 
@@ -5100,7 +5121,7 @@ void drawVrkumo(Mtx drawMtx, GXColor& color, u8** tex) {
                     spA8 = 0.84f;
 #endif
 
-                    if (dKy_darkworld_check()) {
+                    if (dKy_darkworld_visual_effect_check()) {
                         spAC = 0.8f;
                         spA8 = 0.8f;
                     }

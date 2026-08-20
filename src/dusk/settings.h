@@ -23,6 +23,20 @@ enum class DepthOfFieldMode : int {
     Dusk = 2,
 };
 
+enum class TwilightSkyboxMode : u8 {
+    Day = 0,
+    Night = 1,
+};
+
+enum class TwilightWeather : u8 {
+    Current = 0,
+    Clear = 1,
+    Rain = 2,
+    Snow = 3,
+    Lightning = 4,
+    WindStorm = 5,
+};
+
 enum class Resampler : int {
     Bilinear = 0,
     Area = 1,
@@ -99,6 +113,18 @@ template <>
 struct ConfigEnumRange<DepthOfFieldMode> {
     static constexpr auto min = DepthOfFieldMode::Off;
     static constexpr auto max = DepthOfFieldMode::Dusk;
+};
+
+template <>
+struct ConfigEnumRange<TwilightSkyboxMode> {
+    static constexpr auto min = TwilightSkyboxMode::Day;
+    static constexpr auto max = TwilightSkyboxMode::Night;
+};
+
+template <>
+struct ConfigEnumRange<TwilightWeather> {
+    static constexpr auto min = TwilightWeather::Current;
+    static constexpr auto max = TwilightWeather::WindStorm;
 };
 
 template <>
@@ -253,6 +279,10 @@ struct UserSettings {
         ConfigVar<int> internalResolutionScale;
         ConfigVar<int> shadowResolutionMultiplier;
         ConfigVar<Resampler> resampler;
+        ConfigVar<bool> enableTwilightVisuals;
+        ConfigVar<float> twilightVisualBrightness;
+        ConfigVar<TwilightSkyboxMode> twilightSkyboxMode;
+        ConfigVar<TwilightWeather> twilightWeather;
         ConfigVar<bool> enableMapBackground;
         ConfigVar<bool> disableCutscenePillarboxing;
         ConfigVar<bool> enableHighQualityMinimapTextures;
@@ -383,6 +413,7 @@ struct UserSettings {
         HotkeyBinding gyroAim;
         HotkeyBinding showInputViewer;
         HotkeyBinding moveLink;
+        HotkeyBinding cycleBloomMode;
     } hotkeys;
 
     // Arrays of size 4 for 4 ports
