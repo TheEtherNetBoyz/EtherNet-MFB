@@ -1041,6 +1041,9 @@ public:
     bool freeCamera();
     bool executeDebugFlyCam();
     void deactivateDebugFlyCam();
+    static bool isDebugFlyCamMouseLookEnabled();
+    static void setDebugFlyCamMouseLookEnabled(bool enabled);
+    void setDebugFlyCamTransform(const cXyz& center, const cXyz& eye, f32 fovy, s16 bank);
     void getRawRenderTransform(cXyz& center, cXyz& eye, f32& fovy, s16& bank);
     void setRawRenderTransform(const cXyz& center, const cXyz& eye, f32 fovy, s16 bank);
     #endif
@@ -1171,7 +1174,7 @@ public:
         return mCamSetup.Far();
     }
 
-    static engine_fn engine_tbl[];
+    static DUSK_GAME_DATA engine_fn engine_tbl[];
 
     /* 0x000 */ camera_class* field_0x0;
 #if PARTIAL_DEBUG || DEBUG // Ensure struct layout consistent in all TUs.

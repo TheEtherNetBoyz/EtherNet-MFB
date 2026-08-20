@@ -5,6 +5,7 @@
 #include "fmt/format.h"
 
 #include "JSystem/J2DGraph/J2DGrafContext.h"
+#include "JSystem/J2DGraph/J2DOrthoGraph.h"
 #include "JSystem/J2DGraph/J2DTextBox.h"
 #include "JSystem/JUtility/JUTResFont.h"
 #include "JSystem/JUtility/TColor.h"
@@ -32,6 +33,7 @@
 #include "f_op/f_op_overlap_mng.h"
 #include "f_pc/f_pc_name.h"
 #include "m_Do/m_Do_controller_pad.h"
+#include "m_Do/m_Do_graphic.h"
 
 #include <algorithm>
 #include <array>
@@ -573,10 +575,10 @@ bool alphabetical_less(const char* a, const char* b) {
 void gz_set_bool(ConfigVar<bool>& value, bool enabled = true) {
     if (!enabled) return;
     value.setValue(!value.getValue());
-    config::Save();
+    config::save();
 }
 
-void gz_activate_generic_row(ImGuiPracticeSaves::MainCategory category, int row) {
+bool gz_activate_generic_row(ImGuiPracticeSaves::MainCategory category, int row) {
     auto& s = getSettings();
     const bool cheatsEnabled = !s.game.speedrunMode;
     switch (category) {
@@ -615,10 +617,12 @@ void gz_activate_generic_row(ImGuiPracticeSaves::MainCategory category, int row)
             const auto& map = region.maps[s_gzWarpState.map];
             const auto& room = map.mapRooms[s_gzWarpState.room];
             dComIfGp_setNextStage(map.mapFile, room.roomPoints[s_gzWarpState.spawn], room.roomNo, s_gzWarpState.layer);
+            return true;
         }
         break;
     default: break;
     }
+    return false;
 }
 
 void gz_adjust_generic_row(ImGuiPracticeSaves::MainCategory category, int row, int delta) {
@@ -696,7 +700,7 @@ bool gz_config_checkbox(const char* label, ConfigVar<bool>& value, bool enabled 
     gz_end_row(selected);
     if (changed) {
         value.setValue(copy);
-        config::Save();
+        config::save();
         return true;
     }
     return false;
@@ -761,6 +765,7 @@ void draw_gz_tools_panel() {
     ImGui::Separator();
 
     if (tab == 0) {
+        gz_config_checkbox("area reload", s.game.areaReload, !s.game.speedrunMode);
         gz_disabled_checkbox("coro td");
         gz_disabled_checkbox("ebmb");
         gz_disabled_checkbox("elevator escape");
@@ -831,7 +836,7 @@ void draw_gz_settings_panel() {
     ImGui::EndChild();
 }
 
-void draw_gz_warping_panel() {
+void draw_gz_warping_panel(bool& open) {
     auto& state = s_gzWarpState;
     clamp_gz_warp_state(state);
     ImGui::BeginChild("##gz_warp_panel", ImVec2(560.0f, 0.0f), true);
@@ -920,6 +925,7 @@ void draw_gz_warping_panel() {
     }
     if (ImGui::Button("warp", ImVec2(160.0f, 0.0f))) {
         dComIfGp_setNextStage(map.mapFile, spawnPoint, room.roomNo, state.layer);
+        open = false;
     }
     if (!dusk::IsGameLaunched) {
         ImGui::EndDisabled();
@@ -1042,9 +1048,12 @@ bool ImGuiPracticeSaves::loadPracticeSave(SaveCategory category, const PracticeS
 
         m_pendingSavedata = g_dComIfG_gameInfo.info.mSavedata;
 
-        // Force mDan.mStageNo = -1 so dComIfGs_initDan() during scene load always clears
-        // dungeon switch bits, even when reloading the same stage.
-        dComIfGs_resetDan();
+        // Force mDan.mStageNo = -1 so dComIfGs_initDan() during scene load clears
+        // dungeon switch bits when reloading the same stage. Stallord saves must
+        // retain zone switch 5 while the arena actors are being created.
+        if (callbacks.stageInit != PracticeSaveCallback::StallordInit) {
+            dComIfGs_resetDan();
+        }
 
         m_statusMsg = fmt::format("Loading {}.", entry.name);
         return true;
@@ -1169,7 +1178,9 @@ void ImGuiPracticeSaves::handleController(bool& open) {
                 return;
             }
             if (accept(PAD_BUTTON_A, 0.20)) {
-                gz_activate_generic_row(m_mainCategory, m_selectedGenericRow);
+                if (gz_activate_generic_row(m_mainCategory, m_selectedGenericRow)) {
+                    open = false;
+                }
                 return;
             }
         }
@@ -1424,7 +1435,9 @@ void ImGuiPracticeSaves::handleControllerNative(bool& open) {
                     return;
                 }
             }
-            gz_activate_generic_row(m_mainCategory, m_selectedGenericRow);
+            if (gz_activate_generic_row(m_mainCategory, m_selectedGenericRow)) {
+                open = false;
+            }
             return;
         }
     }
@@ -1507,7 +1520,7 @@ void ImGuiPracticeSaves::drawPracticePanel(bool& open) {
     ImGui::EndChild();
 }
 
-void ImGuiPracticeSaves::drawGenericPanel() {
+void ImGuiPracticeSaves::drawGenericPanel(bool& open) {
     s_gzDrawRow = 0;
     s_gzSelectedRow = m_selectedGenericRow;
     s_gzPanelFocused = m_focusSaveList;
@@ -1526,7 +1539,7 @@ void ImGuiPracticeSaves::drawGenericPanel() {
         draw_gz_tools_panel();
         break;
     case MainCategory::Warping:
-        draw_gz_warping_panel();
+        draw_gz_warping_panel(open);
         break;
     default: {
         const char* const* rows = nullptr;
@@ -1809,7 +1822,7 @@ void ImGuiPracticeSaves::draw(bool& open) {
     if (m_mainCategory == MainCategory::Practice) {
         drawPracticePanel(open);
     } else {
-        drawGenericPanel();
+        drawGenericPanel(open);
     }
 
     if (!m_statusMsg.empty()) {
@@ -2197,9 +2210,10 @@ void draw_native_input_display(JUTFont* font) {
 
 void draw_native_link_debug(JUTFont* font) {
     const JUtility::TColor kWhite(0xFF, 0xFF, 0xFF, 0xFF);
+    const float left = mDoGph_gInf_c::ScaleHUDXRight(452.0f);
     daAlink_c* player = daAlink_getAlinkActorClass();
     if (player == nullptr) {
-        draw_native_text(font, 452.0f, 178.0f, 14.0f, kWhite, "link: ?");
+        draw_native_text(font, left, 178.0f, 14.0f, kWhite, "link: ?");
         return;
     }
 
@@ -2223,7 +2237,7 @@ void draw_native_link_debug(JUTFont* font) {
 
     float y = 182.0f;
     for (const auto& line : lines) {
-        draw_native_text(font, 452.0f, y, 14.0f, kWhite, line);
+        draw_native_text(font, left, y, 14.0f, kWhite, line);
         y += 20.0f;
     }
 }
@@ -2241,20 +2255,26 @@ void ImGuiPracticeSaves::drawNative(bool menuOpen) {
     if (!menuOpen && !nativeLinkDebugInfo && !nativeInputViewer) {
         return;
     }
-    J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
-    if (port == nullptr) {
-        return;
-    }
-    // Re-establish the active HUD ortho (viewport + projection + pos matrix).
-    port->setPort();
+    // Use overlay-owned render state, as decompGZ does, instead of depending on
+    // the active scene's graphics port. The scene port may not exist while a
+    // load-zone transition is replacing the play scene.
+    static J2DOrthoGraph sNativeOrtho(0.0f, 0.0f, 608.0f, 448.0f, -1.0f, 1.0f);
+    // Match the game's 2D coordinate space. A fixed 608-wide projection stretches
+    // the overlay on wider viewports and makes the aspect-aware edge offsets use
+    // coordinates outside that projection.
+    sNativeOrtho.setOrtho(mDoGph_gInf_c::getMinXF(), mDoGph_gInf_c::getMinYF(),
+                          mDoGph_gInf_c::getWidthF(), mDoGph_gInf_c::getHeightF(),
+                          -1.0f, 1.0f);
+    sNativeOrtho.setPort();
 
-    // Guard: the message font lives in the font archive, absent on some
-    // transition/title frames. Avoid lazy init there; shape-only overlays can
-    // still draw without labels when the native menu is closed.
-    JUTFont* font = nullptr;
-    if (dComIfGp_getFontArchive() != nullptr) {
-        font = mDoExt_getMesgFont();
+    // Retain one reference to the game font once its archive becomes available.
+    // The archive pointer temporarily disappears during scene transitions, but
+    // the retained font remains valid for this process-lifetime overlay.
+    static JUTFont* sNativeFont = nullptr;
+    if (sNativeFont == nullptr && dComIfGp_getFontArchive() != nullptr) {
+        sNativeFont = mDoExt_getMesgFont();
     }
+    JUTFont* font = sNativeFont;
     if (font == nullptr && menuOpen) {
         return;
     }
@@ -2262,7 +2282,7 @@ void ImGuiPracticeSaves::drawNative(bool menuOpen) {
     const JUtility::TColor kWhite(0xFF, 0xFF, 0xFF, 0xFF);
     const JUtility::TColor kGreen(26, 230, 26, 0xFF);  // imgui (0.1, 0.9, 0.1)
 
-    const float left = 24.0f;
+    const float left = mDoGph_gInf_c::ScaleHUDXLeft(24.0f);
     const float headerSize = 18.0f;
     const float itemSize = 15.0f;
     const float lineH = 19.0f;
@@ -2397,6 +2417,7 @@ void ImGuiPracticeSaves::drawNative(bool menuOpen) {
         }
         case MainCategory::Tools: {
             if (s_gzToolsTab == 0) {
+                boolRow("area reload", s.game.areaReload.getValue(), s.game.speedrunMode);
                 disabledBool("coro td");
                 disabledBool("ebmb");
                 disabledBool("elevator escape");

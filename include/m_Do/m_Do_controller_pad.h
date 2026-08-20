@@ -3,7 +3,10 @@
 
 #include "JSystem/JUtility/JUTGamePad.h"
 #include "SSystem/SComponent/c_API_controller_pad.h"
+
+#if defined(DUSK_BUILDING_GAME)
 #include "dusk/settings.h"
+#endif
 
 // Controller Ports 1 - 4
 enum { PAD_1, PAD_2, PAD_3, PAD_4 };
@@ -19,6 +22,7 @@ public:
     static interface_of_controller_pad& getCpadInfo(u32 pad) { return m_cpadInfo[pad]; }
     static JUTGamePad* getGamePad(u32 pad) { return m_gamePad[pad]; }
     static u32 getTrig(u32 pad) { return getCpadInfo(pad).mPressedButtonFlags; }
+    static u32 getUnfilteredTrig(u32 pad) { return m_unfilteredPressedButtonFlags[pad]; }
     static u32 getTrigLockL(u32 pad) { return getCpadInfo(pad).mTrigLockL; }
     static u32 getTrigLockR(u32 pad) { return getCpadInfo(pad).mTrigLockR; }
     static u32 getTrigUp(u32 pad) { return getTrig(pad) & PAD_BUTTON_UP; }
@@ -35,7 +39,6 @@ public:
     static u32 getTrigStart(u32 pad) { return getTrig(pad) & PAD_BUTTON_START; }
     static u32 getHold(u32 pad) { return getCpadInfo(pad).mButtonFlags; }
     static u32 getUnfilteredHold(u32 pad) { return m_unfilteredButtonFlags[pad]; }
-    static u32 getUnfilteredTrig(u32 pad) { return m_unfilteredPressedButtonFlags[pad]; }
     static u32 getHoldLockL(u32 pad) { return getCpadInfo(pad).mHoldLockL; }
     static u32 getHoldLockR(u32 pad) { return getCpadInfo(pad).mHoldLockR; }
     static u32 getHoldUp(u32 pad) { return getHold(pad) & PAD_BUTTON_UP; }
@@ -56,29 +59,21 @@ public:
     static f32 getStickValue(u32 pad) { return getCpadInfo(pad).mMainStickValue; }
     static s16 getStickAngle(u32 pad) { return getCpadInfo(pad).mMainStickAngle; }
 
+#if TARGET_PC
+    static s16 getStickAngle3D(u32 pad);
+#else
     static s16 getStickAngle3D(u32 pad) {
-        #if TARGET_PC
-        if (dusk::getSettings().game.enableMirrorMode) {
-            return -getCpadInfo(pad).mMainStickAngle;
-        } else {
-            return getCpadInfo(pad).mMainStickAngle;
-        }
-        #else
         return getCpadInfo(pad).mMainStickAngle;
-        #endif
     }
+#endif
 
+#if TARGET_PC
+    static f32 getSubStickX3D(u32 pad);
+#else
     static f32 getSubStickX3D(u32 pad) {
-        #if TARGET_PC
-        if (dusk::getSettings().game.enableMirrorMode) {
-            return -getCpadInfo(pad).mCStickPosX;
-        } else {
-            return getCpadInfo(pad).mCStickPosX;
-        }
-        #else
         return getCpadInfo(pad).mCStickPosX;
-        #endif
     }
+#endif
 
     static f32 getSubStickX(u32 pad) { return getCpadInfo(pad).mCStickPosX; }
     static f32 getSubStickY(u32 pad) { return getCpadInfo(pad).mCStickPosY; }
@@ -95,9 +90,9 @@ public:
     static void stopMotorHard(u32 pad) { return m_gamePad[pad]->stopMotorHard(); }
     static void stopMotorWaveHard(u32 pad) { return m_gamePad[pad]->stopMotorWaveHard(); }
 
-    static JUTGamePad* m_gamePad[4];
-    static interface_of_controller_pad m_cpadInfo[4];
-    static interface_of_controller_pad m_debugCpadInfo[4];
+    static DUSK_GAME_DATA JUTGamePad* m_gamePad[4];
+    static DUSK_GAME_DATA interface_of_controller_pad m_cpadInfo[4];
+    static DUSK_GAME_DATA interface_of_controller_pad m_debugCpadInfo[4];
     static u32 m_unfilteredButtonFlags[4];
     static u32 m_unfilteredPressedButtonFlags[4];
 };

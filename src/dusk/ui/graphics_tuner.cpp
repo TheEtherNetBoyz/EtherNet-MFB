@@ -89,7 +89,7 @@ void set_value(GraphicsOption option, int value) {
     }
     case GraphicsOption::BloomMode:
         getSettings().game.bloomMode.setValue(static_cast<BloomMode>(std::clamp(
-            value, static_cast<int>(BloomMode::Off), static_cast<int>(BloomMode::Dusk))));
+            value, static_cast<int>(BloomMode::Off), static_cast<int>(BloomMode::Legacy))));
         break;
     case GraphicsOption::DepthOfFieldMode:
         getSettings().game.depthOfFieldMode.setValue(static_cast<DepthOfFieldMode>(std::clamp(
@@ -225,6 +225,8 @@ Rml::String format_graphics_setting_value(GraphicsOption option, int value) {
             return "Classic";
         case BloomMode::Dusk:
             return "Dusklight";
+        case BloomMode::Legacy:
+            return "Legacy";
         }
         break;
     case GraphicsOption::DepthOfFieldMode:
@@ -245,9 +247,9 @@ Rml::String format_graphics_setting_value(GraphicsOption option, int value) {
     return "";
 }
 
-GraphicsTuner::GraphicsTuner(GraphicsTunerProps props, bool prelaunch)
-    : Document(kDocumentSource), mOption(props.option), mValueMin(props.valueMin),
-      mValueMax(props.valueMax), mDefaultValue(props.defaultValue), mPrelaunch(prelaunch) {
+GraphicsTuner::GraphicsTuner(GraphicsTunerProps props)
+    : Document(kDocumentSource, false, DocumentScope::GraphicsTuner), mOption(props.option),
+      mValueMin(props.valueMin), mValueMax(props.valueMax), mDefaultValue(props.defaultValue) {
     if (mDocument == nullptr) {
         return;
     }
@@ -301,7 +303,7 @@ void GraphicsTuner::show() {
 }
 
 void GraphicsTuner::hide(bool close) {
-    config::Save();
+    config::save();
     mRoot->RemoveAttribute("open");
     if (close) {
         mPendingClose = true;
@@ -339,7 +341,7 @@ bool GraphicsTuner::handle_nav_command(Rml::Event& event, NavCommand cmd) {
         return true;
     }
 
-    return mPrelaunch ? false : Document::handle_nav_command(event, cmd);
+    return Document::handle_nav_command(event, cmd);
 }
 
 void GraphicsTuner::reset_default() {

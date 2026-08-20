@@ -55,3 +55,7 @@ instaload_watch.log
 
 extract
 .aider*
+
+# Local packaged runtimes
+dusk-rupee-slide-runtime/
+dusk-rupee-slide-twilight-runtime/

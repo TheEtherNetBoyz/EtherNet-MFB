@@ -29,6 +29,7 @@
 #include "d/actor/d_a_ykgr.h"
 #if TARGET_PC
 #include "dusk/settings.h"
+#include "dusk/tas_movie.h"
 #endif
 #include "JSystem/JHostIO/JORFile.h"
 #include "JSystem/JHostIO/JORServer.h"
@@ -96,9 +97,9 @@ static OSTime resPreLoadTime1;
 
 static dScnPly_preLoad_HIO_c g_preLoadHIO;
 
-s8 dScnPly_c::pauseTimer;
+DUSK_GAME_DATA s8 dScnPly_c::pauseTimer;
 
-s8 dScnPly_c::nextPauseTimer;
+DUSK_GAME_DATA s8 dScnPly_c::nextPauseTimer;
 
 #if DEBUG
 u8 dScnPly_c::debugPause;
@@ -1173,6 +1174,13 @@ static int phase_00(dScnPly_c* i_this) {
         return cPhs_INIT_e;
     }
 
+#if TARGET_PC
+    // A TAS anchor may spend an indeterminate amount of time tearing down the
+    // outgoing scene. Restore RNG only after that work is finished, immediately
+    // before the new play scene starts consuming it.
+    dusk::tas_movie::onPlaySceneCreateBegin();
+#endif
+
     #if PLATFORM_WII
     data_8053a730 = 1;
     #endif
@@ -1495,9 +1503,9 @@ static int phase_3(dScnPly_c* i_this) {
     return cPhs_NEXT_e;
 }
 
-dScnPly_reg_HIO_c g_regHIO;
+DUSK_GAME_DATA dScnPly_reg_HIO_c g_regHIO;
 
-dScnPly_env_HIO_c g_envHIO;
+DUSK_GAME_DATA dScnPly_env_HIO_c g_envHIO;
 
 #if DEBUG
 dScnPly_preset_HIO_c g_presetHIO;

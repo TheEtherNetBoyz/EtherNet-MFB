@@ -87,6 +87,9 @@ public:
     virtual ~JPAParticleCallBack() = 0;
     virtual void execute(JPABaseEmitter*, JPABaseParticle*) {}
     virtual void draw(JPABaseEmitter*, JPABaseParticle*) {}
+#if TARGET_PC
+    virtual void interp(JPABaseEmitter*, JPABaseParticle*) {}
+#endif
 };
 
 // not sure where this belongs

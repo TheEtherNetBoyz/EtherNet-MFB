@@ -507,7 +507,7 @@ static projectionFunc p_prj[3] = {
 };
 
 #if TARGET_PC
-static bool JPAIsPresentationParticleResource(JPAEmitterWorkData* work) {
+static bool JPAUsesExtendedPresentation(JPAEmitterWorkData* work) {
     switch (work->mpRes->getUsrIdx()) {
     case 0x243: // ZI_J_yamiFilter_a
     case 0x262: // ZI_S_warpholeApp_a
@@ -547,21 +547,25 @@ static bool JPAIsPresentationParticleResource(JPAEmitterWorkData* work) {
 
 static bool JPAGetPresentationParticlePos(JPAEmitterWorkData* work, JPABaseParticle* ptcl, JGeometry::TVec3<f32>* pos) {
 #if TARGET_PC
-    if (!JPAIsPresentationParticleResource(work)) {
+    if (work->mUsePresentationCorrection) {
+        MTXMultVec(work->mPresentationCorrection, &ptcl->mPosition, pos);
+        return true;
+    }
+
+    if (!JPAUsesExtendedPresentation(work)) {
         return false;
     }
 
-    if (!dusk::frame_interp::is_enabled() || dusk::frame_interp::is_sim_frame() ||
-        ptcl->mAge == 0)
-    {
-        return false;
+    Mtx particleMtx;
+    if (dusk::frame_interp::lookup_replacement(ptcl, particleMtx)) {
+        pos->set(particleMtx[0][3], particleMtx[1][3], particleMtx[2][3]);
+        return true;
     }
 
-    const f32 step = dusk::frame_interp::get_interpolation_step();
-    pos->set(ptcl->mPosition.x + ptcl->mVelocity.x * step,
-             ptcl->mPosition.y + ptcl->mVelocity.y * step,
-             ptcl->mPosition.z + ptcl->mVelocity.z * step);
-    return true;
+    // A particle without both a previous and current sample cannot be interpolated safely.
+    // Predicting from velocity makes newly created particles jump into the future for one
+    // presentation interval and then snap back once normal interpolation becomes available.
+    return false;
 #else
     return false;
 #endif
@@ -569,7 +573,7 @@ static bool JPAGetPresentationParticlePos(JPAEmitterWorkData* work, JPABaseParti
 
 static s16 JPAGetPresentationRotateAngle(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
 #if TARGET_PC
-    if (!JPAIsPresentationParticleResource(work)) {
+    if (!JPAUsesExtendedPresentation(work)) {
         return ptcl->mRotateAngle;
     }
 
@@ -627,8 +631,8 @@ static void submit_particle_quad(
     GXCallDisplayList(dl, dlSize);
 }
 
-void JPAInterpBillboard(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
-    if (!JPAIsPresentationParticleResource(work)) {
+void JPAInterpTranslation(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
+    if (!JPAUsesExtendedPresentation(work)) {
         return;
     }
 
@@ -637,11 +641,13 @@ void JPAInterpBillboard(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
     dusk::frame_interp::record_final_mtx(ptclPosMtx, ptcl);
 }
 
-void JPAInterpRotBillboard(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
-    if (!JPAIsPresentationParticleResource(work)) {
-        return;
-    }
+void JPAInterpBillboard(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
+    Mtx ptclPosMtx;
+    MTXTrans(ptclPosMtx, ptcl->mPosition.x, ptcl->mPosition.y, ptcl->mPosition.z);
+    dusk::frame_interp::record_final_mtx(ptclPosMtx, ptcl);
+}
 
+void JPAInterpRotBillboard(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
     Mtx ptclPosMtx;
     f32 sinRot = JMASSin(ptcl->mRotateAngle);
     f32 cosRot = JMASCos(ptcl->mRotateAngle);
@@ -663,7 +669,13 @@ void JPADrawBillboard(JPAEmitterWorkData* work, JPABaseParticle* ptcl JPA_DRAW_C
     JGeometry::TVec3<f32> pos;
 #if TARGET_PC
     Mtx ptclPosMtx;
-    if (dusk::frame_interp::lookup_replacement(ptcl, ptclPosMtx)) {
+    JGeometry::TVec3<f32> correctedPos;
+    if (work->mUsePresentationCorrection &&
+        JPAGetPresentationParticlePos(work, ptcl, &correctedPos))
+    {
+        pos.set(correctedPos);
+        MTXMultVec(work->mPosCamMtx, &pos, &pos);
+    } else if (dusk::frame_interp::lookup_replacement(ptcl, ptclPosMtx)) {
         pos.set(ptclPosMtx[0][3], ptclPosMtx[1][3], ptclPosMtx[2][3]);
         MTXMultVec(work->mPosCamMtx, &pos, &pos);
     } else
@@ -706,7 +718,16 @@ void JPADrawRotBillboard(JPAEmitterWorkData* work, JPABaseParticle* ptcl JPA_DRA
 #if TARGET_PC
     Mtx ptclPosMtx;
     MTXTrans(ptclPosMtx, ptcl->mPosition.x, ptcl->mPosition.y, ptcl->mPosition.z);
-    if (dusk::frame_interp::lookup_replacement(ptcl, ptclPosMtx)) {
+    JGeometry::TVec3<f32> correctedPos;
+    if (work->mUsePresentationCorrection &&
+        JPAGetPresentationParticlePos(work, ptcl, &correctedPos))
+    {
+        pos.set(correctedPos);
+        const s16 angle = JPAGetPresentationRotateAngle(work, ptcl);
+        sinRot = JMASSin(angle);
+        cosRot = JMASCos(angle);
+        MTXMultVec(work->mPosCamMtx, &pos, &pos);
+    } else if (dusk::frame_interp::lookup_replacement(ptcl, ptclPosMtx)) {
         pos.set(ptclPosMtx[0][3], ptclPosMtx[1][3], ptclPosMtx[2][3]);
         sinRot = ptclPosMtx[1][0];
         cosRot = ptclPosMtx[0][0];
@@ -1007,7 +1028,9 @@ static bool make_direction_mtx(JPAEmitterWorkData* work, JPABaseParticle* ptcl, 
     axisZ.normalize();
     baseAxis.cross(axisY, axisZ);
     baseAxis.normalize();
-    ptcl->mBaseAxis.set(baseAxis);
+    if (dusk::frame_interp::is_sim_frame()) {
+        ptcl->mBaseAxis.set(baseAxis);
+    }
 
     f32 scaleX = work->mGlobalPtclScl.x * ptcl->mParticleScaleX;
     f32 scaleY = work->mGlobalPtclScl.y * ptcl->mParticleScaleY;
@@ -1047,7 +1070,9 @@ static bool make_rot_direction_mtx(JPAEmitterWorkData* work, JPABaseParticle* pt
     axisZ.normalize();
     baseAxis.cross(axisY, axisZ);
     baseAxis.normalize();
-    ptcl->mBaseAxis.set(baseAxis);
+    if (dusk::frame_interp::is_sim_frame()) {
+        ptcl->mBaseAxis.set(baseAxis);
+    }
 
     f32 scaleX = work->mGlobalPtclScl.x * ptcl->mParticleScaleX;
     f32 scaleY = work->mGlobalPtclScl.y * ptcl->mParticleScaleY;
@@ -1072,10 +1097,6 @@ static bool make_rot_direction_mtx(JPAEmitterWorkData* work, JPABaseParticle* pt
 }
 
 void JPAInterpDirection(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
-    if (!JPAIsPresentationParticleResource(work)) {
-        return;
-    }
-
     JGeometry::TVec3<f32> axisY;
     JGeometry::TVec3<f32> axisZ;
     p_direction[work->mDirType](work, ptcl, &axisY);
@@ -1114,10 +1135,6 @@ void JPAInterpDirection(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
 }
 
 void JPAInterpRotDirection(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
-    if (!JPAIsPresentationParticleResource(work)) {
-        return;
-    }
-
     f32 sinRot = JMASSin(ptcl->mRotateAngle);
     f32 cosRot = JMASCos(ptcl->mRotateAngle);
     JGeometry::TVec3<f32> axisY;
@@ -1170,8 +1187,18 @@ void JPADrawDirection(JPAEmitterWorkData* work, JPABaseParticle* ptcl JPA_DRAW_C
 
     Mtx posMtx;
 #if TARGET_PC
-    if (!dusk::frame_interp::lookup_replacement(ptcl, posMtx) &&
-        !make_direction_mtx(work, ptcl, posMtx))
+    if (work->mUsePresentationCorrection) {
+        if (!make_direction_mtx(work, ptcl, posMtx)) {
+            return;
+        }
+        JGeometry::TVec3<f32> correctedPos;
+        if (JPAGetPresentationParticlePos(work, ptcl, &correctedPos)) {
+            posMtx[0][3] = correctedPos.x;
+            posMtx[1][3] = correctedPos.y;
+            posMtx[2][3] = correctedPos.z;
+        }
+    } else if (!dusk::frame_interp::lookup_replacement(ptcl, posMtx) &&
+               !make_direction_mtx(work, ptcl, posMtx))
     {
         return;
     }
@@ -1241,8 +1268,18 @@ void JPADrawRotDirection(JPAEmitterWorkData* work, JPABaseParticle* ptcl JPA_DRA
     Mtx mtx1;
     Mtx mtx2;
 #if TARGET_PC
-    if (!dusk::frame_interp::lookup_replacement(ptcl, mtx1) &&
-        !make_rot_direction_mtx(work, ptcl, mtx1))
+    if (work->mUsePresentationCorrection) {
+        if (!make_rot_direction_mtx(work, ptcl, mtx1)) {
+            return;
+        }
+        JGeometry::TVec3<f32> correctedPos;
+        if (JPAGetPresentationParticlePos(work, ptcl, &correctedPos)) {
+            mtx1[0][3] = correctedPos.x;
+            mtx1[1][3] = correctedPos.y;
+            mtx1[2][3] = correctedPos.z;
+        }
+    } else if (!dusk::frame_interp::lookup_replacement(ptcl, mtx1) &&
+               !make_rot_direction_mtx(work, ptcl, mtx1))
     {
         return;
     }
@@ -1495,9 +1532,13 @@ void JPADrawStripe(JPAEmitterWorkData* param_0) {
                                                      node = node_func(node), coord += step) {
         param_0->mpCurNode = node;
         JPABaseParticle* particle = node->getObject();
-        local_ec.set(particle->mPosition);
-        dVar11 = JMASSin(particle->mRotateAngle);
-        dVar12 = JMASCos(particle->mRotateAngle);
+        if (!JPAGetPresentationParticlePos(param_0, particle, &local_ec)) {
+            local_ec.set(particle->mPosition);
+        }
+        const s16 rotateAngle = JPAGetPresentationRotateAngle(param_0, particle);
+        dVar11 = JMASSin(rotateAngle);
+        dVar12 = JMASCos(rotateAngle);
+        JGeometry::TVec3<f32> baseAxis(particle->mBaseAxis);
         local_e0[0].set(-particle->mParticleScaleX * dVar14, 0.0f, 0.0f);
         local_e0[0].set(local_e0[0].x * dVar12, 0.0f, local_e0[0].x * dVar11);
         local_e0[1].set(particle->mParticleScaleX * dVar13, 0.0f, 0.0f);
@@ -1508,26 +1549,33 @@ void JPADrawStripe(JPAEmitterWorkData* param_0) {
         } else {
             local_f8.normalize();
         }
-        local_104.cross(particle->mBaseAxis, local_f8);
+        local_104.cross(baseAxis, local_f8);
         if (local_104.isZero()) {
             local_104.set(1.0f, 0.0f, 0.0f);
         } else {
             local_104.normalize();
         }
-        particle->mBaseAxis.cross(local_f8, local_104);
-        particle->mBaseAxis.normalize();
+        baseAxis.cross(local_f8, local_104);
+        baseAxis.normalize();
+#if TARGET_PC
+        if (dusk::frame_interp::is_sim_frame()) {
+            particle->mBaseAxis.set(baseAxis);
+        }
+#else
+        particle->mBaseAxis.set(baseAxis);
+#endif
 
         local_c8[0][0] = local_104.x;
         local_c8[0][1] = local_f8.x;
-        local_c8[0][2] = particle->mBaseAxis.x;
+        local_c8[0][2] = baseAxis.x;
         local_c8[0][3] = 0.0f;
         local_c8[1][0] = local_104.y;
         local_c8[1][1] = local_f8.y;
-        local_c8[1][2] = particle->mBaseAxis.y;
+        local_c8[1][2] = baseAxis.y;
         local_c8[1][3] = 0.0f;
         local_c8[2][0] = local_104.z;
         local_c8[2][1] = local_f8.z;
-        local_c8[2][2] = particle->mBaseAxis.z;
+        local_c8[2][2] = baseAxis.z;
         local_c8[2][3] = 0.0f;
         MTXMultVecArraySR(local_c8, (Vec*)local_e0, (Vec*)local_e0, 2);
         GXPosition3f32(local_e0[0].x + local_ec.x, local_e0[0].y + local_ec.y,
@@ -1586,9 +1634,13 @@ void JPADrawStripeX(JPAEmitterWorkData* param_0) {
                                                      node = node_func(node), coord += step) {
         param_0->mpCurNode = node;
         JPABaseParticle* particle = node->getObject();
-        local_b4.set(particle->mPosition);
-        dVar11 = JMASSin(particle->mRotateAngle);
-        dVar12 = JMASCos(particle->mRotateAngle);
+        if (!JPAGetPresentationParticlePos(param_0, particle, &local_b4)) {
+            local_b4.set(particle->mPosition);
+        }
+        const s16 rotateAngle = JPAGetPresentationRotateAngle(param_0, particle);
+        dVar11 = JMASSin(rotateAngle);
+        dVar12 = JMASCos(rotateAngle);
+        JGeometry::TVec3<f32> baseAxis(particle->mBaseAxis);
         local_a8[0].set(-particle->mParticleScaleX * local_154, 0.0f, 0.0f);
         local_a8[0].set(local_a8[0].x * dVar12, 0.0f, local_a8[0].x * dVar11);
         local_a8[1].set(particle->mParticleScaleX * local_158, 0.0f, 0.0f);
@@ -1599,26 +1651,33 @@ void JPADrawStripeX(JPAEmitterWorkData* param_0) {
         } else {
             local_c0.normalize();
         }
-        local_cc.cross(particle->mBaseAxis, local_c0);
+        local_cc.cross(baseAxis, local_c0);
         if (local_cc.isZero()) {
             local_cc.set(1.0f, 0.0f, 0.0f);
         } else {
             local_cc.normalize();
         }
-        particle->mBaseAxis.cross(local_c0, local_cc);
-        particle->mBaseAxis.normalize();
+        baseAxis.cross(local_c0, local_cc);
+        baseAxis.normalize();
+#if TARGET_PC
+        if (dusk::frame_interp::is_sim_frame()) {
+            particle->mBaseAxis.set(baseAxis);
+        }
+#else
+        particle->mBaseAxis.set(baseAxis);
+#endif
 
         local_90[0][0] = local_cc.x;
         local_90[0][1] = local_c0.x;
-        local_90[0][2] = particle->mBaseAxis.x;
+        local_90[0][2] = baseAxis.x;
         local_90[0][3] = 0.0f;
         local_90[1][0] = local_cc.y;
         local_90[1][1] = local_c0.y;
-        local_90[1][2] = particle->mBaseAxis.y;
+        local_90[1][2] = baseAxis.y;
         local_90[1][3] = 0.0f;
         local_90[2][0] = local_cc.z;
         local_90[2][1] = local_c0.z;
-        local_90[2][2] = particle->mBaseAxis.z;
+        local_90[2][2] = baseAxis.z;
         local_90[2][3] = 0.0f;
         MTXMultVecArraySR(local_90, (Vec*)local_a8, (Vec*)local_a8, 2);
         GXPosition3f32(local_a8[0].x + local_b4.x, local_a8[0].y + local_b4.y,
@@ -1636,9 +1695,13 @@ void JPADrawStripeX(JPAEmitterWorkData* param_0) {
                                                      node = node_func(node), coord += step) {
         param_0->mpCurNode = node;
         JPABaseParticle* particle = node->getObject();
-        local_b4.set(particle->mPosition);
-        dVar11 = JMASCos(particle->mRotateAngle);
-        dVar12 = -JMASSin(particle->mRotateAngle);
+        if (!JPAGetPresentationParticlePos(param_0, particle, &local_b4)) {
+            local_b4.set(particle->mPosition);
+        }
+        const s16 rotateAngle = JPAGetPresentationRotateAngle(param_0, particle);
+        dVar11 = JMASCos(rotateAngle);
+        dVar12 = -JMASSin(rotateAngle);
+        JGeometry::TVec3<f32> baseAxis(particle->mBaseAxis);
         local_a8[0].set(-particle->mParticleScaleY * local_15c, 0.0f, 0.0f);
         local_a8[0].set(local_a8[0].x * dVar12, 0.0f, local_a8[0].x * dVar11);
         local_a8[1].set(particle->mParticleScaleY * local_160, 0.0f, 0.0f);
@@ -1649,26 +1712,33 @@ void JPADrawStripeX(JPAEmitterWorkData* param_0) {
         } else {
             local_c0.normalize();
         }
-        local_cc.cross(particle->mBaseAxis, local_c0);
+        local_cc.cross(baseAxis, local_c0);
         if (local_cc.isZero()) {
             local_cc.set(1.0f, 0.0f, 0.0f);
         } else {
             local_cc.normalize();
         }
-        particle->mBaseAxis.cross(local_c0, local_cc);
-        particle->mBaseAxis.normalize();
+        baseAxis.cross(local_c0, local_cc);
+        baseAxis.normalize();
+#if TARGET_PC
+        if (dusk::frame_interp::is_sim_frame()) {
+            particle->mBaseAxis.set(baseAxis);
+        }
+#else
+        particle->mBaseAxis.set(baseAxis);
+#endif
 
         local_90[0][0] = local_cc.x;
         local_90[0][1] = local_c0.x;
-        local_90[0][2] = particle->mBaseAxis.x;
+        local_90[0][2] = baseAxis.x;
         local_90[0][3] = 0.0f;
         local_90[1][0] = local_cc.y;
         local_90[1][1] = local_c0.y;
-        local_90[1][2] = particle->mBaseAxis.y;
+        local_90[1][2] = baseAxis.y;
         local_90[1][3] = 0.0f;
         local_90[2][0] = local_cc.z;
         local_90[2][1] = local_c0.z;
-        local_90[2][2] = particle->mBaseAxis.z;
+        local_90[2][2] = baseAxis.z;
         local_90[2][3] = 0.0f;
         MTXMultVecArraySR(local_90, (Vec*)local_a8, (Vec*)local_a8, 2);
         GXPosition3f32(local_a8[0].x + local_b4.x, local_a8[0].y + local_b4.y,
@@ -1746,36 +1816,36 @@ static void makeColorTable(GXColor** o_color_table, JPAClrAnmKeyData const* i_da
     *o_color_table = p_clr_tbl;
 }
 
-GXBlendMode JPABaseShape::st_bm[3] = {
+DUSK_GAME_DATA GXBlendMode JPABaseShape::st_bm[3] = {
     GX_BM_NONE,
     GX_BM_BLEND,
     GX_BM_LOGIC,
 };
 
-GXBlendFactor JPABaseShape::st_bf[10] = {
+DUSK_GAME_DATA GXBlendFactor JPABaseShape::st_bf[10] = {
     GX_BL_ZERO,      GX_BL_ONE,           GX_BL_SRCCLR, GX_BL_INVSRCCLR,
     GX_BL_DSTCLR, GX_BL_INVDSTCLR, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA,
     GX_BL_DSTALPHA, GX_BL_INVDSTALPHA,
 };
 
-GXLogicOp JPABaseShape::st_lo[16] = {
+DUSK_GAME_DATA GXLogicOp JPABaseShape::st_lo[16] = {
     GX_LO_CLEAR,   GX_LO_SET,     GX_LO_COPY,   GX_LO_INVCOPY, GX_LO_NOOP, GX_LO_INV,
     GX_LO_AND,     GX_LO_NAND,    GX_LO_OR,     GX_LO_NOR,      GX_LO_XOR,  GX_LO_EQUIV,
     GX_LO_REVAND, GX_LO_INVAND, GX_LO_REVOR, GX_LO_INVOR,
 };
 
-GXCompare JPABaseShape::st_c[8] = {
+DUSK_GAME_DATA GXCompare JPABaseShape::st_c[8] = {
     GX_NEVER, GX_LESS, GX_LEQUAL, GX_EQUAL, GX_NEQUAL, GX_GEQUAL, GX_GREATER, GX_ALWAYS,
 };
 
-GXAlphaOp JPABaseShape::st_ao[4] = {
+DUSK_GAME_DATA GXAlphaOp JPABaseShape::st_ao[4] = {
     GX_AOP_AND,
     GX_AOP_OR,
     GX_AOP_XOR,
     GX_AOP_XNOR,
 };
 
-GXTevColorArg JPABaseShape::st_ca[6][4] = {
+DUSK_GAME_DATA GXTevColorArg JPABaseShape::st_ca[6][4] = {
     {
         GX_CC_ZERO,
         GX_CC_TEXC,
@@ -1814,7 +1884,7 @@ GXTevColorArg JPABaseShape::st_ca[6][4] = {
     },
 };
 
-GXTevAlphaArg JPABaseShape::st_aa[2][4] = {
+DUSK_GAME_DATA GXTevAlphaArg JPABaseShape::st_aa[2][4] = {
     {
         GX_CA_ZERO,
         GX_CA_TEXA,

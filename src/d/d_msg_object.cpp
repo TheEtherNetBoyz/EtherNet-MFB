@@ -30,6 +30,7 @@
 #include "m_Do/m_Do_lib.h"
 
 #if TARGET_PC
+#include "dusk/language.hpp"
 #include "dusk/menu_pointer.h"
 #include "dusk/settings.h"
 #include "dusk/version.hpp"
@@ -314,6 +315,13 @@ dMsgObject_HIO_c::dMsgObject_HIO_c() {
 }
 
 int dMsgObject_c::_create(msg_class* param_1) {
+#if TARGET_PC
+    if (dusk::version::isRegionJpn())
+        g_MsgObject_HIO_c.mBoxTalkScaleX = 1.1f;
+    else
+        g_MsgObject_HIO_c.mBoxTalkScaleX = 1.2f;
+#endif
+
     field_0x124 = NULL;
     field_0x100 = param_1;
     field_0x16c = -1;
@@ -425,20 +433,9 @@ static void dummyStrings() {
     DEAD_STRING("");
 }
 
-dMsgObject_HIO_c g_MsgObject_HIO_c;
+DUSK_GAME_DATA dMsgObject_HIO_c g_MsgObject_HIO_c;
 
 int dMsgObject_c::_execute() {
-// TODO: enabling wii message overrides fixes direction text, but gives wrong item control text
-/*#if TARGET_PC
-    if (dusk::getSettings().game.enableMirrorMode) {
-        // enable wii message index override
-        g_MsgObject_HIO_c.mMessageDisplay = 1;
-    } else if (!dusk::getSettings().game.enableMirrorMode && g_MsgObject_HIO_c.mMessageDisplay == 1) {
-        g_MsgObject_HIO_c.mMessageDisplay = 0;
-    }
-#endif*/
-
-
     field_0x4c7 = 0;
     if (mpTalkHeap != NULL) {
         field_0x148 = mDoExt_setCurrentHeap(mpTalkHeap);
@@ -655,8 +652,21 @@ static const MirrorMsgOverride mirrorMsgOverrides[] = {
     {0x17e2, 0x3ef2},
     {0x1dae, 0x44be},
     {0x14ca, 0x3bda},
-    {0x470, 0x493}, 
+    {0x470, 0x493},
     {0x473, 0x492},
+    {0x1f41, 0x4651},
+    {0x1f42, 0x4652},
+    {0x0847, 0x0870},
+    {0x0d5c, 0x0d65},
+    {0x0a97, 0x0a98},
+    {0x0327, 0x12ba},
+    {0x0328, 0x12bb},
+    {0x1534, 0x3c44},
+    {0x1536, 0x3c46},
+    {0x1557, 0x3c67},
+    {0x1b88, 0x4298},
+    {0x14c8, 0x3bd8},
+    {0x151b, 0x3c2b},
 };
 
 static u32 getMirrorMsgOverride(u32 msgId) {
@@ -1722,7 +1732,9 @@ void dMsgObject_c::readMessageGroupLocal(mDoDvdThd_mountXArchive_c** p_arcMount)
 #endif
 
     int msgGroup = dStage_stagInfo_GetMsgGroup(dComIfGp_getStage()->getStagInfo());
-    #if REGION_PAL
+#if TARGET_PC
+    snprintf(arcName, sizeof(arcName), "/res/%s/bmgres%d.arc", dusk::language::msg_folder(), msgGroup);
+#elif REGION_PAL
     switch (dComIfGs_getPalLanguage()) {
     case dSv_player_config_c::LANGUAGE_GERMAN:
         sprintf(arcName, "/res/Msgde/bmgres%d.arc", msgGroup);
@@ -1739,39 +1751,11 @@ void dMsgObject_c::readMessageGroupLocal(mDoDvdThd_mountXArchive_c** p_arcMount)
     default:
         sprintf(arcName, "/res/Msguk/bmgres%d.arc", msgGroup);
     }
-    #elif REGION_JPN
+#elif REGION_JPN
     sprintf(arcName, "/res/Msgjp/bmgres%d.arc", msgGroup);
-    #else
-#if TARGET_PC
-    // Original game UB
-
-    if (dusk::version::isRegionPal()) {
-        switch (dComIfGs_getPalLanguage()) {
-        case dSv_player_config_c::LANGUAGE_GERMAN:
-            snprintf(arcName, sizeof(arcName), "/res/Msgde/bmgres%d.arc", msgGroup);
-            break;
-        case dSv_player_config_c::LANGUAGE_FRENCH:
-            snprintf(arcName, sizeof(arcName), "/res/Msgfr/bmgres%d.arc", msgGroup);
-            break;
-        case dSv_player_config_c::LANGUAGE_SPANISH:
-            snprintf(arcName, sizeof(arcName), "/res/Msgsp/bmgres%d.arc", msgGroup);
-            break;
-        case dSv_player_config_c::LANGUAGE_ITALIAN:
-            snprintf(arcName, sizeof(arcName), "/res/Msgit/bmgres%d.arc", msgGroup);
-            break;
-        default:
-            snprintf(arcName, sizeof(arcName), "/res/Msguk/bmgres%d.arc", msgGroup);
-        }
-    } else if (dusk::version::isRegionJpn()) {
-        snprintf(arcName, sizeof(arcName), "/res/Msgjp/bmgres%d.arc", msgGroup);
-    } else {
-        snprintf(arcName, sizeof(arcName), "/res/Msgus/bmgres%d.arc", msgGroup);
-    }
-
 #else
     sprintf(arcName, "/res/Msgus/bmgres%d.arc", msgGroup);
 #endif
-    #endif
 
     *p_arcMount = mDoDvdThd_mountXArchive_c::create(arcName, 0, JKRArchive::MOUNT_MEM, NULL);
 

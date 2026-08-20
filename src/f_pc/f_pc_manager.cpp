@@ -21,9 +21,11 @@
 #include "f_pc/f_pc_priority.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include "dusk/latency.h"
-#include "dusk/latency_trace.h"
-#ifdef TARGET_PC
+#if TARGET_PC
 #include "dusk/detached_camera.h"
+#include "dusk/frame_interpolation.h"
+#include "dusk/tas_movie.h"
+#include "dusk/game_clock.h"
 #endif
 
 #include "tracy/Tracy.hpp"
@@ -69,19 +71,20 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
             }
 
 #ifdef TARGET_PC
-            // FRAME INTERP NOTE: Called in m_Do_main when interp is enabled
-            if (!dusk::frame_interp::is_enabled() && !dusk::low_latency_presentation_enabled())
+            // The main loop manages painting for separate presentation and low-latency modes.
+            if (!dusk::game_clock::g_frameTiming.separatePresentation &&
+                !dusk::low_latency_presentation_enabled())
 #endif
             {
-                dusk::latency_trace::mark("cAPIGph_Painter_original_before");
 #ifdef TARGET_PC
+                dusk::tas_movie::applyPresentationCamera(dComIfGd_getView());
                 dusk::detached_camera::apply(dComIfGd_getView());
 #endif
                 cAPIGph_Painter();
 #ifdef TARGET_PC
                 dusk::detached_camera::restore();
+                dusk::tas_movie::restorePresentationCamera();
 #endif
-                dusk::latency_trace::mark("cAPIGph_Painter_original_after");
             }
 
             if (!dPa_control_c::isStatus(1)) {
@@ -108,6 +111,9 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
 
             if (!fapGm_HIO_c::isCaptureScreen() || fapGm_HIO_c::getCaptureScreenDivH() != 1) {
 #ifdef TARGET_PC
+                // Gameplay execution is finished. Switch only now, before the
+                // first actor builds render and culling state.
+                dusk::tas_movie::applyPresentationCamera(dComIfGd_getView());
                 dusk::detached_camera::apply(dComIfGd_getView());
 #endif
                 fpcDw_Handler((fpcDw_HandlerFuncFunc)fpcM_DrawIterater, (fpcDw_HandlerFunc)fpcM_Draw);
@@ -116,6 +122,7 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
                     !dusk::low_latency_presentation_enabled())
                 {
                     dusk::detached_camera::restore();
+                    dusk::tas_movie::restorePresentationCamera();
                 }
 #endif
             }
@@ -128,12 +135,12 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
 
 #ifdef TARGET_PC
             if (!dusk::frame_interp::is_enabled() && dusk::low_latency_presentation_enabled()) {
-                dusk::latency_trace::mark("cAPIGph_Painter_low_latency_before");
                 cAPIGph_Painter();
                 dusk::detached_camera::restore();
-                dusk::latency_trace::mark("cAPIGph_Painter_low_latency_after");
+                dusk::tas_movie::restorePresentationCamera();
             } else {
                 dusk::detached_camera::restore();
+                dusk::tas_movie::restorePresentationCamera();
             }
 #endif
         } else if (!l_dvdError) {

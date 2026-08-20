@@ -51,9 +51,10 @@
 #include "aurora/lib/window.hpp"
 #include "d/actor/d_a_horse.h"
 #include "dusk/dusk.h"
-#include "dusk/endian.h"
+#include "helpers/endian.h"
 #include "dusk/frame_interpolation.h"
-#include "dusk/gx_helper.h"
+#include "dusk/gfx.hpp"
+#include "helpers/gx_helper.h"
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/load_position_overlay.hpp"
 #include "dusk/logging.h"
@@ -240,28 +241,9 @@ static void drawHeapMap() {
 
 #endif
 
-#if TARGET_PC
-// --- Native practice-saves menu ----------------------------------------------
-// Renders the practice-saves menu through the GX 2D pass using the game's own
-// message font, instead of imgui. Because it draws in the game's virtual 2D
-// space it scales with output resolution like the HUD, unlike imgui which
-// positions in raw output pixels. The draw object is queued into the 2D
-// translucent list; the actual rendering lives in ImGuiPracticeSaves::drawNative
-// (reached via the ImGuiConsole bridge) and no-ops when the menu is closed.
-class dDlst_duskPracticeMenu_c : public dDlst_base_c {
-public:
-    virtual void draw() { dusk::g_imguiConsole.DrawPracticeSavesNative(); }
-};
-
-static dDlst_duskPracticeMenu_c l_duskPracticeMenu;
-
-static void drawDuskPracticeMenu() {
-    dComIfGd_set2DXlu(&l_duskPracticeMenu);
-}
-
 class dDlst_duskLoadPositionOverlay_c : public dDlst_base_c {
 public:
-    virtual void draw() { dusk::DrawLoadPositionOverlayNative(); }
+    void draw() override { dusk::DrawLoadPositionOverlayNative(); }
 };
 
 static dDlst_duskLoadPositionOverlay_c l_duskLoadPositionOverlay;
@@ -269,7 +251,6 @@ static dDlst_duskLoadPositionOverlay_c l_duskLoadPositionOverlay;
 static void drawDuskLoadPositionOverlay() {
     dComIfGd_set2DXlu(&l_duskLoadPositionOverlay);
 }
-#endif
 
 static ResTIMG* createTimg(u16 width, u16 height, u32 format) {
     u32 bufferSize = GXGetTexBufferSize(width, height, format, GX_FALSE, 0) + 0x20;
@@ -297,36 +278,36 @@ static ResTIMG* createTimg(u16 width, u16 height, u32 format) {
     return timg;
 }
 
-JUTFader* mDoGph_gInf_c::mFader;
+DUSK_GAME_DATA JUTFader* mDoGph_gInf_c::mFader;
 
 #if PLATFORM_WII || PLATFORM_SHIELD || TARGET_PC
-ResTIMG* mDoGph_gInf_c::m_fullFrameBufferTimg;
-void* mDoGph_gInf_c::m_fullFrameBufferTex;
+DUSK_GAME_DATA ResTIMG* mDoGph_gInf_c::m_fullFrameBufferTimg;
+DUSK_GAME_DATA void* mDoGph_gInf_c::m_fullFrameBufferTex;
 #endif
 
-ResTIMG* mDoGph_gInf_c::mFrameBufferTimg;
+DUSK_GAME_DATA ResTIMG* mDoGph_gInf_c::mFrameBufferTimg;
 
-void* mDoGph_gInf_c::mFrameBufferTex;
+DUSK_GAME_DATA void* mDoGph_gInf_c::mFrameBufferTex;
 
-ResTIMG* mDoGph_gInf_c::mZbufferTimg;
+DUSK_GAME_DATA ResTIMG* mDoGph_gInf_c::mZbufferTimg;
 
-void* mDoGph_gInf_c::mZbufferTex;
+DUSK_GAME_DATA void* mDoGph_gInf_c::mZbufferTex;
 
-f32 mDoGph_gInf_c::mFadeRate;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::mFadeRate;
 
-f32 mDoGph_gInf_c::mFadeSpeed;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::mFadeSpeed;
 
-GXColor mDoGph_gInf_c::mBackColor = {0, 0, 0, 0};
+DUSK_GAME_DATA GXColor mDoGph_gInf_c::mBackColor = {0, 0, 0, 0};
 
-GXColor mDoGph_gInf_c::mFadeColor = {0, 0, 0, 0};
+DUSK_GAME_DATA GXColor mDoGph_gInf_c::mFadeColor = {0, 0, 0, 0};
 
-u8 mDoGph_gInf_c::mBlureFlag;
+DUSK_GAME_DATA u8 mDoGph_gInf_c::mBlureFlag;
 
-u8 mDoGph_gInf_c::mBlureRate;
+DUSK_GAME_DATA u8 mDoGph_gInf_c::mBlureRate;
 
-u8 mDoGph_gInf_c::mFade;
+DUSK_GAME_DATA u8 mDoGph_gInf_c::mFade;
 
-bool mDoGph_gInf_c::mAutoForcus;
+DUSK_GAME_DATA bool mDoGph_gInf_c::mAutoForcus;
 
 #if TARGET_PC || PLATFORM_WII
 static void captureFullFrameBuffer() {
@@ -486,16 +467,16 @@ void mDoGph_gInf_c::onBlure() {
 }
 
 #if PLATFORM_WII || PLATFORM_SHIELD || TARGET_PC
-TGXTexObj mDoGph_gInf_c::m_fullFrameBufferTexObj;
+DUSK_GAME_DATA TGXTexObj mDoGph_gInf_c::m_fullFrameBufferTexObj;
 #endif
 
-TGXTexObj mDoGph_gInf_c::mFrameBufferTexObj;
+DUSK_GAME_DATA TGXTexObj mDoGph_gInf_c::mFrameBufferTexObj;
 
-TGXTexObj mDoGph_gInf_c::mZbufferTexObj;
+DUSK_GAME_DATA TGXTexObj mDoGph_gInf_c::mZbufferTexObj;
 
-mDoGph_gInf_c::bloom_c mDoGph_gInf_c::m_bloom;
+DUSK_GAME_DATA mDoGph_gInf_c::bloom_c mDoGph_gInf_c::m_bloom;
 
-Mtx mDoGph_gInf_c::mBlureMtx;
+DUSK_GAME_DATA Mtx mDoGph_gInf_c::mBlureMtx;
 
 #if !PLATFORM_GCN
 cXyz mDoGph_gInf_c::csr_c::m_nowEffPos(0.0f, 0.0f, 0.0f);
@@ -610,15 +591,15 @@ void mDoGph_gInf_c::csr_c::particleExecute() {
 #endif
 
 #if WIDESCREEN_SUPPORT
-u8 mDoGph_gInf_c::mWideZoom;
+DUSK_GAME_DATA u8 mDoGph_gInf_c::mWideZoom;
 
-int mDoGph_gInf_c::m_minX;
+DUSK_GAME_DATA int mDoGph_gInf_c::m_minX;
 
-int mDoGph_gInf_c::m_minY;
+DUSK_GAME_DATA int mDoGph_gInf_c::m_minY;
 
-f32 mDoGph_gInf_c::m_minXF;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::m_minXF;
 
-f32 mDoGph_gInf_c::m_minYF;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::m_minYF;
 
 #if PLATFORM_WII || PLATFORM_SHIELD
 mDoGph_gInf_c::csr_c* mDoGph_gInf_c::m_baseCsr;
@@ -630,29 +611,29 @@ mDoGph_gInf_c::csr_c* mDoGph_gInf_c::m_csr;
 JKRHeap* mDoGph_gInf_c::m_heap;
 #endif
 
-u8 mDoGph_gInf_c::mWide = 1;
+DUSK_GAME_DATA u8 mDoGph_gInf_c::mWide = 1;
 
-f32 mDoGph_gInf_c::m_aspect = 1.3571428f;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::m_aspect = 1.3571428f;
 
-f32 mDoGph_gInf_c::m_scale = 1.0f;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::m_scale = 1.0f;
 
-f32 mDoGph_gInf_c::m_invScale = 1.0f;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::m_invScale = 1.0f;
 
-int mDoGph_gInf_c::m_maxX = FB_WIDTH_BASE - 1;
+DUSK_GAME_DATA int mDoGph_gInf_c::m_maxX = FB_WIDTH_BASE - 1;
 
-int mDoGph_gInf_c::m_maxY = FB_HEIGHT_BASE - 1;
+DUSK_GAME_DATA int mDoGph_gInf_c::m_maxY = FB_HEIGHT_BASE - 1;
 
-int mDoGph_gInf_c::m_width = FB_WIDTH_BASE;
+DUSK_GAME_DATA int mDoGph_gInf_c::m_width = FB_WIDTH_BASE;
 
-int mDoGph_gInf_c::m_height = FB_HEIGHT_BASE;
+DUSK_GAME_DATA int mDoGph_gInf_c::m_height = FB_HEIGHT_BASE;
 
-f32 mDoGph_gInf_c::m_maxXF = FB_WIDTH_BASE - 1;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::m_maxXF = FB_WIDTH_BASE - 1;
 
-f32 mDoGph_gInf_c::m_maxYF = FB_HEIGHT_BASE - 1;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::m_maxYF = FB_HEIGHT_BASE - 1;
 
-f32 mDoGph_gInf_c::m_widthF = FB_WIDTH_BASE;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::m_widthF = FB_WIDTH_BASE;
 
-f32 mDoGph_gInf_c::m_heightF = FB_HEIGHT_BASE;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::m_heightF = FB_HEIGHT_BASE;
 
 struct tvSize {
     u16 width;
@@ -661,7 +642,7 @@ struct tvSize {
 #ifndef TARGET_PC
 const
 #endif
-tvSize l_tvSize[2] = {
+DUSK_GAME_DATA tvSize l_tvSize[2] = {
     {FB_WIDTH_BASE, FB_HEIGHT_BASE},
     {808, FB_HEIGHT_BASE},
 };
@@ -806,14 +787,14 @@ void mDoGph_gInf_c::setWideZoomLightProjection(Mtx& m) {
 #endif
 
 #if TARGET_PC
-f32 mDoGph_gInf_c::hudAspectScaleDown = 1.0f;
-f32 mDoGph_gInf_c::hudAspectScaleUp = 1.0f;
-f32 mDoGph_gInf_c::m_safeMinXF = 0.0f;
-f32 mDoGph_gInf_c::m_safeMinYF = 0.0f;
-f32 mDoGph_gInf_c::m_safeMaxXF = FB_WIDTH_BASE;
-f32 mDoGph_gInf_c::m_safeMaxYF = FB_HEIGHT_BASE;
-f32 mDoGph_gInf_c::m_safeWidthF = FB_WIDTH_BASE;
-f32 mDoGph_gInf_c::m_safeHeightF = FB_HEIGHT_BASE;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::hudAspectScaleDown = 1.0f;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::hudAspectScaleUp = 1.0f;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::m_safeMinXF = 0.0f;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::m_safeMinYF = 0.0f;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::m_safeMaxXF = FB_WIDTH_BASE;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::m_safeMaxYF = FB_HEIGHT_BASE;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::m_safeWidthF = FB_WIDTH_BASE;
+DUSK_GAME_DATA f32 mDoGph_gInf_c::m_safeHeightF = FB_HEIGHT_BASE;
 
 void mDoGph_gInf_c::updateSafeAreaBounds() {
     m_safeMinXF = m_minXF;
@@ -1793,16 +1774,36 @@ void mDoGph_gInf_c::bloom_c::draw2() {
     }
 }
 
-// April-9 (pre-"Widescreen rework") Classic bloom path. Keep its bloom buffers
-// 1:1 with the active render resolution and submit its viewport in render space.
 void mDoGph_gInf_c::bloom_c::drawClassic() {
+    drawClassicPass(false);
+}
+
+void mDoGph_gInf_c::bloom_c::drawLegacy() {
+    drawClassicPass(true);
+}
+
+// Classic and Legacy use the same original bloom algorithm. Classic retains the
+// high-resolution blur path formerly hidden behind drawShield(true), while Legacy
+// reproduces the live render-space routing used by the April 9 Aurora build.
+void mDoGph_gInf_c::bloom_c::drawClassicPass(bool legacy) {
     ZoneScoped;
     bool enabled = mEnable && m_buffer != NULL;
     if (mMonoColor.a != 0 || enabled) {
-        f32 width = JUTVideo::getManager()->getRenderWidth();
-        f32 height = JUTVideo::getManager()->getRenderHeight();
-        GXSetViewportRender(0.0f, 0.0f, width, height, 0.0f, 1.0f);
-        GXSetScissorRender(0, 0, width, height);
+        u32 blurRadius =
+            legacy ? 0
+                   : std::max(1u, JUTVideo::getManager()->getRenderHeight() / FB_HEIGHT_BASE);
+        u32 copyBlurRadius = legacy ? 0 : std::max(1u, blurRadius / 2);
+        f32 width = legacy ? JUTVideo::getManager()->getRenderWidth()
+                           : mDoGph_gInf_c::getWidth();
+        f32 height = legacy ? JUTVideo::getManager()->getRenderHeight()
+                            : mDoGph_gInf_c::getHeight();
+        if (legacy) {
+            GXSetViewportRender(0.0f, 0.0f, width, height, 0.0f, 1.0f);
+            GXSetScissorRender(0, 0, width, height);
+        } else {
+            GXSetViewport(0.0f, 0.0f, width, height, 0.0f, 1.0f);
+            GXSetScissor(0, 0, width, height);
+        }
 
         GXLoadTexObj(getFrameBufferTexObj(), GX_TEXMAP0);
         GXSetNumChans(0);
@@ -1842,7 +1843,11 @@ void mDoGph_gInf_c::bloom_c::drawClassic() {
             mDoGph_drawFilterQuad(4, 4);
         }
         if (enabled) {
-            GXCreateFrameBuffer(width, height);
+            if (legacy) {
+                GXCreateFrameBuffer(width, height);
+            } else {
+                GXCreateScaledFrameBuffer(width, height, blurRadius);
+            }
 
             GXSetNumTevStages(3);
             GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
@@ -1869,7 +1874,11 @@ void mDoGph_gInf_c::bloom_c::drawClassic() {
             GXSetTevAlphaOp(GX_TEVSTAGE2, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE,
                             GX_TEVPREV);
             GXSetBlendMode(GX_BM_NONE, GX_BL_ZERO, GX_BL_ZERO, GX_LO_OR);
-            GXColorS10 tevColor0 = {(s16)-mPoint, (s16)-mPoint, (s16)-mPoint, 0x40};
+            s16 bloomAlpha =
+                legacy ? 0x40
+                       : s16(0x40 * dusk::getSettings().game.bloomMultiplier.getValue());
+            GXColorS10 tevColor0 = {(s16)-mPoint, (s16)-mPoint, (s16)-mPoint,
+                                    bloomAlpha};
             GXSetTevColorS10(GX_TEVREG0, tevColor0);
             GXColor tevColor1 = {mBlureRatio, mBlureRatio, mBlureRatio, mBlureRatio};
             GXSetTevColor(GX_TEVREG1, tevColor1);
@@ -1884,6 +1893,9 @@ void mDoGph_gInf_c::bloom_c::drawClassic() {
             void* zBufferTex = getZbufferTex();
             GXSetTexCopySrc(0, 0, width / 2, height / 2);
             GXSetTexCopyDst(width / 4, height / 4, GX_TF_RGBA8, GX_TRUE);
+            if (!legacy) {
+                GXSetCopyBlur(copyBlurRadius);
+            }
             GXCopyTex(zBufferTex, 0);
 
             TGXTexObj tmp_tex1;
@@ -1938,6 +1950,9 @@ void mDoGph_gInf_c::bloom_c::drawClassic() {
             GXSetTexCopyDst(width / 8, height / 8, GX_TF_RGBA8, GX_TRUE);
 
             // Downsample EFB 1/4 to zBufferTex 1/8 (tmp_tex2).
+            if (!legacy) {
+                GXSetCopyBlur(copyBlurRadius);
+            }
             GXCopyTex(zBufferTex, GX_FALSE);
 
             TGXTexObj tmp_tex2;
@@ -1958,6 +1973,9 @@ void mDoGph_gInf_c::bloom_c::drawClassic() {
             // Now that we've upsampled and filtered our final bloom, copy 1/4 buffer back to zBufferTex.
             GXSetTexCopySrc(0, 0, width / 4, height / 4);
             GXSetTexCopyDst(width / 4, height / 4, GX_TF_RGBA8, GX_FALSE);
+            if (!legacy) {
+                GXSetCopyBlur(copyBlurRadius);
+            }
             GXCopyTex(zBufferTex, GX_FALSE);
 
             GXRestoreFrameBuffer();
@@ -1992,6 +2010,10 @@ void mDoGph_gInf_c::bloom_c::draw() {
 #if TARGET_PC
     if (dusk::getSettings().game.bloomMode.getValue() == dusk::BloomMode::Classic) {
         drawClassic();
+        return;
+    }
+    if (dusk::getSettings().game.bloomMode.getValue() == dusk::BloomMode::Legacy) {
+        drawLegacy();
         return;
     }
 #endif
@@ -2488,15 +2510,11 @@ int mDoGph_Painter() {
 
 #if TARGET_PC
     dusk::g_imguiConsole.PreDraw();
+    drawDuskLoadPositionOverlay();
 #endif
 
     #if DEBUG
     drawHeapMap();
-    #endif
-
-    #if TARGET_PC
-    drawDuskPracticeMenu();
-    drawDuskLoadPositionOverlay();
     #endif
 
 #ifdef TARGET_PC
@@ -2643,6 +2661,10 @@ int mDoGph_Painter() {
 
             GXSetClipMode(GX_CLIP_ENABLE);
 
+#if TARGET_PC
+            dusk::mods::gfx_run_stage(GFX_STAGE_SCENE_BEGIN, &camera_p->view, view_port);
+#endif
+
             #if DEBUG
             // "drawing up to Background (Translucent) (Rendering)"
             fapGm_HIO_c::stopCpuTimer("背景（半透明）描画まで（レンダリング）");
@@ -2670,6 +2692,10 @@ int mDoGph_Painter() {
             #endif
 
             GX_DEBUG_GROUP(dComIfGd_drawShadow, camera_p->view.viewMtx);
+
+#if TARGET_PC
+            dusk::mods::gfx_run_stage(GFX_STAGE_SCENE_AFTER_TERRAIN, &camera_p->view, view_port);
+#endif
 
             #if DEBUG
             // "shadow drawing (Rendering)"
@@ -2699,6 +2725,10 @@ int mDoGph_Painter() {
 #endif
 
             GX_DEBUG_GROUP(dComIfGd_drawOpaListPacket);
+
+#if TARGET_PC
+            dusk::mods::gfx_run_stage(GFX_STAGE_SCENE_AFTER_OPAQUE, &camera_p->view, view_port);
+#endif
 
             #if DEBUG
             // "drawing up to special-use drawing (Opaque) except J3D (Rendering)"
@@ -3028,6 +3058,10 @@ int mDoGph_Painter() {
     captureScreenSetPort();
     #endif
 
+#if TARGET_PC
+    dusk::mods::gfx_run_stage(GFX_STAGE_FRAME_BEFORE_HUD);
+#endif
+
     if (fapGmHIO_get2Ddraw()) {
         Mtx m4;
         cMtx_copy(j3dSys.getViewMtx(), m4);
@@ -3085,6 +3119,10 @@ int mDoGph_Painter() {
         dComIfGd_draw2DXlu();
     }
 
+#if TARGET_PC
+    dusk::mods::gfx_run_stage(GFX_STAGE_FRAME_AFTER_HUD);
+#endif
+
     #if DEBUG
     if (dJcame_c::get()) {
         dJcame_c::get()->show2D();
@@ -3095,13 +3133,20 @@ int mDoGph_Painter() {
     // "drawing up to 2D-fore particle (Rendering)"
     fapGm_HIO_c::stopCpuTimer("２Ｄ前（？）パーティクル描画まで（レンダリング）");
     JAWExtSystem::draw();
-    #endif
+#endif
 
 #if TARGET_PC
     dusk::g_imguiConsole.PostDraw();
 #endif
 
     mDoGph_gInf_c::endRender();
+
+#if TARGET_PC
+    // decompGZ submits its persistent overlay after the game's painter has
+    // completely finished. In particular, keep this after endRender(): load
+    // transitions may apply their final scene/fader output there.
+    dusk::g_imguiConsole.DrawPracticeSavesNative();
+#endif
 
     #if WIDESCREEN_SUPPORT
     mDoGph_gInf_c::offWideZoom();

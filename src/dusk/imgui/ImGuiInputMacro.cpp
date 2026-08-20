@@ -4,6 +4,7 @@
 #include "dusk/input_macro.h"
 #include "dusk/io.hpp"
 #include "dusk/main.h"
+#include "dusk/tas_movie.h"
 
 #include "absl/strings/escaping.h"
 #include "fmt/format.h"
@@ -107,13 +108,17 @@ namespace dusk {
             const bool recording = state == input_macro::State::Recording;
             const bool playing = state == input_macro::State::Playing;
             const bool hasRecording = input_macro::hasRecording();
-            const bool busy = recording || playing;
+            const bool tasBusy = tas_movie::active();
+            const bool busy = recording || playing || tasBusy;
 
             if (!sLoaded) {
                 LoadMacrosFile();
             }
 
             ImGui::Text("State: %s", StateName(state));
+            if (tasBusy) {
+                ImGui::TextDisabled("TAS Movie currently owns deterministic input.");
+            }
             ImGui::Text("Frames: %zu", input_macro::recordedFrames());
             if (playing) {
                 ImGui::Text("Playback: %zu", input_macro::playbackFrame());
@@ -234,13 +239,13 @@ namespace dusk {
                     input_macro::stopRecording();
                 }
             } else {
-                if (playing) {
+                if (playing || tasBusy) {
                     ImGui::BeginDisabled();
                 }
                 if (ImGui::Button("Start Recording")) {
                     input_macro::startRecording();
                 }
-                if (playing) {
+                if (playing || tasBusy) {
                     ImGui::EndDisabled();
                 }
             }
@@ -251,25 +256,25 @@ namespace dusk {
                     input_macro::stopPlayback();
                 }
             } else {
-                if (!hasRecording || recording) {
+                if (!hasRecording || recording || tasBusy) {
                     ImGui::BeginDisabled();
                 }
                 if (ImGui::Button("Play")) {
                     input_macro::startPlayback();
                 }
-                if (!hasRecording || recording) {
+                if (!hasRecording || recording || tasBusy) {
                     ImGui::EndDisabled();
                 }
             }
 
             ImGui::SameLine();
-            if (recording || playing || !hasRecording) {
+            if (recording || playing || !hasRecording || tasBusy) {
                 ImGui::BeginDisabled();
             }
             if (ImGui::Button("Clear")) {
                 input_macro::clear();
             }
-            if (recording || playing || !hasRecording) {
+            if (recording || playing || !hasRecording || tasBusy) {
                 ImGui::EndDisabled();
             }
 

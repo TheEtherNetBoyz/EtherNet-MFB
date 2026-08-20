@@ -15,6 +15,8 @@
 #include "m_Do/m_Do_controller_pad.h"
 #include <dusk/autosave.h>
 
+#include "dusk/version.hpp"
+
 dBrightCheck_c::dBrightCheck_c(JKRArchive* i_archive) {
     mArchive = i_archive;
     mBrightCheck.mMsgString = JKR_NEW dMsgString_c();
@@ -39,7 +41,16 @@ void dBrightCheck_c::screenSet() {
         MULTI_CHAR('font_a1'), MULTI_CHAR('font_at2'), MULTI_CHAR('font_at3'), MULTI_CHAR('font_at4'), MULTI_CHAR('font_at'),
     };
 
-    #if (VERSION == VERSION_GCN_JPN) || (VERSION == VERSION_WII_JPN)
+    #if TARGET_PC
+    static u64 const txTV_jpn[] = {
+        MULTI_CHAR('menu_t6s'), MULTI_CHAR('menu_t6'),  MULTI_CHAR('menu_t9s'), MULTI_CHAR('menu_t9'),  MULTI_CHAR('menut10s'),
+        MULTI_CHAR('menu_t10'), MULTI_CHAR('menu_t7s'), MULTI_CHAR('menu_t7'),  MULTI_CHAR('menu_t8s'), MULTI_CHAR('menu_t8'),
+    };
+    static u64 const txTV[] = {
+        MULTI_CHAR('menu_t61'), MULTI_CHAR('menu_t2'),  MULTI_CHAR('menu_t91'), MULTI_CHAR('menu_t1'),  MULTI_CHAR('menut101'),
+        MULTI_CHAR('menu_t01'), MULTI_CHAR('menu_t71'), MULTI_CHAR('menu_t3'),  MULTI_CHAR('menu_t81'), MULTI_CHAR('menu_t4'),
+    };
+    #elif (VERSION == VERSION_GCN_JPN) || (VERSION == VERSION_WII_JPN)
     static u64 const txTV[] = {
         MULTI_CHAR('menu_t6s'), MULTI_CHAR('menu_t6'),  MULTI_CHAR('menu_t9s'), MULTI_CHAR('menu_t9'),  MULTI_CHAR('menut10s'),
         MULTI_CHAR('menu_t10'), MULTI_CHAR('menu_t7s'), MULTI_CHAR('menu_t7'),  MULTI_CHAR('menu_t8s'), MULTI_CHAR('menu_t8'),
@@ -51,7 +62,14 @@ void dBrightCheck_c::screenSet() {
     };
     #endif
 
-    #if (VERSION == VERSION_GCN_JPN) || (VERSION == VERSION_WII_JPN)
+    #if TARGET_PC
+    static u64 const txTVhide_jpn[] = {
+        MULTI_CHAR('fmenu_6n'), MULTI_CHAR('fmenu_9n'), MULTI_CHAR('fmenu_10'), MULTI_CHAR('fmenu_7n'), MULTI_CHAR('fmenu_8n'),
+    };
+    static u64 const txTVhide[] = {
+        MULTI_CHAR('menu_6n'), MULTI_CHAR('menu_9n'), MULTI_CHAR('menu_10n'), MULTI_CHAR('menu_7n'), MULTI_CHAR('menu_8n'),
+    };
+    #elif (VERSION == VERSION_GCN_JPN) || (VERSION == VERSION_WII_JPN)
     static u64 const txTVhide[] = {
         MULTI_CHAR('fmenu_6n'), MULTI_CHAR('fmenu_9n'), MULTI_CHAR('fmenu_10'), MULTI_CHAR('fmenu_7n'), MULTI_CHAR('fmenu_8n'),
     };
@@ -65,9 +83,22 @@ void dBrightCheck_c::screenSet() {
     JUT_ASSERT(0, mBrightCheck.Scr != NULL);
     mBrightCheck.Scr->setPriority("zelda_option_check.blo", 0x1100000, mArchive);
 
+    IF_DUSK_BLOCK(dusk::version::getGameVersion() >= dusk::version::GameVersion::WiiJpn)
     mBrightCheck.Scr->search(MULTI_CHAR('g_abtn_n'))->hide();
+    IF_DUSK_BLOCK_END
 
-    #if (VERSION == VERSION_GCN_JPN) || (VERSION == VERSION_WII_JPN)
+    #if TARGET_PC
+    J2DTextBox* settings_text;
+    if (dusk::version::isRegionJpn()) {
+        settings_text = (J2DTextBox*)mBrightCheck.Scr->search(MULTI_CHAR('t_t00'));
+        mBrightCheck.Scr->search(MULTI_CHAR('t_t00'))->show();
+        mBrightCheck.Scr->search(MULTI_CHAR('f_t00'))->hide();
+    } else {
+        settings_text = (J2DTextBox*)mBrightCheck.Scr->search(MULTI_CHAR('f_t00'));
+        mBrightCheck.Scr->search(MULTI_CHAR('f_t00'))->show();
+        mBrightCheck.Scr->search(MULTI_CHAR('t_t00'))->hide();
+    }
+    #elif (VERSION == VERSION_GCN_JPN) || (VERSION == VERSION_WII_JPN)
     J2DTextBox* settings_text = (J2DTextBox*)mBrightCheck.Scr->search(MULTI_CHAR('t_t00'));
     mBrightCheck.Scr->search(MULTI_CHAR('t_t00'))->show();
     mBrightCheck.Scr->search(MULTI_CHAR('f_t00'))->hide();
@@ -83,7 +114,17 @@ void dBrightCheck_c::screenSet() {
 
     J2DTextBox* btna_text[5];
     for (int i = 0; i < 5; i++) {
-        #if (VERSION == VERSION_GCN_JPN) || (VERSION == VERSION_WII_JPN)
+        #if TARGET_PC
+        if (dusk::version::isJpnOrLessThanWiiJpn()) {
+            btna_text[i] = (J2DTextBox*)mBrightCheck.Scr->search(tv_btnA[i]);
+            if (dusk::version::getGameVersion() >= dusk::version::GameVersion::WiiJpn) {
+                mBrightCheck.Scr->search(ftv_btnA[i])->hide();
+            }
+        } else {
+            btna_text[i] = (J2DTextBox*)mBrightCheck.Scr->search(ftv_btnA[i]);
+            mBrightCheck.Scr->search(tv_btnA[i])->hide();
+        }
+        #elif (VERSION == VERSION_GCN_JPN) || (VERSION == VERSION_WII_JPN)
         btna_text[i] = (J2DTextBox*)mBrightCheck.Scr->search(tv_btnA[i]);
         mBrightCheck.Scr->search(ftv_btnA[i])->hide();
         #else
@@ -97,15 +138,17 @@ void dBrightCheck_c::screenSet() {
     }
 
     for (int i = 0; i < 5; i++) {
-        mBrightCheck.Scr->search(txTVhide[i])->hide();
+        mBrightCheck.Scr->search(DUSK_IF_ELSE(dusk::version::isRegionJpn() ? txTVhide_jpn[i] : txTVhide[i], txTVhide[i]))->hide();
     }
 
     for (int i = 0; i < 10; i++) {
-        J2DTextBox* check_text = (J2DTextBox*)mBrightCheck.Scr->search(txTV[i]);
+        J2DTextBox* check_text = (J2DTextBox*)mBrightCheck.Scr->search(DUSK_IF_ELSE(dusk::version::isRegionJpn() ? txTV_jpn[i] : txTV[i], txTV[i]));
         check_text->setFont(mDoExt_getMesgFont());
 
-        #if (VERSION != VERSION_GCN_JPN) && (VERSION != VERSION_WII_JPN)
+        #if TARGET_PC || ((VERSION != VERSION_GCN_JPN) && (VERSION != VERSION_WII_JPN))
+        IF_DUSK_BLOCK(!dusk::version::isRegionJpn())
         check_text->setCharSpace(0.0f);
+        IF_DUSK_BLOCK_END
         #endif
 
         if (i < 2) {
@@ -183,7 +226,9 @@ void dBrightCheck_c::brightCheckWide() {
 
     // Confirm A Button
     mBrightCheck.Scr->search(MULTI_CHAR('abtn_n'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
-    mBrightCheck.Scr->search(MULTI_CHAR('gcabtn_n'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
+    if (dusk::version::getGameVersion() >= dusk::version::GameVersion::WiiJpn) {
+        mBrightCheck.Scr->search(MULTI_CHAR('gcabtn_n'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
+    }
 
     // Text
     mBrightCheck.Scr->search(MULTI_CHAR('menu_6n'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);

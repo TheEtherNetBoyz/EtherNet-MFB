@@ -1,9 +1,11 @@
 #include <algorithm>
 #include <array>
+#include <aurora/aurora.h>
+#include <chrono>
+#include <cstring>
 #include <numeric>
 #include <string>
 #include <string_view>
-#include <chrono>
 
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include "imgui.h"
@@ -30,6 +32,7 @@
 #include "dusk/livesplit.h"
 #include "dusk/texture_replacements.hpp"
 #include "dusk/main.h"
+#include "dusk/presentation.hpp"
 #include "dusk/settings.h"
 #include "dusk/ui/ui.hpp"
 #include "f_pc/f_pc_manager.h"
@@ -60,6 +63,7 @@ struct LinkTeleportPoint {
 };
 
 LinkTeleportPoint sLinkTeleportPoint;
+constexpr float kTurboTimeScale = 4.f;
 
 ImGuiWindow* FindDragScrollWindow(ImGuiWindow* window) {
     while (window != nullptr) {
@@ -145,7 +149,7 @@ bool hotkey_event_pressed(const SDL_Event& event, const dusk::UserSettings::Hotk
 
 void toggle_config_bool(dusk::config::ConfigVar<bool>& value) {
     value.setValue(!value.getValue());
-    dusk::config::Save();
+    dusk::config::save();
 }
 
 void toggle_texture_pack() {
@@ -350,7 +354,7 @@ namespace dusk {
         if (hotkey_event_pressed(event, hotkeys.toggleFullscreen)) {
             getSettings().video.enableFullscreen.setValue(!getSettings().video.enableFullscreen);
             VISetWindowFullscreen(getSettings().video.enableFullscreen);
-            config::Save();
+            config::save();
         }
 
         if (hotkey_event_pressed(event, hotkeys.hideShowImGuiMenu)) {
@@ -378,8 +382,29 @@ namespace dusk {
     }
 
     void ImGuiConsole::UpdateSettings() {
-        getTransientSettings().skipFrameRateLimit = getSettings().game.enableTurboKeybind &&
-            (hotkey_down(getSettings().hotkeys.turboSpeed) || getActionBindHoldAnyPort(ActionBinds::TURBO_SPEED_BUTTON));
+        static bool previousTurboActive = false;
+        static bool previousSlowActive = false;
+        static float previousTimeScale = 1.0f;
+
+        const bool turboActive = getSettings().game.enableTurboKeybind &&
+            (hotkey_down(getSettings().hotkeys.turboSpeed) ||
+             getActionBindHoldAnyPort(ActionBinds::TURBO_SPEED_BUTTON));
+        const bool slowDown = turboActive && ImGui::GetIO().KeyShift;
+        getTransientSettings().skipFrameRateLimit = turboActive;
+        if (turboActive != previousTurboActive) {
+            getTransientSettings().turboMode = turboActive;
+            presentation::update_frame_rate_preference();
+            if (turboActive) {
+                previousTimeScale = aurora_get_timescale();
+                aurora_set_timescale(slowDown ? 1.f / kTurboTimeScale : kTurboTimeScale);
+            } else {
+                aurora_set_timescale(previousTimeScale);
+            }
+        } else if (turboActive && slowDown != previousSlowActive) {
+            aurora_set_timescale(slowDown ? 1.f / kTurboTimeScale : kTurboTimeScale);
+        }
+        previousTurboActive = turboActive;
+        previousSlowActive = slowDown;
 
         static int sFrameBufferScaleApplyFrames = 0;
         static int sLastFrameBufferScale = getSettings().game.internalResolutionScale.getValue();
@@ -463,11 +488,25 @@ namespace dusk {
 
         UpdateSettings();
 
+        if (ImGui::IsKeyPressed(ImGuiKey_F11)) {
+            getSettings().video.enableFullscreen.setValue(!getSettings().video.enableFullscreen);
+            VISetWindowFullscreen(getSettings().video.enableFullscreen);
+            config::save();
+        }
+
         if (getSettings().game.enableResetKeybind && ImGui::GetIO().KeyCtrl &&
             ImGui::IsKeyReleased(ImGuiKey_R) && !fpcM_SearchByName(fpcNm_LOGO_SCENE_e))
         {
             input_macro::recordResetRequest();
             JUTGamePad::C3ButtonReset::sResetSwitchPushing = true;
+        }
+
+        if (ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_F1)) {
+            if (getSettings().backend.enableAdvancedSettings) {
+                m_isHidden = !m_isHidden;
+            } else {
+                m_isHidden = true;
+            }
         }
 
         bool showMenu = !m_isHidden;
@@ -535,7 +574,7 @@ namespace dusk {
             if constexpr (SupportsProcessRestart) {
                 if (ImGui::Button("Retry (Auto backend)")) {
                     getSettings().backend.graphicsBackend.setValue("auto");
-                    config::Save();
+                    config::save();
                     RestartRequested = true;
                     IsRunning = false;
                 }
@@ -557,6 +596,7 @@ namespace dusk {
         m_menuTools.ShowInputViewer();
 
         if (dusk::IsGameLaunched && !dusk::getSettings().game.speedrunMode) {
+            m_menuTools.UpdateTasMovie();
             m_menuTools.ShowDebugOverlay();
             m_menuTools.ShowCameraOverlay();
             m_menuTools.ShowProcessManager();
@@ -568,6 +608,7 @@ namespace dusk {
             m_menuTools.ShowSaveEditor();
             m_menuTools.ShowPracticeSaves();
             m_menuTools.ShowInputMacro();
+            m_menuTools.ShowTasMovie();
             m_menuTools.ShowStateShare();
             m_menuTools.ShowActorSpawner();
         }

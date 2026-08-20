@@ -176,6 +176,11 @@ static s32 r1;
 
 static s32 r2;
 
+#if TARGET_PC
+static u64 sRndPrimaryCalls;
+static u64 sRndSecondaryCalls;
+#endif
+
 void cM_initRnd(int s0, int s1, int s2) {
     r0 = s0;
     r1 = s1;
@@ -187,6 +192,9 @@ void cM_initRnd(int s0, int s1, int s2) {
  * @return a random value
  */
 f32 cM_rnd() {
+#if TARGET_PC
+    ++sRndPrimaryCalls;
+#endif
     r0 = (r0 * 171) % 30269;
     r1 = (r1 * 172) % 30307;
     r2 = (r2 * 170) % 30323;
@@ -226,6 +234,9 @@ void cM_initRnd2(int s0, int s1, int s2) {
 }
 
 f32 cM_rnd2() {
+#if TARGET_PC
+    ++sRndSecondaryCalls;
+#endif
     r02 = (r02 * 171) % 30269;
     r12 = (r12 * 172) % 30307;
     r22 = (r22 * 170) % 30323;
@@ -241,3 +252,35 @@ f32 cM_rndF2(f32 max) {
 f32 cM_rndFX2(f32 max) {
     return max * (cM_rnd2() - 0.5f) * 2.0f;
 }
+
+#if TARGET_PC
+void cM_getRndState(cM_RndState* state) {
+    if (state == nullptr) {
+        return;
+    }
+    state->primary[0] = r0;
+    state->primary[1] = r1;
+    state->primary[2] = r2;
+    state->secondary[0] = r02;
+    state->secondary[1] = r12;
+    state->secondary[2] = r22;
+}
+
+void cM_setRndState(const cM_RndState* state) {
+    if (state == nullptr) {
+        return;
+    }
+    cM_initRnd(state->primary[0], state->primary[1], state->primary[2]);
+    cM_initRnd2(state->secondary[0], state->secondary[1], state->secondary[2]);
+    sRndPrimaryCalls = 0;
+    sRndSecondaryCalls = 0;
+}
+
+void cM_getRndCallCounts(cM_RndCallCounts* counts) {
+    if (counts == nullptr) {
+        return;
+    }
+    counts->primary = sRndPrimaryCalls;
+    counts->secondary = sRndSecondaryCalls;
+}
+#endif

@@ -274,8 +274,9 @@ inline void getItemFunc(u8 i_itemNo) {
     item_func_ptr[i_itemNo]();
 }
 
-void execItemGet(u8 i_itemNo) {
+void execItemGet(u8 i_itemNo IF_DUSK_ARG(u32 i_itemGiveTag) IF_DUSK_ARG(fopAc_ac_c* i_giver)) {
     getItemFunc(i_itemNo);
+    IF_DUSK(dusk::mods::item_granted(i_itemNo, i_itemGiveTag, i_giver);)
 }
 
 static int (*item_getcheck_func_ptr[256])() = {
@@ -2187,4 +2188,4 @@ int addBombCount(u8 i_bombType, u8 i_addNum) {
     return i_addNum;
 }
 
-u8* dEnemyItem_c::mData;
+DUSK_GAME_DATA u8* dEnemyItem_c::mData;

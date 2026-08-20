@@ -142,7 +142,7 @@ void persistCurrentSlidePosition(const daAlink_c* link) {
     game.rupeeSlideRoom.setValue(s_loggedSlideRoom);
     game.rupeeSlideLayer.setValue(s_loggedSlideLayer);
     game.rupeeSlidePositionValid.setValue(true);
-    config::Save();
+    config::save();
 }
 
 void updateLoggedSlidePosition(const daAlink_c* link) {

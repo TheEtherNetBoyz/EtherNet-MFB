@@ -19,6 +19,7 @@
 #include "dusk/frame_interpolation.h"
 #include "dusk/livesplit.h"
 #include "dusk/logging.h"
+#include "dusk/mod_loader.hpp"
 #include "f_op/f_op_camera_mng.h"
 #include "f_op/f_op_draw_tag.h"
 #include "f_op/f_op_overlap_mng.h"
@@ -827,7 +828,7 @@ static void fapGm_AfterRecord() {
     fapGm_After();
 }
 
-BOOL isRecording = false;
+DUSK_GAME_DATA BOOL isRecording = false;
 
 static void duskExecute() {
     dusk::menu_pointer::begin_game_frame();
@@ -901,6 +902,8 @@ static void duskExecute() {
     if (dusk::getSettings().game.infiniteOxygen) {
         dComIfGp_setOxygen(dComIfGp_getMaxOxygen());
     }
+
+    dusk::mods::ModLoader::instance().tick();
 }
 #endif
 
@@ -934,42 +937,7 @@ void fapGm_Execute() {
 #endif
 }
 
-#if TARGET_PC
-void fapGm_ExecuteTurboLogicOnly() {
-    ZoneScoped;
-
-    duskExecute();
-
-    if (!dPa_control_c::isStatus(1)) {
-        fpcDt_Handler();
-    } else {
-        dPa_control_c::offStatus(1);
-    }
-
-    if (!fpcPi_Handler()) {
-        JUT_ASSERT(936, FALSE);
-    }
-
-    if (!fpcCt_Handler()) {
-        JUT_ASSERT(940, FALSE);
-    }
-
-    fapGm_Before();
-
-    if (!fapGm_HIO_c::isCaptureScreen()) {
-        fpcEx_Handler((fpcLnIt_QueueFunc)fpcM_Execute);
-    }
-
-    fapGm_AfterRecord();
-
-    cCt_Counter(0);
-    dusk::speedrun::onGameFrame();
-    dusk::AchievementSystem::get().tick();
-    dusk::menu_pointer::end_game_frame();
-}
-#endif
-
-fapGm_HIO_c g_HIO;
+DUSK_GAME_DATA fapGm_HIO_c g_HIO;
 
 void fapGm_Create() {
     // unused, unknown purpose

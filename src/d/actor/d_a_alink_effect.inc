@@ -8,9 +8,9 @@
 #include "d/actor/d_a_alink.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_k_wmark.h"
-#include "dusk/gx_helper.h"
+#include "helpers/gx_helper.h"
 
-const EffParamProc daAlink_c::m_fEffParamProc[] = {
+DUSK_GAME_DATA const EffParamProc daAlink_c::m_fEffParamProc[] = {
     &daAlink_c::setEffectFrontRollParam,
     &daAlink_c::setEffectSlipParam,
     &daAlink_c::setEffectSmallLandParam,
@@ -1199,6 +1199,31 @@ void daAlink_c::setLightningSwordEffect() {
         }
     }
 }
+
+#if TARGET_PC
+void daAlink_c::prepareSwordEffectInterpolation() {
+    if (mSwordModel == NULL) {
+        return;
+    }
+
+    JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(field_0x321c);
+    if (emitter != NULL) {
+        dusk::frame_interp::record_final_mtx(mSwordModel->getBaseTRMtx(), emitter);
+    }
+
+    emitter = dComIfGp_particle_getEmitter(field_0x3294);
+    if (emitter != NULL) {
+        dusk::frame_interp::record_final_mtx(mSwordModel->getBaseTRMtx(), emitter);
+    }
+
+    for (int i = 0; i < 3; ++i) {
+        emitter = dComIfGp_particle_getEmitter(field_0x327c[i]);
+        if (emitter != NULL) {
+            dusk::frame_interp::record_final_mtx(mSwordModel->getBaseTRMtx(), emitter);
+        }
+    }
+}
+#endif
 
 void daAlink_c::setWolfRollAttackEffect() {
     cXyz pos(current.pos.x, current.pos.y + 80.0f, current.pos.z);

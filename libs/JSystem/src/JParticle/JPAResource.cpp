@@ -19,6 +19,8 @@
 #include "tracy/Tracy.hpp"
 
 #if TARGET_PC
+#include "dusk/frame_interpolation.h"
+
 #define JPA_DRAW_CTX_ARG , &ctx
 #else
 #define JPA_DRAW_CTX_ARG
@@ -44,7 +46,7 @@ JPAResource::JPAResource() {
     mUsrIdx = fldNum = keyNum = texNum = mpCalcEmitterFuncListNum = mpDrawEmitterFuncListNum = mpDrawEmitterChildFuncListNum = mpCalcParticleFuncListNum = mpDrawParticleFuncListNum = mpCalcParticleChildFuncListNum = mpDrawParticleChildFuncListNum = 0;
 }
 
-static u8 jpa_pos[324] ATTRIBUTE_ALIGN(32) = {
+ATTRIBUTE_ALIGN(32) static u8 jpa_pos[324] = {
     0x00, 0x00, 0x00, 0x32, 0x00, 0x00, 0x32, 0xCE, 0x00, 0x00, 0xCE, 0x00, 0xE7, 0x00, 0x00, 0x19,
     0x00, 0x00, 0x19, 0xCE, 0x00, 0xE7, 0xCE, 0x00, 0xCE, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xCE,
     0x00, 0xCE, 0xCE, 0x00, 0x00, 0x19, 0x00, 0x32, 0x19, 0x00, 0x32, 0xE7, 0x00, 0x00, 0xE7, 0x00,
@@ -68,7 +70,7 @@ static u8 jpa_pos[324] ATTRIBUTE_ALIGN(32) = {
     0x00, 0x00, 0x00, 0xCE,
 };
 
-static u8 jpa_crd[32] ATTRIBUTE_ALIGN(32) = {
+ATTRIBUTE_ALIGN(32) static u8 jpa_crd[32] = {
     0x00, 0x00, 0x01, 0x00, 0x01, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x00, 0x02, 0x01, 0x00, 0x01,
     0x00, 0x00, 0x01, 0x00, 0x01, 0x02, 0x00, 0x02, 0x00, 0x00, 0x02, 0x00, 0x02, 0x02, 0x00, 0x02,
 };
@@ -872,6 +874,26 @@ void JPAResource::draw(JPAEmitterWorkData* work, JPABaseEmitter* emtr) {
     work->mpEmtr = emtr;
     work->mpRes = this;
     work->mDrawCount = 0;
+#if TARGET_PC
+    Mtx authoritativeMtx;
+    Mtx presentationMtx;
+    work->mUsePresentationCorrection = false;
+    const bool usePresentationMtx =
+        dusk::frame_interp::lookup_replacement(emtr, presentationMtx);
+    if (usePresentationMtx) {
+        MTXCopy(emtr->mGlobalRot, authoritativeMtx);
+        authoritativeMtx[0][3] = emtr->mGlobalTrs.x;
+        authoritativeMtx[1][3] = emtr->mGlobalTrs.y;
+        authoritativeMtx[2][3] = emtr->mGlobalTrs.z;
+        Mtx inverseAuthoritativeMtx;
+        if (MTXInverse(authoritativeMtx, inverseAuthoritativeMtx)) {
+            MTXConcat(presentationMtx, inverseAuthoritativeMtx,
+                      work->mPresentationCorrection);
+            work->mUsePresentationCorrection = true;
+        }
+        emtr->setGlobalRTMatrix(presentationMtx);
+    }
+#endif
     calcWorkData_d(work);
     pBsp->setGX(work);
     for (s32 i = 1; i <= emtr->getDrawTimes(); i++) {
@@ -882,6 +904,12 @@ void JPAResource::draw(JPAEmitterWorkData* work, JPABaseEmitter* emtr) {
         if (!pBsp->isDrawPrntAhead() && pCsp != NULL)
             drawC(work);
     }
+#if TARGET_PC
+    if (usePresentationMtx) {
+        emtr->setGlobalRTMatrix(authoritativeMtx);
+    }
+    work->mUsePresentationCorrection = false;
+#endif
 }
 
 #if TARGET_PC

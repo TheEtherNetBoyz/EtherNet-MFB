@@ -30,14 +30,17 @@
 #endif
 
 #if TARGET_PC
+#include "dusk/detached_camera.h"
+#include "dusk/camera_operators.hpp"
 #include "dusk/frame_interpolation.h"
 #include "dusk/logging.h"
 #include "dusk/action_bindings.h"
 #include "dusk/mouse.h"
 #include "dusk/settings.h"
-#include "dusk/detached_camera.h"
+#include "dusk/tas_movie.h"
 #include "dusk/touch_camera.h"
 #include "imgui.h"
+#include <SDL3/SDL_keyboard.h>
 #endif
 
 namespace {
@@ -207,7 +210,7 @@ int dCamMapToolData::Set(s32 param_0, s32 roomNo, fopAc_ac_c* param_2, u16 param
     return 0;
 }
 
-engine_fn dCamera_c::engine_tbl[] = {
+DUSK_GAME_DATA engine_fn dCamera_c::engine_tbl[] = {
     &dCamera_c::letCamera,        &dCamera_c::chaseCamera,    &dCamera_c::lockonCamera,
     &dCamera_c::talktoCamera,     &dCamera_c::subjectCamera,  &dCamera_c::fixedPositionCamera,
     &dCamera_c::fixedFrameCamera, &dCamera_c::towerCamera,    &dCamera_c::rideCamera,
@@ -1064,7 +1067,7 @@ void dCamera_c::debugDrawInit() {
 bool dCamera_c::Run() {
 #if TARGET_PC
     ResetView();
-    if (executeDebugFlyCam()) {
+    if (executeDebugFlyCam() || dusk::mods::camera_run_operators(this)) {
         mFrameCounter++;
         mTicks++;
         return true;
@@ -7515,6 +7518,8 @@ static constexpr f32 FLYCAM_ROTATION_SPEED = 0.002f;
 static constexpr f32 FLYCAM_TRIGGER_DEADZONE = 20.0f;
 static constexpr s16 FLYCAM_ROLL_SPEED = 256;
 static ImVec2 sFlyCamLastMousePos = {-1.f, -1.f};
+static bool sFlyCamMouseLookEnabled = true;
+static bool sFlyCamMouseLookKeyWasDown = false;
 
 #if TARGET_PC
 static constexpr f32 TOUCH_CAMERA_CSTICK_EXIT_THRESHOLD = 0.05f;
@@ -7524,6 +7529,29 @@ bool dCamera_c::isAimActive() {
     auto* link = daAlink_getAlinkActorClass();
     return link != nullptr && link->checkAimInputContext() &&
            dComIfGp_checkCameraAttentionStatus(link->field_0x317c, 0x10);
+}
+
+bool dCamera_c::isDebugFlyCamMouseLookEnabled() {
+    return sFlyCamMouseLookEnabled;
+}
+
+void dCamera_c::setDebugFlyCamMouseLookEnabled(bool enabled) {
+    sFlyCamMouseLookEnabled = enabled;
+    // Re-baseline the cursor when mouse look is enabled again so movement that
+    // happened while unlocked cannot produce a large camera jump.
+    sFlyCamLastMousePos = {-1.0f, -1.0f};
+}
+
+void dCamera_c::setDebugFlyCamTransform(const cXyz& center, const cXyz& eye, f32 fovy,
+                                        s16 bank) {
+    const f32 dx = center.x - eye.x;
+    const f32 dy = center.y - eye.y;
+    const f32 dz = center.z - eye.z;
+    mDebugFlyCam.yaw = atan2f(dz, dx);
+    mDebugFlyCam.pitch = atan2f(dy, sqrtf(dx * dx + dz * dz));
+    mFovy = std::clamp(fovy, 0.1f, 179.9f);
+    mBank = bank;
+    Reset(center, eye, mFovy, bank);
 }
 
 void dCamera_c::getRawRenderTransform(cXyz& center, cXyz& eye, f32& fovy, s16& bank) {
@@ -7547,6 +7575,7 @@ bool dCamera_c::executeDebugFlyCam() {
             deactivateDebugFlyCam();
         }
         sFlyCamLastMousePos = {-1.f, -1.f};
+        sFlyCamMouseLookKeyWasDown = false;
         return false;
     }
 
@@ -7610,6 +7639,16 @@ bool dCamera_c::executeDebugFlyCam() {
 
     {
         ImGuiIO& io = ImGui::GetIO();
+        int keyboardStateCount = 0;
+        const bool* keyboardState = SDL_GetKeyboardState(&keyboardStateCount);
+        const bool mouseLookKeyDown =
+            keyboardState != nullptr && SDL_SCANCODE_P < keyboardStateCount &&
+            keyboardState[SDL_SCANCODE_P];
+        if (mouseLookKeyDown && !sFlyCamMouseLookKeyWasDown && !io.WantTextInput) {
+            setDebugFlyCamMouseLookEnabled(!sFlyCamMouseLookEnabled);
+        }
+        sFlyCamMouseLookKeyWasDown = mouseLookKeyDown;
+
         if (!io.WantCaptureKeyboard) {
             f32 kbX = 0.0f, kbY = 0.0f;
             if (ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_UpArrow)) kbY += 1.f;
@@ -7626,7 +7665,8 @@ bool dCamera_c::executeDebugFlyCam() {
             if (ImGui::IsKeyDown(ImGuiKey_Q)) rollInput -= 1.0f;
             if (ImGui::IsKeyDown(ImGuiKey_E)) rollInput += 1.0f;
         }
-        bool mouseValid = !io.WantCaptureMouse && io.MousePos.x >= 0.0f && io.MousePos.y >= 0.0f;
+        bool mouseValid = sFlyCamMouseLookEnabled && !io.WantCaptureMouse &&
+                          io.MousePos.x >= 0.0f && io.MousePos.y >= 0.0f;
         if (mouseValid && sFlyCamLastMousePos.x >= 0.0f) {
             cStickX -= (io.MousePos.x - sFlyCamLastMousePos.x) * 2.0f;
             cStickY -= (io.MousePos.y - sFlyCamLastMousePos.y) * 2.0f;
@@ -11481,10 +11521,11 @@ static int camera_draw(camera_process_class* i_this) {
     int camera_id = get_camera_id(a_this);
 
 #if TARGET_PC
-    // Actor drawing uses the detached render view. Camera audio and environment
-    // work must still observe the real gameplay camera.
+    // The process manager installed the render-only view before actor drawing.
+    // Temporarily recover the gameplay view for camera audio/environment work.
     if (camera_id == 0) {
         dusk::detached_camera::restore();
+        dusk::tas_movie::restorePresentationCamera();
     }
 #endif
 
@@ -11577,9 +11618,11 @@ static int camera_draw(camera_process_class* i_this) {
         Z2AudioMgr::getInterface()->setCameraPolygonPos(NULL);
     }
 
+    // Return to the render-only view after the normal camera completed its
+    // audio/environment work.
 #if TARGET_PC
-    // Reinstall the detached view after gameplay-camera side effects finish.
     if (camera_id == 0) {
+        dusk::tas_movie::applyPresentationCamera(&process->view);
         dusk::detached_camera::apply(&process->view);
     }
 #endif

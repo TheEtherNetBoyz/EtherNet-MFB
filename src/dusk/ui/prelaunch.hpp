@@ -19,6 +19,7 @@ public:
     void update() override;
     bool focus() override;
     bool visible() const override;
+    bool obscures_game() const override { return true; }
 
 protected:
     bool handle_nav_command(Rml::Event& event, NavCommand cmd) override;
@@ -48,6 +49,8 @@ struct PrelaunchState {
     std::string activeDiscPath;
     iso::DiscInfo activeDiscInfo{};
     GameLanguage initialLanguage = GameLanguage::English;
+    GameLanguage unavailableLanguage = GameLanguage::English;
+    bool pendingLanguageUnavailableNotice = false;
     std::string initialGraphicsBackend;
     int initialCardFileType = 0;
     std::string errorString;
@@ -62,5 +65,6 @@ void refresh_configured_disc_state() noexcept;
 void open_iso_picker() noexcept;
 bool is_restart_pending() noexcept;
 void try_push_verification_modal(Document& host);
+void try_push_language_unavailable_modal(Document& host);
 
 }  // namespace dusk::ui

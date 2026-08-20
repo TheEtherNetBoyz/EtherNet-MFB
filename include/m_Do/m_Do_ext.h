@@ -19,9 +19,9 @@ class Z2Creature;
 struct cXy;
 
 namespace mDoExt {
-    extern u8 CurrentHeapAdjustVerbose;
-    extern u8 HeapAdjustVerbose;
-    extern u8 HeapAdjustQuiet;
+    DUSK_GAME_EXTERN u8 CurrentHeapAdjustVerbose;
+    DUSK_GAME_EXTERN u8 HeapAdjustVerbose;
+    DUSK_GAME_EXTERN u8 HeapAdjustQuiet;
 };
 
 class mDoExt_baseAnm {
@@ -747,7 +747,8 @@ public:
 
 class mDoExt_spherePacket : public J3DPacket {
 public:
-    mDoExt_spherePacket(cXyz& i_position, f32 i_size, const GXColor& i_color, u8 i_clipZ);
+    mDoExt_spherePacket(cXyz& i_position, f32 i_size, const GXColor& i_color,
+                        u8 i_clipZ, u8 i_depthWrite);
 
     virtual void draw();
     virtual ~mDoExt_spherePacket() {}
@@ -756,11 +757,13 @@ public:
     /* 0x1C */ f32 mSize;
     /* 0x20 */ GXColor mColor;
     /* 0x24 */ u8 mClipZ;
+    /* 0x25 */ u8 mDepthWrite;
 };
 
 class mDoExt_cylinderPacket : public J3DPacket {
 public:
-    mDoExt_cylinderPacket(cXyz& i_position, f32 i_radius, f32 i_height, const GXColor& i_color, u8 i_clipZ);
+    mDoExt_cylinderPacket(cXyz& i_position, f32 i_radius, f32 i_height,
+                          const GXColor& i_color, u8 i_clipZ, u8 i_depthWrite);
 
     virtual void draw();
     virtual ~mDoExt_cylinderPacket() {}
@@ -770,6 +773,7 @@ public:
     /* 0x20 */ f32 mHeight;
     /* 0x24 */ GXColor mColor;
     /* 0x28 */ u8 mClipZ;
+    /* 0x29 */ u8 mDepthWrite;
 };
 
 class mDoExt_cylinderMPacket : public J3DPacket {
@@ -840,7 +844,7 @@ void mDoExt_modelUpdateDL(J3DModel* i_model);
 J3DModel* mDoExt_J3DModel__create(J3DModelData* i_modelData, u32 i_modelFlag,
                                   u32 i_differedDlistFlag);
 
-extern u32 aram_cache_size;
+DUSK_GAME_EXTERN u32 aram_cache_size;
 u32 mDoExt_getAraCacheSize();
 void mDoExt_setAraCacheSize(u32 size);
 
@@ -889,10 +893,10 @@ int DummyCheckHeap_isVirgin();
 
 void DummyCheckHeap_check();
 
-extern JKRExpHeap* zeldaHeap;
-extern JKRExpHeap* gameHeap;
-extern JKRExpHeap* archiveHeap;
-extern JKRExpHeap* commandHeap;
-extern DummyCheckHeap* dch;
+DUSK_GAME_EXTERN JKRExpHeap* zeldaHeap;
+DUSK_GAME_EXTERN JKRExpHeap* gameHeap;
+DUSK_GAME_EXTERN JKRExpHeap* archiveHeap;
+DUSK_GAME_EXTERN JKRExpHeap* commandHeap;
+DUSK_GAME_EXTERN DummyCheckHeap* dch;
 
 #endif /* M_DO_M_DO_EXT_H */

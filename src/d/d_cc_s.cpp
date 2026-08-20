@@ -11,6 +11,7 @@
 #include "f_op/f_op_actor_mng.h"
 #if TARGET_PC
 #include "dusk/settings.h"
+#include "dusk/trigger_view.h"
 #endif
 
 class dCcS_HIO : public JORReflexible {
@@ -849,6 +850,10 @@ void dCcS::Draw() {
         }
     }
 
+#if TARGET_PC
+    dusk::trigger_view::Draw();
+#endif
+
     #if DEBUG
     if (s_Hio.ChkCounter()) {
         OS_REPORT("At:%d,Tg:%d,Co:%d\n", field_0x280c, field_0x280e, field_0x2810);
@@ -872,7 +877,7 @@ void dCcS::MassClear() {
 }
 
 // clang-format off
-bool dCcS::m_mtrl_hit_tbl[64] = {
+DUSK_GAME_DATA bool dCcS::m_mtrl_hit_tbl[64] = {
     true,  true,  true,  true,  true,  true,  true,  true, 
     false, true,  false, false, false, false, false, false,
     false, false, true,  false, false, false, false, false,

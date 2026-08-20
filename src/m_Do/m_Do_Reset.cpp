@@ -15,6 +15,7 @@
 #include "m_Do/m_Do_MemCard.h"
 #if TARGET_PC
 #include "dusk/input_macro.h"
+#include "dusk/tas_movie.h"
 #endif
 
 #if !PLATFORM_GCN
@@ -33,7 +34,7 @@ static void destroyVideo() {
     return;
 }
 
-mDoRstData* mDoRst::mResetData;
+DUSK_GAME_DATA mDoRstData* mDoRst::mResetData;
 
 void mDoRst_reset(int reset, u32 resetCode, int forceMenu) {
     JUT_ASSERT(83, mDoExt_GetCurrentRunningThread() != 0);
@@ -109,6 +110,7 @@ void checkDiskCallback(s32 result, DVDCommandBlock* block) {
 void mDoRst_resetCallBack(int port, void*) {
 #if TARGET_PC
     dusk::input_macro::recordResetRequest();
+    dusk::tas_movie::recordResetRequest();
 #endif
     if (mDoRst::isReset()) {
         return;

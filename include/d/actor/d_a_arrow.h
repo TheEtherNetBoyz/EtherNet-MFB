@@ -29,6 +29,9 @@ public:
     void setBlur();
     void setLightArrowHitMark(cXyz const*);
     void setLightChargeEffect(int);
+#if TARGET_PC
+    void prepareLightArrowEffectInterpolation();
+#endif
     int setArrowWaterNextPos(cXyz*, cXyz*);
     void setArrowAt(f32);
     void arrowShooting();
@@ -161,7 +164,7 @@ private:
     /* 0xA10 */ dPa_hermiteEcallBack_c field_0xa10;
     /* 0xA28 */ int (daArrow_c::*mProcFunc)();
 
-    static s16 m_count;
+    static DUSK_GAME_DATA s16 m_count;
 };
 
 STATIC_ASSERT(sizeof(daArrow_c) == 0xA34);

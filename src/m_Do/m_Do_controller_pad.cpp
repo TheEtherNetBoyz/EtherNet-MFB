@@ -8,6 +8,7 @@
 #include "SSystem/SComponent/c_lib.h"
 #include "d/d_com_inf_game.h"
 #include "dusk/input_macro.h"
+#include "dusk/tas_movie.h"
 #include "f_ap/f_ap_game.h"
 #include "m_Do/m_Do_Reset.h"
 #include "m_Do/m_Do_main.h"
@@ -17,42 +18,39 @@
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_scancode.h>
 
-#include <algorithm>
-#include <array>
-#include <chrono>
-
 #include "dusk/menu_pointer.h"
+#include "dusk/settings.h"
 #include "dusk/ui/touch_controls.hpp"
 #endif
 
-JUTGamePad* mDoCPd_c::m_gamePad[4];
+DUSK_GAME_DATA JUTGamePad* mDoCPd_c::m_gamePad[4];
 
-interface_of_controller_pad mDoCPd_c::m_cpadInfo[4];
-interface_of_controller_pad mDoCPd_c::m_debugCpadInfo[4];
+DUSK_GAME_DATA interface_of_controller_pad mDoCPd_c::m_cpadInfo[4];
+DUSK_GAME_DATA interface_of_controller_pad mDoCPd_c::m_debugCpadInfo[4];
 u32 mDoCPd_c::m_unfilteredButtonFlags[4] = {};
 u32 mDoCPd_c::m_unfilteredPressedButtonFlags[4] = {};
+
+#if TARGET_PC
+s16 mDoCPd_c::getStickAngle3D(u32 pad) {
+    if (dusk::getSettings().game.enableMirrorMode) {
+        return -getCpadInfo(pad).mMainStickAngle;
+    }
+    return getCpadInfo(pad).mMainStickAngle;
+}
+
+f32 mDoCPd_c::getSubStickX3D(u32 pad) {
+    if (dusk::getSettings().game.enableMirrorMode) {
+        return -getCpadInfo(pad).mCStickPosX;
+    }
+    return getCpadInfo(pad).mCStickPosX;
+}
+#endif
 
 #if TARGET_PC
 static bool sCtrlRResetHeld = false;
 static constexpr u32 kPracticeMenuInputMask = PAD_BUTTON_UP | PAD_BUTTON_DOWN | PAD_BUTTON_LEFT |
                                               PAD_BUTTON_RIGHT | PAD_BUTTON_A | PAD_BUTTON_B |
                                               PAD_TRIGGER_L | PAD_TRIGGER_R;
-static constexpr int kMaxInputLagMs = 150;
-static constexpr size_t kInputDelayHistorySize = 64;
-
-using InputDelayClock = std::chrono::steady_clock;
-
-struct InputDelaySample {
-    bool valid = false;
-    InputDelayClock::time_point time{};
-    std::array<interface_of_controller_pad, 4> pads{};
-};
-
-static std::array<InputDelaySample, kInputDelayHistorySize> sInputDelayHistory;
-static size_t sInputDelayHistoryWriteIndex = 0;
-static std::array<interface_of_controller_pad, 4> sInputDelayLastDeliveredPads{};
-static bool sInputDelayHasLastDeliveredPads = false;
-
 static bool checkCtrlRSoftReset() {
     int keyCount = 0;
     const bool* keys = SDL_GetKeyboardState(&keyCount);
@@ -87,78 +85,6 @@ static void clearTeleportLinkDpadInput(interface_of_controller_pad* interface) {
     interface->mPressedButtonFlags &= ~kTeleportDpadMask;
 }
 
-static void resetInputDelayHistory() {
-    for (InputDelaySample& sample : sInputDelayHistory) {
-        sample.valid = false;
-    }
-    sInputDelayHistoryWriteIndex = 0;
-    sInputDelayHasLastDeliveredPads = false;
-}
-
-static void finalizeDelayedInput(interface_of_controller_pad* pads) {
-    for (size_t i = 0; i < sInputDelayLastDeliveredPads.size(); ++i) {
-        const interface_of_controller_pad previous =
-            sInputDelayHasLastDeliveredPads ? sInputDelayLastDeliveredPads[i] : interface_of_controller_pad{};
-
-        pads[i].mPressedButtonFlags = pads[i].mButtonFlags & ~previous.mButtonFlags;
-        pads[i].mTrigLockL = pads[i].mHoldLockL && !previous.mHoldLockL;
-        pads[i].mTrigLockR = pads[i].mHoldLockR && !previous.mHoldLockR;
-
-        sInputDelayLastDeliveredPads[i] = pads[i];
-    }
-    sInputDelayHasLastDeliveredPads = true;
-}
-
-static void applyInputDelay(interface_of_controller_pad* pads) {
-    const int delayMs = std::clamp(dusk::getSettings().game.inputLagMs.getValue(), 0, kMaxInputLagMs);
-    if (delayMs <= 0) {
-        resetInputDelayHistory();
-        return;
-    }
-
-    const InputDelayClock::time_point now = InputDelayClock::now();
-    InputDelaySample& writeSample = sInputDelayHistory[sInputDelayHistoryWriteIndex];
-    writeSample.valid = true;
-    writeSample.time = now;
-    for (size_t i = 0; i < writeSample.pads.size(); ++i) {
-        writeSample.pads[i] = pads[i];
-    }
-    sInputDelayHistoryWriteIndex = (sInputDelayHistoryWriteIndex + 1) % sInputDelayHistory.size();
-
-    const InputDelayClock::time_point target =
-        now - std::chrono::milliseconds(delayMs);
-    const InputDelaySample* bestSample = nullptr;
-    const InputDelaySample* oldestSample = nullptr;
-
-    for (const InputDelaySample& sample : sInputDelayHistory) {
-        if (!sample.valid) {
-            continue;
-        }
-
-        if (oldestSample == nullptr || sample.time < oldestSample->time) {
-            oldestSample = &sample;
-        }
-
-        if (sample.time <= target &&
-            (bestSample == nullptr || sample.time > bestSample->time))
-        {
-            bestSample = &sample;
-        }
-    }
-
-    if (bestSample == nullptr) {
-        bestSample = oldestSample;
-    }
-
-    if (bestSample == nullptr) {
-        return;
-    }
-
-    for (size_t i = 0; i < bestSample->pads.size(); ++i) {
-        pads[i] = bestSample->pads[i];
-    }
-    finalizeDelayedInput(pads);
-}
 #endif
 
 void mDoCPd_c::create() {
@@ -267,8 +193,13 @@ void mDoCPd_c::read() {
     }
 
 #if TARGET_PC
-    applyInputDelay(m_cpadInfo);
-    if (dusk::input_macro::tick(m_cpadInfo, ctrlRResetRequested) && !mDoRst::isReset()) {
+    const bool tasOwnsInput =
+        dusk::tas_movie::state() == dusk::tas_movie::State::Recording ||
+        dusk::tas_movie::state() == dusk::tas_movie::State::Playing;
+    const bool replayResetRequested =
+        tasOwnsInput ? dusk::tas_movie::tick(m_cpadInfo, ctrlRResetRequested)
+                     : dusk::input_macro::tick(m_cpadInfo, ctrlRResetRequested);
+    if (replayResetRequested && !mDoRst::isReset()) {
         mDoRst_resetCallBack(-1, NULL);
     }
 
@@ -279,7 +210,6 @@ void mDoCPd_c::read() {
     {
         clearTeleportLinkDpadInput(&m_cpadInfo[PAD_1]);
     }
-#endif
 
     const u32 physicalHold = m_unfilteredButtonFlags[PAD_1];
     const u32 replayCombo = PAD_BUTTON_B | PAD_BUTTON_LEFT | PAD_TRIGGER_Z;
@@ -287,16 +217,15 @@ void mDoCPd_c::read() {
         m_cpadInfo[PAD_1].mButtonFlags &= ~replayCombo;
         m_cpadInfo[PAD_1].mPressedButtonFlags &= ~replayCombo;
     }
-
     if ((physicalHold & PAD_BUTTON_A) != 0) {
         m_cpadInfo[PAD_1].mButtonFlags &= ~PAD_BUTTON_LEFT;
         m_cpadInfo[PAD_1].mPressedButtonFlags &= ~PAD_BUTTON_LEFT;
-
         if ((physicalHold & PAD_BUTTON_LEFT) != 0) {
             m_cpadInfo[PAD_1].mButtonFlags &= ~PAD_TRIGGER_Z;
             m_cpadInfo[PAD_1].mPressedButtonFlags &= ~PAD_TRIGGER_Z;
         }
     }
+#endif
 }
 
 void mDoCPd_c::convert(interface_of_controller_pad* pInterface, JUTGamePad* pPad) {

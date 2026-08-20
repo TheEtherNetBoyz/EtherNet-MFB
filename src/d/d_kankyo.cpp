@@ -39,6 +39,7 @@
 #include "dusk/settings.h"
 #include "dusk/frame_interpolation.h"
 #include "dusk/game_clock.h"
+static f32 timeScale = 1.0f;
 #endif
 
 static void GxXFog_set();
@@ -117,9 +118,9 @@ static u16 lightMaskData[8] = {
     GX_LIGHT0, GX_LIGHT1, GX_LIGHT2, GX_LIGHT3, GX_LIGHT4, GX_LIGHT5, GX_LIGHT6, GX_LIGHT7,
 };
 
-dScnKy_env_light_c g_env_light;
+DUSK_GAME_DATA dScnKy_env_light_c g_env_light;
 
-Z2EnvSeMgr g_mEnvSeMgr;
+DUSK_GAME_DATA Z2EnvSeMgr g_mEnvSeMgr;
 
 #if DEBUG
 dKankyo_HIO_c g_kankyoHIO;
@@ -1810,6 +1811,9 @@ void dScnKy_env_light_c::setLight_palno_get(u8* prev_envr_id_p, u8* next_envr_id
     u8 psel_idx = 0;
     int i;
     int sp14 = 0;
+#if TARGET_PC
+    const f32 timeScale = (pattern_ratio_p == &g_env_light.pat_ratio) ? ::timeScale : 1.0f;
+#endif
 
     if (*init_timer_p != 0) {
         (*init_timer_p)++;
@@ -2143,14 +2147,22 @@ void dScnKy_env_light_c::setLight_palno_get(u8* prev_envr_id_p, u8* next_envr_id
 
             if (g_env_light.mColPatMode == 0) {
                 if (pselect_p->change_rate > 0.0f) {
+#if TARGET_PC
+                    *pattern_ratio_p += timeScale * ((1.0f / 30) / pselect_p->change_rate);
+#else
                     *pattern_ratio_p += (1.0f / 30) / pselect_p->change_rate;
+#endif
                 }
 
                 // pattern change rate is faster in hyrule field
                 if (strcmp(dComIfGp_getStartStageName(), "F_SP121") == 0 &&
                     *prev_pat_p == *next_pat_p)
                 {
+#if TARGET_PC
+                    *pattern_ratio_p += timeScale * (1.0f / 15);
+#else
                     *pattern_ratio_p += (1.0f / 15);
+#endif
                 }
 
                 if (*pattern_ratio_p >= 1.0f) {
@@ -2460,6 +2472,10 @@ void dScnKy_env_light_c::setLight() {
         u8 next_pal_start_id;
         u8 prev_pal_end_id;
         u8 next_pal_end_id;
+#if TARGET_PC
+        const f32 deltaTime = dusk::game_clock::consume_interval(this);
+        timeScale = deltaTime / dusk::game_clock::kSimPeriod;
+#endif
         setLight_palno_get(&g_env_light.PrevCol, &g_env_light.UseCol, &g_env_light.wether_pat0,
                            &g_env_light.wether_pat1, &prev_pal_start_id, &prev_pal_end_id,
                            &next_pal_start_id, &next_pal_end_id, &color_ratio, &start_pat_pal_id,
@@ -2645,14 +2661,18 @@ void dScnKy_env_light_c::setLight() {
                 f32 sin = cM_ssin(S_fuwan_sin);
 
                 #if TARGET_PC
-                    const f32 deltaTime = dusk::game_clock::consume_interval(this);
-                    const f32 timeScale = deltaTime / dusk::game_clock::period_for_original_frames(1.0f);
                     S_fuwan_sin += (s16)((cM_rndF(2000.0f) + 500) * timeScale);
                 #else
                     S_fuwan_sin += (s16)cM_rndF(2000.0f) + 500;
                 #endif
 
-                blure_size += (u8)(sin * (0.2f * blure_size));
+                f32 pulseAmount = 0.2f;
+                #if TARGET_PC
+                if (dusk::getSettings().game.bloomMode.getValue() == dusk::BloomMode::Classic) {
+                    pulseAmount = 0.1f;
+                }
+                #endif
+                blure_size += (u8)(sin * (pulseAmount * blure_size));
             }
 
             mDoGph_gInf_c::getBloom()->setBlureSize(blure_size);
