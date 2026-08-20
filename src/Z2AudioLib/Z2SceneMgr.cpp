@@ -46,6 +46,41 @@ static u32 z2FastLoadAudioFadeFrames(u32 frames) {
 #endif
 }
 
+#if TARGET_PC
+static bool s_twilightVisualsPalaceMusicForced = false;
+static s32 s_twilightVisualsPalaceMusicStatus = 0;
+
+static bool z2TwilightVisualsPreserveSceneMusic(int sceneNum) {
+    switch (sceneNum) {
+    case Z2SCENE_HYLIA_BRIDGE_BATTLE:
+    case Z2SCENE_ELDIN_BRIDGE_BATTLE:
+    case Z2SCENE_FOREST_TEMPLE_MINIBOSS:
+    case Z2SCENE_FOREST_TEMPLE_BOSS:
+    case Z2SCENE_GORON_MINES_MINIBOSS:
+    case Z2SCENE_GORON_MINES_BOSS:
+    case Z2SCENE_LAKEBED_TEMPLE_MINIBOSS:
+    case Z2SCENE_LAKEBED_TEMPLE_BOSS:
+    case Z2SCENE_ARBITERS_GROUNDS_MINIBOSS:
+    case Z2SCENE_ARBITERS_GROUNDS_BOSS:
+    case Z2SCENE_SNOWPEAK_RUINS_MINIBOSS:
+    case Z2SCENE_SNOWPEAK_RUINS_BOSS:
+    case Z2SCENE_TEMPLE_OF_TIME_MINIBOSS:
+    case Z2SCENE_TEMPLE_OF_TIME_BOSS:
+    case Z2SCENE_CITY_IN_THE_SKY_MINIBOSS:
+    case Z2SCENE_CITY_IN_THE_SKY_BOSS:
+    case Z2SCENE_PALACE_OF_TWILIGHT_MINIBOSS_A:
+    case Z2SCENE_PALACE_OF_TWILIGHT_MINIBOSS_B:
+    case Z2SCENE_PALACE_OF_TWILIGHT_BOSS:
+    case Z2SCENE_FINAL_BATTLE_THRONE_ROOM:
+    case Z2SCENE_FINAL_BATTLE_FIELD:
+    case Z2SCENE_FINAL_BATTLE_CUTSCENE:
+        return true;
+    default:
+        return false;
+    }
+}
+#endif
+
 Z2SceneMgr::Z2SceneMgr() : JASGlobalInstance<Z2SceneMgr>(true) {
     sceneNum = -1;
     BGM_ID = -1;
@@ -1667,17 +1702,26 @@ void Z2SceneMgr::setSceneName(char* spot, s32 room, s32 layer) {
     }
 
 #if TARGET_PC
-    // Twilight Visuals uses the regular Palace of Twilight dungeon theme for
-    // map music, but keeps explicit demo/cutscene audio selections intact.
+    // Preserve native music in dungeons. Exterior field loads use the Palace
+    // outdoor mix, while interior loads use its indoor mix.
+    s_twilightVisualsPalaceMusicForced = false;
     const bool isPalaceScene = spotNo >= Z2SCENE_PALACE_OF_TWILIGHT &&
                                spotNo <= Z2SCENE_PALACE_OF_TWILIGHT_BOSS;
+    const bool preserveSceneMusic = z2TwilightVisualsPreserveSceneMusic(spotNo) ||
+                                    Z2GetStatusMgr()->getDemoStatus() != 0;
+    const bool isExteriorLoad = spot != NULL && strncmp(spot, "F_", 2) == 0;
+    const bool isInteriorLoad = spot != NULL && strncmp(spot, "R_", 2) == 0;
     if (dusk::getSettings().game.enableTwilightVisuals.getValue() &&
-        !inDarkness_ && !isPalaceScene && demo_wave == 0) {
+        !inDarkness_ && !isPalaceScene && !preserveSceneMusic && demo_wave == 0 &&
+        (isExteriorLoad || isInteriorLoad)) {
         bgm_id = Z2BGM_DUNGEON_LV8;
         bgm_wave1 = 0x28;
         bgm_wave2 = 0;
         bVar2 = true;
         field_bgm_play = false;
+        s_twilightVisualsPalaceMusicForced = true;
+        s_twilightVisualsPalaceMusicStatus = isInteriorLoad ? 1 : 0;
+        Z2GetSeqMgr()->changeBgmStatus(s_twilightVisualsPalaceMusicStatus);
     }
 #endif
 
@@ -1940,11 +1984,8 @@ void Z2SceneMgr::sceneBgmStart() {
             case Z2BGM_DUNGEON_LV9_02:
             case Z2BGM_SNOW_MOUNTAIN:
 #if TARGET_PC
-                if (dusk::getSettings().game.enableTwilightVisuals.getValue() &&
-                    !inDarkness_ &&
-                    (sceneNum < Z2SCENE_PALACE_OF_TWILIGHT ||
-                     sceneNum > Z2SCENE_PALACE_OF_TWILIGHT_BOSS)) {
-                    Z2GetSeqMgr()->changeBgmStatus(0);
+                if (s_twilightVisualsPalaceMusicForced) {
+                    Z2GetSeqMgr()->changeBgmStatus(s_twilightVisualsPalaceMusicStatus);
                 } else
 #endif
                 if (sceneNum == Z2SCENE_CASTLE_TOWN_SHOPS) {

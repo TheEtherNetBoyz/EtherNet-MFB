@@ -54,6 +54,11 @@ int get_value(GraphicsOption option) {
         return std::clamp(
             static_cast<int>(getSettings().game.bloomMultiplier.getValue() * 100.0f + 0.5f), 0,
             100);
+    case GraphicsOption::TwilightVisualBrightness:
+        return std::clamp(static_cast<int>(
+                              getSettings().game.twilightVisualBrightness.getValue() * 100.0f +
+                              0.5f),
+            0, 120);
     case GraphicsOption::DepthOfFieldMode:
         return static_cast<int>(getSettings().game.depthOfFieldMode.getValue());
     case GraphicsOption::TextureReplacements:
@@ -97,6 +102,10 @@ void set_value(GraphicsOption option, int value) {
         break;
     case GraphicsOption::BloomMultiplier:
         getSettings().game.bloomMultiplier.setValue(std::clamp(value, 0, 100) / 100.0f);
+        break;
+    case GraphicsOption::TwilightVisualBrightness:
+        getSettings().game.twilightVisualBrightness.setValue(
+            std::clamp(value, 0, 120) / 100.0f);
         break;
     case GraphicsOption::TextureReplacements:
         getSettings().game.enableTextureReplacements.setValue(static_cast<bool>(value));
@@ -240,6 +249,8 @@ Rml::String format_graphics_setting_value(GraphicsOption option, int value) {
         }
         break;
     case GraphicsOption::BloomMultiplier:
+        return fmt::format("{}%", value);
+    case GraphicsOption::TwilightVisualBrightness:
         return fmt::format("{}%", value);
     case GraphicsOption::TextureReplacements:
         return static_cast<bool>(value) ? "On" : "Off";

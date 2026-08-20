@@ -75,6 +75,87 @@ static bool dKy_visual_twilight_options_active() {
 #endif
 }
 
+#if TARGET_PC
+static s16 dKy_scale_visual_twilight_channel(s16 channel, f32 brightness) {
+    f32 scaled = channel * brightness;
+    if (scaled < -1024.0f) {
+        scaled = -1024.0f;
+    } else if (scaled > 1023.0f) {
+        scaled = 1023.0f;
+    }
+    return static_cast<s16>(scaled);
+}
+
+static void dKy_scale_visual_twilight_color(GXColorS10& color, f32 brightness) {
+    color.r = dKy_scale_visual_twilight_channel(color.r, brightness);
+    color.g = dKy_scale_visual_twilight_channel(color.g, brightness);
+    color.b = dKy_scale_visual_twilight_channel(color.b, brightness);
+}
+
+static u8 dKy_scale_visual_twilight_channel_u8(u8 channel, f32 brightness) {
+    f32 scaled = channel * brightness;
+    if (scaled < 0.0f) {
+        scaled = 0.0f;
+    } else if (scaled > 255.0f) {
+        scaled = 255.0f;
+    }
+    return static_cast<u8>(scaled);
+}
+
+static f32 dKy_get_visual_twilight_brightness() {
+    if (!dKy_visual_twilight_options_active() || dKy_darkworld_check()) {
+        return 1.0f;
+    }
+
+    f32 brightness = dusk::getSettings().game.twilightVisualBrightness.getValue();
+    if (brightness < 0.0f) {
+        return 0.0f;
+    }
+    if (brightness > 1.2f) {
+        return 1.2f;
+    }
+    return brightness;
+}
+
+static void dKy_scale_visual_twilight_light(J3DLightObj& light, f32 brightness) {
+    J3DLightInfo* info = light.getLightInfo();
+    info->mColor.r = dKy_scale_visual_twilight_channel_u8(info->mColor.r, brightness);
+    info->mColor.g = dKy_scale_visual_twilight_channel_u8(info->mColor.g, brightness);
+    info->mColor.b = dKy_scale_visual_twilight_channel_u8(info->mColor.b, brightness);
+}
+
+static void dKy_apply_visual_twilight_brightness(dScnKy_env_light_c& env) {
+    // Only alter maps receiving the optional Twilight Visuals treatment. Native
+    // Twilight maps and the Palace retain their original environment lighting.
+    if (!dKy_visual_twilight_options_active() || dKy_darkworld_check()) {
+        return;
+    }
+
+    f32 brightness = dKy_get_visual_twilight_brightness();
+
+    dKy_scale_visual_twilight_color(env.actor_amb_col, brightness);
+    for (int i = 0; i < 4; ++i) {
+        dKy_scale_visual_twilight_color(env.bg_amb_col[i], brightness);
+    }
+    for (int i = 0; i < 6; ++i) {
+        dKy_scale_visual_twilight_color(env.dungeonlight_col[i], brightness);
+        env.dungeonlight[i].mColor.r = static_cast<u8>(env.dungeonlight_col[i].r < 0 ? 0 :
+            (env.dungeonlight_col[i].r > 255 ? 255 : env.dungeonlight_col[i].r));
+        env.dungeonlight[i].mColor.g = static_cast<u8>(env.dungeonlight_col[i].g < 0 ? 0 :
+            (env.dungeonlight_col[i].g > 255 ? 255 : env.dungeonlight_col[i].g));
+        env.dungeonlight[i].mColor.b = static_cast<u8>(env.dungeonlight_col[i].b < 0 ? 0 :
+            (env.dungeonlight_col[i].b > 255 ? 255 : env.dungeonlight_col[i].b));
+    }
+    dKy_scale_visual_twilight_color(env.fog_col, brightness);
+    dKy_scale_visual_twilight_color(env.vrbox_sky_col, brightness);
+    dKy_scale_visual_twilight_color(env.vrbox_kumo_top_col, brightness);
+    dKy_scale_visual_twilight_color(env.vrbox_kumo_bottom_col, brightness);
+    dKy_scale_visual_twilight_color(env.vrbox_kumo_shadow_col, brightness);
+    dKy_scale_visual_twilight_color(env.vrbox_kasumi_outer_col, brightness);
+    dKy_scale_visual_twilight_color(env.vrbox_kasumi_inner_col, brightness);
+}
+#endif
+
 static u8 dKy_visual_twilight_bloom_id() {
     // Bloom entries 1 and 2 are the game's Twilight and Twilight Weak
     // profiles. Use the full Twilight profile when the map has no extended
@@ -3152,6 +3233,10 @@ void dScnKy_env_light_c::setLight() {
                 vrbox_kasumi_inner_col.g = 0;
                 vrbox_kasumi_inner_col.b = 0;
             }
+
+            #if TARGET_PC
+            dKy_apply_visual_twilight_brightness(*this);
+            #endif
             }
 
             #if DEBUG
@@ -3260,6 +3345,19 @@ void dScnKy_env_light_c::setLight_bg(dKy_tevstr_c* tevstr_p, GXColorS10* bg_col_
             dKy_WolfPowerup_FogNearFar(fog_near_p, fog_far_p);
         }
     }
+
+    #if TARGET_PC
+    const f32 twilight_brightness = dKy_get_visual_twilight_brightness();
+    if (twilight_brightness != 1.0f) {
+        for (i = 0; i < 4; ++i) {
+            dKy_scale_visual_twilight_color(bg_col_p[i], twilight_brightness);
+        }
+        for (i = 0; i < 6; ++i) {
+            dKy_scale_visual_twilight_light(tevstr_p->mLights[i], twilight_brightness);
+        }
+        dKy_scale_visual_twilight_color(*fog_col_p, twilight_brightness);
+    }
+    #endif
 }
 
 void dScnKy_env_light_c::setLight_actor(dKy_tevstr_c* tevstr_p, GXColorS10* fog_col_p,
@@ -3435,6 +3533,17 @@ void dScnKy_env_light_c::setLight_actor(dKy_tevstr_c* tevstr_p, GXColorS10* fog_
             dKy_WolfPowerup_FogNearFar(fog_near_p, fog_far_p);
         }
     }
+
+    #if TARGET_PC
+    const f32 twilight_brightness = dKy_get_visual_twilight_brightness();
+    if (twilight_brightness != 1.0f) {
+        dKy_scale_visual_twilight_color(tevstr_p->AmbCol, twilight_brightness);
+        for (i = 0; i < 6; ++i) {
+            dKy_scale_visual_twilight_light(tevstr_p->mLights[i], twilight_brightness);
+        }
+        dKy_scale_visual_twilight_color(*fog_col_p, twilight_brightness);
+    }
+    #endif
 }
 
 void dScnKy_env_light_c::settingTevStruct_colget_actor(cXyz* unused, dKy_tevstr_c* tevstr_p,

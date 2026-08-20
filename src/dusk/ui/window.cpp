@@ -139,6 +139,9 @@ Window::Window(Props props)
             return;
         }
         mResize.active = false;
+        if (mPersistSize) {
+            getSettings().ui.menuSizeCustomized.setValue(true);
+        }
         save_persisted_size();
         event.StopPropagation();
     };
@@ -277,9 +280,10 @@ void Window::apply_persisted_size() noexcept {
     const float minHeight = std::min(400.0f * dpRatio, availableHeight);
 
     const auto& settings = getSettings().ui;
-    const int savedWidthDp = settings.menuWidthDp.getValue() > 0 ?
+    const bool customized = settings.menuSizeCustomized.getValue();
+    const int savedWidthDp = customized && settings.menuWidthDp.getValue() > 0 ?
                                   settings.menuWidthDp.getValue() : kDefaultMenuWidthDp;
-    const int savedHeightDp = settings.menuHeightDp.getValue() > 0 ?
+    const int savedHeightDp = customized && settings.menuHeightDp.getValue() > 0 ?
                                    settings.menuHeightDp.getValue() : kDefaultMenuHeightDp;
     if (savedWidthDp > 0) {
         const float width = std::clamp(savedWidthDp * dpRatio, minWidth, availableWidth);
@@ -299,13 +303,19 @@ void Window::save_persisted_size() noexcept {
     if (context == nullptr) {
         return;
     }
+    auto& settings = getSettings().ui;
+    if (!settings.menuSizeCustomized.getValue()) {
+        settings.menuWidthDp.setValue(settings.menuWidthDp.getDefaultValue());
+        settings.menuHeightDp.setValue(settings.menuHeightDp.getDefaultValue());
+        config::save();
+        return;
+    }
     const float dpRatio = context->GetDensityIndependentPixelRatio();
     const int widthDp = static_cast<int>(std::lround(mRoot->GetOffsetWidth() / dpRatio));
     const int heightDp = static_cast<int>(std::lround(mRoot->GetOffsetHeight() / dpRatio));
     if (widthDp <= 0 || heightDp <= 0) {
         return;
     }
-    auto& settings = getSettings().ui;
     settings.menuWidthDp.setValue(widthDp);
     settings.menuHeightDp.setValue(heightDp);
     config::save();

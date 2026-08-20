@@ -19,7 +19,8 @@ public:
     };
     struct Props {
         bool tabBar = true;
-        bool persistSize = false;
+        // All full-size Dusk windows share the persisted menu shell size.
+        bool persistSize = true;
         std::vector<Rml::String> styleSheets;
     };
 

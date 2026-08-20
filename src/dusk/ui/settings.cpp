@@ -1364,7 +1364,7 @@ void confirm_return_to_startup() {
 }  // namespace
 
 SettingsWindow::SettingsWindow(bool prelaunch)
-    : Window(Window::Props{.tabBar = true, .persistSize = true}), mPrelaunch(prelaunch) {
+    : Window(Window::Props{.tabBar = true}), mPrelaunch(prelaunch) {
     if (prelaunch) {
         add_tab("Prelaunch", [this](Rml::Element* content) {
             auto& leftPane = add_child<Pane>(content, Pane::Type::Controlled);
@@ -1558,18 +1558,6 @@ SettingsWindow::SettingsWindow(bool prelaunch)
         auto& rightPane = add_child<Pane>(content, Pane::Type::Uncontrolled);
 
         leftPane.add_section("Display");
-        leftPane.register_control(leftPane.add_button("Reset Dusk Menu Size").on_pressed([this] {
-            auto& uiSettings = getSettings().ui;
-            uiSettings.menuWidthDp.setValue(uiSettings.menuWidthDp.getDefaultValue());
-            uiSettings.menuHeightDp.setValue(uiSettings.menuHeightDp.getDefaultValue());
-            mPersistedSizeApplied = false;
-            apply_persisted_size();
-            config::save();
-        }),
-            rightPane, [](Pane& pane) {
-                pane.clear();
-                pane.add_text("Restore the Dusk menu to its original default size.");
-            });
 
         register_favorite({
             .label = "Fullscreen",
@@ -1604,6 +1592,19 @@ SettingsWindow::SettingsWindow(bool prelaunch)
             VICenterWindow();
         }),
             rightPane, [](Pane& pane) { pane.clear(); });
+        leftPane.register_control(leftPane.add_button("Reset Dusk Menu Size").on_pressed([this] {
+            auto& uiSettings = getSettings().ui;
+            uiSettings.menuWidthDp.setValue(uiSettings.menuWidthDp.getDefaultValue());
+            uiSettings.menuHeightDp.setValue(uiSettings.menuHeightDp.getDefaultValue());
+            uiSettings.menuSizeCustomized.setValue(false);
+            mPersistedSizeApplied = false;
+            apply_persisted_size();
+            config::save();
+        }),
+            rightPane, [](Pane& pane) {
+                pane.clear();
+                pane.add_text("Restore the Dusk menu to its original default size.");
+            });
         config_bool_select(leftPane, rightPane, getSettings().video.enableVsync,
             {
                 .key = "Enable VSync",
@@ -1776,10 +1777,17 @@ SettingsWindow::SettingsWindow(bool prelaunch)
                 .helpText = "Apply the Faron, Eldin, and Lanayru twilight environment layers anywhere. "
                             "This changes visuals and uses the Palace of Twilight map music; actors, gameplay, and time remain unchanged."
             });
-        config_percent_select(leftPane, rightPane, getSettings().game.twilightVisualBrightness,
-            "Twilight Visual Brightness",
-            "Adjusts the strength of the Twilight bloom when Twilight Visuals is enabled. 100% matches the vanilla Twilight strength.",
-            0, 400, 10);
+        graphics_tuner_control(*this, leftPane, rightPane,
+            getSettings().game.twilightVisualBrightness,
+            GraphicsTunerProps{
+                .option = GraphicsOption::TwilightVisualBrightness,
+                .title = "Twilight Visual Brightness",
+                .helpText = "Adjusts Twilight map lighting, actors, fog, sky, and bloom. 100% matches the vanilla Twilight strength.",
+                .valueMin = 0,
+                .valueMax = 120,
+                .defaultValue = 100,
+                .step = 5,
+            });
         static constexpr const char* kTwilightSkyboxModes[] = {"Day", "Night"};
         config_enum_select(leftPane, rightPane, getSettings().game.twilightSkyboxMode,
             "Twilight Skybox", "Choose the authored Twilight skybox time of day.",
@@ -2755,6 +2763,10 @@ SettingsWindow::SettingsWindow(bool prelaunch)
             }
         }
     });
+
+    // Favorite entries are registered while their tabs are built. Build all tab callbacks once so
+    // the Favorites tab has the complete list on its initial display.
+    mTabBar->initialize_callbacks();
 }
 
 void SettingsWindow::update() {

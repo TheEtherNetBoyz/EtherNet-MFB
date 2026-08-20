@@ -94,7 +94,7 @@ static f32 twilight_bloom_brightness() {
         return 1.0f;
     }
 
-    return std::clamp(dusk::getSettings().game.twilightVisualBrightness.getValue(), 0.0f, 4.0f);
+    return std::clamp(dusk::getSettings().game.twilightVisualBrightness.getValue(), 0.0f, 1.2f);
 }
 #endif
 

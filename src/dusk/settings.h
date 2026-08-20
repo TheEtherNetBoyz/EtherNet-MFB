@@ -228,6 +228,7 @@ struct UserSettings {
         ConfigVar<std::string> settingsFavorites;
         ConfigVar<int> menuWidthDp;
         ConfigVar<int> menuHeightDp;
+        ConfigVar<bool> menuSizeCustomized;
     } ui;
 
     struct {

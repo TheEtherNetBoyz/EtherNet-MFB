@@ -26,6 +26,7 @@ UserSettings g_userSettings = {
         .settingsFavorites {"ui.settingsFavorites", ""},
         .menuWidthDp {"ui.menuWidthDp", 1088},
         .menuHeightDp {"ui.menuHeightDp", 768},
+        .menuSizeCustomized {"ui.menuSizeCustomized", false},
     },
 
     .audio = {
@@ -367,6 +368,7 @@ void registerSettings() {
     Register(g_userSettings.ui.settingsFavorites);
     Register(g_userSettings.ui.menuWidthDp);
     Register(g_userSettings.ui.menuHeightDp);
+    Register(g_userSettings.ui.menuSizeCustomized);
 
     // Video
     Register(g_userSettings.video.enableFullscreen);

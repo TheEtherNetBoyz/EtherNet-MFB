@@ -311,8 +311,15 @@ namespace dusk {
         void TwilightVisualsMenu() {
             auto& s = getSettings();
             MenuCheckbox("Enable Twilight Visuals", s.game.enableTwilightVisuals);
-            SliderFloatItem("Twilight Brightness", s.game.twilightVisualBrightness, 0.0f, 4.0f,
-                            "%.2fx");
+            ImGui::TextUnformatted("Twilight Brightness");
+            ImGui::SameLine(170.0f);
+            ImGui::SetNextItemWidth(160.0f);
+            float twilightBrightnessPercent = s.game.twilightVisualBrightness.getValue() * 100.0f;
+            if (ImGui::SliderFloat("##TwilightBrightness", &twilightBrightnessPercent, 0.0f,
+                                   120.0f, "%.0f%%")) {
+                s.game.twilightVisualBrightness.setValue(twilightBrightnessPercent / 100.0f);
+                config::save();
+            }
 
             int skyboxMode = static_cast<int>(s.game.twilightSkyboxMode.getValue());
             const char* skyboxModes[] = {"Day", "Night"};

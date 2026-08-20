@@ -45,6 +45,7 @@ enum class GraphicsOption {
     Resampler,
     BloomMode,
     BloomMultiplier,
+    TwilightVisualBrightness,
     DepthOfFieldMode,
     TextureReplacements,
 };

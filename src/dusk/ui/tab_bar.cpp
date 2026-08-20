@@ -140,6 +140,23 @@ void TabBar::add_tab(const Rml::String& title, TabCallback callback) {
     });
 }
 
+void TabBar::initialize_callbacks() {
+    const int selectedTabIndex = mProps.selectedTabIndex;
+    for (int i = 0; i < static_cast<int>(mTabs.size()); ++i) {
+        if (i == selectedTabIndex) {
+            continue;
+        }
+        if (mTabs[i].callback) {
+            mTabs[i].callback();
+        }
+    }
+    if (selectedTabIndex >= 0 && selectedTabIndex < static_cast<int>(mTabs.size()) &&
+        mTabs[selectedTabIndex].callback)
+    {
+        mTabs[selectedTabIndex].callback();
+    }
+}
+
 bool TabBar::set_active_tab(int index) {
     if (index == -1) {
         // Clear currently selected tab
