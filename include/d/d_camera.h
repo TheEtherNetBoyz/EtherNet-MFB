@@ -1041,6 +1041,8 @@ public:
     bool freeCamera();
     bool executeDebugFlyCam();
     void deactivateDebugFlyCam();
+    void getRawRenderTransform(cXyz& center, cXyz& eye, f32& fovy, s16& bank);
+    void setRawRenderTransform(const cXyz& center, const cXyz& eye, f32 fovy, s16 bank);
     #endif
     bool towerCamera(s32);
     bool hookshotCamera(s32);

@@ -21,6 +21,8 @@ struct MainLoopPacer {
 MainLoopPacer advance_main_loop();
 void finish_main_loop();
 void commit_sim_tick();
+void count_sim_tick();
+unsigned long long simulation_tick_count();
 float sample_interpolation_step();
 
 float consume_interval(const void* consumer);

@@ -35,6 +35,7 @@
 #include "dusk/action_bindings.h"
 #include "dusk/mouse.h"
 #include "dusk/settings.h"
+#include "dusk/detached_camera.h"
 #include "dusk/touch_camera.h"
 #include "imgui.h"
 #endif
@@ -7525,6 +7526,21 @@ bool dCamera_c::isAimActive() {
            dComIfGp_checkCameraAttentionStatus(link->field_0x317c, 0x10);
 }
 
+void dCamera_c::getRawRenderTransform(cXyz& center, cXyz& eye, f32& fovy, s16& bank) {
+    center = mCenter;
+    eye = mEye;
+    fovy = mFovy;
+    bank = mBank.Val();
+}
+
+void dCamera_c::setRawRenderTransform(const cXyz& center, const cXyz& eye, f32 fovy,
+                                      s16 bank) {
+    mCenter = center;
+    mEye = eye;
+    mFovy = fovy;
+    mBank.Val(bank);
+}
+
 bool dCamera_c::executeDebugFlyCam() {
     if (!dusk::getSettings().game.debugFlyCam) {
         if (mDebugFlyCam.initialized) {
@@ -11464,6 +11480,14 @@ static int camera_draw(camera_process_class* i_this) {
     camera_process_class* process = i_this;
     int camera_id = get_camera_id(a_this);
 
+#if TARGET_PC
+    // Actor drawing uses the detached render view. Camera audio and environment
+    // work must still observe the real gameplay camera.
+    if (camera_id == 0) {
+        dusk::detached_camera::restore();
+    }
+#endif
+
 #if DEBUG
     if (dDebugPad.Enable(0) && body->CameraID() == 0) {
         if (dDebugPad.Trigger() != 0) {
@@ -11552,6 +11576,13 @@ static int camera_draw(camera_process_class* i_this) {
     } else {
         Z2AudioMgr::getInterface()->setCameraPolygonPos(NULL);
     }
+
+#if TARGET_PC
+    // Reinstall the detached view after gameplay-camera side effects finish.
+    if (camera_id == 0) {
+        dusk::detached_camera::apply(&process->view);
+    }
+#endif
 
     MTXCopy(process->view.viewMtx, process->view.viewMtxNoTrans);
     process->view.viewMtxNoTrans[0][3] = 0.0f;

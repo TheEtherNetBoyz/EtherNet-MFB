@@ -3696,6 +3696,8 @@ public:
         return (mProcID == PROC_GET_ITEM && checkHorseRide()) || mProcID == PROC_HORSE_GET_KEY;
     }
 
+    BOOL checkGetItemMode() const { return mProcID == PROC_GET_ITEM; }
+
     bool checkFisingRodJewl() const {
         return (mEquipItem == dItemNo_JEWEL_ROD_e || mEquipItem == dItemNo_JEWEL_WORM_ROD_e) || mEquipItem == dItemNo_JEWEL_BEE_ROD_e;
     }

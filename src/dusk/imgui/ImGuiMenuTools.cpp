@@ -97,6 +97,7 @@ namespace dusk {
             s.game.recordingMode.setSpeedrunValue(false);
             s.game.debugFlyCam.setSpeedrunValue(false);
             s.game.moveLink.setSpeedrunValue(false);
+            s.game.teleportLink.setSpeedrunValue(false);
             s.game.gorgeVoidChecker.setSpeedrunValue(false);
             getTransientSettings().moveLinkActive = false;
         }
@@ -273,7 +274,7 @@ namespace dusk {
         void BloomModeControl() {
             auto& value = getSettings().game.bloomMode;
             int copy = static_cast<int>(value.getValue());
-            const char* items[] = {"Off", "Classic", "Dusk", "Shield"};
+            const char* items[] = {"Off", "Classic", "Dusk"};
             ImGui::TextUnformatted("Bloom Mode");
             ImGui::SameLine(170.0f);
             ImGui::SetNextItemWidth(150.0f);
@@ -473,6 +474,7 @@ namespace dusk {
             ForcedAspectRatioControl();
             BloomModeControl();
             BloomMultiplierSlider();
+            MenuCheckbox("Twilight Everywhere", s.game.forceTwilightVisuals);
         }
 
         void DrawAudioMenu() {
@@ -542,6 +544,11 @@ namespace dusk {
             ImGui::MenuItem("Input Macro", nullptr, &m_showInputMacro);
             ImGui::MenuItem("State Share", hotkeys::SHOW_STATE_SHARE, &m_showStateShare);
             MenuCheckbox("Move Link", getSettings().game.moveLink);
+            MenuCheckbox("Teleport Link", getSettings().game.teleportLink);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "D-pad Up + R: set point\nD-pad Down + R: teleport");
+            }
 
             ImGui::EndDisabled();
 

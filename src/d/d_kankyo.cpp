@@ -1228,7 +1228,7 @@ void dKy_light_size_get(char const* stageName) {
     dKydata_lightsizeInfo_c* size_tbl = dKyd_light_size_tbl_getp();
     dKydata_lightsizeInfo_c* tw_size_tbl = dKyd_light_tw_size_tbl_getp();
 
-    if (!dKy_darkworld_check()) {
+    if (!dKy_twilight_visuals_check()) {
         for (int i = 0; i < 36; i++) {
             if (!strcmp(stageName, size_tbl->stageName)) {
                 g_env_light.light_size = size_tbl->size;
@@ -2280,6 +2280,123 @@ void dKy_calc_color_set(GXColorS10* out_color_p, color_RGB_class* color_a_start_
                                color_b_start_p->b, color_b_end_p->b, blend_ratio, add_col.b, scale);
 }
 
+#if TARGET_PC
+static u8 dKy_twilight_clamp_channel(s32 value) {
+    if (value < 0) {
+        return 0;
+    }
+    if (value > 255) {
+        return 255;
+    }
+    return (u8)value;
+}
+
+static void dKy_twilight_tint(GXColorS10* color, u8 tint_r, u8 tint_g, u8 tint_b) {
+    color->r = dKy_twilight_clamp_channel((color->r * tint_r) / 255);
+    color->g = dKy_twilight_clamp_channel((color->g * tint_g) / 255);
+    color->b = dKy_twilight_clamp_channel((color->b * tint_b) / 255);
+}
+
+static void dKy_twilight_tint(GXColor* color, u8 tint_r, u8 tint_g, u8 tint_b) {
+    color->r = dKy_twilight_clamp_channel((color->r * tint_r) / 255);
+    color->g = dKy_twilight_clamp_channel((color->g * tint_g) / 255);
+    color->b = dKy_twilight_clamp_channel((color->b * tint_b) / 255);
+}
+
+static void dKy_twilight_fog(GXColorS10* color, f32* near_z, f32* far_z) {
+    // Blend every room's own fog toward the blue-black haze used by the twilight
+    // fields. Keeping one quarter of the source color preserves room identity.
+    color->r = dKy_twilight_clamp_channel((color->r + 42 * 3) / 4);
+    color->g = dKy_twilight_clamp_channel((color->g + 58 * 3) / 4);
+    color->b = dKy_twilight_clamp_channel((color->b + 74 * 3) / 4);
+
+    if (*near_z > 1800.0f) {
+        *near_z = 1800.0f;
+    }
+    if (*far_z > 18000.0f) {
+        *far_z = 18000.0f;
+    }
+}
+
+static void dKy_apply_global_twilight_environment(dScnKy_env_light_c* env) {
+    if (!dKy_force_twilight_visuals_check() || dKy_darkworld_check()) {
+        return;
+    }
+
+    dKy_twilight_tint(&env->actor_amb_col, 205, 180, 218);
+    for (int i = 0; i < 4; ++i) {
+        dKy_twilight_tint(&env->bg_amb_col[i], 176, 169, 208);
+    }
+    for (int i = 0; i < 6; ++i) {
+        dKy_twilight_tint(&env->dungeonlight[i].mColor, 214, 193, 224);
+    }
+    dKy_twilight_fog(&env->fog_col, &env->mFogNear, &env->mFogFar);
+
+    // These values are deliberately independent of the current stage's VRK0
+    // table. Consequently a normal or already-cleared stage cannot fall back to
+    // its daylight sky merely because it has no authored twilight palette.
+    env->vrbox_sky_col = GXColorS10{24, 48, 72, 255};
+    env->vrbox_kumo_top_col = GXColorS10{112, 108, 80, 176};
+    env->vrbox_kumo_bottom_col = GXColorS10{43, 68, 79, 255};
+    env->vrbox_kumo_shadow_col = GXColorS10{18, 29, 45, 176};
+    env->vrbox_kasumi_outer_col = GXColorS10{119, 91, 49, 255};
+    env->vrbox_kasumi_inner_col = GXColorS10{57, 75, 81, 255};
+    env->hide_vrbox = false;
+
+    // Bloom preset 1 is the game's canonical Twilight preset. Allocate the
+    // buffer here as well so stages whose ENVR data disables bloom still work,
+    // including when the option is enabled after entering a room.
+    mDoGph_gInf_c::bloom_c* bloom = mDoGph_gInf_c::getBloom();
+    bloom->create();
+    dKydata_BloomInfo_c* bloom_info = dKyd_BloomInf_tbl_getp(1);
+    bloom->setEnable(1);
+    bloom->setMode(bloom_info->info.mType != 0);
+    bloom->setPoint(bloom_info->info.mThreshold);
+    bloom->setBlureSize(bloom_info->info.mBlurAmount);
+    bloom->setBlureRatio(bloom_info->info.mDensity);
+    bloom->setBlendColor(GXColor{
+        bloom_info->info.mColorR,
+        bloom_info->info.mColorG,
+        bloom_info->info.mColorB,
+        bloom_info->info.mOrigDensity,
+    });
+    bloom->setMonoColor(GXColor{
+        bloom_info->info.mSaturateSubtractR,
+        bloom_info->info.mSaturateSubtractG,
+        bloom_info->info.mSaturateSubtractB,
+        bloom_info->info.mSaturateSubtractA,
+    });
+}
+
+static void dKy_apply_global_twilight_tev(dKy_tevstr_c* tevstr, GXColorS10* fog_col,
+                                          f32* fog_near, f32* fog_far) {
+    if (!dKy_force_twilight_visuals_check() || dKy_darkworld_check()) {
+        return;
+    }
+
+    dKy_twilight_tint(&tevstr->AmbCol, 205, 180, 218);
+    for (int i = 0; i < 6; ++i) {
+        dKy_twilight_tint(&tevstr->mLights[i].getLightInfo()->mColor, 214, 193, 224);
+    }
+    dKy_twilight_fog(fog_col, fog_near, fog_far);
+}
+
+static void dKy_apply_global_twilight_bg(dKy_tevstr_c* tevstr, GXColorS10* bg_col,
+                                         GXColorS10* fog_col, f32* fog_near, f32* fog_far) {
+    if (!dKy_force_twilight_visuals_check() || dKy_darkworld_check()) {
+        return;
+    }
+
+    for (int i = 0; i < 4; ++i) {
+        dKy_twilight_tint(&bg_col[i], 176, 169, 208);
+    }
+    for (int i = 0; i < 6; ++i) {
+        dKy_twilight_tint(&tevstr->mLights[i].getLightInfo()->mColor, 214, 193, 224);
+    }
+    dKy_twilight_fog(fog_col, fog_near, fog_far);
+}
+#endif
+
 
 void dScnKy_env_light_c::setLight() {
     f32 color_ratio;
@@ -2522,7 +2639,7 @@ void dScnKy_env_light_c::setLight() {
 
             GXColor bloom_mono_col;
 
-            if (dKy_darkworld_check()) {
+            if (dKy_twilight_visuals_check()) {
                 static s16 S_fuwan_sin;
 
                 f32 sin = cM_ssin(S_fuwan_sin);
@@ -2645,7 +2762,7 @@ void dScnKy_env_light_c::setLight() {
                 field_0x123c = 0.65f;
             }
 
-            if (dKy_darkworld_check()) {
+            if (dKy_twilight_visuals_check()) {
                 var_f30 = 0.55f;
                 field_0x123c = 0.55f;
             }
@@ -2822,6 +2939,10 @@ void dScnKy_env_light_c::setLight() {
             dKydb_HIO_debug_TVdsp(color_ratio, g_env_light.pat_ratio, start_pat_pal_id, end_pat_pal_id, lightMask);
             #endif
         }
+
+#if TARGET_PC
+        dKy_apply_global_twilight_environment(this);
+#endif
     }
 }
 
@@ -2924,6 +3045,10 @@ void dScnKy_env_light_c::setLight_bg(dKy_tevstr_c* tevstr_p, GXColorS10* bg_col_
             dKy_WolfPowerup_FogNearFar(fog_near_p, fog_far_p);
         }
     }
+
+#if TARGET_PC
+    dKy_apply_global_twilight_bg(tevstr_p, bg_col_p, fog_col_p, fog_near_p, fog_far_p);
+#endif
 }
 
 void dScnKy_env_light_c::setLight_actor(dKy_tevstr_c* tevstr_p, GXColorS10* fog_col_p,
@@ -3099,6 +3224,10 @@ void dScnKy_env_light_c::setLight_actor(dKy_tevstr_c* tevstr_p, GXColorS10* fog_
             dKy_WolfPowerup_FogNearFar(fog_near_p, fog_far_p);
         }
     }
+
+#if TARGET_PC
+    dKy_apply_global_twilight_tev(tevstr_p, fog_col_p, fog_near_p, fog_far_p);
+#endif
 }
 
 void dScnKy_env_light_c::settingTevStruct_colget_actor(cXyz* unused, dKy_tevstr_c* tevstr_p,
@@ -10280,7 +10409,7 @@ void dKy_twilight_camelight_set() {
     if (strcmp(dComIfGp_getStartStageName(), "R_SP107") != 0 ||
         dComIfGp_roomControl_getStayNo() != 3 || dComIfGp_getStartStageLayer() != 12)
     {
-        if (!dKy_darkworld_check() || memcmp(dComIfGp_getStartStageName(), "D_MN08", 6) == 0) {
+        if (!dKy_twilight_visuals_check() || memcmp(dComIfGp_getStartStageName(), "D_MN08", 6) == 0) {
             return;
         }
 
@@ -11081,6 +11210,18 @@ u8 dKy_darkworld_check() {
     }
 
     return check;
+}
+
+BOOL dKy_force_twilight_visuals_check() {
+#if TARGET_PC
+    return dusk::getSettings().game.forceTwilightVisuals.getValue();
+#else
+    return FALSE;
+#endif
+}
+
+BOOL dKy_twilight_visuals_check() {
+    return dKy_darkworld_check() || dKy_force_twilight_visuals_check();
 }
 
 /**

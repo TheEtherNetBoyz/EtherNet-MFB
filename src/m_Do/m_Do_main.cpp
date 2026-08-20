@@ -57,7 +57,9 @@
 #include "dusk/data.hpp"
 #include "dusk/dusk.h"
 #include "dusk/frame_interpolation.h"
+#include "dusk/detached_camera.h"
 #include "dusk/game_clock.h"
+#include "dusk/load_position_overlay.hpp"
 #include "dusk/gyro.h"
 #include "dusk/mouse.h"
 #include "dusk/imgui/ImGuiConsole.hpp"
@@ -332,8 +334,10 @@ void main01(void) {
                     dusk::gyro::read(pacing.sim_pace);
                     dusk::latency_trace::mark("fapGm_Execute_before");
                     fapGm_Execute();
+                    dusk::detached_camera::restore();
                     dusk::latency_trace::mark("fapGm_Execute_after");
                     mDoAud_Execute();
+                    dusk::UpdateLoadPositionDriftNative();
                     dusk::game_clock::commit_sim_tick();
                 }
             }
@@ -356,10 +360,12 @@ void main01(void) {
             if (!dusk::frame_interp::presentation_skip_active()) {
                 dusk::frame_interp::interpolate();
                 dusk::frame_interp::begin_presentation_camera();
+                dusk::detached_camera::apply(dComIfGd_getView());
                 // run draw functions for anything specially marked to handle interp
                 dusk::latency_trace::mark("interp_draw_before");
                 fpcM_DrawIterater((fpcM_DrawIteraterFunc)fpcM_Draw);
                 cAPIGph_Painter();
+                dusk::detached_camera::restore();
                 dusk::latency_trace::mark("interp_draw_after");
                 dusk::frame_interp::end_presentation_camera();
             } else {
@@ -390,9 +396,12 @@ void main01(void) {
                 } else {
                     fapGm_ExecuteTurboLogicOnly();
                 }
+                dusk::detached_camera::restore();
                 dusk::latency_trace::mark("fapGm_Execute_after");
 
                 mDoAud_Execute();
+                dusk::UpdateLoadPositionDriftNative();
+                dusk::game_clock::count_sim_tick();
             }
         }
 

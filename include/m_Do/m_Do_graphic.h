@@ -33,7 +33,7 @@ public:
         void draw();
 #if TARGET_PC
         void draw2();
-        void drawShield();
+        void drawClassic();
 #endif
 
         u8 getEnable() { return mEnable; }

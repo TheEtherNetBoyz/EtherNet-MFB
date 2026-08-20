@@ -18,6 +18,7 @@ bool s_initialized = false;
 clock::time_point s_previous_sample{};
 clock::time_point s_current_snapshot_time{};
 Limiter s_frame_limiter;
+unsigned long long s_simulation_tick_count = 0;
 
 std::unordered_map<uintptr_t, clock::time_point> s_interval_last_sample;
 
@@ -125,6 +126,15 @@ void finish_main_loop() {
 void commit_sim_tick() {
     ensure_initialized();
     s_current_snapshot_time += kSimPeriodDuration;
+    count_sim_tick();
+}
+
+void count_sim_tick() {
+    ++s_simulation_tick_count;
+}
+
+unsigned long long simulation_tick_count() {
+    return s_simulation_tick_count;
 }
 
 float sample_interpolation_step() {

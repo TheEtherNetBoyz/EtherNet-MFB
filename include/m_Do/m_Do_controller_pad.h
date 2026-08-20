@@ -34,6 +34,8 @@ public:
     static u32 getTrigX(u32 pad) { return getTrig(pad) & PAD_BUTTON_X; }
     static u32 getTrigStart(u32 pad) { return getTrig(pad) & PAD_BUTTON_START; }
     static u32 getHold(u32 pad) { return getCpadInfo(pad).mButtonFlags; }
+    static u32 getUnfilteredHold(u32 pad) { return m_unfilteredButtonFlags[pad]; }
+    static u32 getUnfilteredTrig(u32 pad) { return m_unfilteredPressedButtonFlags[pad]; }
     static u32 getHoldLockL(u32 pad) { return getCpadInfo(pad).mHoldLockL; }
     static u32 getHoldLockR(u32 pad) { return getCpadInfo(pad).mHoldLockR; }
     static u32 getHoldUp(u32 pad) { return getHold(pad) & PAD_BUTTON_UP; }
@@ -96,6 +98,8 @@ public:
     static JUTGamePad* m_gamePad[4];
     static interface_of_controller_pad m_cpadInfo[4];
     static interface_of_controller_pad m_debugCpadInfo[4];
+    static u32 m_unfilteredButtonFlags[4];
+    static u32 m_unfilteredPressedButtonFlags[4];
 };
 
 inline void mDoCPd_ANALOG_CONV(u8 analog, f32& param_1) {

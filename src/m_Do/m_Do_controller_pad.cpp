@@ -29,6 +29,8 @@ JUTGamePad* mDoCPd_c::m_gamePad[4];
 
 interface_of_controller_pad mDoCPd_c::m_cpadInfo[4];
 interface_of_controller_pad mDoCPd_c::m_debugCpadInfo[4];
+u32 mDoCPd_c::m_unfilteredButtonFlags[4] = {};
+u32 mDoCPd_c::m_unfilteredPressedButtonFlags[4] = {};
 
 #if TARGET_PC
 static bool sCtrlRResetHeld = false;
@@ -77,6 +79,12 @@ static void clearPracticeMenuInput(interface_of_controller_pad* interface) {
     interface->mTrigLockL = false;
     interface->mHoldLockR = false;
     interface->mTrigLockR = false;
+}
+
+static void clearTeleportLinkDpadInput(interface_of_controller_pad* interface) {
+    constexpr u32 kTeleportDpadMask = PAD_BUTTON_UP | PAD_BUTTON_DOWN;
+    interface->mButtonFlags &= ~kTeleportDpadMask;
+    interface->mPressedButtonFlags &= ~kTeleportDpadMask;
 }
 
 static void resetInputDelayHistory() {
@@ -229,8 +237,12 @@ void mDoCPd_c::read() {
     for (u32 i = 0; i < 4; i++) {
         if (*pad == NULL) {
             cLib_memSet(interface, 0, sizeof(interface_of_controller_pad));
+            m_unfilteredButtonFlags[i] = 0;
+            m_unfilteredPressedButtonFlags[i] = 0;
         } else {
             convert(interface, *pad);
+            m_unfilteredButtonFlags[i] = interface->mButtonFlags;
+            m_unfilteredPressedButtonFlags[i] = interface->mPressedButtonFlags;
 #if TARGET_PC
             const u32 suppressedButtons = dusk::menu_pointer::suppressed_pad_buttons(i);
             interface->mButtonFlags &= ~suppressedButtons;
@@ -259,7 +271,32 @@ void mDoCPd_c::read() {
     if (dusk::input_macro::tick(m_cpadInfo, ctrlRResetRequested) && !mDoRst::isReset()) {
         mDoRst_resetCallBack(-1, NULL);
     }
+
+    if (dusk::getSettings().game.teleportLink.getValue() &&
+        !dusk::getSettings().game.speedrunMode.getValue() &&
+        (m_unfilteredButtonFlags[PAD_1] & PAD_TRIGGER_R) != 0 &&
+        (m_unfilteredButtonFlags[PAD_1] & PAD_TRIGGER_L) == 0)
+    {
+        clearTeleportLinkDpadInput(&m_cpadInfo[PAD_1]);
+    }
 #endif
+
+    const u32 physicalHold = m_unfilteredButtonFlags[PAD_1];
+    const u32 replayCombo = PAD_BUTTON_B | PAD_BUTTON_LEFT | PAD_TRIGGER_Z;
+    if ((physicalHold & replayCombo) == replayCombo) {
+        m_cpadInfo[PAD_1].mButtonFlags &= ~replayCombo;
+        m_cpadInfo[PAD_1].mPressedButtonFlags &= ~replayCombo;
+    }
+
+    if ((physicalHold & PAD_BUTTON_A) != 0) {
+        m_cpadInfo[PAD_1].mButtonFlags &= ~PAD_BUTTON_LEFT;
+        m_cpadInfo[PAD_1].mPressedButtonFlags &= ~PAD_BUTTON_LEFT;
+
+        if ((physicalHold & PAD_BUTTON_LEFT) != 0) {
+            m_cpadInfo[PAD_1].mButtonFlags &= ~PAD_TRIGGER_Z;
+            m_cpadInfo[PAD_1].mPressedButtonFlags &= ~PAD_TRIGGER_Z;
+        }
+    }
 }
 
 void mDoCPd_c::convert(interface_of_controller_pad* pInterface, JUTGamePad* pPad) {

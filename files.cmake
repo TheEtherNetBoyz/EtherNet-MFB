@@ -1415,6 +1415,7 @@ set(DUSK_FILES
         include/dusk/endian_gx.hpp
         include/dusk/config.hpp
         include/dusk/dvd_asset.hpp
+        include/dusk/detached_camera.h
         include/dusk/input_macro.h
         include/dusk/latency_trace.h
         include/dusk/scope_guard.hpp
@@ -1430,6 +1431,7 @@ set(DUSK_FILES
         src/dusk/crash_reporting.cpp
         src/dusk/data.cpp
         src/dusk/data.hpp
+        src/dusk/detached_camera.cpp
         src/dusk/endian.cpp
         src/dusk/extras.c
         src/dusk/file_select.cpp

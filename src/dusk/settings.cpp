@@ -73,6 +73,7 @@ UserSettings g_userSettings = {
         // Graphics
         .bloomMode {"game.bloomMode", BloomMode::Dusk},
         .bloomMultiplier {"game.bloomMultiplier", 1.0f},
+        .forceTwilightVisuals {"game.forceTwilightVisuals", false},
         .depthOfFieldMode{"game.depthOfFieldMode", DepthOfFieldMode::Dusk},
         .disableWaterRefraction {"game.disableWaterRefraction", false},
         .enableTextureReplacements {"game.enableTextureReplacements", true},
@@ -170,6 +171,15 @@ UserSettings g_userSettings = {
         .liveSplitEnabled {"game.liveSplitEnabled", false},
         .showSpeedrunRTATimer {"game.showSpeedrunRTATimer", true},
         .moveLink {"game.moveLink", false},
+        .teleportLink {"game.teleportLink", false},
+        .rupeeSlidePositionX {"game.rupeeSlidePositionX", 0.0f},
+        .rupeeSlidePositionY {"game.rupeeSlidePositionY", 0.0f},
+        .rupeeSlidePositionZ {"game.rupeeSlidePositionZ", 0.0f},
+        .rupeeSlideAngleY {"game.rupeeSlideAngleY", 0},
+        .rupeeSlideStage {"game.rupeeSlideStage", ""},
+        .rupeeSlideRoom {"game.rupeeSlideRoom", -1},
+        .rupeeSlideLayer {"game.rupeeSlideLayer", -1},
+        .rupeeSlidePositionValid {"game.rupeeSlidePositionValid", false},
         .gorgeVoidChecker {"game.gorgeVoidChecker", false},
         .recordingMode {"game.recordingMode", false},
         .removeQuestMapMarkers {"game.removeQuestMapMarkers", false},
@@ -396,6 +406,7 @@ void registerSettings() {
     Register(g_userSettings.game.enableDiscordPresence);
     Register(g_userSettings.game.bloomMode);
     Register(g_userSettings.game.bloomMultiplier);
+    Register(g_userSettings.game.forceTwilightVisuals);
     Register(g_userSettings.game.depthOfFieldMode);
     Register(g_userSettings.game.disableWaterRefraction);
     Register(g_userSettings.game.enableTextureReplacements);
@@ -423,6 +434,15 @@ void registerSettings() {
     Register(g_userSettings.game.liveSplitEnabled);
     Register(g_userSettings.game.showSpeedrunRTATimer);
     Register(g_userSettings.game.moveLink);
+    Register(g_userSettings.game.teleportLink);
+    Register(g_userSettings.game.rupeeSlidePositionX);
+    Register(g_userSettings.game.rupeeSlidePositionY);
+    Register(g_userSettings.game.rupeeSlidePositionZ);
+    Register(g_userSettings.game.rupeeSlideAngleY);
+    Register(g_userSettings.game.rupeeSlideStage);
+    Register(g_userSettings.game.rupeeSlideRoom);
+    Register(g_userSettings.game.rupeeSlideLayer);
+    Register(g_userSettings.game.rupeeSlidePositionValid);
     Register(g_userSettings.game.gorgeVoidChecker);
     Register(g_userSettings.game.recordingMode);
     Register(g_userSettings.game.menuScalingMode);

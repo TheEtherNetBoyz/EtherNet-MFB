@@ -1032,6 +1032,8 @@ BOOL dKy_TeachWind_existence_chk();
 u8 dKy_darkworld_stage_check(char const* stageName, int roomNo);
 BOOL dKy_withwarp_capture_check();
 u8 dKy_darkworld_check();
+BOOL dKy_force_twilight_visuals_check();
+BOOL dKy_twilight_visuals_check();
 void dKy_undwater_filter_draw();
 BOOL dKy_camera_water_in_status_check();
 int dKy_Outdoor_check();

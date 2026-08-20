@@ -1793,18 +1793,16 @@ void mDoGph_gInf_c::bloom_c::draw2() {
     }
 }
 
-// Verbatim port of the April-9 (pre-"Widescreen rework") bloom_c::draw() PC path.
-// Goal: reproduce the exact "Native Bloom ON" look using the original full-resolution
-// (getWidth/getHeight) source and the original getZbufferTex/GXCopyTex/mDoGph_drawFilterQuad
-// plumbing, rather than the Classic path's fixed FB_WIDTH/FB_HEIGHT downscale.
-void mDoGph_gInf_c::bloom_c::drawShield() {
+// April-9 (pre-"Widescreen rework") Classic bloom path. Keep its bloom buffers
+// 1:1 with the active render resolution and submit its viewport in render space.
+void mDoGph_gInf_c::bloom_c::drawClassic() {
     ZoneScoped;
     bool enabled = mEnable && m_buffer != NULL;
     if (mMonoColor.a != 0 || enabled) {
-        f32 width = mDoGph_gInf_c::getWidth();
-        f32 height = mDoGph_gInf_c::getHeight();
-        GXSetViewport(0.0f, 0.0f, width, height, 0.0f, 1.0f);
-        GXSetScissor(0, 0, width, height);
+        f32 width = JUTVideo::getManager()->getRenderWidth();
+        f32 height = JUTVideo::getManager()->getRenderHeight();
+        GXSetViewportRender(0.0f, 0.0f, width, height, 0.0f, 1.0f);
+        GXSetScissorRender(0, 0, width, height);
 
         GXLoadTexObj(getFrameBufferTexObj(), GX_TEXMAP0);
         GXSetNumChans(0);
@@ -1902,7 +1900,7 @@ void mDoGph_gInf_c::bloom_c::drawShield() {
             for (int texCoord = (int)GX_TEXCOORD1; texCoord < (int)GX_MAX_TEXCOORD; texCoord++) {
                 GXSetTexCoordGen((GXTexCoordID)texCoord, GX_TG_MTX2x4, GX_TG_TEX0, iVar11);
 
-                f32 dVar15 = mBlureSize * ((448.0f / getHeight()) / 6400.0f);
+                f32 dVar15 = mBlureSize * ((448.0f / height) / 6400.0f);
 
                 mDoMtx_stack_c::transS((dVar15 * cM_scos(sVar10)) * getInvScale(),
                                        dVar15 * cM_ssin(sVar10), 0.0f);
@@ -1992,14 +1990,12 @@ void mDoGph_gInf_c::bloom_c::draw() {
         return;
     }
 #if TARGET_PC
-    if (dusk::getSettings().game.bloomMode.getValue() == dusk::BloomMode::Shield) {
-        drawShield();
+    if (dusk::getSettings().game.bloomMode.getValue() == dusk::BloomMode::Classic) {
+        drawClassic();
         return;
     }
 #endif
-    if (dusk::getSettings().game.bloomMode.getValue() != dusk::BloomMode::Classic &&
-        dusk::getSettings().game.bloomMode.getValue() != dusk::BloomMode::Shield)
-    {
+    if (dusk::getSettings().game.bloomMode.getValue() != dusk::BloomMode::Classic) {
         return;
     }
 

@@ -13,7 +13,6 @@ enum class BloomMode : int {
     Off = 0,
     Classic = 1,
     Dusk = 2,
-    Shield = 3,
 };
 
 enum class DepthOfFieldMode : int {
@@ -90,7 +89,7 @@ namespace config {
 template <>
 struct ConfigEnumRange<BloomMode> {
     static constexpr auto min = BloomMode::Off;
-    static constexpr auto max = BloomMode::Shield;
+    static constexpr auto max = BloomMode::Dusk;
 };
 
 template <>
@@ -241,6 +240,7 @@ struct UserSettings {
         // Graphics
         ConfigVar<BloomMode> bloomMode;
         ConfigVar<float> bloomMultiplier;
+        ConfigVar<bool> forceTwilightVisuals;
         ConfigVar<DepthOfFieldMode> depthOfFieldMode;
         ConfigVar<bool> disableWaterRefraction;
         ConfigVar<bool> enableTextureReplacements;
@@ -333,6 +333,15 @@ struct UserSettings {
         ConfigVar<bool> liveSplitEnabled;
         ConfigVar<bool> showSpeedrunRTATimer;
         ConfigVar<bool> moveLink;
+        ConfigVar<bool> teleportLink;
+        ConfigVar<float> rupeeSlidePositionX;
+        ConfigVar<float> rupeeSlidePositionY;
+        ConfigVar<float> rupeeSlidePositionZ;
+        ConfigVar<int> rupeeSlideAngleY;
+        ConfigVar<std::string> rupeeSlideStage;
+        ConfigVar<int> rupeeSlideRoom;
+        ConfigVar<int> rupeeSlideLayer;
+        ConfigVar<bool> rupeeSlidePositionValid;
         ConfigVar<bool> gorgeVoidChecker;
         ConfigVar<bool> recordingMode;
         ConfigVar<bool> removeQuestMapMarkers;

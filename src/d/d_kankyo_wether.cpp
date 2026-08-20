@@ -432,7 +432,7 @@ static void wether_move_sun() {
 
         switch (g_env_light.mSunInitialized) {
         case FALSE:
-            if (sunVisible && dKy_darkworld_check() != true) {
+            if (sunVisible && !dKy_twilight_visuals_check()) {
                 g_env_light.mpSunPacket = JKR_NEW_ARGS (0x20) dKankyo_sun_Packet;
                 g_env_light.mpSunLenzPacket = JKR_NEW_ARGS (0x20) dKankyo_sunlenz_Packet;
                 if (g_env_light.mpSunPacket != NULL && g_env_light.mpSunLenzPacket != NULL) {
@@ -497,7 +497,7 @@ static void wether_move_sun() {
             }
             break;
         case TRUE:
-            if (!sunVisible) {
+            if (!sunVisible || dKy_twilight_visuals_check()) {
                 g_env_light.mSunInitialized = false;
                 JKR_DELETE(g_env_light.mpSunPacket);
                 JKR_DELETE(g_env_light.mpSunLenzPacket);
@@ -573,6 +573,17 @@ static void wether_move_snow() {
 
 static void wether_move_star() {
     s32 starsVisible = false;
+    if (dKy_twilight_visuals_check()) {
+        g_env_light.mStarCount = 0;
+        g_env_light.mStarDensity = 0.0f;
+        if (g_env_light.mStarInitialized) {
+            g_env_light.mStarInitialized = false;
+            JKR_DELETE(g_env_light.mpStarPacket);
+            g_env_light.mpStarPacket = NULL;
+        }
+        return;
+    }
+
     // Stage is Hyrule Castle or Castle Throne Room
     if (!strcmp(dComIfGp_getStartStageName(), "D_MN09") ||
         !strcmp(dComIfGp_getStartStageName(), "D_MN09A"))
@@ -594,7 +605,7 @@ static void wether_move_star() {
                 starsVisible = true;
             }
 
-            if (starsVisible && dKy_darkworld_check() != true) {
+            if (starsVisible) {
                 f32 density;
                 f32 time = g_env_light.getDaytime();
                 if (time >= 330.0f || time < 45.0f) {
@@ -664,19 +675,26 @@ static void wether_move_star() {
 }
 
 static void wether_move_housi() {
+    const BOOL force_twilight = dKy_force_twilight_visuals_check();
+
     // Stage is Palace of Twilight or Zant Throne Room, or Phantom Zant arena
     // Room is not Entrance or Boss Key room
-    if ((!strcmp(dComIfGp_getStartStageName(), "D_MN08") && dComIfGp_roomControl_getStayNo() != 0 &&
-         dComIfGp_roomControl_getStayNo() != 11) ||
-        (!strcmp(dComIfGp_getStartStageName(), "D_MN08A") ||
-         !strcmp(dComIfGp_getStartStageName(), "D_MN08B") ||
-         !strcmp(dComIfGp_getStartStageName(), "D_MN08C")))
+    if (!force_twilight &&
+        (((!strcmp(dComIfGp_getStartStageName(), "D_MN08") &&
+           dComIfGp_roomControl_getStayNo() != 0 &&
+           dComIfGp_roomControl_getStayNo() != 11) ||
+          (!strcmp(dComIfGp_getStartStageName(), "D_MN08A") ||
+           !strcmp(dComIfGp_getStartStageName(), "D_MN08B") ||
+           !strcmp(dComIfGp_getStartStageName(), "D_MN08C")))))
     {
         return;
     }
 
     // Stage is darkworld or Stage is Lake Hylia and Room is Lanayru Spring
-    if (dKy_darkworld_check() == true ||
+    if (force_twilight) {
+        g_env_light.field_0xea9 = 0;
+        g_env_light.mHousiCount = 200;
+    } else if (dKy_darkworld_check() == true ||
         (!strcmp(dComIfGp_getStartStageName(), "F_SP115") &&
          dComIfGp_roomControl_getStayNo() == 1 && dComIfGp_getStartStageLayer() == 9))
     {
@@ -708,7 +726,7 @@ static void wether_move_housi() {
             g_env_light.mpHousiPacket = JKR_NEW_ARGS (32) dKankyo_housi_Packet;
 
             if (g_env_light.mpHousiPacket != NULL) {
-                if (dKy_darkworld_check() == true) {
+                if (dKy_twilight_visuals_check()) {
                     g_env_light.mpHousiPacket->mpResTex = (u8*)dComIfG_getObjectRes("Always", 0x5E);
                 } else {
                     if (g_env_light.field_0xea9 == 2) {
@@ -752,7 +770,7 @@ static void wether_move_housi() {
             g_env_light.mpHousiPacket = NULL;
         } else {
             dKyr_housi_move();
-            if (!dKy_darkworld_check()) {
+            if (!dKy_twilight_visuals_check()) {
                 g_env_light.mHousiCount = 0;
             }
         }
@@ -865,7 +883,7 @@ static void wether_move_vrkumo() {
         g_env_light.mVrkumoCount = 0;
     }
 
-    if (dKy_darkworld_check()) {
+    if (dKy_twilight_visuals_check()) {
         g_env_light.mVrkumoCount = 30;
     }
 
@@ -877,7 +895,9 @@ static void wether_move_vrkumo() {
 
     if (strcmp(dComIfGp_getStartStageName(), "F_SP200") == 0) {
         g_env_light.mVrkumoCount = 30;
-    } else if (var_r31 == 0) {
+    } else if (var_r31 == 0 &&
+               !(dKy_force_twilight_visuals_check() && dComIfGp_checkStatus(1)))
+    {
         return;
     }
 

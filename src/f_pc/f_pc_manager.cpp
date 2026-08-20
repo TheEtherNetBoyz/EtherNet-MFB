@@ -22,6 +22,9 @@
 #include "m_Do/m_Do_controller_pad.h"
 #include "dusk/latency.h"
 #include "dusk/latency_trace.h"
+#ifdef TARGET_PC
+#include "dusk/detached_camera.h"
+#endif
 
 #include "tracy/Tracy.hpp"
 
@@ -71,7 +74,13 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
 #endif
             {
                 dusk::latency_trace::mark("cAPIGph_Painter_original_before");
+#ifdef TARGET_PC
+                dusk::detached_camera::apply(dComIfGd_getView());
+#endif
                 cAPIGph_Painter();
+#ifdef TARGET_PC
+                dusk::detached_camera::restore();
+#endif
                 dusk::latency_trace::mark("cAPIGph_Painter_original_after");
             }
 
@@ -98,7 +107,17 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
             }
 
             if (!fapGm_HIO_c::isCaptureScreen() || fapGm_HIO_c::getCaptureScreenDivH() != 1) {
+#ifdef TARGET_PC
+                dusk::detached_camera::apply(dComIfGd_getView());
+#endif
                 fpcDw_Handler((fpcDw_HandlerFuncFunc)fpcM_DrawIterater, (fpcDw_HandlerFunc)fpcM_Draw);
+#ifdef TARGET_PC
+                if (!dusk::frame_interp::is_enabled() &&
+                    !dusk::low_latency_presentation_enabled())
+                {
+                    dusk::detached_camera::restore();
+                }
+#endif
             }
 
             if (i_postExecuteFn != NULL) {
@@ -111,7 +130,10 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
             if (!dusk::frame_interp::is_enabled() && dusk::low_latency_presentation_enabled()) {
                 dusk::latency_trace::mark("cAPIGph_Painter_low_latency_before");
                 cAPIGph_Painter();
+                dusk::detached_camera::restore();
                 dusk::latency_trace::mark("cAPIGph_Painter_low_latency_after");
+            } else {
+                dusk::detached_camera::restore();
             }
 #endif
         } else if (!l_dvdError) {
