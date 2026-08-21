@@ -49,6 +49,8 @@ static u32 z2FastLoadAudioFadeFrames(u32 frames) {
 #if TARGET_PC
 static bool s_twilightVisualsPalaceMusicForced = false;
 static s32 s_twilightVisualsPalaceMusicStatus = 0;
+static bool s_bgmOnlyDynamicWaveRefresh = false;
+static s32 s_bgmStatusAfterRefresh = -1;
 
 static bool z2TwilightVisualsPreserveSceneMusic(int sceneNum) {
     switch (sceneNum) {
@@ -1713,6 +1715,7 @@ void Z2SceneMgr::setSceneName(char* spot, s32 room, s32 layer) {
     const bool isInteriorLoad = spot != NULL && strncmp(spot, "R_", 2) == 0;
     if (!dusk::getSettings().game.speedrunMode.getValue() &&
         dusk::getSettings().game.enableTwilightVisuals.getValue() &&
+        dusk::getSettings().game.enableTwilightVisualMusic.getValue() &&
         !inDarkness_ && !isPalaceScene && !preserveSceneMusic && demo_wave == 0 &&
         (isExteriorLoad || isInteriorLoad)) {
         bgm_id = Z2BGM_DUNGEON_LV8;
@@ -1826,11 +1829,35 @@ void Z2SceneMgr::load1stDynamicWave() {
     }
 }
 
+void Z2SceneMgr::load1stDynamicWaveForBgmRefresh() {
+#if TARGET_PC
+    s_bgmOnlyDynamicWaveRefresh = true;
+#endif
+    timer = 0;
+    setSceneExist(false);
+    if (load1stWait == 0) {
+        _load1stWaveInner_1();
+    }
+}
+
+void Z2SceneMgr::restoreBgmStatusAfterRefresh(s32 status) {
+#if TARGET_PC
+    s_bgmStatusAfterRefresh = status;
+#else
+    UNUSED(status);
+#endif
+}
+
 void Z2SceneMgr::_load1stWaveInner_1() {
     OS_REPORT("[Z2SceneMgr::_load1stWaveInner_1] requestSe:%d loadedSe:%d\n", requestSeWave_1, loadedSeWave_1);
 
-    Z2GetSeMgr()->seStopAll(0);
-    Z2GetEnvSeMgr()->resetSceneInner();
+#if TARGET_PC
+    if (!s_bgmOnlyDynamicWaveRefresh)
+#endif
+    {
+        Z2GetSeMgr()->seStopAll(0);
+        Z2GetEnvSeMgr()->resetSceneInner();
+    }
                  /* dSv_event_flag_c::M_071 - Cutscene - [cutscene: 20] Zant appears (during Midna's desperate hour) */
     field_0x18 = dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[104]) ? 0x59 : 0x58;
 
@@ -1901,6 +1928,9 @@ void Z2SceneMgr::_load1stWaveInner_2() {
             loadedBgmWave_1 = 0;
         }
     }
+#if TARGET_PC
+    s_bgmOnlyDynamicWaveRefresh = false;
+#endif
 }
 
 bool Z2SceneMgr::check1stDynamicWave() {
@@ -2041,6 +2071,12 @@ void Z2SceneMgr::sceneBgmStart() {
         }
     }
 
+#if TARGET_PC
+    if (s_bgmStatusAfterRefresh >= 0) {
+        Z2GetSeqMgr()->changeBgmStatus(s_bgmStatusAfterRefresh);
+        s_bgmStatusAfterRefresh = -1;
+    }
+#endif
     Z2GetSeqMgr()->bgmAllUnMute(0);
     field_0x1a = false;
 }

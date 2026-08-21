@@ -317,6 +317,7 @@ namespace dusk {
             const bool speedrunRestricted = s.game.speedrunMode.getValue();
             ImGui::BeginDisabled(speedrunRestricted);
             MenuCheckbox("Enable Twilight Visuals", s.game.enableTwilightVisuals);
+            MenuCheckbox("Use Palace Music", s.game.enableTwilightVisualMusic);
             ImGui::TextUnformatted("Twilight Brightness");
             ImGui::SameLine(170.0f);
             ImGui::SetNextItemWidth(160.0f);

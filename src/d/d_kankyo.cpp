@@ -51,6 +51,7 @@ static bool s_visual_environment_has_twilight_layer = false;
 #if TARGET_PC
 static bool s_twilight_visual_audio_state = false;
 static bool s_twilight_visual_audio_state_initialized = false;
+static u8 s_twilight_visual_original_bgm_status = 0xff;
 #endif
 static bool s_visual_environment_forced = false;
 static bool s_has_faron_twilight_sky = false;
@@ -1477,7 +1478,7 @@ void dKy_apply_visual_twilight_weather() {
     static int wind_gust_timer = 0;
     static bool wind_gust_active = false;
 
-    const bool active = dKy_visual_twilight_options_active();
+    const bool active = !dusk::getSettings().game.speedrunMode.getValue();
     const dusk::TwilightWeather weather = dusk::getSettings().game.twilightWeather.getValue();
     if (!active || weather == dusk::TwilightWeather::Current) {
         wind_gust_timer = 0;
@@ -8672,7 +8673,8 @@ static int dKy_Draw(sub_kankyo__class* i_this) {
 #if TARGET_PC
 static void dKy_update_visual_twilight_audio() {
     const bool enabled = !dusk::getSettings().game.speedrunMode.getValue() &&
-                         dusk::getSettings().game.enableTwilightVisuals.getValue();
+                         dusk::getSettings().game.enableTwilightVisuals.getValue() &&
+                         dusk::getSettings().game.enableTwilightVisualMusic.getValue();
 
     if (!s_twilight_visual_audio_state_initialized) {
         s_twilight_visual_audio_state = enabled;
@@ -8684,14 +8686,25 @@ static void dKy_update_visual_twilight_audio() {
         return;
     }
 
+    if (enabled) {
+        s_twilight_visual_original_bgm_status = Z2GetSeqMgr()->getBgmStatus();
+    } else if (s_twilight_visual_original_bgm_status != 0xff) {
+        Z2GetSceneMgr()->restoreBgmStatusAfterRefresh(
+            s_twilight_visual_original_bgm_status);
+        s_twilight_visual_original_bgm_status = 0xff;
+    }
+
     const char* stageName = dComIfGp_getStartStageName();
     if (stageName == NULL || stageName[0] == '\0') {
         return;
     }
 
-    mDoAud_setSceneName(stageName, dComIfGp_getStartStageRoomNo(),
-                        dComIfGp_getStartStageLayer());
-    mDoAud_load1stDynamicWave();
+    const s8 roomNo = dComIfGp_roomControl_getStayNo();
+    const s8 layerNo = dComIfG_play_c::getLayerNo_common(
+        stageName, roomNo, dComIfGp_getStartStageLayer());
+    mDoAud_setSceneName(stageName, roomNo, layerNo);
+    Z2GetSceneMgr()->load1stDynamicWaveForBgmRefresh();
+    mDoAud_zelAudio_c::onBgmSet();
     s_twilight_visual_audio_state = enabled;
 }
 #endif

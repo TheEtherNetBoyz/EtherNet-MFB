@@ -45,7 +45,10 @@ enum class GraphicsOption {
     Resampler,
     BloomMode,
     BloomMultiplier,
+    TwilightVisualsEnabled,
     TwilightVisualBrightness,
+    TwilightSkybox,
+    Weather,
     DepthOfFieldMode,
     TextureReplacements,
 };
@@ -60,6 +63,7 @@ struct GraphicsTunerProps {
     int valueMax = 0;
     int defaultValue = 0;
     int step = 1;
+    bool openInFavorites = false;
 };
 
 class GraphicsTuner : public Document {

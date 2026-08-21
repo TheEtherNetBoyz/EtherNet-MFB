@@ -97,6 +97,7 @@ UserSettings g_userSettings = {
         .shadowResolutionMultiplier {"game.shadowResolutionMultiplier", 1},
         .resampler {"game.resampler", Resampler::Bilinear},
         .enableTwilightVisuals {"game.enableTwilightVisuals", false},
+        .enableTwilightVisualMusic {"game.enableTwilightVisualMusic", true},
         .twilightVisualBrightness {"game.twilightVisualBrightness", 1.0f},
         .twilightSkyboxMode {"game.twilightSkyboxMode", TwilightSkyboxMode::TwilightDay},
         .twilightWeather {"game.twilightWeather", TwilightWeather::Current},
@@ -452,6 +453,7 @@ void registerSettings() {
     Register(g_userSettings.game.resampler);
     Register(g_userSettings.game.shadowResolutionMultiplier);
     Register(g_userSettings.game.enableTwilightVisuals);
+    Register(g_userSettings.game.enableTwilightVisualMusic);
     Register(g_userSettings.game.twilightVisualBrightness);
     Register(g_userSettings.game.twilightSkyboxMode);
     Register(g_userSettings.game.twilightWeather);

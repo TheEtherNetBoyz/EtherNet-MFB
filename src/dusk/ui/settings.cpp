@@ -876,8 +876,10 @@ struct FavoriteEntry {
     std::string id;
     Rml::String label;
     std::function<Rml::String()> value;
+    std::function<void(Pane&)> details;
     std::function<bool()> isDisabled;
     std::function<void()> activate;
+    std::function<void(NavCommand)> adjust;
 };
 
 class FavoritesPane;
@@ -1032,6 +1034,7 @@ T& add_favorite_star(T& component, std::string id) {
 class FavoritesPane final : public Pane {
 public:
     explicit FavoritesPane(Rml::Element* parent) : Pane(parent, Type::Controlled) {
+        mDetails = std::make_unique<Pane>(parent, Pane::Type::Uncontrolled);
         s_favoritesPane = this;
         auto* document = root()->GetOwnerDocument();
         Component::listen(document, Rml::EventId::Mousemove, [this](Rml::Event& event) {
@@ -1072,6 +1075,7 @@ public:
     void update() override {
         if (mDirty) {
             clear();
+            mDetails->clear();
             while (root()->GetNumChildren() != 0) {
                 root()->RemoveChild(root()->GetFirstChild());
             }
@@ -1121,11 +1125,28 @@ public:
                         return false;
                     }
                     if (auto* favorite = find_favorite_entry(id);
-                        favorite && favorite->activate &&
-                        !(favorite->isDisabled && favorite->isDisabled())) {
-                        favorite->activate();
+                        favorite && !(favorite->isDisabled && favorite->isDisabled())) {
+                        if (favorite->adjust) {
+                            favorite->adjust(cmd);
+                        } else if (favorite->activate) {
+                            favorite->activate();
+                        }
                     }
                     return true;
+                });
+                register_control(button, *mDetails, [id](Pane& pane) {
+                    const auto* favorite = find_favorite_entry(id);
+                    if (favorite == nullptr) {
+                        return;
+                    }
+                    if (favorite->details) {
+                        favorite->details(pane);
+                        return;
+                    }
+                    pane.add_section(favorite->label);
+                    if (favorite->value) {
+                        pane.add_text("Current value: " + favorite->value());
+                    }
                 });
             }
             if (!hasFavorites) {
@@ -1224,6 +1245,7 @@ private:
     }
 
     std::vector<FavoriteRow> mRows;
+    std::unique_ptr<Pane> mDetails;
     DragState mDrag;
     bool mSuppressClick = false;
     bool mDirty = true;
@@ -1251,6 +1273,7 @@ SelectButton& config_bool_select(
     register_favorite({
         .label = props.key,
         .value = [&var] { return var.getValue() ? Rml::String{"On"} : Rml::String{"Off"}; },
+        .details = [helpText = props.helpText](Pane& pane) { pane.add_rml(helpText); },
         .isDisabled = [isDisabled] {
             return *isDisabled && (*isDisabled)();
         },
@@ -1308,6 +1331,7 @@ SelectButton& config_percent_select(Pane& leftPane, Pane& rightPane, ConfigVar<f
     register_favorite({
         .label = favoriteLabel,
         .value = [&var] { return fmt::format("{}%", float_setting_percent(var)); },
+        .details = [helpText](Pane& pane) { pane.add_rml(helpText); },
         .isDisabled = [disabled] { return *disabled && (*disabled)(); },
         .activate = [&var, min, max, step] {
             const int value = std::clamp(float_setting_percent(var) + step, min, max);
@@ -1353,6 +1377,7 @@ SelectButton& config_enum_select(Pane& leftPane, Pane& rightPane, ConfigVar<T>& 
             const int index = static_cast<int>(var.getValue());
             return Rml::String{index >= 0 && index < labelCount ? labels[index] : "Unknown"};
         },
+        .details = [helpText](Pane& pane) { pane.add_text(helpText); },
         .isDisabled = [disabled] { return *disabled && (*disabled)(); },
         .activate = [&var, labelCount, callback] {
             if (labelCount == 0) {
@@ -1414,6 +1439,7 @@ SelectButton& config_int_select(Pane& leftPane, Pane& rightPane, ConfigVar<int>&
         .value = [&var, favoriteSuffix] {
             return fmt::format("{}{}", var.getValue(), favoriteSuffix);
         },
+        .details = [helpText](Pane& pane) { pane.add_text(helpText); },
         .isDisabled = [disabled] { return *disabled && (*disabled)(); },
         .activate = [&var, min, max, step, callback] {
             const int value = std::clamp(var.getValue() + step, min, max);
@@ -1467,6 +1493,7 @@ SelectButton& config_level_select(Pane& leftPane, Pane& rightPane, ConfigVar<flo
     register_favorite({
         .label = favoriteLabel,
         .value = [&var] { return fmt::format("{:.1f}", std::clamp(var.getValue(), 1.0f, 10.0f)); },
+        .details = [helpText](Pane& pane) { pane.add_text(helpText); },
         .isDisabled = [disabled] { return *disabled && (*disabled)(); },
         .activate = [&var] {
             var.setValue(std::clamp(var.getValue() + 0.1f, 1.0f, 10.0f));
@@ -1514,6 +1541,33 @@ void graphics_tuner_control(Window& window, Pane& leftPane, Pane& rightPane, Con
         },
         .isDisabled = [disabled] { return *disabled && (*disabled)(); },
         .activate = [&window, props] { window.push(std::make_unique<GraphicsTuner>(props)); },
+        .adjust = [&window, &var, props](NavCommand cmd) {
+            if (props.openInFavorites) {
+                window.push(std::make_unique<GraphicsTuner>(props));
+                window.Document::hide(false);
+                return;
+            }
+            int value;
+            if constexpr (std::is_same_v<T, float>) {
+                value = float_setting_percent(var);
+            } else {
+                value = static_cast<int>(var.getValue());
+            }
+            const int direction = cmd == NavCommand::Left ? -1 : 1;
+            int next = value + direction * props.step;
+            if (next > props.valueMax) {
+                next = props.valueMin;
+            } else if (next < props.valueMin) {
+                next = props.valueMax;
+            }
+            if constexpr (std::is_same_v<T, float>) {
+                var.setValue(next / 100.0f);
+            } else {
+                var.setValue(static_cast<T>(next));
+            }
+            mDoAud_seStartMenu(kSoundItemChange);
+            config::save();
+        },
     }, var);
     auto& button = leftPane
                        .add_select_button({
@@ -1969,11 +2023,22 @@ SettingsWindow::SettingsWindow(bool prelaunch)
                 .defaultValue = static_cast<int>(Resampler::Bilinear),
             });
         leftPane.add_section("Twilight Visuals");
-        config_bool_select(leftPane, rightPane, getSettings().game.enableTwilightVisuals,
+        graphics_tuner_control(*this, leftPane, rightPane,
+            getSettings().game.enableTwilightVisuals,
+            GraphicsTunerProps{
+                .option = GraphicsOption::TwilightVisualsEnabled,
+                .title = "Enable Twilight Visuals",
+                .helpText = "Apply the Faron, Eldin, and Lanayru Twilight environment layers anywhere while keeping the game visible.",
+                .valueMin = 0,
+                .valueMax = 1,
+                .defaultValue = 0,
+                .openInFavorites = true,
+            }, [] { return getSettings().game.speedrunMode.getValue(); });
+        config_bool_select(leftPane, rightPane, getSettings().game.enableTwilightVisualMusic,
             {
-                .key = "Enable Twilight Visuals",
-                .helpText = "Apply the Faron, Eldin, and Lanayru twilight environment layers anywhere. "
-                            "This changes visuals and uses the Palace of Twilight map music; actors, gameplay, and time remain unchanged.",
+                .key = "Use Palace Music",
+                .helpText = "Replace normal map music with Palace of Twilight music while Twilight Visuals is active. "
+                            "Twilight enemy music remains active during encounters when this is disabled.",
                 .isDisabled = [] { return getSettings().game.speedrunMode.getValue(); },
             });
         graphics_tuner_control(*this, leftPane, rightPane,
@@ -1987,22 +2052,26 @@ SettingsWindow::SettingsWindow(bool prelaunch)
                 .defaultValue = 100,
                 .step = 5,
             }, [] { return getSettings().game.speedrunMode.getValue(); });
-        static constexpr const char* kTwilightSkyboxModes[] = {
-            "Day", "Night", "Sunrise", "Sunset", "Overcast / Storm",
-            "Faron Twilight", "Eldin Twilight", "Lanayru Twilight", "Palace of Twilight",
-            "Sacred Grove", "Snowpeak", "Gerudo Desert", "Lake Hylia", "Fishing Hole",
-            "Ordon", "Hyrule Field", "Castle Town"};
-        config_enum_select(leftPane, rightPane, getSettings().game.twilightSkyboxMode,
-            "Twilight Skybox", "Choose the authored Twilight skybox time of day.",
-            kTwilightSkyboxModes, ARRAY_SIZEU(kTwilightSkyboxModes), {},
-            [] { return getSettings().game.speedrunMode.getValue(); });
-        static constexpr const char* kTwilightWeather[] = {"Current", "Clear", "Rain", "Snow", "Lightning", "Wind Storm"};
-        config_enum_select(leftPane, rightPane, getSettings().game.twilightWeather,
-            "Twilight Weather", "Choose whether Twilight uses the current map weather or a visual weather override.",
-            kTwilightWeather, ARRAY_SIZEU(kTwilightWeather), {},
-            [] { return getSettings().game.speedrunMode.getValue(); });
-
+        graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.twilightSkyboxMode,
+            GraphicsTunerProps{
+                .option = GraphicsOption::TwilightSkybox,
+                .title = "Twilight Skybox",
+                .helpText = "Choose an authored Twilight skybox while previewing it in game.",
+                .valueMin = static_cast<int>(TwilightSkyboxMode::TwilightDay),
+                .valueMax = static_cast<int>(TwilightSkyboxMode::CastleTown),
+                .defaultValue = static_cast<int>(TwilightSkyboxMode::TwilightDay),
+            }, [] { return getSettings().game.speedrunMode.getValue(); });
         leftPane.add_section("Post-Processing");
+        graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.twilightWeather,
+            GraphicsTunerProps{
+                .option = GraphicsOption::Weather,
+                .title = "Weather",
+                .helpText = "Override the current map weather while previewing it in game.",
+                .valueMin = static_cast<int>(TwilightWeather::Current),
+                .valueMax = static_cast<int>(TwilightWeather::WindStorm),
+                .defaultValue = static_cast<int>(TwilightWeather::Current),
+                .openInFavorites = true,
+            }, [] { return getSettings().game.speedrunMode.getValue(); });
         graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.bloomMode,
             GraphicsTunerProps{
                 .option = GraphicsOption::BloomMode,

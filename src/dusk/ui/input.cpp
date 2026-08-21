@@ -334,6 +334,59 @@ bool find_event_pad_button(
            find_mapped_pad_button(port, static_cast<SDL_GamepadButton>(event.button), button);
 }
 
+bool is_pad_button_physically_down(u32 port, PADButton padButton) noexcept {
+    const s32 index = PADGetIndexForPort(port);
+    if (index < 0) {
+        return false;
+    }
+    SDL_Gamepad* gamepad = PADGetSDLGamepadForIndex(static_cast<u32>(index));
+    if (gamepad == nullptr) {
+        return false;
+    }
+
+    u32 buttonCount = 0;
+    if (PADButtonMapping* buttons = PADGetButtonMappings(port, &buttonCount)) {
+        for (u32 i = 0; i < buttonCount; ++i) {
+            if (buttons[i].padButton == padButton &&
+                buttons[i].nativeButton != PAD_NATIVE_BUTTON_INVALID &&
+                SDL_GetGamepadButton(
+                    gamepad, static_cast<SDL_GamepadButton>(buttons[i].nativeButton)))
+            {
+                return true;
+            }
+        }
+    }
+
+    u32 axisCount = 0;
+    if (PADAxisMapping* axes = PADGetAxisMappings(port, &axisCount)) {
+        for (u32 i = 0; i < axisCount; ++i) {
+            const auto& mapping = axes[i];
+            if (pad_button_from_axis(mapping.padAxis) != padButton) {
+                continue;
+            }
+            if (mapping.nativeButton >= 0 &&
+                SDL_GetGamepadButton(
+                    gamepad, static_cast<SDL_GamepadButton>(mapping.nativeButton)))
+            {
+                return true;
+            }
+            if (mapping.nativeAxis.nativeAxis < 0) {
+                continue;
+            }
+            const Sint16 value = SDL_GetGamepadAxis(
+                gamepad, static_cast<SDL_GamepadAxis>(mapping.nativeAxis.nativeAxis));
+            if ((mapping.nativeAxis.sign == AXIS_SIGN_POSITIVE &&
+                    value >= kGamepadAxisPressThreshold) ||
+                (mapping.nativeAxis.sign == AXIS_SIGN_NEGATIVE &&
+                    value <= -kGamepadAxisPressThreshold))
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool is_favorite_toggle_button(
     const SDL_GamepadButtonEvent& event, bool hasPadButton, PADButton button) noexcept {
     if (hasPadButton) {
@@ -781,7 +834,8 @@ void handle_event(const SDL_Event& event) noexcept {
             return;
         }
         set_pad_button_held(port, button, true);
-        const bool chorded = hasPadButton && is_menu_chord_part(button) && is_menu_chord(port) &&
+        const bool chorded = hasPadButton && button == PAD_BUTTON_START &&
+                             is_pad_button_physically_down(port, PAD_TRIGGER_R) &&
                              !area_reload_menu_blocked(port);
         if (chorded) {
             consume_menu_chord(port, *context);

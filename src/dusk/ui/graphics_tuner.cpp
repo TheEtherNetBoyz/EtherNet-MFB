@@ -54,11 +54,17 @@ int get_value(GraphicsOption option) {
         return std::clamp(
             static_cast<int>(getSettings().game.bloomMultiplier.getValue() * 100.0f + 0.5f), 0,
             100);
+    case GraphicsOption::TwilightVisualsEnabled:
+        return getSettings().game.enableTwilightVisuals.getValue();
     case GraphicsOption::TwilightVisualBrightness:
         return std::clamp(static_cast<int>(
                               getSettings().game.twilightVisualBrightness.getValue() * 100.0f +
                               0.5f),
             0, 120);
+    case GraphicsOption::TwilightSkybox:
+        return static_cast<int>(getSettings().game.twilightSkyboxMode.getValue());
+    case GraphicsOption::Weather:
+        return static_cast<int>(getSettings().game.twilightWeather.getValue());
     case GraphicsOption::DepthOfFieldMode:
         return static_cast<int>(getSettings().game.depthOfFieldMode.getValue());
     case GraphicsOption::TextureReplacements:
@@ -103,9 +109,22 @@ void set_value(GraphicsOption option, int value) {
     case GraphicsOption::BloomMultiplier:
         getSettings().game.bloomMultiplier.setValue(std::clamp(value, 0, 100) / 100.0f);
         break;
+    case GraphicsOption::TwilightVisualsEnabled:
+        getSettings().game.enableTwilightVisuals.setValue(static_cast<bool>(value));
+        break;
     case GraphicsOption::TwilightVisualBrightness:
         getSettings().game.twilightVisualBrightness.setValue(
             std::clamp(value, 0, 120) / 100.0f);
+        break;
+    case GraphicsOption::TwilightSkybox:
+        getSettings().game.twilightSkyboxMode.setValue(static_cast<TwilightSkyboxMode>(
+            std::clamp(value, static_cast<int>(TwilightSkyboxMode::TwilightDay),
+                static_cast<int>(TwilightSkyboxMode::CastleTown))));
+        break;
+    case GraphicsOption::Weather:
+        getSettings().game.twilightWeather.setValue(static_cast<TwilightWeather>(
+            std::clamp(value, static_cast<int>(TwilightWeather::Current),
+                static_cast<int>(TwilightWeather::WindStorm))));
         break;
     case GraphicsOption::TextureReplacements:
         getSettings().game.enableTextureReplacements.setValue(static_cast<bool>(value));
@@ -250,8 +269,29 @@ Rml::String format_graphics_setting_value(GraphicsOption option, int value) {
         break;
     case GraphicsOption::BloomMultiplier:
         return fmt::format("{}%", value);
+    case GraphicsOption::TwilightVisualsEnabled:
+        return static_cast<bool>(value) ? "On" : "Off";
     case GraphicsOption::TwilightVisualBrightness:
         return fmt::format("{}%", value);
+    case GraphicsOption::TwilightSkybox: {
+        static constexpr const char* modes[] = {
+            "Day", "Night", "Sunrise", "Sunset", "Overcast / Storm",
+            "Faron Twilight", "Eldin Twilight", "Lanayru Twilight", "Palace of Twilight",
+            "Sacred Grove", "Snowpeak", "Gerudo Desert", "Lake Hylia", "Fishing Hole",
+            "Ordon", "Hyrule Field", "Castle Town"};
+        if (value >= 0 && value < static_cast<int>(std::size(modes))) {
+            return modes[value];
+        }
+        break;
+    }
+    case GraphicsOption::Weather: {
+        static constexpr const char* modes[] = {
+            "Current", "Clear", "Rain", "Snow", "Lightning", "Wind Storm"};
+        if (value >= 0 && value < static_cast<int>(std::size(modes))) {
+            return modes[value];
+        }
+        break;
+    }
     case GraphicsOption::TextureReplacements:
         return static_cast<bool>(value) ? "On" : "Off";
     }

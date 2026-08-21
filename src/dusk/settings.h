@@ -317,6 +317,7 @@ struct UserSettings {
         ConfigVar<int> shadowResolutionMultiplier;
         ConfigVar<Resampler> resampler;
         ConfigVar<bool> enableTwilightVisuals;
+        ConfigVar<bool> enableTwilightVisualMusic;
         ConfigVar<float> twilightVisualBrightness;
         ConfigVar<TwilightSkyboxMode> twilightSkyboxMode;
         ConfigVar<TwilightWeather> twilightWeather;

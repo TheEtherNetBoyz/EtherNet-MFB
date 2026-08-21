@@ -13,8 +13,21 @@
 
 #if TARGET_PC
 #include "dusk/audio.h"
+#include "dusk/settings.h"
 #include "dusk/version.hpp"
 #endif
+
+static bool useTwilightBattleMusic() {
+    if (Z2GetSoundObjMgr()->isTwilightBattle()) {
+        return true;
+    }
+#if TARGET_PC
+    return !dusk::getSettings().game.speedrunMode.getValue() &&
+           dusk::getSettings().game.enableTwilightVisuals.getValue();
+#else
+    return false;
+#endif
+}
 
 Z2SeqMgr::Z2SeqMgr() : JASGlobalInstance<Z2SeqMgr>(true) {
     mMainBgmMaster.forceIn();
@@ -1737,15 +1750,15 @@ void Z2SeqMgr::setBattleDistState(u8 state) {
             }
 
 #if !DEBUG
-            if ((Z2GetSoundObjMgr()->isTwilightBattle() && getSubBgmID() == Z2BGM_BATTLE_NORMAL) ||
-                (!Z2GetSoundObjMgr()->isTwilightBattle() && getSubBgmID() == Z2BGM_BATTLE_TWILIGHT))
+            if ((useTwilightBattleMusic() && getSubBgmID() == Z2BGM_BATTLE_NORMAL) ||
+                (!useTwilightBattleMusic() && getSubBgmID() == Z2BGM_BATTLE_TWILIGHT))
             {
                 mSubBgmHandle->stop(30);
                 mSubBgmHandle->releaseHandle();
             }
 #endif
 
-            if (Z2GetSoundObjMgr()->isTwilightBattle() || getSubBgmID() == Z2BGM_BATTLE_TWILIGHT) {
+            if (useTwilightBattleMusic() || getSubBgmID() == Z2BGM_BATTLE_TWILIGHT) {
                 switch (state) {
                 case 0:
                     if (mBattleSeqState == 0) {
@@ -1811,7 +1824,7 @@ void Z2SeqMgr::setBattleSeqState(u8 state) {
         stopBattleBgm(Z2Param::BGM_CROSS_FADEOUT_TIME, Z2Param::BGM_CROSS_FADEIN_TIME);
         return;
     }
-    if (getSubBgmID() == Z2BGM_BATTLE_NORMAL && !(getMainBgmID() == Z2BGM_FIELD_LINK_DAY && !Z2GetSoundObjMgr()->isTwilightBattle())) {
+    if (getSubBgmID() == Z2BGM_BATTLE_NORMAL && !(getMainBgmID() == Z2BGM_FIELD_LINK_DAY && !useTwilightBattleMusic())) {
         switch (state) {
         case 2:
             if (mBattleSeqState == 1) {
@@ -1872,7 +1885,7 @@ void Z2SeqMgr::battleBgmFramework() {
         case Z2BGM_BATTLE_TWILIGHT:
             break;
         case Z2BGM_BATTLE_NORMAL:
-            if (getMainBgmID() == Z2BGM_FIELD_LINK_DAY && !Z2GetSoundObjMgr()->isTwilightBattle()) {
+            if (getMainBgmID() == Z2BGM_FIELD_LINK_DAY && !useTwilightBattleMusic()) {
                 return;
             }
 
@@ -1917,7 +1930,7 @@ void Z2SeqMgr::startBattleBgm(bool isFadeIn) {
     }
 
     JAISoundID bgm_id = Z2BGM_BATTLE_NORMAL;
-    if (Z2GetSceneMgr()->isInDarkness() || Z2GetSoundObjMgr()->isTwilightBattle()) {
+    if (Z2GetSceneMgr()->isInDarkness() || useTwilightBattleMusic()) {
         bgm_id = Z2BGM_BATTLE_TWILIGHT;
     }
 
@@ -1954,7 +1967,7 @@ void Z2SeqMgr::startBattleBgm(bool isFadeIn) {
                 }
                 break;
             case Z2BGM_BATTLE_TWILIGHT:
-                changeSubBgmStatus(Z2GetSoundObjMgr()->isTwilightBattle());
+                changeSubBgmStatus(useTwilightBattleMusic());
                 fadeinTime = 25 - ivar2 / 4;
                 fadeoutTime = 25 - ivar2 / 4;
                 break;

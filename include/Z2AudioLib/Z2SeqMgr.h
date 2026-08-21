@@ -83,6 +83,7 @@ public:
     void bgmStreamPlay();
     void bgmStreamStop(u32 fadeTime);
     void changeBgmStatus(s32 status);
+    u8 getBgmStatus() const { return mBgmStatus; }
     void changeSubBgmStatus(s32 status);
     void onVariantBgmJumpEnd(bool);
     void changeFishingBgm(s32);
