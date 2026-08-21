@@ -602,7 +602,7 @@ namespace dusk {
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("D-pad Up + R: set point\nD-pad Down + R: teleport");
             }
-            MenuCheckbox("Area Reload (L+R+Start+A)", getSettings().game.areaReload);
+            MenuCheckbox("Area Reload", getSettings().game.areaReload);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("L+R+Start+A: reload the current area at its last entrance");
             }

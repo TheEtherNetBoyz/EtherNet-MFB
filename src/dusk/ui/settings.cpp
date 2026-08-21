@@ -884,6 +884,7 @@ struct FavoriteEntry {
 
 class FavoritesPane;
 FavoritesPane* s_favoritesPane = nullptr;
+SettingsWindow* s_activeSettingsWindow = nullptr;
 std::vector<FavoriteEntry> s_favoriteEntries;
 
 FavoriteEntry* find_favorite_entry(std::string_view id) {
@@ -1540,11 +1541,17 @@ void graphics_tuner_control(Window& window, Pane& leftPane, Pane& rightPane, Con
             }
         },
         .isDisabled = [disabled] { return *disabled && (*disabled)(); },
-        .activate = [&window, props] { window.push(std::make_unique<GraphicsTuner>(props)); },
-        .adjust = [&window, &var, props](NavCommand cmd) {
+        .activate = [props] {
+            if (s_activeSettingsWindow != nullptr) {
+                s_activeSettingsWindow->push(std::make_unique<GraphicsTuner>(props));
+            }
+        },
+        .adjust = [&var, props](NavCommand cmd) {
             if (props.openInFavorites) {
-                window.push(std::make_unique<GraphicsTuner>(props));
-                window.Document::hide(false);
+                if (s_activeSettingsWindow != nullptr) {
+                    s_activeSettingsWindow->push(std::make_unique<GraphicsTuner>(props));
+                    s_activeSettingsWindow->Document::hide(false);
+                }
                 return;
             }
             int value;
@@ -1635,6 +1642,7 @@ void confirm_return_to_startup() {
 
 SettingsWindow::SettingsWindow(bool prelaunch)
     : Window(Window::Props{.tabBar = true}), mPrelaunch(prelaunch) {
+    s_activeSettingsWindow = this;
     if (prelaunch) {
         add_tab("Prelaunch", [this](Rml::Element* content) {
             auto& leftPane = add_child<Pane>(content, Pane::Type::Controlled);
@@ -2028,7 +2036,7 @@ SettingsWindow::SettingsWindow(bool prelaunch)
             GraphicsTunerProps{
                 .option = GraphicsOption::TwilightVisualsEnabled,
                 .title = "Enable Twilight Visuals",
-                .helpText = "Apply the Faron, Eldin, and Lanayru Twilight environment layers anywhere while keeping the game visible.",
+                .helpText = "Apply the Faron, Eldin, and Lanayru Twilight environment layers anywhere.",
                 .valueMin = 0,
                 .valueMax = 1,
                 .defaultValue = 0,
@@ -2066,7 +2074,7 @@ SettingsWindow::SettingsWindow(bool prelaunch)
             GraphicsTunerProps{
                 .option = GraphicsOption::Weather,
                 .title = "Weather",
-                .helpText = "Override the current map weather while previewing it in game.",
+                .helpText = "Override the current map weather.",
                 .valueMin = static_cast<int>(TwilightWeather::Current),
                 .valueMax = static_cast<int>(TwilightWeather::WindStorm),
                 .defaultValue = static_cast<int>(TwilightWeather::Current),
@@ -2614,8 +2622,9 @@ SettingsWindow::SettingsWindow(bool prelaunch)
         addOption("Aiming Reticle", getSettings().game.aimingReticle,
             "Shows the aiming reticle for bow and slingshot.");
 
-        addSpeedrunDisabledOption("Area Reload (L+R+Start+A)", getSettings().game.areaReload,
-            "Reloads the current area at its last entrance while preserving temporary area state.");
+        addSpeedrunDisabledOption("Area Reload", getSettings().game.areaReload,
+            "Press L+R+Start+A to reload the current area at its last entrance while preserving "
+            "temporary area state.");
 
         leftPane.add_section("Speedrunning");
         config_bool_select(leftPane, rightPane, getSettings().game.speedrunMode,
@@ -3038,6 +3047,12 @@ SettingsWindow::SettingsWindow(bool prelaunch)
     // Favorite entries are registered while their tabs are built. Build all tab callbacks once so
     // the Favorites tab has the complete list on its initial display.
     mTabBar->initialize_callbacks();
+}
+
+SettingsWindow::~SettingsWindow() {
+    if (s_activeSettingsWindow == this) {
+        s_activeSettingsWindow = nullptr;
+    }
 }
 
 void SettingsWindow::update() {
