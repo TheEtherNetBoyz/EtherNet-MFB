@@ -1720,7 +1720,7 @@ void Z2SceneMgr::setSceneName(char* spot, s32 room, s32 layer) {
         dusk::getSettings().game.enableTwilightVisuals.getValue() &&
         dusk::getSettings().game.enableTwilightVisualMusic.getValue() &&
         !isPalaceScene && !preserveSceneMusic &&
-        ((!inDarkness_ && demo_wave == 0) || isKakarikoVillage) &&
+        (!inDarkness_ && (demo_wave == 0 || isKakarikoVillage)) &&
         (isExteriorLoad || isInteriorLoad)) {
         bgm_id = Z2BGM_DUNGEON_LV8;
         bgm_wave1 = 0x28;

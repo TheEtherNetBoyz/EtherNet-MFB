@@ -317,6 +317,17 @@ namespace dusk {
             const bool speedrunRestricted = s.game.speedrunMode.getValue();
             ImGui::BeginDisabled(speedrunRestricted);
             MenuCheckbox("Enable Twilight Visuals", s.game.enableTwilightVisuals);
+            int visualStyle = static_cast<int>(s.game.twilightVisualStyle.getValue());
+            const char* visualStyles[] = {"Normal Twilight", "Black and White"};
+            ImGui::TextUnformatted("Visual Style");
+            ImGui::SameLine(170.0f);
+            ImGui::SetNextItemWidth(160.0f);
+            if (ImGui::Combo("##TwilightVisualStyle", &visualStyle, visualStyles,
+                             IM_ARRAYSIZE(visualStyles))) {
+                s.game.twilightVisualStyle.setValue(
+                    static_cast<TwilightVisualStyle>(visualStyle));
+                config::save();
+            }
             MenuCheckbox("Use Palace Music", s.game.enableTwilightVisualMusic);
             ImGui::TextUnformatted("Twilight Brightness");
             ImGui::SameLine(170.0f);

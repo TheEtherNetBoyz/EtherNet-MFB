@@ -32,6 +32,7 @@
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_lib.h"
 #include "JSystem/JKernel/JKRSolidHeap.h"
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #if TARGET_PC
@@ -94,6 +95,43 @@ static void dKy_scale_visual_twilight_color(GXColorS10& color, f32 brightness) {
     color.b = dKy_scale_visual_twilight_channel(color.b, brightness);
 }
 
+static bool dKy_visual_twilight_monochrome_active() {
+    return dKy_visual_twilight_options_active() &&
+           dusk::getSettings().game.twilightVisualStyle.getValue() ==
+               dusk::TwilightVisualStyle::BlackAndWhiteEnvironment;
+}
+
+static void dKy_grayscale_visual_twilight_color(GXColorS10& color) {
+    const s32 luminance = (static_cast<s32>(color.r) * 77 +
+                          static_cast<s32>(color.g) * 150 +
+                          static_cast<s32>(color.b) * 29) >> 8;
+    const s16 gray = static_cast<s16>(std::clamp(luminance, -1024, 1023));
+    color.r = gray;
+    color.g = gray;
+    color.b = gray;
+}
+
+static void dKy_grayscale_visual_twilight_color(GXColor& color) {
+    const u32 luminance = (static_cast<u32>(color.r) * 77 +
+                          static_cast<u32>(color.g) * 150 +
+                          static_cast<u32>(color.b) * 29) >> 8;
+    const u8 gray = static_cast<u8>(luminance);
+    color.r = gray;
+    color.g = gray;
+    color.b = gray;
+}
+
+static void dKy_grayscale_visual_twilight_light(J3DLightObj& light) {
+    J3DLightInfo* info = light.getLightInfo();
+    const u32 luminance = (static_cast<u32>(info->mColor.r) * 77 +
+                          static_cast<u32>(info->mColor.g) * 150 +
+                          static_cast<u32>(info->mColor.b) * 29) >> 8;
+    const u8 gray = static_cast<u8>(luminance);
+    info->mColor.r = gray;
+    info->mColor.g = gray;
+    info->mColor.b = gray;
+}
+
 static u8 dKy_scale_visual_twilight_channel_u8(u8 channel, f32 brightness) {
     f32 scaled = channel * brightness;
     if (scaled < 0.0f) {
@@ -105,7 +143,7 @@ static u8 dKy_scale_visual_twilight_channel_u8(u8 channel, f32 brightness) {
 }
 
 static f32 dKy_get_visual_twilight_brightness() {
-    if (!dKy_visual_twilight_options_active() || dKy_darkworld_check()) {
+    if (!dKy_visual_twilight_options_active()) {
         return 1.0f;
     }
 
@@ -127,9 +165,9 @@ static void dKy_scale_visual_twilight_light(J3DLightObj& light, f32 brightness) 
 }
 
 static void dKy_apply_visual_twilight_brightness(dScnKy_env_light_c& env) {
-    // Only alter maps receiving the optional Twilight Visuals treatment. Native
-    // Twilight maps and the Palace retain their original environment lighting.
-    if (!dKy_visual_twilight_options_active() || dKy_darkworld_check()) {
+    // Apply the user brightness to both universal Twilight Visuals and native
+    // Twilight layers. Palace of Twilight is excluded by the stage check above.
+    if (!dKy_visual_twilight_options_active()) {
         return;
     }
 
@@ -155,6 +193,25 @@ static void dKy_apply_visual_twilight_brightness(dScnKy_env_light_c& env) {
     dKy_scale_visual_twilight_color(env.vrbox_kumo_shadow_col, brightness);
     dKy_scale_visual_twilight_color(env.vrbox_kasumi_outer_col, brightness);
     dKy_scale_visual_twilight_color(env.vrbox_kasumi_inner_col, brightness);
+}
+
+static void dKy_apply_visual_twilight_monochrome(dScnKy_env_light_c& env) {
+    if (!dKy_visual_twilight_monochrome_active()) {
+        return;
+    }
+
+    // Keep actor ambient and actor light paths colored. Only the environment
+    // palette, fog, and virtual sky receive the monochrome treatment.
+    for (int i = 0; i < 4; ++i) {
+        dKy_grayscale_visual_twilight_color(env.bg_amb_col[i]);
+    }
+    dKy_grayscale_visual_twilight_color(env.fog_col);
+    dKy_grayscale_visual_twilight_color(env.vrbox_sky_col);
+    dKy_grayscale_visual_twilight_color(env.vrbox_kumo_top_col);
+    dKy_grayscale_visual_twilight_color(env.vrbox_kumo_bottom_col);
+    dKy_grayscale_visual_twilight_color(env.vrbox_kumo_shadow_col);
+    dKy_grayscale_visual_twilight_color(env.vrbox_kasumi_outer_col);
+    dKy_grayscale_visual_twilight_color(env.vrbox_kasumi_inner_col);
 }
 #endif
 
@@ -3015,6 +3072,17 @@ void dScnKy_env_light_c::setLight() {
 
 #if TARGET_PC
             dusk::ApplyBloomOverride();
+
+            if (dKy_visual_twilight_monochrome_active()) {
+                // Apply this after the optional ImGui bloom override so every
+                // bloom source remains monochrome in the black-and-white style.
+                GXColor monochromeBlend = *mDoGph_gInf_c::getBloom()->getBlendColor();
+                GXColor monochromeSubtract = *mDoGph_gInf_c::getBloom()->getMonoColor();
+                dKy_grayscale_visual_twilight_color(monochromeBlend);
+                dKy_grayscale_visual_twilight_color(monochromeSubtract);
+                mDoGph_gInf_c::getBloom()->setBlendColor(monochromeBlend);
+                mDoGph_gInf_c::getBloom()->setMonoColor(monochromeSubtract);
+            }
 #endif
 
             f32 var_f30;
@@ -3239,6 +3307,7 @@ void dScnKy_env_light_c::setLight() {
 
             #if TARGET_PC
             dKy_apply_visual_twilight_brightness(*this);
+            dKy_apply_visual_twilight_monochrome(*this);
             #endif
             }
 
@@ -3359,6 +3428,15 @@ void dScnKy_env_light_c::setLight_bg(dKy_tevstr_c* tevstr_p, GXColorS10* bg_col_
             dKy_scale_visual_twilight_light(tevstr_p->mLights[i], twilight_brightness);
         }
         dKy_scale_visual_twilight_color(*fog_col_p, twilight_brightness);
+    }
+    if (dKy_visual_twilight_monochrome_active()) {
+        for (i = 0; i < 4; ++i) {
+            dKy_grayscale_visual_twilight_color(bg_col_p[i]);
+        }
+        for (i = 0; i < 6; ++i) {
+            dKy_grayscale_visual_twilight_light(tevstr_p->mLights[i]);
+        }
+        dKy_grayscale_visual_twilight_color(*fog_col_p);
     }
     #endif
 }

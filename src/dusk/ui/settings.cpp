@@ -2042,6 +2042,17 @@ SettingsWindow::SettingsWindow(bool prelaunch)
                 .defaultValue = 0,
                 .openInFavorites = true,
             }, [] { return getSettings().game.speedrunMode.getValue(); });
+        graphics_tuner_control(*this, leftPane, rightPane,
+            getSettings().game.twilightVisualStyle,
+            GraphicsTunerProps{
+                .option = GraphicsOption::TwilightVisualStyle,
+                .title = "Twilight Visual Style",
+                .helpText = "Choose normal Twilight colors or a black-and-white environment.",
+                .valueMin = static_cast<int>(TwilightVisualStyle::Normal),
+                .valueMax = static_cast<int>(TwilightVisualStyle::BlackAndWhiteEnvironment),
+                .defaultValue = static_cast<int>(TwilightVisualStyle::Normal),
+                .openInFavorites = true,
+            }, [] { return getSettings().game.speedrunMode.getValue(); });
         config_bool_select(leftPane, rightPane, getSettings().game.enableTwilightVisualMusic,
             {
                 .key = "Use Palace Music",

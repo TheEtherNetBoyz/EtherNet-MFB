@@ -56,6 +56,8 @@ int get_value(GraphicsOption option) {
             100);
     case GraphicsOption::TwilightVisualsEnabled:
         return getSettings().game.enableTwilightVisuals.getValue();
+    case GraphicsOption::TwilightVisualStyle:
+        return static_cast<int>(getSettings().game.twilightVisualStyle.getValue());
     case GraphicsOption::TwilightVisualBrightness:
         return std::clamp(static_cast<int>(
                               getSettings().game.twilightVisualBrightness.getValue() * 100.0f +
@@ -111,6 +113,11 @@ void set_value(GraphicsOption option, int value) {
         break;
     case GraphicsOption::TwilightVisualsEnabled:
         getSettings().game.enableTwilightVisuals.setValue(static_cast<bool>(value));
+        break;
+    case GraphicsOption::TwilightVisualStyle:
+        getSettings().game.twilightVisualStyle.setValue(static_cast<TwilightVisualStyle>(
+            std::clamp(value, static_cast<int>(TwilightVisualStyle::Normal),
+                static_cast<int>(TwilightVisualStyle::BlackAndWhiteEnvironment))));
         break;
     case GraphicsOption::TwilightVisualBrightness:
         getSettings().game.twilightVisualBrightness.setValue(
@@ -271,6 +278,11 @@ Rml::String format_graphics_setting_value(GraphicsOption option, int value) {
         return fmt::format("{}%", value);
     case GraphicsOption::TwilightVisualsEnabled:
         return static_cast<bool>(value) ? "On" : "Off";
+    case GraphicsOption::TwilightVisualStyle:
+        return static_cast<TwilightVisualStyle>(value) ==
+                       TwilightVisualStyle::BlackAndWhiteEnvironment
+                   ? "Black and White"
+                   : "Normal Twilight";
     case GraphicsOption::TwilightVisualBrightness:
         return fmt::format("{}%", value);
     case GraphicsOption::TwilightSkybox: {

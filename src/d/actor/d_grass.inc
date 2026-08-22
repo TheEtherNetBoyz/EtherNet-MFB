@@ -12,6 +12,9 @@
 #include "f_op/f_op_camera_mng.h"
 
 #include "dusk/frame_interpolation.h"
+#include "dusk/settings.h"
+
+#include <algorithm>
 
 const u16 l_M_Hijiki00TEX__width = 31;
 const u16 l_M_Hijiki00TEX__height = 31;
@@ -21,6 +24,70 @@ const u16 l_M_kusa05_RGBATEX__height = 31;
 #if TARGET_PC
 #include "dusk/dvd_asset.hpp"
 using GameVersion = dusk::version::GameVersion;
+
+alignas(32) static u8 s_grassMonochromeKusaTexture[0x800];
+alignas(32) static u8 s_grassMonochromeHijikiTexture[0x800];
+static TGXTexObj s_grassMonochromeKusaTexObj;
+static TGXTexObj s_grassMonochromeHijikiTexObj;
+
+static bool grass_monochrome_active() {
+    const auto& settings = dusk::getSettings().game;
+    return !settings.speedrunMode.getValue() && settings.enableTwilightVisuals.getValue() &&
+           settings.twilightVisualStyle.getValue() ==
+               dusk::TwilightVisualStyle::BlackAndWhiteEnvironment &&
+           strcmp(dComIfGp_getStartStageName(), "D_MN08") != 0;
+}
+
+static u8 grass_luminance(u8 r, u8 g, u8 b) {
+    return static_cast<u8>((static_cast<u32>(r) * 77 + static_cast<u32>(g) * 150 +
+                            static_cast<u32>(b) * 29) >> 8);
+}
+
+static void grass_monochrome_color(GXColor& color) {
+    const u8 luminance = grass_luminance(color.r, color.g, color.b);
+    color.r = luminance;
+    color.g = luminance;
+    color.b = luminance;
+}
+
+static void grass_monochrome_color(GXColorS10& color) {
+    const s32 luminance = (static_cast<s32>(color.r) * 77 + static_cast<s32>(color.g) * 150 +
+                           static_cast<s32>(color.b) * 29) >> 8;
+    const s16 clamped = static_cast<s16>(std::clamp(luminance, -1024, 1023));
+    color.r = clamped;
+    color.g = clamped;
+    color.b = clamped;
+}
+
+static void make_grass_monochrome_texture(u8* dst, const u8* src, size_t size) {
+    for (size_t i = 0; i < size; i += 2) {
+        const u16 pixel = static_cast<u16>((src[i] << 8) | src[i + 1]);
+        u16 monochrome;
+        if ((pixel & 0x8000) != 0) {
+            const u8 r = static_cast<u8>(((pixel >> 10) & 0x1F) * 255 / 31);
+            const u8 g = static_cast<u8>(((pixel >> 5) & 0x1F) * 255 / 31);
+            const u8 b = static_cast<u8>((pixel & 0x1F) * 255 / 31);
+            const u16 gray = static_cast<u16>(grass_luminance(r, g, b) * 31 / 255);
+            monochrome = static_cast<u16>(0x8000 | (gray << 10) | (gray << 5) | gray);
+        } else {
+            const u16 alpha = pixel & 0x7000;
+            const u8 r = static_cast<u8>(((pixel >> 8) & 0xF) * 17);
+            const u8 g = static_cast<u8>(((pixel >> 4) & 0xF) * 17);
+            const u8 b = static_cast<u8>((pixel & 0xF) * 17);
+            const u16 gray = static_cast<u16>((grass_luminance(r, g, b) + 8) / 17);
+            monochrome = static_cast<u16>(alpha | (gray << 8) | (gray << 4) | gray);
+        }
+        dst[i] = static_cast<u8>(monochrome >> 8);
+        dst[i + 1] = static_cast<u8>(monochrome);
+    }
+}
+
+static GXTexObj* grass_texture(GXTexObj* original, bool kusa) {
+    if (grass_monochrome_active()) {
+        return kusa ? &s_grassMonochromeKusaTexObj : &s_grassMonochromeHijikiTexObj;
+    }
+    return original;
+}
 
 template <typename T, size_t N>
 static bool LoadGrassAsset(T (&dst)[N], std::initializer_list<dusk::OffsetVersion> offset) {
@@ -576,6 +643,21 @@ dGrass_packet_c::dGrass_packet_c() {
 #endif
 
 #if TARGET_PC
+    static bool monochromeTexturesInitialized = false;
+    if (!monochromeTexturesInitialized) {
+        make_grass_monochrome_texture(s_grassMonochromeKusaTexture, l_M_kusa05_RGBATEX,
+                                      sizeof(s_grassMonochromeKusaTexture));
+        make_grass_monochrome_texture(s_grassMonochromeHijikiTexture, l_M_Hijiki00TEX,
+                                      sizeof(s_grassMonochromeHijikiTexture));
+        GXInitTexObj(&s_grassMonochromeKusaTexObj, s_grassMonochromeKusaTexture,
+                     l_M_kusa05_RGBATEX__width + 1, l_M_kusa05_RGBATEX__height + 1,
+                     GX_TF_RGB5A3, GX_REPEAT, GX_CLAMP, GX_FALSE);
+        GXInitTexObj(&s_grassMonochromeHijikiTexObj, s_grassMonochromeHijikiTexture,
+                     l_M_Hijiki00TEX__width + 1, l_M_Hijiki00TEX__height + 1,
+                     GX_TF_RGB5A3, GX_REPEAT, GX_CLAMP, GX_FALSE);
+        monochromeTexturesInitialized = true;
+    }
+
     GXInitTexObj(&mTexObj_l_M_kusa05_RGBATEX, l_M_kusa05_RGBATEX,
         l_M_kusa05_RGBATEX__width + 1, l_M_kusa05_RGBATEX__height + 1, GX_TF_RGB5A3, GX_REPEAT, GX_CLAMP, GX_FALSE
     );
@@ -641,6 +723,9 @@ static GXColor blade_amb_color(const dGrass_data_c* blade, const dKy_tevstr_c* t
         amb.r = g_kankyoHIO.navy.grass_ambcol.r * 2;
         amb.g = g_kankyoHIO.navy.grass_ambcol.g * 2;
         amb.b = g_kankyoHIO.navy.grass_ambcol.b * 2;
+        if (grass_monochrome_active()) {
+            grass_monochrome_color(amb);
+        }
         return amb;
     }
 #endif
@@ -687,6 +772,10 @@ static GXColor blade_amb_color(const dGrass_data_c* blade, const dKy_tevstr_c* t
         amb.b = tevstr->AmbCol.b * roomAmbScale;
     } else {
         amb.b = amb.b * colScale;
+    }
+
+    if (grass_monochrome_active()) {
+        grass_monochrome_color(amb);
     }
 
     return amb;
@@ -798,6 +887,9 @@ void dGrass_packet_c::draw() {
             reg1.b = 5;
             reg1.a = 0x50;
         }
+        if (grass_monochrome_active()) {
+            grass_monochrome_color(reg1);
+        }
         GFSetTevColorS10(GX_TEVREG1, reg1);
 
         if (dComIfGp_roomControl_getStatusRoomDt(i) != nullptr) {
@@ -822,14 +914,14 @@ void dGrass_packet_c::draw() {
 
         // room-level setup
         if (first->field_0x05 <= 3 || first->field_0x05 >= 10) {
-            GXLoadTexObj(&mTexObj_l_M_kusa05_RGBATEX, GX_TEXMAP0);
+            GXLoadTexObj(grass_texture(&mTexObj_l_M_kusa05_RGBATEX, true), GX_TEXMAP0);
             if (lightCount <= 3) {
                 GXCallDisplayList(mp_kusa9q_14_DL, m_kusa9q_DL_14_size);
             } else {
                 GXCallDisplayList(mp_kusa9q_DL, m_kusa9q_DL_size);
             }
         } else {
-            GXLoadTexObj(&mTexObj_l_M_Hijiki00TEX, GX_TEXMAP0);
+            GXLoadTexObj(grass_texture(&mTexObj_l_M_Hijiki00TEX, false), GX_TEXMAP0);
             GXCallDisplayList(l_Tengusa_matDL, 0xA0);
         }
 
@@ -868,14 +960,14 @@ void dGrass_packet_c::draw() {
 
                 if (!open) {
                     if (kusaTex) {
-                        GXLoadTexObj(&mTexObj_l_M_kusa05_RGBATEX, GX_TEXMAP0);
+                        GXLoadTexObj(grass_texture(&mTexObj_l_M_kusa05_RGBATEX, true), GX_TEXMAP0);
                         if (lightCount <= 2) {
                             GXCallDisplayList(mp_kusa9q_14_DL, m_kusa9q_DL_14_size);
                         } else {
                             GXCallDisplayList(mp_kusa9q_DL, m_kusa9q_DL_size);
                         }
                     } else {
-                        GXLoadTexObj(&mTexObj_l_M_Hijiki00TEX, GX_TEXMAP0);
+                        GXLoadTexObj(grass_texture(&mTexObj_l_M_Hijiki00TEX, false), GX_TEXMAP0);
                         GXCallDisplayList(l_Tengusa_matDL, 0xA0);
                     }
                     // change amb_src to GX_SRC_VTX
@@ -884,8 +976,16 @@ void dGrass_packet_c::draw() {
                             ? (GX_LIGHT1 | GX_LIGHT2 | GX_LIGHT3 | GX_LIGHT4)
                             : (GX_LIGHT1 | GX_LIGHT2 | GX_LIGHT3 | GX_LIGHT4 | GX_LIGHT5 |
                                GX_LIGHT6 | GX_LIGHT7);
-                    GXSetChanCtrl(GX_COLOR0, GX_TRUE, GX_SRC_VTX, GX_SRC_REG, lightMask,
-                                  GX_DF_CLAMP, GX_AF_SPOT);
+                    if (grass_monochrome_active()) {
+                        // The texture and blade color are grayscale already;
+                        // bypass colored room lights so the final grass pixel
+                        // cannot be tinted back into color.
+                        GXSetChanCtrl(GX_COLOR0, GX_FALSE, GX_SRC_REG, GX_SRC_VTX, 0,
+                                      GX_DF_NONE, GX_AF_NONE);
+                    } else {
+                        GXSetChanCtrl(GX_COLOR0, GX_TRUE, GX_SRC_VTX, GX_SRC_REG, lightMask,
+                                      GX_DF_CLAMP, GX_AF_SPOT);
+                    }
                     reg1.a = cut ? 0 : shine;
                     GFSetTevColorS10(GX_TEVREG1, reg1);
                     GXBegin(GX_TRIANGLES, GX_VTXFMT1, GX_AUTO);
@@ -908,6 +1008,10 @@ void dGrass_packet_c::draw() {
         // draw them with the original immediate path
         if (hasRegrowing) {
             GXSetVtxDescv(l_vtxDescList);
+            if (grass_monochrome_active()) {
+                GXSetChanCtrl(GX_COLOR0, GX_FALSE, GX_SRC_REG, GX_SRC_VTX, 0,
+                              GX_DF_NONE, GX_AF_NONE);
+            }
             for (dGrass_data_c* blade = first; blade != NULL; blade = blade->mp_next) {
                 if (blade->field_0x02 >= -1 || cLib_checkBit<u8>(blade->field_0x01, 2)) {
                     continue;
@@ -915,14 +1019,14 @@ void dGrass_packet_c::draw() {
 
                 const bool kusaTex = blade->field_0x05 <= 3 || blade->field_0x05 >= 10;
                 if (kusaTex) {
-                    GXLoadTexObj(&mTexObj_l_M_kusa05_RGBATEX, GX_TEXMAP0);
+                    GXLoadTexObj(grass_texture(&mTexObj_l_M_kusa05_RGBATEX, true), GX_TEXMAP0);
                     if (lightCount <= 2) {
                         GXCallDisplayList(mp_kusa9q_14_DL, m_kusa9q_DL_14_size);
                     } else {
                         GXCallDisplayList(mp_kusa9q_DL, m_kusa9q_DL_size);
                     }
                 } else {
-                    GXLoadTexObj(&mTexObj_l_M_Hijiki00TEX, GX_TEXMAP0);
+                    GXLoadTexObj(grass_texture(&mTexObj_l_M_Hijiki00TEX, false), GX_TEXMAP0);
                     GXCallDisplayList(l_Tengusa_matDL, 0xA0);
                 }
 
@@ -950,6 +1054,7 @@ void dGrass_packet_c::draw() {
                 GFSetTevColorS10(GX_TEVREG2, {0, 0, 0, 0});
             }
         }
+
     }
 
     J3DShape::resetVcdVatCache();

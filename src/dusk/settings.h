@@ -52,6 +52,11 @@ enum class TwilightWeather : u8 {
     WindStorm = 5,
 };
 
+enum class TwilightVisualStyle : u8 {
+    Normal = 0,
+    BlackAndWhiteEnvironment = 1,
+};
+
 enum class Resampler : int {
     Bilinear = 0,
     Area = 1,
@@ -146,6 +151,12 @@ template <>
 struct ConfigEnumRange<TwilightWeather> {
     static constexpr auto min = TwilightWeather::Current;
     static constexpr auto max = TwilightWeather::WindStorm;
+};
+
+template <>
+struct ConfigEnumRange<TwilightVisualStyle> {
+    static constexpr auto min = TwilightVisualStyle::Normal;
+    static constexpr auto max = TwilightVisualStyle::BlackAndWhiteEnvironment;
 };
 
 template <>
@@ -318,6 +329,7 @@ struct UserSettings {
         ConfigVar<Resampler> resampler;
         ConfigVar<bool> enableTwilightVisuals;
         ConfigVar<bool> enableTwilightVisualMusic;
+        ConfigVar<TwilightVisualStyle> twilightVisualStyle;
         ConfigVar<float> twilightVisualBrightness;
         ConfigVar<TwilightSkyboxMode> twilightSkyboxMode;
         ConfigVar<TwilightWeather> twilightWeather;

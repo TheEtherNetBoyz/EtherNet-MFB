@@ -46,6 +46,7 @@ enum class GraphicsOption {
     BloomMode,
     BloomMultiplier,
     TwilightVisualsEnabled,
+    TwilightVisualStyle,
     TwilightVisualBrightness,
     TwilightSkybox,
     Weather,
