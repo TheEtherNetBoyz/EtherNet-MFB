@@ -1705,10 +1705,13 @@ void Z2SceneMgr::setSceneName(char* spot, s32 room, s32 layer) {
 
 #if TARGET_PC
     // Preserve native music in dungeons. Exterior field loads use the Palace
-    // outdoor mix, while interior loads use its indoor mix.
+    // outdoor mix, while interior loads use its indoor mix. Kakariko Village
+    // is a narrow exception because its normal scene keeps an auxiliary demo
+    // wave loaded and can remain flagged as being in darkness.
     s_twilightVisualsPalaceMusicForced = false;
     const bool isPalaceScene = spotNo >= Z2SCENE_PALACE_OF_TWILIGHT &&
                                spotNo <= Z2SCENE_PALACE_OF_TWILIGHT_BOSS;
+    const bool isKakarikoVillage = spotNo == Z2SCENE_KAKARIKO_VILLAGE;
     const bool preserveSceneMusic = z2TwilightVisualsPreserveSceneMusic(spotNo) ||
                                     Z2GetStatusMgr()->getDemoStatus() != 0;
     const bool isExteriorLoad = spot != NULL && strncmp(spot, "F_", 2) == 0;
@@ -1716,7 +1719,8 @@ void Z2SceneMgr::setSceneName(char* spot, s32 room, s32 layer) {
     if (!dusk::getSettings().game.speedrunMode.getValue() &&
         dusk::getSettings().game.enableTwilightVisuals.getValue() &&
         dusk::getSettings().game.enableTwilightVisualMusic.getValue() &&
-        !inDarkness_ && !isPalaceScene && !preserveSceneMusic && demo_wave == 0 &&
+        !isPalaceScene && !preserveSceneMusic &&
+        ((!inDarkness_ && demo_wave == 0) || isKakarikoVillage) &&
         (isExteriorLoad || isInteriorLoad)) {
         bgm_id = Z2BGM_DUNGEON_LV8;
         bgm_wave1 = 0x28;
