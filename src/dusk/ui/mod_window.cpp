@@ -106,7 +106,8 @@ Component* build_mod_control(Pane& pane, Pane* helpPane, ModControlSpec spec) {
     return control;
 }
 
-ModWindow::ModWindow(Desc desc) : mDesc(std::move(desc)) {
+ModWindow::ModWindow(Desc desc)
+    : Window{Props{.persistSize = true}}, mDesc(std::move(desc)) {
     mRoot->SetAttribute("mod-id", mDesc.modId);
     for (int i = 0; i < static_cast<int>(mDesc.tabs.size()); ++i) {
         add_tab(mDesc.tabs[i].title, [this, i](Rml::Element* content) {

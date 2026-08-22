@@ -164,7 +164,12 @@ private:
 
 }  // namespace
 
-ModsWindow::ModsWindow() : Window{Props{.tabBar = false, .styleSheets = {"res/rml/mods.rcss"}}} {
+ModsWindow::ModsWindow()
+    : Window{Props{
+          .tabBar = false,
+          .persistSize = true,
+          .styleSheets = {"res/rml/mods.rcss"},
+      }} {
     mRoot->SetClass("mods", true);
 
     for (auto& trackedMod : mods::ModLoader::instance().mods()) {
