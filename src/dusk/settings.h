@@ -250,6 +250,7 @@ struct UserSettings {
         ConfigVar<bool> rememberWindowSize;
         ConfigVar<int> lastWindowWidth;
         ConfigVar<int> lastWindowHeight;
+        ConfigVar<int> uiScale;
     } video;
 
     struct {
@@ -432,6 +433,8 @@ struct UserSettings {
         // scales with resolution but is controller-only. When false, it uses
         // the imgui menu (mouse-capable).
         ConfigVar<bool> nativePracticeMenu;
+
+        ConfigVar<std::string> lastSelectedGameModeId;
     } game;
 
     struct {

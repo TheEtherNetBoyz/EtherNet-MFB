@@ -37,10 +37,11 @@
 #include "m_Do/m_Do_Reset.h"
 
 #if TARGET_PC
-#include "tracy/Tracy.hpp"
-#include <dusk/gamepad_color.h>
 #include <dusk/autosave.h>
+#include <dusk/gamepad_color.h>
+#include "dusk/game_mode.hpp"
 #include "dusk/menu_pointer.h"
+#include "tracy/Tracy.hpp"
 #endif
 
 fapGm_HIO_c::fapGm_HIO_c() {
@@ -931,7 +932,11 @@ void fapGm_Execute() {
 
     cCt_Counter(0);
 #ifdef TARGET_PC
-    dusk::speedrun::onGameFrame();
+    const dusk::gamemode::GameMode* gameMode =
+        dusk::gamemode::getGameModeManager().getCurrentGameMode();
+    if (gameMode) {
+        gameMode->invokeOnTickFunction();
+    }
     dusk::AchievementSystem::get().tick();
     dusk::menu_pointer::end_game_frame();
 #endif

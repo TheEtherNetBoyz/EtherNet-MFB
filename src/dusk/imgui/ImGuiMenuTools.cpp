@@ -18,6 +18,7 @@
 #include "dusk/data.hpp"
 #include "dusk/dusk.h"
 #include "dusk/livesplit.h"
+#include "dusk/speedrun.h"
 #include "dusk/main.h"
 #include "dusk/ui/menu_bar.hpp"
 #include "dusk/ui/ui.hpp"
@@ -43,73 +44,6 @@ namespace dusk {
         bool MenuCheckbox(const char* label, ConfigVar<bool>& value, bool enabled = true) {
             return config::ImGuiMenuItem(label, nullptr, value, enabled);
         }
-        void RefreshRmlMenuBar() {
-            for (auto& doc : ui::get_document_stack()) {
-                if (dynamic_cast<ui::MenuBar*>(doc.get())) {
-                    doc = std::make_unique<ui::MenuBar>();
-                    break;
-                }
-            }
-        }
-
-        void ClearSpeedrunOverrides() {
-            config::EnumerateRegistered([](config::ConfigVarBase& cvar) {
-                cvar.clearSpeedrunOverride();
-            });
-        }
-
-        void ResetForSpeedrunMode() {
-            auto& s = getSettings();
-            mDoMain::developmentMode = -1;
-
-            s.game.enableTurboKeybind.setSpeedrunValue(false);
-
-            s.game.damageMultiplier.setSpeedrunValue(1);
-            s.game.instantDeath.setSpeedrunValue(false);
-            s.game.noHeartDrops.setSpeedrunValue(false);
-            s.game.autoSave.setSpeedrunValue(false);
-            s.game.sunsSong.setSpeedrunValue(false);
-
-            s.game.infiniteHearts.setSpeedrunValue(false);
-            s.game.infiniteArrows.setSpeedrunValue(false);
-            s.game.infiniteSeeds.setSpeedrunValue(false);
-            s.game.infiniteBombs.setSpeedrunValue(false);
-            s.game.infiniteOil.setSpeedrunValue(false);
-            s.game.infiniteOxygen.setSpeedrunValue(false);
-            s.game.infiniteRupees.setSpeedrunValue(false);
-            s.game.enableIndefiniteItemDrops.setSpeedrunValue(false);
-            s.game.moonJump.setSpeedrunValue(false);
-            s.game.superClawshot.setSpeedrunValue(false);
-            s.game.alwaysGreatspin.setSpeedrunValue(false);
-            s.game.enableFastIronBoots.setSpeedrunValue(false);
-            s.game.canTransformAnywhere.setSpeedrunValue(false);
-            s.game.fastRoll.setSpeedrunValue(false);
-            s.game.fastSpinner.setSpeedrunValue(false);
-            s.game.armorRupeeDrain.setSpeedrunValue(dusk::MagicArmorMode::NORMAL);
-            s.game.invincibleEnemies.setSpeedrunValue(false);
-
-            s.game.pauseOnFocusLost.setSpeedrunValue(false);
-            aurora_set_pause_on_focus_lost(false);
-            s.game.discLoadingDelayMode.setSpeedrunValue(DiscLoadingDelayMode::Off);
-            s.game.theEtherNetBoyzExperience.setSpeedrunValue(false);
-            updateDiscLoadingDelay();
-
-            s.backend.enableAdvancedSettings.setSpeedrunValue(false);
-            s.game.recordingMode.setSpeedrunValue(false);
-            s.game.debugFlyCam.setSpeedrunValue(false);
-            s.game.moveLink.setSpeedrunValue(false);
-            s.game.teleportLink.setSpeedrunValue(false);
-            s.game.areaReload.setSpeedrunValue(false);
-            s.game.gorgeVoidChecker.setSpeedrunValue(false);
-            getTransientSettings().moveLinkActive = false;
-        }
-
-        void RestoreFromSpeedrunMode() {
-            ClearSpeedrunOverrides();
-            aurora_set_pause_on_focus_lost(getSettings().game.pauseOnFocusLost.getValue());
-            updateDiscLoadingDelay();
-        }
-
         bool SpeedrunModeCheckbox() {
             auto& s = getSettings();
             bool copy = s.game.speedrunMode.getValue();
@@ -119,14 +53,11 @@ namespace dusk {
 
             s.game.speedrunMode.setValue(copy);
             if (copy) {
-                ResetForSpeedrunMode();
+                speedrun::registerSpeedrunGameMode();
             } else {
-                RestoreFromSpeedrunMode();
-                if (s.game.liveSplitEnabled) {
-                    speedrun::disconnectLiveSplit();
-                }
+                speedrun::unregisterSpeedrunGameMode();
             }
-            RefreshRmlMenuBar();
+            ui::MenuBar::refresh_tabs();
             config::save();
             return true;
         }
@@ -134,7 +65,8 @@ namespace dusk {
         bool LiveSplitCheckbox() {
             auto& s = getSettings();
             bool copy = s.game.liveSplitEnabled.getValue();
-            if (!ImGui::MenuItem("LiveSplit", nullptr, &copy, !IsMobile && s.game.speedrunMode)) {
+            if (!ImGui::MenuItem("LiveSplit", nullptr, &copy,
+                    !IsMobile && speedrun::isActive())) {
                 return false;
             }
 
@@ -602,7 +534,7 @@ namespace dusk {
                 ImGui::BeginDisabled();
             }
 
-            ImGui::BeginDisabled(getSettings().game.speedrunMode);
+            ImGui::BeginDisabled(dusk::speedrun::isActive());
 
             ImGui::MenuItem("Save Editor", hotkeys::SHOW_SAVE_EDITOR, &m_showSaveEditor);
             ImGui::MenuItem("Practice Saves", nullptr, &m_showPracticeSaves);
@@ -645,7 +577,7 @@ namespace dusk {
         }
 
         if (ImGui::BeginMenu("Debug")) {
-            ImGui::BeginDisabled(getSettings().game.speedrunMode);
+            ImGui::BeginDisabled(dusk::speedrun::isActive());
 
             config::ImGuiMenuItem("Advanced Settings", nullptr, getSettings().backend.enableAdvancedSettings);
             config::ImGuiMenuItem("Show Pipeline Compilation", nullptr, getSettings().backend.showPipelineCompilation);

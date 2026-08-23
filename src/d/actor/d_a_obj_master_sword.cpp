@@ -1,6 +1,6 @@
 /**
  * @file d_a_obj_master_sword.cpp
- * 
+ *
 */
 
 #include "d/dolzel_rel.h" // IWYU pragma: keep
@@ -15,16 +15,51 @@
 #include "dusk/cutscene_skip.h"
 #include "Z2AudioLib/Z2Instances.h"
 
+#if TARGET_PC
+#include "d/d_item.h"
+#include "dusk/mods/item.hpp"
+#include "mods/items.h"
+#endif
+
 DUSK_GAME_DATA daObjMasterSword_Attr_c const daObjMasterSword_c::mAttr = {1.0f};
 
 static daObjMasterSword_c* s_activeMasterSwordSkipActor;
 
 static void completeMasterSwordGet(daObjMasterSword_c* i_this) {
+#if TARGET_PC
+    const auto masterSword = dusk::mods::item_check_commit(
+        ITEM_CHECK_MASTER_SWORD, dItemNo_MASTER_SWORD_e, i_this);
+    if (masterSword.itemNo == dItemNo_MASTER_SWORD_e) {
+        dComIfGs_onItemFirstBit(dItemNo_MASTER_SWORD_e);
+        dMeter2Info_setSword(dItemNo_MASTER_SWORD_e, false);
+        dComIfGs_setSelectEquipSword(dItemNo_MASTER_SWORD_e);
+        dusk::mods::item_check_complete(masterSword, i_this);
+    } else if (masterSword.itemNo == dItemNo_NONE_e) {
+        dusk::mods::item_check_complete(masterSword, i_this);
+    } else {
+        dusk::mods::item_check_enqueue(masterSword, dusk::mods::ItemGiveMode::Demo);
+    }
+#else
     dComIfGs_onItemFirstBit(dItemNo_MASTER_SWORD_e);
     dMeter2Info_setSword(dItemNo_MASTER_SWORD_e, false);
     dComIfGs_setSelectEquipSword(dItemNo_MASTER_SWORD_e);
+#endif
 
     dComIfGp_setItemLifeCount(dComIfGs_getMaxLife(), 0);
+
+#if TARGET_PC
+    const auto shadowCrystal = dusk::mods::item_check_commit(
+        ITEM_CHECK_SHADOW_CRYSTAL, dItemNo_SHADOW_CRYSTAL_e, i_this);
+    if (shadowCrystal.itemNo == dItemNo_SHADOW_CRYSTAL_e) {
+        execItemGet(shadowCrystal.itemNo, shadowCrystal.tag, i_this);
+    } else if (shadowCrystal.itemNo == dItemNo_NONE_e) {
+        dusk::mods::item_check_complete(shadowCrystal, i_this);
+    } else {
+        dusk::mods::item_check_enqueue(shadowCrystal, dusk::mods::ItemGiveMode::Demo);
+    }
+
+    dComIfGs_onEventBit(dSv_event_flag_c::F_0264);
+#endif
     dComIfGs_onEventBit(dSv_event_flag_c::saveBitLabels[i_this->getFlagNo()]);
     s_activeMasterSwordSkipActor = NULL;
     fopAcM_delete(i_this);
@@ -212,7 +247,11 @@ void daObjMasterSword_c::create_init() {
 int daObjMasterSword_c::create() {
     fopAcM_ct(this, daObjMasterSword_c);
 
+#if TARGET_PC
+    if (dComIfGs_isEventBit(dSv_event_flag_c::F_0264)) {
+#else
     if (dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[getFlagNo()])) {
+#endif
         return cPhs_ERROR_e;
     }
 

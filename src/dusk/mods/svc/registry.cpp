@@ -214,6 +214,7 @@ void ModLoader::init_services() {
             &svc::g_overlayModule,
             &svc::g_textureModule,
             &svc::g_configModule,
+            &svc::g_uiModule_v1,
             &svc::g_uiModule,
             &svc::g_gameModule,
             &svc::g_cameraModule,
@@ -222,6 +223,9 @@ void ModLoader::init_services() {
             &svc::g_saveModule,
             &svc::g_stageModule,
             &svc::g_itemModule,
+            &svc::g_flowModule,
+            &svc::g_messageModule,
+            &svc::g_gamemodeModule,
         })
     {
         svc::register_module(*module);
