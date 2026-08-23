@@ -116,6 +116,7 @@ PresetWindow::PresetWindow() : WindowSmall("modal", "modal-dialog") {
                 getSettings().backend.wasPresetChosen.setValue(true);
                 config::save();
                 hide(true);
+                mDoAud_seStartMenu(kSoundClick);
                 return true;
             }
             return false;
