@@ -9,6 +9,7 @@
 #include "d/actor/d_a_suspend.h"
 #include "d/d_com_inf_actor.h"
 #include "d/d_demo.h"
+#include "d/d_kankyo.h"
 #include "d/d_s_play.h"
 #include "f_ap/f_ap_game.h"
 #include "f_op/f_op_actor.h"
@@ -266,7 +267,13 @@ static int fopAc_Draw(void* i_this) {
             print_error_check_c error_check(actor, print_error_check_c::sDRAW);
             #endif
 
+#if TARGET_PC
+            dKy_visual_enemy_form_context_set(actor->group == fopAc_ENEMY_e);
+#endif
             ret = fpcLf_DrawMethod((leafdraw_method_class DUSK_CONST*)actor->sub_method, actor);
+#if TARGET_PC
+            dKy_visual_enemy_form_context_set(0);
+#endif
 
             #if DEBUG
             }
@@ -347,7 +354,13 @@ static int fopAc_Execute(void* i_this) {
             print_error_check_c error_check(actor, print_error_check_c::sEXECUTE);
             #endif
 
+#if TARGET_PC
+            dKy_visual_enemy_form_context_set(actor->group == fopAc_ENEMY_e);
+#endif
             ret = fpcMtd_Execute((process_method_class DUSK_CONST*)actor->sub_method, actor);
+#if TARGET_PC
+            dKy_visual_enemy_form_context_set(0);
+#endif
 
             #if DEBUG
             }
@@ -560,7 +573,15 @@ static int fopAc_Create(void* i_this) {
     print_error_check_c error_check(actor, print_error_check_c::sCREATE);
     #endif
 
+#if TARGET_PC
+    // Let only enemy creation/model selection see the visual Twilight state.
+    // NPCs and other actors retain their vanilla Twilight layer selection.
+    dKy_visual_enemy_form_context_set(actor->group == fopAc_ENEMY_e);
+#endif
     ret = fpcMtd_Create((process_method_class*)actor->sub_method, actor);
+#if TARGET_PC
+    dKy_visual_enemy_form_context_set(0);
+#endif
 
     #if DEBUG
     }

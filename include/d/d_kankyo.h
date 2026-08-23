@@ -1031,6 +1031,7 @@ int dKy_WolfEyeLight_set(cXyz* pos_p, f32 angle_x, f32 angle_y, f32 cutoff, GXCo
 BOOL dKy_TeachWind_existence_chk();
 u8 dKy_darkworld_stage_check(char const* stageName, int roomNo);
 BOOL dKy_withwarp_capture_check();
+void dKy_visual_enemy_form_context_set(u8 enabled);
 u8 dKy_darkworld_check();
 u8 dKy_darkworld_visual_check();
 u8 dKy_darkworld_visual_effect_check();

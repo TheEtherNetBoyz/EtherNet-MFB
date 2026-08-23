@@ -1594,6 +1594,7 @@ u8 dStage_roomControl_c::mNoArcBank;
 #endif
 
 #if TARGET_PC
+static s16 dStage_getVisualTwilightEnemyProcName(s16 procName, BE(u32)* parameters);
 static void dStage_actorCreate(stage_actor_data_class* i_actorData, fopAcM_prm_class* i_actorPrm,
                                size_t recordSize = sizeof(stage_actor_data_class)) {
     if (!dusk::mods::svc::stage_apply_actor_edits(i_actorData, i_actorPrm, recordSize,
@@ -1612,8 +1613,14 @@ static void dStage_actorCreate(stage_actor_data_class* i_actorData, fopAcM_prm_c
         JKRFree(i_actorPrm);
     } else {
         i_actorPrm->argument = actorInf->argument;
-        if (actorInf->procname == fpcNm_SUSPEND_e) {
-            fopAc_ac_c* actor = (fopAc_ac_c*)fopAcM_FastCreate(actorInf->procname, NULL, NULL, i_actorPrm);
+#if TARGET_PC
+        const s16 procName = dStage_getVisualTwilightEnemyProcName(
+            actorInf->procname, &i_actorPrm->base.parameters);
+#else
+        const s16 procName = actorInf->procname;
+#endif
+        if (procName == fpcNm_SUSPEND_e) {
+            fopAc_ac_c* actor = (fopAc_ac_c*)fopAcM_FastCreate(procName, NULL, NULL, i_actorPrm);
 
             if (actor != NULL) {
                 fopAcM_delete(actor);
@@ -1621,7 +1628,7 @@ static void dStage_actorCreate(stage_actor_data_class* i_actorData, fopAcM_prm_c
             return;
         }
 
-        fopAcM_Create(actorInf->procname, NULL, i_actorPrm);
+        fopAcM_Create(procName, NULL, i_actorPrm);
     }
 }
 
@@ -1963,6 +1970,11 @@ static int dStage_sclsInfoInit(dStage_dt_c* i_stage, void* i_data, int entryNum,
     return 1;
 }
 
+#if TARGET_PC
+static bool dStage_isVisualTwilightEnemyVariant(const stage_actor_data_class* actorData);
+static bool dStage_prepareVisualTwilightEnemyLayer(void* i_data, dStage_dt_c* i_stage);
+#endif
+
 static int dStage_actorCommonLayerInit(dStage_dt_c* i_stage, void* i_data, int entryNum,
                                        void* param_3) {
     UNUSED(entryNum);
@@ -1971,6 +1983,12 @@ static int dStage_actorCommonLayerInit(dStage_dt_c* i_stage, void* i_data, int e
     stage_actor_data_class* actor_data = actor->m_entries;
 
     for (int i = 0; i < actor->num; i++) {
+#if TARGET_PC
+        if (dStage_isVisualTwilightEnemyVariant(actor_data)) {
+            actor_data++;
+            continue;
+        }
+#endif
         if (!dComIfGs_isActor(actor_data->base.setID, i_stage->getRoomNo())) {
             if (!daSus_c::check(i_stage->getRoomNo(), actor_data->base.position)) {
                 fopAcM_prm_class* appen = fopAcM_CreateAppend();
@@ -1997,6 +2015,12 @@ static int dStage_tgscCommonLayerInit(dStage_dt_c* i_stage, void* i_data, int en
 
     for (int i = 0; i < actor->num; i++) {
         stage_actor_data_class* actor_data = (stage_actor_data_class*)tgsc_data;
+#if TARGET_PC
+        if (dStage_isVisualTwilightEnemyVariant(actor_data)) {
+            tgsc_data++;
+            continue;
+        }
+#endif
         if (!daSus_c::check(i_stage->getRoomNo(), actor_data->base.position)) {
             fopAcM_prm_class* appen = fopAcM_CreateAppend();
 
@@ -2025,6 +2049,12 @@ static int dStage_actorInit(dStage_dt_c* i_stage, void* i_data, int entryNum, vo
     stage_actor_data_class* actor_data = actor->m_entries;
 
     for (int i = 0; i < actor->num; i++) {
+#if TARGET_PC
+        if (dStage_isVisualTwilightEnemyVariant(actor_data)) {
+            actor_data++;
+            continue;
+        }
+#endif
         if (!dComIfGs_isActor(actor_data->base.setID, i_stage->getRoomNo())) {
             if (!daSus_c::check(i_stage->getRoomNo(), actor_data->base.position)) {
                 fopAcM_prm_class* appen = fopAcM_CreateAppend();
@@ -2050,6 +2080,12 @@ static int dStage_actorInit_always(dStage_dt_c* i_stage, void* i_data, int entry
     stage_actor_data_class* actor_data = actor->m_entries;
 
     for (int i = 0; i < actor->num; i++) {
+#if TARGET_PC
+        if (dStage_isVisualTwilightEnemyVariant(actor_data)) {
+            actor_data++;
+            continue;
+        }
+#endif
         if (!dComIfGs_isActor(actor_data->base.setID, i_stage->getRoomNo())) {
             fopAcM_prm_class* appen = fopAcM_CreateAppend();
 
@@ -2748,6 +2784,145 @@ bool dStage_setEnvironmentLayer(int layerNo) {
     return true;
 }
 
+#if TARGET_PC
+// Visual Twilight must use the authored enemy entries from layer 14, while
+// preventing the normal layer from contributing a second enemy set.
+static int s_visual_twilight_enemy_count = 0;
+static bool s_visual_twilight_enemy_layer_filter = false;
+
+static s16 dStage_getEnemyActorProcName(const stage_actor_data_class* actorData) {
+    dStage_objectNameInf* actorInf = dStage_searchName(actorData->name);
+    if (actorInf == NULL) {
+        return -1;
+    }
+
+    const process_profile_definition* processProfile = fpcPf_Get(actorInf->procname);
+    if (processProfile == NULL) {
+        return -1;
+    }
+
+    const actor_process_profile_definition* actorProfile =
+        reinterpret_cast<const actor_process_profile_definition*>(processProfile);
+    return actorProfile->group == fopAc_ENEMY_e ? actorInf->procname : -1;
+}
+
+static bool dStage_isVisualTwilightEnemyVariant(const stage_actor_data_class* actorData) {
+    if (!s_visual_twilight_enemy_layer_filter) {
+        return false;
+    }
+
+    // The normal-layer ACT0 can contain a different set of the same enemies
+    // than layer 14, so matching by set ID or position still leaves vanilla
+    // enemies behind in some maps. Once an authored Twilight enemy layer is
+    // available, the normal layer must contribute no enemies at all; the
+    // layer-14 pass above is the sole source of enemy actors.
+    return dStage_getEnemyActorProcName(actorData) >= 0;
+}
+
+static bool dStage_visualTwilightEnemyLayerEnabled() {
+    const char* stageName = dComIfGp_getStartStageName();
+    return stageName != NULL &&
+           dComIfG_play_c::getLayerNo(0) != 14 &&
+           dKy_darkworld_visual_check() != 0;
+}
+
+static s16 dStage_getVisualTwilightEnemyProcName(s16 procName, BE(u32)* parameters) {
+    if (!dStage_visualTwilightEnemyLayerEnabled() || s_visual_twilight_enemy_layer_filter) {
+        return procName;
+    }
+
+    // These are the vanilla normal/Twilight actor pairs. The fallback is used
+    // only when the current map has no authored layer-14 enemy records.
+    switch (procName) {
+    case fpcNm_E_BA_e:  // Keese -> Shadow Keese
+        return fpcNm_E_YK_e;
+    case fpcNm_E_DB_e:  // Deku Baba -> Twilight Deku Baba
+        return fpcNm_E_YD_e;
+    case fpcNm_E_HB_e:  // Hebi Baba -> Twilight Hebi Baba
+        return fpcNm_E_YH_e;
+    case fpcNm_E_KR_e:  // Kargorok -> Twilight Kargorok
+        return fpcNm_E_YC_e;
+    case fpcNm_E_MS_e:  // Rat -> Twilight Vermin
+        return fpcNm_E_YG_e;
+    case fpcNm_E_YM_e:  // Insect -> Twilight insect variant
+        *parameters = (*parameters & ~0xFFu) | 6;
+        return fpcNm_E_YM_e;
+    default:
+        return procName;
+    }
+}
+
+static int dStage_visualTwilightEnemyLayerInit(dStage_dt_c* i_stage, void* i_data,
+                                                int entryNum, void* param_3) {
+    UNUSED(entryNum);
+    UNUSED(param_3);
+    stage_actor_class* actor = (stage_actor_class*)((int*)i_data + 1);
+    stage_actor_data_class* actorData = actor->m_entries;
+
+    for (int i = 0; i < actor->num; i++, actorData++) {
+        const s16 procName = dStage_getEnemyActorProcName(actorData);
+        if (procName < 0) {
+            continue;
+        }
+
+        const u16 setID = actorData->base.setID;
+
+        if (dComIfGs_isActor(setID, i_stage->getRoomNo()) ||
+            daSus_c::check(i_stage->getRoomNo(), actorData->base.position)) {
+            continue;
+        }
+
+        fopAcM_prm_class* appen = fopAcM_CreateAppend();
+        if (appen != NULL) {
+            appen->base = actorData->base;
+            appen->room_no = (int)i_stage->getRoomNo();
+            dStage_actorCreate(actorData, appen);
+        }
+    }
+
+    return 1;
+}
+
+static int dStage_visualTwilightEnemyLayerScan(dStage_dt_c* i_stage, void* i_data,
+                                                int entryNum, void* param_3) {
+    UNUSED(i_stage);
+    UNUSED(entryNum);
+    UNUSED(param_3);
+    stage_actor_class* actor = (stage_actor_class*)((int*)i_data + 1);
+    stage_actor_data_class* actorData = actor->m_entries;
+
+    for (int i = 0; i < actor->num; i++, actorData++) {
+        if (dStage_getEnemyActorProcName(actorData) >= 0) {
+            s_visual_twilight_enemy_count++;
+        }
+    }
+
+    return 1;
+}
+
+static bool dStage_prepareVisualTwilightEnemyLayer(void* i_data, dStage_dt_c* i_stage) {
+    s_visual_twilight_enemy_count = 0;
+    s_visual_twilight_enemy_layer_filter = false;
+
+    if (!dStage_visualTwilightEnemyLayerEnabled()) {
+        return false;
+    }
+
+    FuncTable visualEnemyLayerScanFuncTable[] = {
+        {"ACT0", dStage_visualTwilightEnemyLayerScan},
+        {"ACTR", dStage_visualTwilightEnemyLayerScan},
+        {"TGOB", dStage_visualTwilightEnemyLayerScan},
+    };
+
+    dStage_setLayerTagName(visualEnemyLayerScanFuncTable,
+                           ARRAY_SIZEU(visualEnemyLayerScanFuncTable), 14);
+    dStage_dt_c_decode(i_data, i_stage, visualEnemyLayerScanFuncTable,
+                       ARRAY_SIZEU(visualEnemyLayerScanFuncTable));
+    s_visual_twilight_enemy_layer_filter = s_visual_twilight_enemy_count > 0;
+    return s_visual_twilight_enemy_layer_filter;
+}
+#endif
+
 bool dStage_getVisualTwilightSky(stage_vrboxcol_info_class* outSky, u8 variant) {
 #if TARGET_PC
     struct SkyVariantSource {
@@ -2896,8 +3071,28 @@ static void layerActorLoader(void* i_data, dStage_dt_c* i_stage, int param_2) {
 #endif
     };
 
+#if TARGET_PC
+    const bool loadVisualTwilightEnemies = s_visual_twilight_enemy_layer_filter;
+#endif
+
     dStage_setLayerTagName(l_layerFuncTable, 4, dComIfG_play_c::getLayerNo(0));
     dStage_dt_c_decode(i_data, i_stage, l_layerFuncTable, ARRAY_SIZEU(l_layerFuncTable));
+
+#if TARGET_PC
+    if (loadVisualTwilightEnemies) {
+        FuncTable visualEnemyLayerFuncTable[] = {
+            {"ACT0", dStage_visualTwilightEnemyLayerInit},
+            {"ACTR", dStage_visualTwilightEnemyLayerInit},
+            {"TGOB", dStage_visualTwilightEnemyLayerInit},
+        };
+
+        dStage_setLayerTagName(visualEnemyLayerFuncTable,
+                               ARRAY_SIZEU(visualEnemyLayerFuncTable), 14);
+        dStage_dt_c_decode(i_data, i_stage, visualEnemyLayerFuncTable,
+                           ARRAY_SIZEU(visualEnemyLayerFuncTable));
+    }
+    s_visual_twilight_enemy_layer_filter = false;
+#endif
 }
 
 void dStage_dt_c_stageLoader(void* i_data, dStage_dt_c* i_stage) {
@@ -2917,6 +3112,9 @@ void dStage_dt_c_stageLoader(void* i_data, dStage_dt_c* i_stage) {
         {"REVT", dStage_stEventInfoInit},   {"SOND", dStage_soundInfoInitCL},
     };
 
+#if TARGET_PC
+    dStage_prepareVisualTwilightEnemyLayer(i_data, i_stage);
+#endif
     dStage_dt_c_decode(i_data, i_stage, l_funcTable, ARRAY_SIZEU(l_funcTable));
     layerTableLoader(i_data, i_stage, -1);
     layerActorLoader(i_data, i_stage, -1);
@@ -2956,6 +3154,9 @@ void dStage_dt_c_roomReLoader(void* i_data, dStage_dt_c* i_stage, int param_2) {
         {"REVT", dStage_mapEventInfoInit},
     };
 
+#if TARGET_PC
+    dStage_prepareVisualTwilightEnemyLayer(i_data, i_stage);
+#endif
     dStage_dt_c_decode(i_data, i_stage, l_funcTable, ARRAY_SIZEU(l_funcTable));
 #if TARGET_PC
     dusk_stage_svc_new_actor_create(i_stage);

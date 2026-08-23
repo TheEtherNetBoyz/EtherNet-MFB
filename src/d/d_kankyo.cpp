@@ -33,6 +33,7 @@
 #include "m_Do/m_Do_lib.h"
 #include "JSystem/JKernel/JKRSolidHeap.h"
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #if TARGET_PC
@@ -55,6 +56,9 @@ static bool s_twilight_visual_audio_state_initialized = false;
 static u8 s_twilight_visual_original_bgm_status = 0xff;
 #endif
 static bool s_visual_environment_forced = false;
+#if TARGET_PC
+static bool s_visual_enemy_form_context = false;
+#endif
 static bool s_has_faron_twilight_sky = false;
 static GXColorS10 s_faron_twilight_sky;
 static GXColorS10 s_faron_twilight_kumo_top;
@@ -63,16 +67,20 @@ static GXColorS10 s_faron_twilight_kumo_shadow;
 static GXColorS10 s_faron_twilight_kasumi_outer;
 static GXColorS10 s_faron_twilight_kasumi_inner;
 
-static bool dKy_visual_twilight_options_active() {
 #if TARGET_PC
+static bool dKy_visual_twilight_stage_enabled() {
     const char* stageName = dComIfGp_getStartStageName();
-    if (stageName == NULL) {
-        return false;
-    }
-
-    return !dusk::getSettings().game.speedrunMode.getValue() &&
+    return stageName != NULL &&
+           !dusk::getSettings().game.speedrunMode.getValue() &&
            dusk::getSettings().game.enableTwilightVisuals.getValue() &&
            strncmp(stageName, "D_MN08", 6) != 0;
+}
+
+#endif
+
+static bool dKy_visual_twilight_options_active() {
+#if TARGET_PC
+    return dKy_visual_twilight_stage_enabled();
 #else
     return false;
 #endif
@@ -11714,6 +11722,14 @@ void dKy_depth_dist_set(void* process_p) {
     }
 }
 
+void dKy_visual_enemy_form_context_set(u8 enabled) {
+#if TARGET_PC
+    s_visual_enemy_form_context = enabled != 0;
+#else
+    UNUSED(enabled);
+#endif
+}
+
 u8 dKy_darkworld_check() {
     dScnKy_env_light_c* kankyo = dKy_getEnvlight();
     u8 check = FALSE;
@@ -11722,6 +11738,18 @@ u8 dKy_darkworld_check() {
     if (dComIfGp_world_dark_get() == TRUE) {
         check = TRUE;
     }
+
+#if TARGET_PC
+    // Only an enemy's creation/model-selection path may see the visual
+    // Twilight state. Keep normal actor/NPC layers on their vanilla state.
+    const char* stageName = dComIfGp_getStartStageName();
+    if (s_visual_enemy_form_context && stageName != NULL &&
+        strncmp(stageName, "D_MN08", 6) != 0 &&
+        !dusk::getSettings().game.speedrunMode.getValue() &&
+        dusk::getSettings().game.enableTwilightVisuals.getValue()) {
+        check = TRUE;
+    }
+#endif
 
     return check;
 }

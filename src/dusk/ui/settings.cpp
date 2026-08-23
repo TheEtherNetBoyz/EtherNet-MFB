@@ -2047,7 +2047,7 @@ SettingsWindow::SettingsWindow(bool prelaunch)
             GraphicsTunerProps{
                 .option = GraphicsOption::TwilightVisualStyle,
                 .title = "Twilight Visual Style",
-                .helpText = "Choose normal Twilight colors or Black and White like the E3 2005 demo.",
+                .helpText = "Choose normal Twilight or Black and White like the E3 2005 demo.",
                 .valueMin = static_cast<int>(TwilightVisualStyle::Normal),
                 .valueMax = static_cast<int>(TwilightVisualStyle::BlackAndWhiteEnvironment),
                 .defaultValue = static_cast<int>(TwilightVisualStyle::Normal),
