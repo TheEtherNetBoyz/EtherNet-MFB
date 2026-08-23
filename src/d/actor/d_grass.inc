@@ -32,7 +32,7 @@ static TGXTexObj s_grassMonochromeHijikiTexObj;
 
 static bool grass_monochrome_active() {
     const auto& settings = dusk::getSettings().game;
-    return !settings.speedrunMode.getValue() && settings.enableTwilightVisuals.getValue() &&
+    return !settings.speedrunMode.getValue() &&
            settings.twilightVisualStyle.getValue() ==
                dusk::TwilightVisualStyle::BlackAndWhiteEnvironment &&
            strcmp(dComIfGp_getStartStageName(), "D_MN08") != 0;

@@ -2712,7 +2712,6 @@ int mDoGph_Painter() {
 #if TARGET_PC
             const auto& visualSettings = dusk::getSettings().game;
             if (!visualSettings.speedrunMode.getValue() &&
-                visualSettings.enableTwilightVisuals.getValue() &&
                 visualSettings.twilightVisualStyle.getValue() ==
                     dusk::TwilightVisualStyle::BlackAndWhiteEnvironment &&
                 strcmp(dComIfGp_getStartStageName(), "D_MN08") != 0) {

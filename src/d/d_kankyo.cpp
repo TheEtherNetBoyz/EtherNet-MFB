@@ -96,7 +96,13 @@ static void dKy_scale_visual_twilight_color(GXColorS10& color, f32 brightness) {
 }
 
 static bool dKy_visual_twilight_monochrome_active() {
-    return dKy_visual_twilight_options_active() &&
+    const char* stageName = dComIfGp_getStartStageName();
+    if (stageName == NULL) {
+        return false;
+    }
+
+    return !dusk::getSettings().game.speedrunMode.getValue() &&
+           strncmp(stageName, "D_MN08", 6) != 0 &&
            dusk::getSettings().game.twilightVisualStyle.getValue() ==
                dusk::TwilightVisualStyle::BlackAndWhiteEnvironment;
 }

@@ -279,10 +279,13 @@ Rml::String format_graphics_setting_value(GraphicsOption option, int value) {
     case GraphicsOption::TwilightVisualsEnabled:
         return static_cast<bool>(value) ? "On" : "Off";
     case GraphicsOption::TwilightVisualStyle:
-        return static_cast<TwilightVisualStyle>(value) ==
-                       TwilightVisualStyle::BlackAndWhiteEnvironment
-                   ? "Black and White"
-                   : "Normal Twilight";
+        switch (static_cast<TwilightVisualStyle>(value)) {
+        case TwilightVisualStyle::BlackAndWhiteEnvironment:
+            return "Black and White";
+        case TwilightVisualStyle::Normal:
+        default:
+            return "Normal Twilight";
+        }
     case GraphicsOption::TwilightVisualBrightness:
         return fmt::format("{}%", value);
     case GraphicsOption::TwilightSkybox: {
