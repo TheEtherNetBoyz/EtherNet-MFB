@@ -6,6 +6,7 @@
 #include "d/actor/d_a_player.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_demo.h"
+#include "d/d_kankyo.h"
 #include "d/d_kankyo_rain.h"
 #include "f_op/f_op_camera_mng.h"
 #include "f_op/f_op_kankyo_mng.h"
@@ -4053,6 +4054,7 @@ void dKyr_drawSnow(Mtx drawMtx, u8** tex) {
     };
 
     static f32 S_fubuki_ratio = 0.0f;
+    const bool visualSnowStorm = dKy_visual_snow_storm_check() != 0;
 #if TARGET_PC
     f32 presentationCounter = g_Counter.mCounter0;
     if (dusk::frame_interp::is_enabled() && !dusk::frame_interp::is_sim_frame()) {
@@ -4182,13 +4184,15 @@ void dKyr_drawSnow(Mtx drawMtx, u8** tex) {
                                     sp40 = snow_packet->mSnowEff[i].mScale * snow_packet->mSnowEff[i].mScale;
                                     sp3C = (snow_packet->mSnowEff[i].mScale - sp40) + snow_packet->mSnowEff[i].mScale;
 
-                                    color_reg0.a = 180.0f * ((snow_packet->mSnowEff[i].mScale * 0.8f) + temp_f29);
-                                } else {
+                                color_reg0.a = (visualSnowStorm ? 1.15f : 1.0f) *
+                                               (180.0f * ((snow_packet->mSnowEff[i].mScale * 0.8f) + temp_f29));
+                            } else {
                                     sp7C = snow_packet->mSnowEff[i].mBasePos;
                                     sp40 = snow_packet->mSnowEff[i].field_0x30 * snow_packet->mSnowEff[i].field_0x30;
                                     sp3C = (snow_packet->mSnowEff[i].field_0x30 - sp40) + snow_packet->mSnowEff[i].field_0x30;
 
-                                    color_reg0.a = S_fubuki_ratio * (220.0f * ((0.8f * (snow_packet->mSnowEff[i].field_0x30)) + temp_f29));
+                                color_reg0.a = S_fubuki_ratio * (visualSnowStorm ? 1.15f : 1.0f) *
+                                               (220.0f * ((0.8f * (snow_packet->mSnowEff[i].field_0x30)) + temp_f29));
                                 }
 #if TARGET_PC
                                 Mtx presentationMtx;
@@ -4227,6 +4231,9 @@ void dKyr_drawSnow(Mtx drawMtx, u8** tex) {
                                     var_f30 = sp68 * (sp3C * (sp6C + (int)(10.0f * ((i & 15) / 15.0f))));
                                 } else {
                                     var_f30 = sp68 * (sp3C * (sp6C + (int)(14.0f * ((i & 15) / 15.0f))));
+                                }
+                                if (visualSnowStorm) {
+                                    var_f30 *= 1.35f;
                                 }
 
                                 sp94.x = -var_f30 * sp44;

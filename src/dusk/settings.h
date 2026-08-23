@@ -50,6 +50,8 @@ enum class TwilightWeather : u8 {
     Snow = 3,
     Lightning = 4,
     WindStorm = 5,
+    SnowStorm = 6,
+    HeavyFog = 7,
 };
 
 enum class TwilightVisualStyle : u8 {
@@ -150,7 +152,7 @@ struct ConfigEnumRange<TwilightSkyboxMode> {
 template <>
 struct ConfigEnumRange<TwilightWeather> {
     static constexpr auto min = TwilightWeather::Current;
-    static constexpr auto max = TwilightWeather::WindStorm;
+    static constexpr auto max = TwilightWeather::HeavyFog;
 };
 
 template <>

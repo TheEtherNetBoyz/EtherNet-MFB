@@ -1034,6 +1034,7 @@ BOOL dKy_withwarp_capture_check();
 u8 dKy_darkworld_check();
 u8 dKy_darkworld_visual_check();
 u8 dKy_darkworld_visual_effect_check();
+u8 dKy_visual_snow_storm_check();
 void dKy_undwater_filter_draw();
 BOOL dKy_camera_water_in_status_check();
 int dKy_Outdoor_check();

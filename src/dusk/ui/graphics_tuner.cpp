@@ -131,7 +131,7 @@ void set_value(GraphicsOption option, int value) {
     case GraphicsOption::Weather:
         getSettings().game.twilightWeather.setValue(static_cast<TwilightWeather>(
             std::clamp(value, static_cast<int>(TwilightWeather::Current),
-                static_cast<int>(TwilightWeather::WindStorm))));
+                static_cast<int>(TwilightWeather::HeavyFog))));
         break;
     case GraphicsOption::TextureReplacements:
         getSettings().game.enableTextureReplacements.setValue(static_cast<bool>(value));
@@ -301,7 +301,8 @@ Rml::String format_graphics_setting_value(GraphicsOption option, int value) {
     }
     case GraphicsOption::Weather: {
         static constexpr const char* modes[] = {
-            "Current", "Clear", "Rain", "Snow", "Lightning", "Wind Storm"};
+            "Current", "Clear", "Rain", "Snow", "Lightning", "Wind Storm", "Snow Storm",
+            "Heavy Fog"};
         if (value >= 0 && value < static_cast<int>(std::size(modes))) {
             return modes[value];
         }

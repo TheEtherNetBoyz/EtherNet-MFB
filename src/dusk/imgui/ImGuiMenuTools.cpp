@@ -355,7 +355,8 @@ namespace dusk {
             }
 
             int weather = static_cast<int>(s.game.twilightWeather.getValue());
-            const char* weatherModes[] = {"Current", "Clear", "Rain", "Snow", "Lightning", "Wind Storm"};
+            const char* weatherModes[] = {"Current", "Clear", "Rain", "Snow", "Lightning",
+                                          "Wind Storm", "Snow Storm", "Heavy Fog"};
             ImGui::TextUnformatted("Weather");
             ImGui::SameLine(170.0f);
             ImGui::SetNextItemWidth(150.0f);

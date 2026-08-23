@@ -1530,6 +1530,14 @@ void dKy_apply_visual_twilight_weather() {
         u8 patMode = 0;
         u8 patModeGather = 0;
         f32 patternRatio = 1.0f;
+        f32 fogNear = 0.0f;
+        f32 fogFar = 0.0f;
+        f32 fogOverrideNear = 0.0f;
+        f32 fogOverrideFar = 0.0f;
+        f32 fogOverrideRatio = 0.0f;
+        u8 moyaMode = 0;
+        int moyaCount = 0;
+        u8 snowFogMode = 0;
         int thunderMode = 0;
         u8 thunderStatus = 0;
         cXyz* windOverride = NULL;
@@ -1538,6 +1546,7 @@ void dKy_apply_visual_twilight_weather() {
     };
     static VisualWeatherState saved;
     static cXyz visual_twilight_storm_wind(1.0f, 0.0f, 0.0f);
+    static cXyz visual_twilight_wind_storm_wind(1.75f, 0.0f, 0.0f);
     static int wind_gust_timer = 0;
     static bool wind_gust_active = false;
 
@@ -1559,6 +1568,14 @@ void dKy_apply_visual_twilight_weather() {
             g_env_light.mColPatMode = saved.patMode;
             g_env_light.mColPatModeGather = saved.patModeGather;
             g_env_light.pat_ratio = saved.patternRatio;
+            g_env_light.mFogNear = saved.fogNear;
+            g_env_light.mFogFar = saved.fogFar;
+            g_env_light.field_0x11ec = saved.fogOverrideNear;
+            g_env_light.field_0x11f0 = saved.fogOverrideFar;
+            g_env_light.field_0x11f4 = saved.fogOverrideRatio;
+            g_env_light.mMoyaMode = saved.moyaMode;
+            g_env_light.mMoyaCount = saved.moyaCount;
+            g_env_light.field_0xe92 = saved.snowFogMode;
             g_env_light.mThunderEff.mMode = saved.thunderMode;
             g_env_light.mThunderEff.mStatus = saved.thunderStatus;
             g_env_light.global_wind_influence.vec_override = saved.windOverride;
@@ -1583,6 +1600,14 @@ void dKy_apply_visual_twilight_weather() {
         saved.patMode = g_env_light.mColPatMode;
         saved.patModeGather = g_env_light.mColPatModeGather;
         saved.patternRatio = g_env_light.pat_ratio;
+        saved.fogNear = g_env_light.mFogNear;
+        saved.fogFar = g_env_light.mFogFar;
+        saved.fogOverrideNear = g_env_light.field_0x11ec;
+        saved.fogOverrideFar = g_env_light.field_0x11f0;
+        saved.fogOverrideRatio = g_env_light.field_0x11f4;
+        saved.moyaMode = g_env_light.mMoyaMode;
+        saved.moyaCount = g_env_light.mMoyaCount;
+        saved.snowFogMode = g_env_light.field_0xe92;
         saved.thunderMode = g_env_light.mThunderEff.mMode;
         saved.thunderStatus = g_env_light.mThunderEff.mStatus;
         saved.windOverride = g_env_light.global_wind_influence.vec_override;
@@ -1591,11 +1616,13 @@ void dKy_apply_visual_twilight_weather() {
     }
 
     const bool windStorm = weather == dusk::TwilightWeather::WindStorm;
-    if (windStorm) {
+    const bool snowStorm = weather == dusk::TwilightWeather::SnowStorm;
+    const bool stormWeather = windStorm || snowStorm;
+    if (stormWeather) {
         if (wind_gust_timer <= 0) {
             wind_gust_active = !wind_gust_active;
             wind_gust_timer = wind_gust_active ?
-                30 + static_cast<int>(cM_rndF(45.0f)) :
+                60 + static_cast<int>(cM_rndF(361.0f)) :
                 60 + static_cast<int>(cM_rndF(120.0f));
         }
         --wind_gust_timer;
@@ -1604,11 +1631,40 @@ void dKy_apply_visual_twilight_weather() {
         wind_gust_active = false;
     }
 
+    const bool denseFogWeather = snowStorm || weather == dusk::TwilightWeather::HeavyFog;
+    if (snowStorm) {
+        // Snowpeak's blizzard path uses the full snow packet, the fubuki draw
+        // mode, 50 drifting mist particles, dense fog, and strong snow ambience.
+        g_env_light.mMoyaMode = 0;
+        g_env_light.mMoyaCount = 50;
+        g_env_light.field_0xe92 = 1;
+        g_env_light.field_0x11ec = 200.0f;
+        g_env_light.field_0x11f0 = 2200.0f;
+        g_env_light.field_0x11f4 = 1.0f;
+        g_mEnvSeMgr.setSnowPower(127.0f);
+    } else if (weather == dusk::TwilightWeather::HeavyFog) {
+        // Reuse the engine's existing mist packet and force the palette fog
+        // range so both world and actor TEV fog use the same dense fog.
+        g_env_light.mMoyaMode = 2;
+        g_env_light.mMoyaCount = 50;
+        g_env_light.field_0xe92 = 0;
+        g_env_light.field_0x11ec = 200.0f;
+        g_env_light.field_0x11f0 = 2200.0f;
+        g_env_light.field_0x11f4 = 1.0f;
+    } else {
+        g_env_light.mMoyaMode = saved.moyaMode;
+        g_env_light.mMoyaCount = saved.moyaCount;
+        g_env_light.field_0xe92 = saved.snowFogMode;
+        g_env_light.field_0x11ec = saved.fogOverrideNear;
+        g_env_light.field_0x11f0 = saved.fogOverrideFar;
+        g_env_light.field_0x11f4 = saved.fogOverrideRatio;
+    }
+
     const bool wetWeather = weather == dusk::TwilightWeather::Rain ||
                             weather == dusk::TwilightWeather::Lightning ||
                             weather == dusk::TwilightWeather::WindStorm;
     const u8 weatherPattern = wetWeather ? 1 :
-                              weather == dusk::TwilightWeather::Snow ? 2 : 0;
+                              (weather == dusk::TwilightWeather::Snow || snowStorm) ? 2 : 0;
     g_env_light.mColpatWeather = weatherPattern;
     g_env_light.wether_pat0 = weatherPattern;
     g_env_light.wether_pat1 = weatherPattern;
@@ -1622,7 +1678,7 @@ void dKy_apply_visual_twilight_weather() {
     if (wetWeather) {
         dKyw_rain_set(250);
         g_env_light.mSnowCount = 0;
-    } else if (weather == dusk::TwilightWeather::Snow) {
+    } else if (weather == dusk::TwilightWeather::Snow || snowStorm) {
         dKyw_rain_set(0);
         g_env_light.mSnowCount = 500;
     } else {
@@ -1636,8 +1692,9 @@ void dKy_apply_visual_twilight_weather() {
     }
     g_env_light.mThunderEff.mMode = thunderMode;
 
-    if (windStorm) {
-        g_env_light.global_wind_influence.vec_override = &visual_twilight_storm_wind;
+    if (stormWeather) {
+        g_env_light.global_wind_influence.vec_override =
+            windStorm ? &visual_twilight_wind_storm_wind : &visual_twilight_storm_wind;
         g_env_light.custom_windpower = wind_gust_active ? 1.0f : 0.0f;
         g_env_light.TeachWind_existence = 1;
     } else {
@@ -1645,6 +1702,15 @@ void dKy_apply_visual_twilight_weather() {
         g_env_light.custom_windpower = saved.customWindPower;
         g_env_light.TeachWind_existence = saved.teachWindExistence;
     }
+
+    if (denseFogWeather) {
+        g_env_light.mFogNear = 200.0f;
+        g_env_light.mFogFar = 2200.0f;
+    } else {
+        g_env_light.mFogNear = saved.fogNear;
+        g_env_light.mFogFar = saved.fogFar;
+    }
+
 #endif
 }
 
@@ -5342,6 +5408,7 @@ void dScnKy_env_light_c::exeKankyo() {
     setDaytime();
     dKyw_wether_proc();
     CalcTevColor();
+    dKy_apply_visual_twilight_weather();
     Sndpos();
     Eflight_flush_proc();
 
@@ -11696,6 +11763,15 @@ u8 dKy_darkworld_visual_effect_check() {
     return dKy_darkworld_visual_check();
 #else
     return dKy_darkworld_check();
+#endif
+}
+
+u8 dKy_visual_snow_storm_check() {
+#if TARGET_PC
+    return !dusk::getSettings().game.speedrunMode.getValue() &&
+           dusk::getSettings().game.twilightWeather.getValue() == dusk::TwilightWeather::SnowStorm;
+#else
+    return false;
 #endif
 }
 

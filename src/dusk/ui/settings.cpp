@@ -2087,7 +2087,7 @@ SettingsWindow::SettingsWindow(bool prelaunch)
                 .title = "Weather",
                 .helpText = "Override the current map weather.",
                 .valueMin = static_cast<int>(TwilightWeather::Current),
-                .valueMax = static_cast<int>(TwilightWeather::WindStorm),
+                .valueMax = static_cast<int>(TwilightWeather::HeavyFog),
                 .defaultValue = static_cast<int>(TwilightWeather::Current),
                 .openInFavorites = true,
             }, [] { return getSettings().game.speedrunMode.getValue(); });
