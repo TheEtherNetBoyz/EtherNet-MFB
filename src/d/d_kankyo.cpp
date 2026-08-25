@@ -50,6 +50,9 @@ static int s_visual_environment_layer = -1;
 static int s_visual_environment_room = -1;
 static char s_visual_environment_stage[16] = {};
 static bool s_visual_environment_has_twilight_layer = false;
+static int s_visual_environment_loaded_layer = 0;
+static bool s_visual_environment_loaded_twilight = false;
+static bool s_visual_environment_area_initialized = false;
 #if TARGET_PC
 static bool s_twilight_visual_audio_state = false;
 static bool s_twilight_visual_audio_state_initialized = false;
@@ -1727,12 +1730,14 @@ static void dKy_update_visual_environment() {
 
     const char* stageName = dComIfGp_getStartStageName();
     const int roomNo = dComIfGp_roomControl_getStayNo();
-    const bool forceTwilight = dKy_darkworld_visual_check();
-    const int layerNo = forceTwilight ? 14 : dComIfG_play_c::getLayerNo(0);
+    const bool forceTwilight = dKy_visual_twilight_stage_enabled();
+    const int layerNo = forceTwilight ? 14 : s_visual_environment_loaded_layer;
 
-    if (layerNo == s_visual_environment_layer && roomNo == s_visual_environment_room &&
-        forceTwilight == s_visual_environment_forced &&
-        stageName != NULL && strcmp(s_visual_environment_stage, stageName) == 0) {
+    // A room/load transition can expose the destination layer before the
+    // current environment has been destroyed. Do not decode that transient
+    // layer into the live scene. The loaded layer is committed by
+    // envcolor_init() only when a complete area environment is created.
+    if (forceTwilight == s_visual_environment_forced) {
         return;
     }
 
@@ -1771,6 +1776,17 @@ static void dKy_update_visual_environment() {
 }
 
 static void envcolor_init() {
+    // This is the full-area environment creation boundary. Remember the
+    // native state now and keep it stable across subsequent room transitions.
+    s_visual_environment_loaded_layer = dComIfG_play_c::getLayerNo(0);
+    s_visual_environment_loaded_twilight = dKy_darkworld_check() != 0;
+    s_visual_environment_area_initialized = true;
+    s_visual_environment_layer = -1;
+    s_visual_environment_room = -1;
+    s_visual_environment_stage[0] = '\0';
+    s_visual_environment_has_twilight_layer = false;
+    s_visual_environment_forced = false;
+
     dKy_update_visual_environment();
 
     stage_palette_info_class* stage_palette_p = dComIfGp_getStagePaletteInfo();
@@ -11767,9 +11783,19 @@ u8 dKy_darkworld_visual_check() {
         return false;
     }
 
-    return dKy_darkworld_check() ||
-           (!dusk::getSettings().game.speedrunMode.getValue() &&
-            dusk::getSettings().game.enableTwilightVisuals.getValue());
+    if (!dusk::getSettings().game.speedrunMode.getValue() &&
+        dusk::getSettings().game.enableTwilightVisuals.getValue()) {
+        return true;
+    }
+
+    // Native darkness/layer flags can switch early during a room transition.
+    // Keep every visual consumer (bloom, sky, fog, lighting, particles, etc.)
+    // on the state accepted at the last complete environment creation.
+    if (s_visual_environment_area_initialized) {
+        return s_visual_environment_loaded_twilight;
+    }
+
+    return dKy_darkworld_check();
 #else
     return dKy_darkworld_check();
 #endif

@@ -690,7 +690,7 @@ static void wether_move_housi() {
     }
 
     // Stage is darkworld or Stage is Lake Hylia and Room is Lanayru Spring
-    if (dKy_darkworld_check() == true ||
+    if (dKy_darkworld_visual_effect_check() == true ||
         (!strcmp(dComIfGp_getStartStageName(), "F_SP115") &&
          dComIfGp_roomControl_getStayNo() == 1 && dComIfGp_getStartStageLayer() == 9))
     {
@@ -722,7 +722,7 @@ static void wether_move_housi() {
             g_env_light.mpHousiPacket = JKR_NEW_ARGS (32) dKankyo_housi_Packet;
 
             if (g_env_light.mpHousiPacket != NULL) {
-                if (dKy_darkworld_check() == true) {
+                if (dKy_darkworld_visual_effect_check() == true) {
                     g_env_light.mpHousiPacket->mpResTex = (u8*)dComIfG_getObjectRes("Always", 0x5E);
                 } else {
                     if (g_env_light.field_0xea9 == 2) {
@@ -766,7 +766,7 @@ static void wether_move_housi() {
             g_env_light.mpHousiPacket = NULL;
         } else {
             dKyr_housi_move();
-            if (!dKy_darkworld_check()) {
+            if (!dKy_darkworld_visual_effect_check()) {
                 g_env_light.mHousiCount = 0;
             }
         }
@@ -783,7 +783,7 @@ static void wether_move_twilight_housi() {
     const bool isLakebedTemple = stageName != NULL && strncmp(stageName, "D_MN05", 6) == 0;
     const int roomNo = dComIfGp_roomControl_getStayNo();
     const bool nativePacketOwnsTwilight =
-        dKy_darkworld_check() && g_env_light.camera_water_in_status == 0 &&
+        dKy_darkworld_visual_effect_check() && g_env_light.camera_water_in_status == 0 &&
         !isLakebedTemple && (!isPalaceOfTwilight || roomNo == 0 || roomNo == 11);
     const bool needVisualPacket = enabled && !nativePacketOwnsTwilight;
 
