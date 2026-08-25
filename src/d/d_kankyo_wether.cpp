@@ -775,19 +775,16 @@ static void wether_move_housi() {
 }
 
 #if TARGET_PC
-static void wether_move_twilight_housi() {
-    const char* stageName = dComIfGp_getStartStageName();
-    const bool enabled = !dusk::getSettings().game.speedrunMode.getValue() &&
-                         dusk::getSettings().game.enableTwilightVisuals.getValue();
-    const bool isPalaceOfTwilight = stageName != NULL && strncmp(stageName, "D_MN08", 6) == 0;
-    const bool isLakebedTemple = stageName != NULL && strncmp(stageName, "D_MN05", 6) == 0;
-    const int roomNo = dComIfGp_roomControl_getStayNo();
-    const bool nativePacketOwnsTwilight =
-        dKy_darkworld_visual_effect_check() && g_env_light.camera_water_in_status == 0 &&
-        !isLakebedTemple && (!isPalaceOfTwilight || roomNo == 0 || roomNo == 11);
-    const bool needVisualPacket = enabled && !nativePacketOwnsTwilight;
+static bool twilight_visual_housi_enabled() {
+    return !dusk::getSettings().game.speedrunMode.getValue() &&
+           dusk::getSettings().game.enableTwilightVisuals.getValue();
+}
 
-    if (!needVisualPacket) {
+static void wether_move_twilight_housi() {
+    const bool enabled = twilight_visual_housi_enabled();
+    u8* const twilightTexture = (u8*)dComIfG_getObjectRes("Always", 0x5E);
+
+    if (!enabled || twilightTexture == NULL) {
         if (s_twilightVisualHousiPacket != NULL) {
             JKR_DELETE(s_twilightVisualHousiPacket);
             s_twilightVisualHousiPacket = NULL;
@@ -801,14 +798,18 @@ static void wether_move_twilight_housi() {
             return;
         }
 
-        s_twilightVisualHousiPacket->mpResTex =
-            (u8*)dComIfG_getObjectRes("Always", 0x5E);
+        s_twilightVisualHousiPacket->mpResTex = twilightTexture;
         s_twilightVisualHousiPacket->field_0x5de8 = 0.0f;
         s_twilightVisualHousiPacket->field_0x10.set(0.0f, 0.0f, 0.0f);
         for (int i = 0; i < 300; i++) {
             s_twilightVisualHousiPacket->mHousiEff[i].mStatus = 0;
         }
     }
+
+    // Keep this bound to the authored Twilight-square texture across every
+    // stage/resource transition. A missing or stale texture must never fall
+    // through to the white generic housi appearance.
+    s_twilightVisualHousiPacket->mpResTex = twilightTexture;
 
     dKankyo_housi_Packet* nativePacket = g_env_light.mpHousiPacket;
     const int nativeHousiCount = g_env_light.mHousiCount;
@@ -1133,7 +1134,11 @@ void dKyw_wether_draw() {
             dKyw_Snow_Draw();
         }
 
-        if (g_env_light.mHousiInitialized) {
+        if (g_env_light.mHousiInitialized
+#if TARGET_PC
+            && !twilight_visual_housi_enabled()
+#endif
+        ) {
             dKyw_Housi_Draw();
         }
 
@@ -1152,7 +1157,8 @@ void dKyw_wether_draw() {
         dKy_undwater_filter_draw();
 
 #if TARGET_PC
-        if (s_twilightVisualHousiPacket != NULL) {
+        if (s_twilightVisualHousiPacket != NULL &&
+            s_twilightVisualHousiPacket->mpResTex != NULL) {
             if (g_env_light.camera_water_in_status != 0) {
                 dComIfGd_setXluList2DScreen();
                 j3dSys.getDrawBuffer(J3DSysDrawBuf_Xlu)->entryImm(
