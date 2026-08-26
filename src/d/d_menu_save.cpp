@@ -3037,48 +3037,53 @@ void dMenu_save_c::_draw() {
 
 #if TARGET_PC
 void dMenu_save_c::menuSaveWide() {
-    const bool useNativeScaling =
+    const bool useFullscreenElements =
         dusk::getSettings().game.menuScalingMode.getValue() == dusk::MenuScaling::GameCube;
-    const f32 rootScale = useNativeScaling ? 1.0f : mDoGph_gInf_c::hudAspectScaleUp;
-    const f32 childScale = useNativeScaling ? 1.0f : mDoGph_gInf_c::hudAspectScaleDown;
-    const f32 rootTransX = useNativeScaling ? 0.0f : mDoGph_gInf_c::getSafeMinXF();
+    const f32 nativeScale = mDoGph_gInf_c::hudAspectScaleDown;
+    const f32 decorationScale = useFullscreenElements ? 1.0f : nativeScale;
+    const f32 fileContainerScale = useFullscreenElements ? nativeScale : 1.0f;
+    const f32 fileChildScale = useFullscreenElements ? 1.0f : nativeScale;
 
-    mSaveSel.Scr->scale(rootScale, 1.0f);
-    mSaveSel.Scr->translate(rootTransX, 0.0f);
+    mSaveSel.Scr->scale(mDoGph_gInf_c::hudAspectScaleUp, 1.0f);
+    mSaveSel.Scr->translate(mDoGph_gInf_c::getSafeMinXF(), 0.0f);
 
-    mSaveSel.Scr->search(MULTI_CHAR('t_for'))->scale(childScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('t_for1'))->scale(childScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('t_for'))->scale(nativeScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('t_for1'))->scale(nativeScale, 1.0f);
 
-    mSaveSel.Scr->search(MULTI_CHAR('w_btn_n'))->scale(childScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_btn_n'))->scale(nativeScale, 1.0f);
 
-    mSaveSel.Scr->search(MULTI_CHAR('w_n_bk00'))->scale(childScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_n_bk01'))->scale(childScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_n_bk02'))->scale(childScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_sel_00'))->scale(fileContainerScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_sel_01'))->scale(fileContainerScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_sel_02'))->scale(fileContainerScale, 1.0f);
 
-    mSaveSel.Scr->search(MULTI_CHAR('w_dat_i0'))->scale(childScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_dat_i1'))->scale(childScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_dat_i2'))->scale(childScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_n_bk00'))->scale(fileChildScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_n_bk01'))->scale(fileChildScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_n_bk02'))->scale(fileChildScale, 1.0f);
 
-    mSaveSel.Scr->search(MULTI_CHAR('w_no_t'))->scale(childScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('f_no_t'))->scale(childScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_yes_t'))->scale(childScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('f_yes_t'))->scale(childScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_dat_i0'))->scale(fileChildScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_dat_i1'))->scale(fileChildScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_dat_i2'))->scale(fileChildScale, 1.0f);
+
+    mSaveSel.Scr->search(MULTI_CHAR('w_no_t'))->scale(nativeScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('f_no_t'))->scale(nativeScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_yes_t'))->scale(nativeScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('f_yes_t'))->scale(nativeScale, 1.0f);
 
     // Spirals
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu00'))->scale(childScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu01'))->scale(childScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu02'))->scale(childScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu03'))->scale(childScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu04'))->scale(childScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu05'))->scale(childScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu06'))->scale(childScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu07'))->scale(childScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu08'))->scale(childScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu09'))->scale(childScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu00'))->scale(decorationScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu01'))->scale(decorationScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu02'))->scale(decorationScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu03'))->scale(decorationScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu04'))->scale(decorationScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu05'))->scale(decorationScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu06'))->scale(decorationScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu07'))->scale(decorationScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu08'))->scale(decorationScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu09'))->scale(decorationScale, 1.0f);
     
     #if TARGET_PC
     if (mSelIcon) {
-        mSelIcon->refreshAspectScale(useNativeScaling ? 1.0f : mDoGph_gInf_c::hudAspectScaleUp);
+        mSelIcon->refreshAspectScale(mDoGph_gInf_c::hudAspectScaleUp);
     }
     #endif
 }
@@ -3118,16 +3123,5 @@ void dDlst_MenuSaveExplain_c::draw() {
 
 
 void dDlst_MenuSave_c::draw() {
-#if TARGET_PC
-    if (dusk::getSettings().game.menuScalingMode.getValue() == dusk::MenuScaling::GameCube) {
-        J2DGrafContext* graf = dComIfGp_getCurrentGrafPort();
-        graf->setPort();
-        graf->setColor(JUtility::TColor(0, 0, 0, 255));
-        graf->fillBox(JGeometry::TBox2<f32>(
-            mDoGph_gInf_c::getMinXF(), mDoGph_gInf_c::getMinYF(),
-            mDoGph_gInf_c::getMinXF() + mDoGph_gInf_c::getWidthF(),
-            mDoGph_gInf_c::getMinYF() + mDoGph_gInf_c::getHeightF()));
-    }
-#endif
     Scr->draw(0.0f, 0.0f, dComIfGp_getCurrentGrafPort());
 }
