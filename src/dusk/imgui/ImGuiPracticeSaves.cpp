@@ -533,7 +533,7 @@ int gz_generic_row_count(ImGuiPracticeSaves::MainCategory category) {
     switch (category) {
     case ImGuiPracticeSaves::MainCategory::Cheats: return 18;
     case ImGuiPracticeSaves::MainCategory::Tools:
-        if (s_gzToolsTab == 0) return 7;
+        if (s_gzToolsTab == 0) return 8;
         if (s_gzToolsTab == 1) return 7;
         return 3;
     case ImGuiPracticeSaves::MainCategory::Scene:
@@ -601,7 +601,8 @@ bool gz_activate_generic_row(ImGuiPracticeSaves::MainCategory category, int row)
         break;
     case ImGuiPracticeSaves::MainCategory::Tools:
         if (s_gzToolsTab == 0) {
-            if (row == 3) gz_set_bool(s.game.gorgeVoidChecker);
+            if (row == 0) gz_set_bool(s.game.areaReload, cheatsEnabled);
+            if (row == 4) gz_set_bool(s.game.gorgeVoidChecker);
         } else if (s_gzToolsTab == 1) {
             if (row == 1) gz_set_bool(s.game.showSpeedrunRTATimer, s.game.speedrunMode);
             if (row == 2) gz_set_bool(s.game.showInputViewer);
