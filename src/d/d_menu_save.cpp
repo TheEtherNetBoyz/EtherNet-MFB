@@ -3040,7 +3040,6 @@ void dMenu_save_c::menuSaveWide() {
     const bool useFullscreenElements =
         dusk::getSettings().game.menuScalingMode.getValue() == dusk::MenuScaling::GameCube;
     const f32 nativeScale = mDoGph_gInf_c::hudAspectScaleDown;
-    const f32 decorationScale = useFullscreenElements ? 1.0f : nativeScale;
     const f32 fileChildScale = useFullscreenElements ? 1.0f : nativeScale;
     const f32 optionChildScale = useFullscreenElements ? 1.0f : nativeScale;
 
@@ -3066,16 +3065,16 @@ void dMenu_save_c::menuSaveWide() {
     mSaveSel.Scr->search(MULTI_CHAR('f_yes_t'))->scale(optionChildScale, 1.0f);
 
     // Spirals
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu00'))->scale(decorationScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu01'))->scale(decorationScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu02'))->scale(decorationScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu03'))->scale(decorationScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu04'))->scale(decorationScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu05'))->scale(decorationScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu06'))->scale(decorationScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu07'))->scale(decorationScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu08'))->scale(decorationScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_uzu09'))->scale(decorationScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu00'))->scale(nativeScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu01'))->scale(nativeScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu02'))->scale(nativeScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu03'))->scale(nativeScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu04'))->scale(nativeScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu05'))->scale(nativeScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu06'))->scale(nativeScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu07'))->scale(nativeScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu08'))->scale(nativeScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_uzu09'))->scale(nativeScale, 1.0f);
     
     #if TARGET_PC
     if (mSelIcon) {
@@ -3171,7 +3170,44 @@ void dDlst_MenuSave_c::draw() {
                             vanillaTransY[i]);
         }
 
+        static const u64 spiralTags[] = {
+            MULTI_CHAR('w_uzu00'), MULTI_CHAR('w_uzu01'), MULTI_CHAR('w_uzu02'),
+            MULTI_CHAR('w_uzu03'), MULTI_CHAR('w_uzu04'), MULTI_CHAR('w_uzu05'),
+            MULTI_CHAR('w_uzu06'), MULTI_CHAR('w_uzu07'), MULTI_CHAR('w_uzu08'),
+            MULTI_CHAR('w_uzu09'),
+        };
+        constexpr int spiralTagCount = sizeof(spiralTags) / sizeof(spiralTags[0]);
+        f32 spiralTransX[spiralTagCount];
+        f32 spiralTransY[spiralTagCount];
+        f32 spiralMinX = 100000.0f;
+        f32 spiralMaxX = -100000.0f;
+
+        for (int i = 0; i < spiralTagCount; ++i) {
+            J2DPane* pane = Scr->search(spiralTags[i]);
+            spiralTransX[i] = pane->getTranslateX();
+            spiralTransY[i] = pane->getTranslateY();
+            if (spiralTransX[i] < spiralMinX) {
+                spiralMinX = spiralTransX[i];
+            }
+            if (spiralTransX[i] > spiralMaxX) {
+                spiralMaxX = spiralTransX[i];
+            }
+        }
+
+        const f32 spiralMidX = (spiralMinX + spiralMaxX) * 0.5f;
+        for (int i = 0; i < spiralTagCount; ++i) {
+            Scr->search(spiralTags[i])
+                ->translate(spiralMidX +
+                                (spiralTransX[i] - spiralMidX) *
+                                    mDoGph_gInf_c::hudAspectScaleDown,
+                            spiralTransY[i]);
+        }
+
         Scr->draw(0.0f, 0.0f, dComIfGp_getCurrentGrafPort());
+
+        for (int i = 0; i < spiralTagCount; ++i) {
+            Scr->search(spiralTags[i])->translate(spiralTransX[i], spiralTransY[i]);
+        }
 
         for (int i = 0; i < nativeTagCount; ++i) {
             J2DPane* pane = Scr->search(nativeTags[i]);
