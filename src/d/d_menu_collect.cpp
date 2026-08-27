@@ -163,12 +163,30 @@ void dMenu_Collect2D_c::menuCollectWide() {
     mpScreenIcon->translate(0.0f, 0.0f);
 
     switch (dusk::getSettings().game.menuScalingMode) {
-    case dusk::MenuScaling::GameCube:
+    case dusk::MenuScaling::GameCube: {
+        // Widen the 4:3 pause-menu backdrop to 3:2 and keep it centered. The full-screen black
+        // layer drawn behind this screen then remains visible only outside the new boundary.
+        constexpr f32 nativeAspect = 4.0f / 3.0f;
+        constexpr f32 wideBackgroundScale = (3.0f / 2.0f) / nativeAspect;
+        const bool useNativeLayout = mDoGph_gInf_c::hudAspectScaleUp <= 1.0001f;
+        const f32 backgroundScale = useNativeLayout ? 1.0f : wideBackgroundScale;
+        const f32 foregroundScale = 1.0f / backgroundScale;
+        constexpr size_t foregroundPaneCount = 22;
+        mpScreen->scale(backgroundScale, 1.0f);
+        mpScreen->translate(FB_WIDTH_BASE * (1.0f - backgroundScale) * 0.5f, 0.0f);
+
+        // These are the collection icons and text that the Wii path also protects from
+        // horizontal stretching. Counter-scale them against the widened background.
+        for (size_t i = 0; i < foregroundPaneCount; ++i) {
+            mpScreen->search(mpScreenPanes[i].tag)->scale(foregroundScale, 1.0f);
+        }
+
         // Selection Cursor
         if (mpDrawCursor) {
             mpDrawCursor->refreshAspectScale(1.0f);
         }
         break;
+    }
     case dusk::MenuScaling::Wii:
         // Main Canvas
         mpScreen->scale(mDoGph_gInf_c::hudAspectScaleUp, 1.0f);

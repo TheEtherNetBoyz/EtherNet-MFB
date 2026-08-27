@@ -9613,6 +9613,12 @@ void daAlink_c::setStickData() {
         var_r31 = TRUE;
         field_0x2fe4 = shape_angle.y;
     } else {
+#if TARGET_PC
+        // Release cutscene-buffered buttons at the exact point Link accepts normal input. This
+        // also catches single controllable frames inside events whose global cutscene flag stays
+        // active.
+        mDoCPd_c::applyCutsceneInputBuffer();
+#endif
         if (!checkInputOnR()) {
             field_0x2fb9 = 0;
         }

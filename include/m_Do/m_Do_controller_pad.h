@@ -61,6 +61,7 @@ public:
 
 #if TARGET_PC
     static s16 getStickAngle3D(u32 pad);
+    static void applyCutsceneInputBuffer();
 #else
     static s16 getStickAngle3D(u32 pad) {
         return getCpadInfo(pad).mMainStickAngle;
