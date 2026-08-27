@@ -368,7 +368,11 @@ namespace dusk {
         }
 
         if (hotkey_event_pressed(event, hotkeys.hideShowImGuiMenu)) {
-            m_isHidden = !m_isHidden;
+            if (getSettings().backend.enableAdvancedSettings) {
+                m_isHidden = !m_isHidden;
+            } else {
+                m_isHidden = true;
+            }
         }
 
         if (hotkey_event_pressed(event, hotkeys.useTexturePack)) {
@@ -525,14 +529,6 @@ namespace dusk {
         {
             input_macro::recordResetRequest();
             JUTGamePad::C3ButtonReset::sResetSwitchPushing = true;
-        }
-
-        if (ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_F1)) {
-            if (getSettings().backend.enableAdvancedSettings) {
-                m_isHidden = !m_isHidden;
-            } else {
-                m_isHidden = true;
-            }
         }
 
         bool showMenu = !m_isHidden;
