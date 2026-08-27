@@ -4186,6 +4186,8 @@ static dusk::utils::PaneCache fileSelPanes[] = {
     {MULTI_CHAR('er_for1'), 0.0f, 0.0f, false},
 };
 
+static bool sFileSelectDetailsWindowActive = false;
+
 void dFile_select_c::fileSelectWide() {
     static bool cachedPanes = false;
     // Get pre-scale values for each pane
@@ -4225,28 +4227,33 @@ void dFile_select_c::fileSelectWide() {
         pane->translate(entry.origTransX, entry.origTransY);
     }
 
-    bool wideScaling = dusk::getSettings().game.menuScalingMode.getValue() != dusk::MenuScaling::GameCube;
-    const f32 rootScale = wideScaling ? mDoGph_gInf_c::hudAspectScaleUp : 1.0f;
-    const f32 childScale = wideScaling ? mDoGph_gInf_c::hudAspectScaleDown : 1.0f;
-    const f32 rootTransX = wideScaling ? mDoGph_gInf_c::getSafeMinXF() : 0.0f;
+    const bool gameCubeScaling =
+        dusk::getSettings().game.menuScalingMode.getValue() == dusk::MenuScaling::GameCube;
+    const f32 rootScale = mDoGph_gInf_c::hudAspectScaleUp;
+    const f32 childScale = mDoGph_gInf_c::hudAspectScaleDown;
+    const f32 animatedChildScale = gameCubeScaling ? 1.0f : childScale;
+    const f32 rootTransX = mDoGph_gInf_c::getSafeMinXF();
+
+    sFileSelectDetailsWindowActive =
+        gameCubeScaling && mDataSelProc >= DATASELPROC_SELECT_DATA_OPEN_MOVE;
 
     mYnSel.ScrYn->scale(rootScale, 1.0f);
     mYnSel.ScrYn->translate(rootTransX, 0.0f);
 
-    mYnSel.ScrYn->search(MULTI_CHAR('w_no_t'))->scale(childScale, 1.0f);
-    mYnSel.ScrYn->search(MULTI_CHAR('f_no_t'))->scale(childScale, 1.0f);
-    mYnSel.ScrYn->search(MULTI_CHAR('w_yes_t'))->scale(childScale, 1.0f);
-    mYnSel.ScrYn->search(MULTI_CHAR('f_yes_t'))->scale(childScale, 1.0f);
+    mYnSel.ScrYn->search(MULTI_CHAR('w_no_t'))->scale(animatedChildScale, 1.0f);
+    mYnSel.ScrYn->search(MULTI_CHAR('f_no_t'))->scale(animatedChildScale, 1.0f);
+    mYnSel.ScrYn->search(MULTI_CHAR('w_yes_t'))->scale(animatedChildScale, 1.0f);
+    mYnSel.ScrYn->search(MULTI_CHAR('f_yes_t'))->scale(animatedChildScale, 1.0f);
 
     m3mSel.Scr3m->scale(rootScale, 1.0f);
     m3mSel.Scr3m->translate(rootTransX, 0.0f);
 
-    m3mSel.Scr3m->search(MULTI_CHAR('w_sta'))->scale(childScale, 1.0f);
-    m3mSel.Scr3m->search(MULTI_CHAR('f_sta'))->scale(childScale, 1.0f);
-    m3mSel.Scr3m->search(MULTI_CHAR('w_del'))->scale(childScale, 1.0f);
-    m3mSel.Scr3m->search(MULTI_CHAR('f_del'))->scale(childScale, 1.0f);
-    m3mSel.Scr3m->search(MULTI_CHAR('w_cop_t'))->scale(childScale, 1.0f);
-    m3mSel.Scr3m->search(MULTI_CHAR('f_cop_t'))->scale(childScale, 1.0f);
+    m3mSel.Scr3m->search(MULTI_CHAR('w_sta'))->scale(animatedChildScale, 1.0f);
+    m3mSel.Scr3m->search(MULTI_CHAR('f_sta'))->scale(animatedChildScale, 1.0f);
+    m3mSel.Scr3m->search(MULTI_CHAR('w_del'))->scale(animatedChildScale, 1.0f);
+    m3mSel.Scr3m->search(MULTI_CHAR('f_del'))->scale(animatedChildScale, 1.0f);
+    m3mSel.Scr3m->search(MULTI_CHAR('w_cop_t'))->scale(animatedChildScale, 1.0f);
+    m3mSel.Scr3m->search(MULTI_CHAR('f_cop_t'))->scale(animatedChildScale, 1.0f);
 
     fileSel.Scr->scale(rootScale, 1.0f);
     fileSel.Scr->translate(rootTransX, 0.0f);
@@ -4256,13 +4263,13 @@ void dFile_select_c::fileSelectWide() {
 
     fileSel.Scr->search(MULTI_CHAR('w_btn_n'))->scale(childScale, 1.0f);
 
-    fileSel.Scr->search(MULTI_CHAR('w_n_bk00'))->scale(childScale, 1.0f);
-    fileSel.Scr->search(MULTI_CHAR('w_n_bk01'))->scale(childScale, 1.0f);
-    fileSel.Scr->search(MULTI_CHAR('w_n_bk02'))->scale(childScale, 1.0f);
+    fileSel.Scr->search(MULTI_CHAR('w_n_bk00'))->scale(animatedChildScale, 1.0f);
+    fileSel.Scr->search(MULTI_CHAR('w_n_bk01'))->scale(animatedChildScale, 1.0f);
+    fileSel.Scr->search(MULTI_CHAR('w_n_bk02'))->scale(animatedChildScale, 1.0f);
 
-    fileSel.Scr->search(MULTI_CHAR('w_dat_i0'))->scale(childScale, 1.0f);
-    fileSel.Scr->search(MULTI_CHAR('w_dat_i1'))->scale(childScale, 1.0f);
-    fileSel.Scr->search(MULTI_CHAR('w_dat_i2'))->scale(childScale, 1.0f);
+    fileSel.Scr->search(MULTI_CHAR('w_dat_i0'))->scale(animatedChildScale, 1.0f);
+    fileSel.Scr->search(MULTI_CHAR('w_dat_i1'))->scale(animatedChildScale, 1.0f);
+    fileSel.Scr->search(MULTI_CHAR('w_dat_i2'))->scale(animatedChildScale, 1.0f);
 
     mCpSel.Scr->search(MULTI_CHAR('w_dat_i1'))->scale(childScale, 1.0f);
     mCpSel.Scr->search(MULTI_CHAR('w_dat_i2'))->scale(childScale, 1.0f);
@@ -4271,9 +4278,42 @@ void dFile_select_c::fileSelectWide() {
 
     switch (dusk::getSettings().game.menuScalingMode) {
     case (dusk::MenuScaling::GameCube):
+        for (dusk::utils::PaneCache& entry : fileSelPanes) {
+            fileSel.Scr->search(entry.tag)->scale(childScale, 1.0f);
+        }
+
         // Selection Cursor
         if (mSelIcon) {
             mSelIcon->refreshAspectScale(1.0f);
+
+            J2DPane* sourcePane = mSelIcon->getSourcePane();
+            for (int i = 0; i < 2; ++i) {
+                if (sourcePane == mYnSelPane[i]->getPanePtr()) {
+                    const Vec left = mYnSelPane[0]->getGlobalVtxCenter(false, 0);
+                    const Vec right = mYnSelPane[1]->getGlobalVtxCenter(false, 0);
+                    const Vec selected = mYnSelPane[i]->getGlobalVtxCenter(false, 0);
+                    const f32 midX = (left.x + right.x) * 0.5f;
+                    const f32 correctedX =
+                        midX + (selected.x - midX) * mDoGph_gInf_c::hudAspectScaleDown;
+                    mSelIcon->setPos(correctedX, selected.y, sourcePane, true);
+                    mSelIcon->setPos(correctedX, selected.y, NULL, false);
+                    break;
+                }
+            }
+
+            for (int i = 0; i < 3; ++i) {
+                if (sourcePane == m3mSelPane[i]->getPanePtr()) {
+                    const Vec first = m3mSelPane[0]->getGlobalVtxCenter(false, 0);
+                    const Vec last = m3mSelPane[2]->getGlobalVtxCenter(false, 0);
+                    const Vec selected = m3mSelPane[i]->getGlobalVtxCenter(false, 0);
+                    const f32 midX = (first.x + last.x) * 0.5f;
+                    const f32 correctedX =
+                        midX + (selected.x - midX) * mDoGph_gInf_c::hudAspectScaleDown;
+                    mSelIcon->setPos(correctedX, selected.y, sourcePane, true);
+                    mSelIcon->setPos(correctedX, selected.y, NULL, false);
+                    break;
+                }
+            }
         }
         if (mSelIcon2) {
             mSelIcon2->refreshAspectScale(1.0f);
@@ -4440,6 +4480,66 @@ void dFile_select_c::_draw() {
 
 void dDlst_FileSel_c::draw() {
     J2DGrafContext* graf = dComIfGp_getCurrentGrafPort();
+#if TARGET_PC
+    if (dusk::getSettings().game.menuScalingMode.getValue() == dusk::MenuScaling::GameCube) {
+        static const u64 nativeTags[] = {
+            MULTI_CHAR('w_sel_00'), MULTI_CHAR('w_sel_01'), MULTI_CHAR('w_sel_02'),
+        };
+        f32 scaleX[3];
+        f32 scaleY[3];
+        for (int i = 0; i < 3; ++i) {
+            J2DPane* pane = Scr->search(nativeTags[i]);
+            scaleX[i] = pane->getScaleX();
+            scaleY[i] = pane->getScaleY();
+            pane->scale(scaleX[i] * mDoGph_gInf_c::hudAspectScaleDown, scaleY[i]);
+        }
+
+        J2DPane* detailsBorder = Scr->search(MULTI_CHAR('w_sub_n'));
+        const f32 detailsScaleX = detailsBorder->getScaleX();
+        const f32 detailsScaleY = detailsBorder->getScaleY();
+        if (sFileSelectDetailsWindowActive) {
+            detailsBorder->scale(detailsScaleX * mDoGph_gInf_c::hudAspectScaleDown,
+                                 detailsScaleY);
+        }
+
+        static const u64 spiralTags[] = {
+            MULTI_CHAR('w_uzu00'), MULTI_CHAR('w_uzu01'), MULTI_CHAR('w_uzu02'),
+            MULTI_CHAR('w_uzu03'), MULTI_CHAR('w_uzu04'), MULTI_CHAR('w_uzu05'),
+            MULTI_CHAR('w_uzu06'), MULTI_CHAR('w_uzu07'), MULTI_CHAR('w_uzu08'),
+            MULTI_CHAR('w_uzu09'),
+        };
+        f32 spiralX[10];
+        f32 spiralY[10];
+        f32 minX = 100000.0f;
+        f32 maxX = -100000.0f;
+        for (int i = 0; i < 10; ++i) {
+            J2DPane* pane = Scr->search(spiralTags[i]);
+            spiralX[i] = pane->getTranslateX();
+            spiralY[i] = pane->getTranslateY();
+            if (spiralX[i] < minX) minX = spiralX[i];
+            if (spiralX[i] > maxX) maxX = spiralX[i];
+        }
+        const f32 midX = (minX + maxX) * 0.5f;
+        for (int i = 0; i < 10; ++i) {
+            Scr->search(spiralTags[i])
+                ->translate(midX + (spiralX[i] - midX) * mDoGph_gInf_c::hudAspectScaleDown,
+                            spiralY[i]);
+        }
+
+        Scr->draw(0.0f, 0.0f, graf);
+
+        for (int i = 0; i < 10; ++i) {
+            Scr->search(spiralTags[i])->translate(spiralX[i], spiralY[i]);
+        }
+        for (int i = 0; i < 3; ++i) {
+            Scr->search(nativeTags[i])->scale(scaleX[i], scaleY[i]);
+        }
+        if (sFileSelectDetailsWindowActive) {
+            detailsBorder->scale(detailsScaleX, detailsScaleY);
+        }
+        return;
+    }
+#endif
     Scr->draw(0.0f, 0.0f, graf);
 }
 
@@ -4450,7 +4550,18 @@ void dDlst_FileSelDt_c::draw() {
     Mtx auStack_90;
     MTXTrans(auStack_60, mpPane->getWidth() / 2, mpPane->getHeight() / 2, 0.0f);
     MTXConcat(local_98, auStack_60, local_98);
-    MTXScale(auStack_90, mpPane->getWidth() / mpPane2->getWidth(),
+    f32 aspectCorrection = 1.0f;
+#if TARGET_PC
+    if (dusk::getSettings().game.menuScalingMode.getValue() == dusk::MenuScaling::GameCube) {
+        // While the opened-file border is drawn, its native correction is
+        // already present in this attachment pane's global matrix. Do not
+        // apply the same correction a second time to the item screen.
+        aspectCorrection = sFileSelectDetailsWindowActive
+                               ? 1.0f
+                               : mDoGph_gInf_c::hudAspectScaleDown;
+    }
+#endif
+    MTXScale(auStack_90, (mpPane->getWidth() / mpPane2->getWidth()) * aspectCorrection,
              mpPane->getHeight() / mpPane2->getHeight(), 1.0f);
     MTXConcat(local_98, auStack_90, local_98);
     mpPane2->setMtx(local_98);
@@ -4470,11 +4581,77 @@ void dDlst_FileSelCp_c::draw() {
 
 void dDlst_FileSelYn_c::draw() {
     J2DGrafContext* graf = dComIfGp_getCurrentGrafPort();
+#if TARGET_PC
+    if (dusk::getSettings().game.menuScalingMode.getValue() == dusk::MenuScaling::GameCube) {
+        static const u64 nativeTags[] = {MULTI_CHAR('w_no_n'), MULTI_CHAR('w_yes_n')};
+        f32 scaleX[2];
+        f32 scaleY[2];
+        f32 transX[2];
+        f32 transY[2];
+        for (int i = 0; i < 2; ++i) {
+            J2DPane* pane = ScrYn->search(nativeTags[i]);
+            scaleX[i] = pane->getScaleX();
+            scaleY[i] = pane->getScaleY();
+            transX[i] = pane->getTranslateX();
+            transY[i] = pane->getTranslateY();
+            pane->scale(scaleX[i] * mDoGph_gInf_c::hudAspectScaleDown, scaleY[i]);
+        }
+        const f32 midX = (transX[0] + transX[1]) * 0.5f;
+        for (int i = 0; i < 2; ++i) {
+            ScrYn->search(nativeTags[i])
+                ->translate(midX + (transX[i] - midX) * mDoGph_gInf_c::hudAspectScaleDown,
+                            transY[i]);
+        }
+        ScrYn->draw(0.0f, 0.0f, graf);
+        for (int i = 0; i < 2; ++i) {
+            J2DPane* pane = ScrYn->search(nativeTags[i]);
+            pane->scale(scaleX[i], scaleY[i]);
+            pane->translate(transX[i], transY[i]);
+        }
+        return;
+    }
+#endif
     ScrYn->draw(0.0f, 0.0f, graf);
 }
 
 void dDlst_FileSel3m_c::draw() {
     J2DGrafContext* graf = dComIfGp_getCurrentGrafPort();
+#if TARGET_PC
+    if (dusk::getSettings().game.menuScalingMode.getValue() == dusk::MenuScaling::GameCube) {
+        static const u64 nativeTags[] = {
+            MULTI_CHAR('w_sta_n'), MULTI_CHAR('w_del_n'), MULTI_CHAR('w_cop_n'),
+        };
+        f32 scaleX[3];
+        f32 scaleY[3];
+        f32 transX[3];
+        f32 transY[3];
+        f32 minX = 100000.0f;
+        f32 maxX = -100000.0f;
+        for (int i = 0; i < 3; ++i) {
+            J2DPane* pane = Scr3m->search(nativeTags[i]);
+            scaleX[i] = pane->getScaleX();
+            scaleY[i] = pane->getScaleY();
+            transX[i] = pane->getTranslateX();
+            transY[i] = pane->getTranslateY();
+            if (transX[i] < minX) minX = transX[i];
+            if (transX[i] > maxX) maxX = transX[i];
+            pane->scale(scaleX[i] * mDoGph_gInf_c::hudAspectScaleDown, scaleY[i]);
+        }
+        const f32 midX = (minX + maxX) * 0.5f;
+        for (int i = 0; i < 3; ++i) {
+            Scr3m->search(nativeTags[i])
+                ->translate(midX + (transX[i] - midX) * mDoGph_gInf_c::hudAspectScaleDown,
+                            transY[i]);
+        }
+        Scr3m->draw(0.0f, 0.0f, graf);
+        for (int i = 0; i < 3; ++i) {
+            J2DPane* pane = Scr3m->search(nativeTags[i]);
+            pane->scale(scaleX[i], scaleY[i]);
+            pane->translate(transX[i], transY[i]);
+        }
+        return;
+    }
+#endif
     Scr3m->draw(0.0f, 0.0f, graf);
 }
 
