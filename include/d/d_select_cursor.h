@@ -50,6 +50,7 @@ public:
 #ifdef TARGET_PC
     f32 getPositionX() const { return mPositionX; }
     f32 getPositionY() const { return mPositionY; }
+    J2DPane* getSourcePane() const { return mpPane; }
 
     void refreshAspectScale(f32 param_0);
 #endif
