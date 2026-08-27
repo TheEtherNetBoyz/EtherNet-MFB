@@ -131,11 +131,9 @@ struct FmapLayerCompensation {
     f32 offsetY = 0.0f;
 };
 
-static bool getFmapLayerCompensation(dMenu_Fmap2DBack_c* map, f32 alpha, f32 spotAlpha,
-                                     f32 renderingScale, f32 renderingPosX,
-                                     f32 renderingPosZ, FmapLayerCompensation* out) {
-    (void)alpha;
-    (void)spotAlpha;
+static bool getFmapLayerCompensation(dMenu_Fmap2DBack_c* map, f32 renderingScale,
+                                     f32 renderingPosX, f32 renderingPosZ,
+                                     FmapLayerCompensation* out) {
     if (renderingScale == 0.0f) {
         return false;
     }
@@ -204,7 +202,8 @@ static bool getFmapSwipeInterp(void* key, f32* x, f32* y, f32* alpha) {
     }
 
     const f32 step = dusk::frame_interp::get_interpolation_step();
-    const f32 frame = it->second.opening ? it->second.frame + step : it->second.frame - step;
+    const f32 frame = it->second.opening ? it->second.frame - 1.0f + step
+                                         : it->second.frame + 1.0f - step;
     const f32 rate = clampFmapSwipeRate(frame / it->second.frameMax);
     calcFmapSwipeTrans(it->second.dir, rate, it->second.opening, x, y);
     *alpha = rate;
@@ -749,6 +748,10 @@ dMenu_Fmap2DBack_c::dMenu_Fmap2DBack_c() {
 }
 
 dMenu_Fmap2DBack_c::~dMenu_Fmap2DBack_c() {
+#if TARGET_PC
+    resetPresentationInterpolation();
+#endif
+
     JKR_DELETE(mpBackScreen);
     mpBackScreen = NULL;
 
@@ -886,8 +889,8 @@ void dMenu_Fmap2DBack_c::draw() {
     f32 backupIconY[128];
     bool restoreIconPositions = false;
     FmapLayerCompensation iconCompensation;
-    if (getFmapLayerCompensation(this, mAlphaRate, mSpotTextureFadeAlpha, mRenderingScale,
-                                 mRenderingPosX, mRenderingPosZ, &iconCompensation)) {
+    if (getFmapLayerCompensation(this, mRenderingScale, mRenderingPosX, mRenderingPosZ,
+                                 &iconCompensation)) {
         const f32 centerX = mTransX + getMapScissorAreaCenterPosX();
         const f32 centerY = mTransZ + getMapScissorAreaCenterPosY();
         for (u16 i = 0; i < mIconNum; i++) {
@@ -964,8 +967,11 @@ void dMenu_Fmap2DBack_c::draw() {
         f32 cursorAngle = field_0x11e0;
 #ifdef TARGET_PC
         if (dusk::frame_interp::is_enabled() && !dusk::frame_interp::is_sim_frame()) {
-            cursorAngle -= g_fmapHIO.mCursorSpeed * dusk::frame_interp::get_interpolation_step();
-            if (cursorAngle < 0.0f) {
+            cursorAngle += g_fmapHIO.mCursorSpeed *
+                           (1.0f - dusk::frame_interp::get_interpolation_step());
+            if (cursorAngle >= 360.0f) {
+                cursorAngle -= 360.0f;
+            } else if (cursorAngle < 0.0f) {
                 cursorAngle += 360.0f;
             }
         }
@@ -1537,8 +1543,11 @@ void dMenu_Fmap2DBack_c::scrollCalc(f32 param_0) {
     {
         f32 local_40 = 2.0f - mMapZoomRate;
 
-        //!@bug local_44 or local_48 can be uninitialized if field_0x11a4 or field_0x11a8 is not 0
-        f32 local_44, local_48;
+        // Either axis can be clamped independently. The unclamped correction must remain zero;
+        // otherwise zooming out while holding a direction feeds stack garbage into the cursor
+        // and stage translation for a frame.
+        f32 local_44 = 0.0f;
+        f32 local_48 = 0.0f;
 
         if (field_0x11a4 != 0.0f) {
             local_44 = field_0x11a4 * local_40;
@@ -1607,11 +1616,6 @@ void dMenu_Fmap2DBack_c::allmap_move2(STControl* param_0) {
         f32 stickValue = param_0->getValueStick();
         if (stickValue >= spC) {
             s16 angle = param_0->getAngleStick();
-#ifdef TARGET_PC
-            if (dusk::getSettings().game.enableMirrorMode) {
-                angle = -angle;
-            }
-#endif
             f32 local_68 = (mTexMaxX - mTexMinX);
             f32 zoomRate = local_68 / getAllMapZoomRate();
             f32 sp24;
@@ -2069,13 +2073,19 @@ void dMenu_Fmap2DBack_c::stageTextureDraw() {
 
 #if TARGET_PC
     FmapLayerCompensation compensation;
-    if (getFmapLayerCompensation(this, mAlphaRate, mSpotTextureFadeAlpha, mRenderingScale,
-                                 mRenderingPosX, mRenderingPosZ, &compensation)) {
+    if (getFmapLayerCompensation(this, mRenderingScale, mRenderingPosX, mRenderingPosZ,
+                                 &compensation)) {
         const f32 centerX = mTransX + getMapScissorAreaCenterPosX();
         const f32 centerY = mTransZ + getMapScissorAreaCenterPosY();
+        f32 offsetX = compensation.offsetX;
+        if (dusk::getSettings().game.enableMirrorMode) {
+            // The cached field-path texture was rendered with a mirrored projection, so its
+            // screen-space horizontal translation is the inverse of the unmirrored layers.
+            offsetX = -offsetX;
+        }
         drawW *= compensation.scale;
         drawH *= compensation.scale;
-        drawX = centerX - (drawW * 0.5f) + compensation.offsetX;
+        drawX = centerX - (drawW * 0.5f) + offsetX;
         drawY = centerY - (drawH * 0.5f) + compensation.offsetY;
     }
 
@@ -2087,7 +2097,17 @@ void dMenu_Fmap2DBack_c::stageTextureDraw() {
     }
 #endif
 
+#if TARGET_PC
+    // Keep the quad pinned to the complete scissor area and express interpolation through its
+    // texture coordinates. Scaling the quad itself below 100% during region-to-spot zoom moved
+    // its top edge into the viewport and exposed the dark layer underneath as a flickering band.
+    mpSpotTexture->drawOut(mTransX + getMapScissorAreaLX(),
+                           mTransZ + getMapScissorAreaLY(),
+                           getMapScissorAreaSizeRealX(), getMapScissorAreaSizeRealY(),
+                           drawX, drawY, drawW, drawH);
+#else
     mpSpotTexture->draw(drawX, drawY, drawW, drawH, false, false, false);
+#endif
 }
 
 void dMenu_Fmap2DBack_c::worldGridDraw() {
@@ -2130,6 +2150,11 @@ void dMenu_Fmap2DBack_c::worldGridDraw() {
     while (true) {
         calcAllMapPos2D(xPos, dVar8, &local_74, &local_78);
         if (local_74 <= getMapScissorAreaLX() + getMapScissorAreaSizeRealX()) {
+            #if TARGET_PC
+            if(dusk::getSettings().game.enableMirrorMode) {
+                local_74 = getMirrorPosX(local_74, 0.0f);
+            }
+            #endif
             J2DDrawLine(local_74, mDoGph_gInf_c::getMinYF(), local_74,
                         mDoGph_gInf_c::getMinYF() + mDoGph_gInf_c::getHeightF(),
                         JUtility::TColor(255, 255, 255, 255), 6);
@@ -2211,6 +2236,11 @@ void dMenu_Fmap2DBack_c::regionGridDraw() {
     while (true) {
         calcAllMapPos2D(xPos, dVar8, &local_74, &local_78);
         if (local_74 <= getMapScissorAreaLX() + getMapScissorAreaSizeRealX()) {
+            #if TARGET_PC
+            if(dusk::getSettings().game.enableMirrorMode) {
+                local_74 = getMirrorPosX(local_74, 0.0f);
+            }
+            #endif
             J2DDrawLine(local_74, mDoGph_gInf_c::getMinYF(), local_74,
                         mDoGph_gInf_c::getMinYF() + mDoGph_gInf_c::getHeightF(),
                         JUtility::TColor(180, 0, 0, 255), 6);
@@ -2586,11 +2616,6 @@ void dMenu_Fmap2DBack_c::regionMapMove(STControl* i_stick) {
         f32 stick_value = i_stick->getValueStick();
         if (stick_value >= slow_bound) {
             s16 angle = i_stick->getAngleStick();
-            #ifdef TARGET_PC
-            if (dusk::getSettings().game.enableMirrorMode) {
-                angle = -angle;
-            }
-            #endif
             f32 local_68 = mTexMaxX - mTexMinX;
             f32 spot_zoom = getSpotMapZoomRate();
             f32 region_zoom = getRegionMapZoomRate(mRegionCursor);
@@ -3297,6 +3322,7 @@ dMenu_Fmap2DTop_c::dMenu_Fmap2DTop_c(JKRExpHeap* i_heap, STControl* i_stick) {
 
 dMenu_Fmap2DTop_c::~dMenu_Fmap2DTop_c() {
 #if TARGET_PC
+    clearPresentationSwipe();
     dusk::ui::set_control_override(dusk::ui::Control::Z, dusk::ui::ControlOverride::Default);
 #endif
 

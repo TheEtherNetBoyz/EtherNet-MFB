@@ -1167,6 +1167,16 @@ void dMenu_Fmap_c::zoom_spot_to_region_proc() {
     mZoomLevel--;
     field_0x1ec = (f32)mZoomLevel / 10.0f;
     mpDraw2DBack->zoomMapCalc2(field_0x1ec);
+#if TARGET_PC
+    if (mZoomLevel == 9 || mZoomLevel == 0) {
+        // The spot and region modes use different ownership for cursor motion: spot mode
+        // clamps control coordinates and moves the map, while region mode moves the cursor.
+        // At either handoff zoomMapCalc2() updates the clamp correction, control position,
+        // and stage translation together. Interpolating those fields independently creates
+        // a short invalid cursor position, so present the coherent post-handoff snapshot.
+        mpDraw2DBack->primePresentationInterpolation();
+    }
+#endif
     mpDraw2DTop->setArrowAlphaRatio(dMenu_Fmap2DTop_c::ARROW_UP, 0.0f);
 
     if (mZoomLevel <= 0) {
