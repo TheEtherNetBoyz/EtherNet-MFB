@@ -2576,8 +2576,8 @@ SettingsWindow::SettingsWindow(bool prelaunch)
         addOption("Skip All Cutscenes", getSettings().game.skipAllCutscenes,
             "Allows additional cutscene skips.");
         addOption("Input Buffering", getSettings().game.cutsceneInputBuffering,
-            "Stores buttons held during a cutscene and presses them on the first available "
-            "gameplay frame after the cutscene ends.");
+            "Presses buttons held on the first available gameplay frame when Link regains "
+            "control after a cutscene.");
         addOption("Faster Climbing", getSettings().game.fastClimbing,
             "Quicker climbing on ladders and vines like the HD version.");
         addOption("Faster Tears of Light", getSettings().game.fastTears,

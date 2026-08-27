@@ -49,7 +49,6 @@ f32 mDoCPd_c::getSubStickX3D(u32 pad) {
 
 #if TARGET_PC
 static bool sCtrlRResetHeld = false;
-static u32 sCutsceneBufferedButtons = 0;
 static bool sCutsceneBufferActive = false;
 static constexpr u32 kPracticeMenuInputMask = PAD_BUTTON_UP | PAD_BUTTON_DOWN | PAD_BUTTON_LEFT |
                                               PAD_BUTTON_RIGHT | PAD_BUTTON_A | PAD_BUTTON_B |
@@ -88,20 +87,16 @@ static void clearTeleportLinkDpadInput(interface_of_controller_pad* interface) {
     interface->mPressedButtonFlags &= ~kTeleportDpadMask;
 }
 
-static void updateCutsceneInputBuffer(interface_of_controller_pad* interface) {
+static void updateCutsceneInputBuffer() {
     if (!dusk::getSettings().game.cutsceneInputBuffering.getValue()) {
-        sCutsceneBufferedButtons = 0;
         sCutsceneBufferActive = false;
         return;
     }
 
     daAlink_c* player = daAlink_getAlinkActorClass();
     if (player == nullptr) {
-        // Scene-transition cutscenes destroy and recreate Link. Keep an already active buffer
-        // alive across that gap and continue tracking buttons held during the load.
-        if (sCutsceneBufferActive) {
-            sCutsceneBufferedButtons |= interface->mButtonFlags;
-        }
+        // Scene-transition cutscenes destroy and recreate Link. Keep the armed
+        // state across that gap, but do not sample any input during it.
         return;
     }
 
@@ -110,13 +105,8 @@ static void updateCutsceneInputBuffer(interface_of_controller_pad* interface) {
     // becomes false.
     const bool cutsceneActive = player->checkEventRun();
     if (cutsceneActive) {
-        // Accumulate every button held during the cutscene so a release before the final frame
-        // does not discard an input the player intended to buffer.
         sCutsceneBufferActive = true;
-        sCutsceneBufferedButtons |= interface->mButtonFlags;
-        return;
     }
-
 }
 
 #endif
@@ -129,9 +119,9 @@ void mDoCPd_c::applyCutsceneInputBuffer() {
         return;
     }
 
-    m_cpadInfo[PAD_1].mButtonFlags |= sCutsceneBufferedButtons;
-    m_cpadInfo[PAD_1].mPressedButtonFlags |= sCutsceneBufferedButtons;
-    sCutsceneBufferedButtons = 0;
+    // Sample only now, at the exact setStickData branch where Link regains
+    // control. Buttons held on earlier cutscene frames are deliberately ignored.
+    m_cpadInfo[PAD_1].mPressedButtonFlags |= m_cpadInfo[PAD_1].mButtonFlags;
     sCutsceneBufferActive = false;
 }
 #endif
@@ -242,7 +232,7 @@ void mDoCPd_c::read() {
     }
 
 #if TARGET_PC
-    updateCutsceneInputBuffer(&m_cpadInfo[PAD_1]);
+    updateCutsceneInputBuffer();
 
     const bool tasOwnsInput =
         dusk::tas_movie::state() == dusk::tas_movie::State::Recording ||
