@@ -2092,6 +2092,8 @@ DUSK_NOINLINE int dComIfG_setObjectRes(
  * @return TRUE if successful, FALSE otherwise
  */
 DUSK_NOINLINE int dComIfG_setStageRes(const char* i_arcName, JKRHeap* i_heap);
+DUSK_NOINLINE int dComIfG_setStageResForStage(const char* i_arcName, const char* i_stageName,
+    const char* i_fileName, JKRHeap* i_heap);
 DUSK_NOINLINE int dComIfG_syncObjectRes(const char* i_arcName);
 DUSK_NOINLINE int dComIfG_syncStageRes(const char* i_arcName);
 DUSK_NOINLINE int dComIfG_deleteObjectResMain(const char* i_arcName);

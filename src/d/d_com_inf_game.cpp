@@ -6212,6 +6212,12 @@ int dComIfG_setStageRes(const char* i_arcName, JKRHeap* i_heap) {
     return g_dComIfG_gameInfo.mResControl.setStageRes(i_arcName, i_heap);
 }
 
+int dComIfG_setStageResForStage(const char* i_arcName, const char* i_stageName,
+                                const char* i_fileName, JKRHeap* i_heap) {
+    return g_dComIfG_gameInfo.mResControl.setStageResForStage(
+        i_arcName, i_stageName, i_fileName, i_heap);
+}
+
 int dComIfG_syncObjectRes(const char* i_arcName) {
     return g_dComIfG_gameInfo.mResControl.syncObjectRes(i_arcName);
 }
