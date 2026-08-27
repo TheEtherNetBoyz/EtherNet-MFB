@@ -16,6 +16,7 @@
 #include "dusk/game_mode.hpp"
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/livesplit.h"
+#include "dusk/settings.h"
 #include "dusk/speedrun.h"
 #endif
 
@@ -199,49 +200,61 @@ void dBrightCheck_c::modeMove() {
 
 #if TARGET_PC
 void dBrightCheck_c::brightCheckWide() {
-    // Main Canvas
-    mBrightCheck.Scr->scale(mDoGph_gInf_c::hudAspectScaleUp, 1.0f);
-    mBrightCheck.Scr->translate(mDoGph_gInf_c::getSafeMinXF(), 0.0f);
+    constexpr f32 targetScale3x2 = (3.0f / 2.0f) / (4.0f / 3.0f);
+    const bool use3x2Canvas =
+        dusk::getSettings().game.menuScalingMode.getValue() == dusk::MenuScaling::GameCube;
+    const f32 canvasScale = use3x2Canvas &&
+                                    mDoGph_gInf_c::hudAspectScaleUp > targetScale3x2
+                                ? targetScale3x2
+                                : mDoGph_gInf_c::hudAspectScaleUp;
+    const f32 contentScale = 1.0f / canvasScale;
+    const f32 canvasWidth = FB_WIDTH_BASE * canvasScale;
+    const f32 canvasX = mDoGph_gInf_c::getSafeMinXF() +
+                        (mDoGph_gInf_c::getSafeWidthF() - canvasWidth) * 0.5f;
+
+    // Center the complete TV-check canvas at 3:2 for the GameCube preset.
+    mBrightCheck.Scr->scale(canvasScale, 1.0f);
+    mBrightCheck.Scr->translate(canvasX, 0.0f);
 
     // Right Square
-    mBrightCheck.Scr->search(MULTI_CHAR('fuchi_1'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
-    mBrightCheck.Scr->search(MULTI_CHAR('big_squa'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('fuchi_1'))->scale(contentScale, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('big_squa'))->scale(contentScale, 1.0f);
 
     // Middle Square
-    mBrightCheck.Scr->search(MULTI_CHAR('fuchi_3'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
-    mBrightCheck.Scr->search(MULTI_CHAR('big_squ1'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('fuchi_3'))->scale(contentScale, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('big_squ1'))->scale(contentScale, 1.0f);
 
     // Left Square
-    mBrightCheck.Scr->search(MULTI_CHAR('fuchi_4'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
-    mBrightCheck.Scr->search(MULTI_CHAR('big_squ2'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('fuchi_4'))->scale(contentScale, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('big_squ2'))->scale(contentScale, 1.0f);
 
     // Gray Squares
-    mBrightCheck.Scr->search(MULTI_CHAR('gray_n'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
-    mBrightCheck.Scr->search(MULTI_CHAR('fuchi_2'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('gray_n'))->scale(contentScale, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('fuchi_2'))->scale(contentScale, 1.0f);
 
     // Confirm A Button
-    mBrightCheck.Scr->search(MULTI_CHAR('abtn_n'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('abtn_n'))->scale(contentScale, 1.0f);
     if (dusk::version::getGameVersion() >= dusk::version::GameVersion::WiiJpn) {
-        mBrightCheck.Scr->search(MULTI_CHAR('gcabtn_n'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
+        mBrightCheck.Scr->search(MULTI_CHAR('gcabtn_n'))->scale(contentScale, 1.0f);
     }
 
     // Text
-    mBrightCheck.Scr->search(MULTI_CHAR('menu_6n'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
-    mBrightCheck.Scr->search(MULTI_CHAR('menu_9n'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
-    mBrightCheck.Scr->search(MULTI_CHAR('menu_10n'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
-    mBrightCheck.Scr->search(MULTI_CHAR('menu_7n'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
-    mBrightCheck.Scr->search(MULTI_CHAR('menu_8n'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
-    mBrightCheck.Scr->search(MULTI_CHAR('fmenu_8n'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
-    mBrightCheck.Scr->search(MULTI_CHAR('fmenu_7n'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
-    mBrightCheck.Scr->search(MULTI_CHAR('fmenu_10'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
-    mBrightCheck.Scr->search(MULTI_CHAR('fmenu_6n'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
-    mBrightCheck.Scr->search(MULTI_CHAR('fmenu_9n'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
-    mBrightCheck.Scr->search(MULTI_CHAR('t_t00'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
-    mBrightCheck.Scr->search(MULTI_CHAR('f_t00'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('menu_6n'))->scale(contentScale, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('menu_9n'))->scale(contentScale, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('menu_10n'))->scale(contentScale, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('menu_7n'))->scale(contentScale, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('menu_8n'))->scale(contentScale, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('fmenu_8n'))->scale(contentScale, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('fmenu_7n'))->scale(contentScale, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('fmenu_10'))->scale(contentScale, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('fmenu_6n'))->scale(contentScale, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('fmenu_9n'))->scale(contentScale, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('t_t00'))->scale(contentScale, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('f_t00'))->scale(contentScale, 1.0f);
 
     // Spirals
-    mBrightCheck.Scr->search(MULTI_CHAR('t_mo_l_n'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
-    mBrightCheck.Scr->search(MULTI_CHAR('t_mo_r_n'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('t_mo_l_n'))->scale(contentScale, 1.0f);
+    mBrightCheck.Scr->search(MULTI_CHAR('t_mo_r_n'))->scale(contentScale, 1.0f);
 }
 #endif
 
