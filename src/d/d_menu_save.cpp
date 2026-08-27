@@ -3042,6 +3042,7 @@ void dMenu_save_c::menuSaveWide() {
     const f32 nativeScale = mDoGph_gInf_c::hudAspectScaleDown;
     const f32 decorationScale = useFullscreenElements ? 1.0f : nativeScale;
     const f32 fileChildScale = useFullscreenElements ? 1.0f : nativeScale;
+    const f32 optionChildScale = useFullscreenElements ? 1.0f : nativeScale;
 
     mSaveSel.Scr->scale(mDoGph_gInf_c::hudAspectScaleUp, 1.0f);
     mSaveSel.Scr->translate(mDoGph_gInf_c::getSafeMinXF(), 0.0f);
@@ -3059,10 +3060,10 @@ void dMenu_save_c::menuSaveWide() {
     mSaveSel.Scr->search(MULTI_CHAR('w_dat_i1'))->scale(fileChildScale, 1.0f);
     mSaveSel.Scr->search(MULTI_CHAR('w_dat_i2'))->scale(fileChildScale, 1.0f);
 
-    mSaveSel.Scr->search(MULTI_CHAR('w_no_t'))->scale(nativeScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('f_no_t'))->scale(nativeScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('w_yes_t'))->scale(nativeScale, 1.0f);
-    mSaveSel.Scr->search(MULTI_CHAR('f_yes_t'))->scale(nativeScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_no_t'))->scale(optionChildScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('f_no_t'))->scale(optionChildScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('w_yes_t'))->scale(optionChildScale, 1.0f);
+    mSaveSel.Scr->search(MULTI_CHAR('f_yes_t'))->scale(optionChildScale, 1.0f);
 
     // Spirals
     mSaveSel.Scr->search(MULTI_CHAR('w_uzu00'))->scale(decorationScale, 1.0f);
@@ -3080,6 +3081,23 @@ void dMenu_save_c::menuSaveWide() {
     if (mSelIcon) {
         mSelIcon->refreshAspectScale(useFullscreenElements ? 1.0f
                                                            : mDoGph_gInf_c::hudAspectScaleUp);
+
+        if (useFullscreenElements && field_0x9c != 0 && mYesNoCursor != 0xFF) {
+            J2DPane* selectedPane = mpNoYes[mYesNoCursor]->getPanePtr();
+            const Vec noPos = mpNoYes[CURSOR_NO]->getGlobalVtxCenter(false, 0);
+            const Vec yesPos = mpNoYes[CURSOR_YES]->getGlobalVtxCenter(false, 0);
+            const Vec selectedPos = mpNoYes[mYesNoCursor]->getGlobalVtxCenter(false, 0);
+            const f32 optionMidX = (noPos.x + yesPos.x) * 0.5f;
+            const f32 correctedPosX =
+                optionMidX + (selectedPos.x - optionMidX) * nativeScale;
+
+            mSelIcon->setPos(correctedPosX, selectedPos.y, selectedPane, true);
+
+            // The cursor normally follows its source pane during draw. That
+            // pane retains the vanilla transform, so detach after copying its
+            // corrected bounds or update() would snap back to the wide center.
+            mSelIcon->setPos(correctedPosX, selectedPos.y, NULL, false);
+        }
     }
     #endif
 }
@@ -3121,24 +3139,44 @@ void dDlst_MenuSaveExplain_c::draw() {
 void dDlst_MenuSave_c::draw() {
 #if TARGET_PC
     if (dusk::getSettings().game.menuScalingMode.getValue() == dusk::MenuScaling::GameCube) {
-        static const u64 fileTags[] = {
+        static const u64 nativeTags[] = {
             MULTI_CHAR('w_sel_00'), MULTI_CHAR('w_sel_01'), MULTI_CHAR('w_sel_02'),
+            MULTI_CHAR('w_no_n'), MULTI_CHAR('w_yes_n'),
         };
-        f32 vanillaScaleX[3];
-        f32 vanillaScaleY[3];
+        constexpr int nativeTagCount = sizeof(nativeTags) / sizeof(nativeTags[0]);
+        f32 vanillaScaleX[nativeTagCount];
+        f32 vanillaScaleY[nativeTagCount];
+        f32 vanillaTransX[nativeTagCount];
+        f32 vanillaTransY[nativeTagCount];
 
-        for (int i = 0; i < 3; ++i) {
-            J2DPane* pane = Scr->search(fileTags[i]);
+        for (int i = 0; i < nativeTagCount; ++i) {
+            J2DPane* pane = Scr->search(nativeTags[i]);
             vanillaScaleX[i] = pane->getScaleX();
             vanillaScaleY[i] = pane->getScaleY();
+            vanillaTransX[i] = pane->getTranslateX();
+            vanillaTransY[i] = pane->getTranslateY();
             pane->scale(vanillaScaleX[i] * mDoGph_gInf_c::hudAspectScaleDown,
                         vanillaScaleY[i]);
         }
 
+        // Keep the animated Yes/No pair's spacing at the same native ratio as
+        // the options themselves. Compress around their current midpoint so
+        // the vanilla slide animation and its overall placement are retained.
+        const f32 optionMidX = (vanillaTransX[3] + vanillaTransX[4]) * 0.5f;
+        for (int i = 3; i < nativeTagCount; ++i) {
+            J2DPane* pane = Scr->search(nativeTags[i]);
+            pane->translate(optionMidX +
+                                (vanillaTransX[i] - optionMidX) *
+                                    mDoGph_gInf_c::hudAspectScaleDown,
+                            vanillaTransY[i]);
+        }
+
         Scr->draw(0.0f, 0.0f, dComIfGp_getCurrentGrafPort());
 
-        for (int i = 0; i < 3; ++i) {
-            Scr->search(fileTags[i])->scale(vanillaScaleX[i], vanillaScaleY[i]);
+        for (int i = 0; i < nativeTagCount; ++i) {
+            J2DPane* pane = Scr->search(nativeTags[i]);
+            pane->scale(vanillaScaleX[i], vanillaScaleY[i]);
+            pane->translate(vanillaTransX[i], vanillaTransY[i]);
         }
         return;
     }
