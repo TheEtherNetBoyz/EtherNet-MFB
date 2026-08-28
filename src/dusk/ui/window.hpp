@@ -72,6 +72,7 @@ protected:
     Insets mBodyPadding;
     bool mPersistSize = false;
     bool mPersistedSizeApplied = false;
+    Rml::Vector2f mAppliedMenuSize;
     struct ResizeState {
         bool active = false;
         Rml::Vector2f startPointer;
