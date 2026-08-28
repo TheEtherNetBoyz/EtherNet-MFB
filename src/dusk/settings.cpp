@@ -7,6 +7,7 @@
 #include "dusk/config.hpp"
 #include "dusk/ui/ui.hpp"
 #include "dusk/game_mode.hpp"
+#include "dusk/speedrun.h"
 
 namespace dusk {
 
@@ -671,8 +672,8 @@ TransientSettings& getTransientSettings() {
 
 void updateDiscLoadingDelay() {
     const int delaySeconds = std::clamp(getSettings().game.discLoadingDelaySeconds.getValue(), 1, 10);
-    const auto mode = getSettings().game.speedrunMode.getValue() ? DiscLoadingDelayMode::Off :
-                                                                   getSettings().game.discLoadingDelayMode.getValue();
+    const auto mode = speedrun::isActive() ? DiscLoadingDelayMode::Off :
+                                             getSettings().game.discLoadingDelayMode.getValue();
 
     aurora_dvd_set_read_delay_seconds(static_cast<u32>(delaySeconds));
     const u32 dvdMode = mode == DiscLoadingDelayMode::Off ? AURORA_DVD_READ_DELAY_OFF :
@@ -682,7 +683,7 @@ void updateDiscLoadingDelay() {
 }
 
 void toggleDiscLoadingDelay() {
-    if (getSettings().game.speedrunMode.getValue()) {
+    if (speedrun::isActive()) {
         return;
     }
     auto& mode = getSettings().game.discLoadingDelayMode;

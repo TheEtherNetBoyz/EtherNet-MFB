@@ -13,6 +13,7 @@
 #include "d/d_com_inf_game.h"
 #if TARGET_PC
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
 #include "m_Do/m_Do_Reset.h"
 #endif
 #include <cstring>
@@ -1716,7 +1717,7 @@ void Z2SceneMgr::setSceneName(char* spot, s32 room, s32 layer) {
                                     Z2GetStatusMgr()->getDemoStatus() != 0;
     const bool isExteriorLoad = spot != NULL && strncmp(spot, "F_", 2) == 0;
     const bool isInteriorLoad = spot != NULL && strncmp(spot, "R_", 2) == 0;
-    if (!dusk::getSettings().game.speedrunMode.getValue() &&
+    if (!dusk::speedrun::isActive() &&
         dusk::getSettings().game.enableTwilightVisuals.getValue() &&
         dusk::getSettings().game.enableTwilightVisualMusic.getValue() &&
         !isPalaceScene && !preserveSceneMusic &&

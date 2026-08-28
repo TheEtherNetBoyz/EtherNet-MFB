@@ -39,6 +39,7 @@
 #if TARGET_PC
 #include "dusk/imgui/ImGuiBloomWindow.hpp"
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
 #include "dusk/frame_interpolation.h"
 #include "dusk/game_clock.h"
 static f32 timeScale = 1.0f;
@@ -74,7 +75,7 @@ static GXColorS10 s_faron_twilight_kasumi_inner;
 static bool dKy_visual_twilight_stage_enabled() {
     const char* stageName = dComIfGp_getStartStageName();
     return stageName != NULL &&
-           !dusk::getSettings().game.speedrunMode.getValue() &&
+           !dusk::speedrun::isActive() &&
            dusk::getSettings().game.enableTwilightVisuals.getValue() &&
            strncmp(stageName, "D_MN08", 6) != 0;
 }
@@ -112,7 +113,7 @@ static bool dKy_visual_twilight_monochrome_active() {
         return false;
     }
 
-    return !dusk::getSettings().game.speedrunMode.getValue() &&
+    return !dusk::speedrun::isActive() &&
            strncmp(stageName, "D_MN08", 6) != 0 &&
            dusk::getSettings().game.twilightVisualStyle.getValue() ==
                dusk::TwilightVisualStyle::BlackAndWhiteEnvironment;
@@ -1561,7 +1562,7 @@ void dKy_apply_visual_twilight_weather() {
     static int wind_gust_timer = 0;
     static bool wind_gust_active = false;
 
-    const bool active = !dusk::getSettings().game.speedrunMode.getValue();
+    const bool active = !dusk::speedrun::isActive();
     const dusk::TwilightWeather weather = dusk::getSettings().game.twilightWeather.getValue();
     if (!active || weather == dusk::TwilightWeather::Current) {
         wind_gust_timer = 0;
@@ -8847,7 +8848,7 @@ static int dKy_Draw(sub_kankyo__class* i_this) {
 
 #if TARGET_PC
 static void dKy_update_visual_twilight_audio() {
-    const bool enabled = !dusk::getSettings().game.speedrunMode.getValue() &&
+    const bool enabled = !dusk::speedrun::isActive() &&
                          dusk::getSettings().game.enableTwilightVisuals.getValue() &&
                          dusk::getSettings().game.enableTwilightVisualMusic.getValue();
 
@@ -11761,7 +11762,7 @@ u8 dKy_darkworld_check() {
     const char* stageName = dComIfGp_getStartStageName();
     if (s_visual_enemy_form_context && stageName != NULL &&
         strncmp(stageName, "D_MN08", 6) != 0 &&
-        !dusk::getSettings().game.speedrunMode.getValue() &&
+        !dusk::speedrun::isActive() &&
         dusk::getSettings().game.enableTwilightVisuals.getValue()) {
         check = TRUE;
     }
@@ -11783,7 +11784,7 @@ u8 dKy_darkworld_visual_check() {
         return false;
     }
 
-    if (!dusk::getSettings().game.speedrunMode.getValue() &&
+    if (!dusk::speedrun::isActive() &&
         dusk::getSettings().game.enableTwilightVisuals.getValue()) {
         return true;
     }
@@ -11822,7 +11823,7 @@ u8 dKy_darkworld_visual_effect_check() {
 
 u8 dKy_visual_snow_storm_check() {
 #if TARGET_PC
-    return !dusk::getSettings().game.speedrunMode.getValue() &&
+    return !dusk::speedrun::isActive() &&
            dusk::getSettings().game.twilightWeather.getValue() == dusk::TwilightWeather::SnowStorm;
 #else
     return false;

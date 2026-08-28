@@ -14,6 +14,7 @@
 #if TARGET_PC
 #include "dusk/audio.h"
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
 #include "dusk/version.hpp"
 #endif
 
@@ -22,7 +23,7 @@ static bool useTwilightBattleMusic() {
         return true;
     }
 #if TARGET_PC
-    return !dusk::getSettings().game.speedrunMode.getValue() &&
+    return !dusk::speedrun::isActive() &&
            dusk::getSettings().game.enableTwilightVisuals.getValue();
 #else
     return false;

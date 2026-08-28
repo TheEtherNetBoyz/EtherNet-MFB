@@ -246,7 +246,7 @@ namespace dusk {
 
         void TwilightVisualsMenu() {
             auto& s = getSettings();
-            const bool speedrunRestricted = s.game.speedrunMode.getValue();
+            const bool speedrunRestricted = dusk::speedrun::isActive();
             ImGui::BeginDisabled(speedrunRestricted);
             MenuCheckbox("Enable Twilight Visuals", s.game.enableTwilightVisuals);
             int visualStyle = static_cast<int>(s.game.twilightVisualStyle.getValue());
@@ -359,18 +359,18 @@ namespace dusk {
                 MenuCheckbox("No Climbing Miss Animation", s.game.noMissClimbing);
                 MenuCheckbox("Faster Tears of Light", s.game.fastTears);
                 MenuCheckbox("No 2nd Fish for Cat", s.game.no2ndFishForCat);
-                MenuCheckbox("Sun's Song (R+X)", s.game.sunsSong, !s.game.speedrunMode);
+                MenuCheckbox("Sun's Song (R+X)", s.game.sunsSong, !dusk::speedrun::isActive());
                 ImGui::Separator();
                 LoadModeCheckbox("Fast Loads", s.game.enableFastLoads, s.game.enableInstaLoads);
                 LoadModeCheckbox("Insta Loads", s.game.enableInstaLoads, s.game.enableFastLoads);
                 MenuCheckbox("Instant Movement", s.game.instantMovement);
-                MenuCheckbox("Autosave", s.game.autoSave, !s.game.speedrunMode);
+                MenuCheckbox("Autosave", s.game.autoSave, !dusk::speedrun::isActive());
                 MenuCheckbox("Instant Saves", s.game.instantSaves);
                 MenuCheckbox("Hold B for Instant Text", s.game.instantText);
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Difficulty")) {
-                ImGui::BeginDisabled(s.game.speedrunMode);
+                ImGui::BeginDisabled(dusk::speedrun::isActive());
                 SliderIntItem("Damage Multiplier", s.game.damageMultiplier, 1, 8);
                 MenuCheckbox("Instant Death", s.game.instantDeath);
                 MenuCheckbox("No Heart Drops", s.game.noHeartDrops);
@@ -384,13 +384,13 @@ namespace dusk {
                 }
                 MenuCheckbox("Rotating Link Doll", s.game.enableLinkDollRotation);
                 MenuCheckbox("Hide TV Settings Screen", s.game.hideTvSettingsScreen);
-                MenuCheckbox("Pause On Focus Lost", s.game.pauseOnFocusLost, !s.game.speedrunMode);
-                MenuCheckbox("Recording Mode", s.game.recordingMode, !s.game.speedrunMode);
+                MenuCheckbox("Pause On Focus Lost", s.game.pauseOnFocusLost, !dusk::speedrun::isActive());
+                MenuCheckbox("Recording Mode", s.game.recordingMode, !dusk::speedrun::isActive());
                 MenuCheckbox("Skip Pre-Launch UI", s.backend.skipPreLaunchUI);
                 ImGui::Separator();
                 SpeedrunModeCheckbox();
                 LiveSplitCheckbox();
-                MenuCheckbox("Show RTA", s.game.showSpeedrunRTATimer, s.game.speedrunMode);
+                MenuCheckbox("Show RTA", s.game.showSpeedrunRTATimer, dusk::speedrun::isActive());
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Input")) {
@@ -425,7 +425,7 @@ namespace dusk {
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Cheats")) {
-                ImGui::BeginDisabled(s.game.speedrunMode);
+                ImGui::BeginDisabled(dusk::speedrun::isActive());
                 MenuCheckbox("Infinite Hearts", s.game.infiniteHearts);
                 MenuCheckbox("Infinite Arrows", s.game.infiniteArrows);
                 MenuCheckbox("Infinite Seeds", s.game.infiniteSeeds);
@@ -503,7 +503,7 @@ namespace dusk {
     }
 
     void ImGuiMenuTools::drawPracticeSavesNative() {
-        if (getSettings().game.speedrunMode) {
+        if (dusk::speedrun::isActive()) {
             m_showPracticeSaves = false;
             getTransientSettings().practiceMenuInputCapture = false;
             return;
@@ -564,7 +564,7 @@ namespace dusk {
 
             ImGui::Separator();
             config::ImGuiMenuItem("Turbo Speed Key", hotkeys::TURBO,
-                getSettings().game.enableTurboKeybind, !getSettings().game.speedrunMode);
+                getSettings().game.enableTurboKeybind, !dusk::speedrun::isActive());
 
 #if DUSK_CAN_OPEN_DATA_FOLDER
             ImGui::Separator();

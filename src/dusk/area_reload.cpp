@@ -6,6 +6,7 @@
 #include "dusk/dusk.h"
 #include "dusk/main.h"
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
 #include "m_Do/m_Do_controller_pad.h"
 
 #include <array>
@@ -27,7 +28,7 @@ AreaReloadState s_state;
 }  // namespace
 
 void reload_area() {
-    if (!IsGameLaunched || getSettings().game.speedrunMode.getValue() ||
+    if (!IsGameLaunched || speedrun::isActive() ||
         dComIfGp_isEnableNextStage()) {
         return;
     }

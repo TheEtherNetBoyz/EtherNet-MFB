@@ -13,6 +13,7 @@
 
 #include "dusk/frame_interpolation.h"
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
 
 #include <algorithm>
 
@@ -32,7 +33,7 @@ static TGXTexObj s_grassMonochromeHijikiTexObj;
 
 static bool grass_monochrome_active() {
     const auto& settings = dusk::getSettings().game;
-    return !settings.speedrunMode.getValue() &&
+    return !dusk::speedrun::isActive() &&
            settings.twilightVisualStyle.getValue() ==
                dusk::TwilightVisualStyle::BlackAndWhiteEnvironment &&
            strcmp(dComIfGp_getStartStageName(), "D_MN08") != 0;

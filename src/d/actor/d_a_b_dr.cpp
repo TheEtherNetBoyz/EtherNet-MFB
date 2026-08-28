@@ -18,6 +18,7 @@
 #include "Z2AudioLib/Z2Instances.h"
 #include "dusk/cutscene_skip.h"
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
 #include "m_Do/m_Do_controller_pad.h"
 
 
@@ -1843,7 +1844,7 @@ void daB_DR_c::executeWeekHit() {
                 sp44.z = 0.0f;
                 sp44.x = 0.0f;
 
-                if (!dusk::getSettings().game.speedrunMode.getValue() &&
+                if (!dusk::speedrun::isActive() &&
                     dusk::getSettings().game.theEtherNetBoyzExperience.getValue()) {
                     // The normal child is the ending death cutscene.  Let the boss
                     // disappear naturally so Link's existing hang logic releases him.

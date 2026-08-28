@@ -29,6 +29,7 @@
 #include "dusk/main.h"
 #include "dusk/map_loader_definitions.h"
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
 #include "f_op/f_op_actor_mng.h"
 #include "f_op/f_op_overlap_mng.h"
 #include "f_pc/f_pc_name.h"
@@ -580,7 +581,7 @@ void gz_set_bool(ConfigVar<bool>& value, bool enabled = true) {
 
 bool gz_activate_generic_row(ImGuiPracticeSaves::MainCategory category, int row) {
     auto& s = getSettings();
-    const bool cheatsEnabled = !s.game.speedrunMode;
+    const bool cheatsEnabled = !dusk::speedrun::isActive();
     switch (category) {
     case ImGuiPracticeSaves::MainCategory::Cheats:
         switch (row) {
@@ -604,11 +605,11 @@ bool gz_activate_generic_row(ImGuiPracticeSaves::MainCategory category, int row)
             if (row == 0) gz_set_bool(s.game.areaReload, cheatsEnabled);
             if (row == 4) gz_set_bool(s.game.gorgeVoidChecker);
         } else if (s_gzToolsTab == 1) {
-            if (row == 1) gz_set_bool(s.game.showSpeedrunRTATimer, s.game.speedrunMode);
+            if (row == 1) gz_set_bool(s.game.showSpeedrunRTATimer, dusk::speedrun::isActive());
             if (row == 2) gz_set_bool(s.game.showInputViewer);
         } else if (s_gzToolsTab == 2) {
             if (row == 0) gz_set_bool(s.game.freeCamera);
-            if (row == 1) gz_set_bool(s.game.moveLink, !s.game.speedrunMode);
+            if (row == 1) gz_set_bool(s.game.moveLink, !dusk::speedrun::isActive());
         }
         break;
     case ImGuiPracticeSaves::MainCategory::Warping:
@@ -726,7 +727,7 @@ void gz_disabled_button(const char* label) {
 
 void draw_gz_cheats_panel() {
     auto& s = getSettings();
-    const bool enabled = !s.game.speedrunMode;
+    const bool enabled = !dusk::speedrun::isActive();
     ImGui::BeginChild("##gz_cheats_panel", ImVec2(560.0f, 0.0f), true);
     if (!enabled) {
         ImGui::TextDisabled("Disabled while Speedrun Mode is active.");
@@ -766,7 +767,7 @@ void draw_gz_tools_panel() {
     ImGui::Separator();
 
     if (tab == 0) {
-        gz_config_checkbox("area reload", s.game.areaReload, !s.game.speedrunMode);
+        gz_config_checkbox("area reload", s.game.areaReload, !dusk::speedrun::isActive());
         gz_disabled_checkbox("coro td");
         gz_disabled_checkbox("ebmb");
         gz_disabled_checkbox("elevator escape");
@@ -776,7 +777,7 @@ void draw_gz_tools_panel() {
         gz_disabled_checkbox("universal map delay");
     } else if (tab == 1) {
         gz_disabled_checkbox("a/b mash rate");
-        gz_config_checkbox("in-game timer", s.game.showSpeedrunRTATimer, s.game.speedrunMode);
+        gz_config_checkbox("in-game timer", s.game.showSpeedrunRTATimer, dusk::speedrun::isActive());
         gz_config_checkbox("input viewer", s.game.showInputViewer);
         gz_disabled_checkbox("link debug info");
         gz_disabled_checkbox("load timer");
@@ -784,7 +785,7 @@ void draw_gz_tools_panel() {
         gz_disabled_checkbox("timer");
     } else {
         gz_config_checkbox("free cam", s.game.freeCamera);
-        gz_config_checkbox("move link", s.game.moveLink, !s.game.speedrunMode);
+        gz_config_checkbox("move link", s.game.moveLink, !dusk::speedrun::isActive());
         gz_disabled_checkbox("teleport");
     }
     ImGui::EndChild();
@@ -1428,11 +1429,11 @@ void ImGuiPracticeSaves::handleControllerNative(bool& open) {
         if (accept(PAD_BUTTON_A, 0.20)) {
             if (m_mainCategory == MainCategory::Tools && s_gzToolsTab == 1) {
                 if (m_selectedGenericRow == 2) {
-                    gz_set_bool(getSettings().game.nativeInputViewer, !getSettings().game.speedrunMode);
+                    gz_set_bool(getSettings().game.nativeInputViewer, !dusk::speedrun::isActive());
                     return;
                 }
                 if (m_selectedGenericRow == 3) {
-                    gz_set_bool(getSettings().game.nativeLinkDebugInfo, !getSettings().game.speedrunMode);
+                    gz_set_bool(getSettings().game.nativeLinkDebugInfo, !dusk::speedrun::isActive());
                     return;
                 }
             }
@@ -1585,7 +1586,7 @@ void ImGuiPracticeSaves::executeGorgeVoidChecker() {
     }
 
     const bool enabled = getSettings().game.gorgeVoidChecker.getValue() &&
-                         !getSettings().game.speedrunMode.getValue();
+                         !dusk::speedrun::isActive();
     if (!enabled) {
         state.timerStarted = false;
         state.comboHeld = false;
@@ -2248,7 +2249,7 @@ void draw_native_link_debug(JUTFont* font) {
 void ImGuiPracticeSaves::drawNative(bool menuOpen) {
     // Only the native renderer; in imgui mode draw() renders the window instead.
     auto& settings = getSettings();
-    if (!settings.game.nativePracticeMenu || settings.game.speedrunMode) {
+    if (!settings.game.nativePracticeMenu || dusk::speedrun::isActive()) {
         return;
     }
     const bool nativeLinkDebugInfo = settings.game.nativeLinkDebugInfo.getValue();
@@ -2395,7 +2396,7 @@ void ImGuiPracticeSaves::drawNative(bool menuOpen) {
         };
         switch (m_mainCategory) {
         case MainCategory::Cheats: {
-            const bool en = !s.game.speedrunMode;
+            const bool en = !dusk::speedrun::isActive();
             boolRow("disable item timer", s.game.enableIndefiniteItemDrops.getValue(), !en);
             disabledBool("disable walls");
             disabledBool("fast bonk recovery");
@@ -2418,7 +2419,7 @@ void ImGuiPracticeSaves::drawNative(bool menuOpen) {
         }
         case MainCategory::Tools: {
             if (s_gzToolsTab == 0) {
-                boolRow("area reload", s.game.areaReload.getValue(), s.game.speedrunMode);
+                boolRow("area reload", s.game.areaReload.getValue(), dusk::speedrun::isActive());
                 disabledBool("coro td");
                 disabledBool("ebmb");
                 disabledBool("elevator escape");
@@ -2429,16 +2430,17 @@ void ImGuiPracticeSaves::drawNative(bool menuOpen) {
             } else if (s_gzToolsTab == 1) {
                 disabledBool("a/b mash rate");
                 boolRow("in-game timer", s.game.showSpeedrunRTATimer.getValue(),
-                        !s.game.speedrunMode);
-                boolRow("input viewer", s.game.nativeInputViewer.getValue(), s.game.speedrunMode);
+                        !dusk::speedrun::isActive());
+                boolRow("input viewer", s.game.nativeInputViewer.getValue(),
+                        dusk::speedrun::isActive());
                 boolRow("link debug info", s.game.nativeLinkDebugInfo.getValue(),
-                        s.game.speedrunMode);
+                        dusk::speedrun::isActive());
                 disabledBool("load timer");
                 disabledBool("stage info");
                 disabledBool("timer");
             } else {
                 boolRow("free cam", s.game.freeCamera.getValue(), false);
-                boolRow("move link", s.game.moveLink.getValue(), s.game.speedrunMode);
+                boolRow("move link", s.game.moveLink.getValue(), dusk::speedrun::isActive());
                 disabledBool("teleport");
             }
             break;
@@ -2512,7 +2514,7 @@ void ImGuiPracticeSaves::drawNative(bool menuOpen) {
 }
 
 void ImGuiMenuTools::ShowPracticeSaves() {
-    if (getSettings().game.speedrunMode) {
+    if (dusk::speedrun::isActive()) {
         m_showPracticeSaves = false;
         getTransientSettings().practiceMenuInputCapture = false;
         return;

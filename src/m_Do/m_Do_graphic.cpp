@@ -59,6 +59,7 @@
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/logging.h"
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
 #endif
 
 class mDoGph_HIO_c : public JORReflexible {
@@ -2711,7 +2712,7 @@ int mDoGph_Painter() {
 
 #if TARGET_PC
             const auto& visualSettings = dusk::getSettings().game;
-            if (!visualSettings.speedrunMode.getValue() &&
+            if (!dusk::speedrun::isActive() &&
                 visualSettings.twilightVisualStyle.getValue() ==
                     dusk::TwilightVisualStyle::BlackAndWhiteEnvironment &&
                 strcmp(dComIfGp_getStartStageName(), "D_MN08") != 0) {

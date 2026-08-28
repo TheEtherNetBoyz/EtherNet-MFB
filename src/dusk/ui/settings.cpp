@@ -435,7 +435,7 @@ public:
                     },
                     .isDisabled = [action = entry.action] {
                         return action == HotkeyAction::ToggleDiscLoadingDelay &&
-                               getSettings().game.speedrunMode.getValue();
+                               dusk::speedrun::isActive();
                     },
                     .isModified = [action = entry.action] {
                         const auto& binding = hotkey_binding(action);
@@ -2047,7 +2047,7 @@ SettingsWindow::SettingsWindow(bool prelaunch)
                 .valueMax = 1,
                 .defaultValue = 0,
                 .openInFavorites = true,
-            }, [] { return getSettings().game.speedrunMode.getValue(); });
+            }, [] { return dusk::speedrun::isActive(); });
         graphics_tuner_control(*this, leftPane, rightPane,
             getSettings().game.twilightVisualStyle,
             GraphicsTunerProps{
@@ -2058,13 +2058,13 @@ SettingsWindow::SettingsWindow(bool prelaunch)
                 .valueMax = static_cast<int>(TwilightVisualStyle::BlackAndWhiteEnvironment),
                 .defaultValue = static_cast<int>(TwilightVisualStyle::Normal),
                 .openInFavorites = true,
-            }, [] { return getSettings().game.speedrunMode.getValue(); });
+            }, [] { return dusk::speedrun::isActive(); });
         config_bool_select(leftPane, rightPane, getSettings().game.enableTwilightVisualMusic,
             {
                 .key = "Use Palace Music",
                 .helpText = "Replace normal map music with Palace of Twilight music while Twilight Visuals is active. "
                             "Twilight enemy music remains active during encounters when this is disabled.",
-                .isDisabled = [] { return getSettings().game.speedrunMode.getValue(); },
+                .isDisabled = [] { return dusk::speedrun::isActive(); },
             });
         graphics_tuner_control(*this, leftPane, rightPane,
             getSettings().game.twilightVisualBrightness,
@@ -2076,7 +2076,7 @@ SettingsWindow::SettingsWindow(bool prelaunch)
                 .valueMax = 120,
                 .defaultValue = 100,
                 .step = 5,
-            }, [] { return getSettings().game.speedrunMode.getValue(); });
+            }, [] { return dusk::speedrun::isActive(); });
         graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.twilightSkyboxMode,
             GraphicsTunerProps{
                 .option = GraphicsOption::TwilightSkybox,
@@ -2085,7 +2085,7 @@ SettingsWindow::SettingsWindow(bool prelaunch)
                 .valueMin = static_cast<int>(TwilightSkyboxMode::TwilightDay),
                 .valueMax = static_cast<int>(TwilightSkyboxMode::CastleTown),
                 .defaultValue = static_cast<int>(TwilightSkyboxMode::TwilightDay),
-            }, [] { return getSettings().game.speedrunMode.getValue(); });
+            }, [] { return dusk::speedrun::isActive(); });
         leftPane.add_section("Post-Processing");
         graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.twilightWeather,
             GraphicsTunerProps{
@@ -2096,7 +2096,7 @@ SettingsWindow::SettingsWindow(bool prelaunch)
                 .valueMax = static_cast<int>(TwilightWeather::HeavyFog),
                 .defaultValue = static_cast<int>(TwilightWeather::Current),
                 .openInFavorites = true,
-            }, [] { return getSettings().game.speedrunMode.getValue(); });
+            }, [] { return dusk::speedrun::isActive(); });
         graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.bloomMode,
             GraphicsTunerProps{
                 .option = GraphicsOption::BloomMode,
@@ -2533,7 +2533,7 @@ SettingsWindow::SettingsWindow(bool prelaunch)
         register_favorite({
             .label = "Damage Multiplier",
             .value = [] { return fmt::format("{}×", std::clamp(getSettings().game.damageMultiplier.getValue(), 1, 8)); },
-            .isDisabled = [] { return getSettings().game.speedrunMode.getValue(); },
+            .isDisabled = [] { return dusk::speedrun::isActive(); },
             .activate = [] {
                 auto& multiplier = getSettings().game.damageMultiplier;
                 multiplier.setValue(std::min(multiplier.getValue() + 1, 8));
@@ -2580,10 +2580,8 @@ SettingsWindow::SettingsWindow(bool prelaunch)
                 .key = "Input Buffering",
                 .helpText =
                     "Presses buttons held on the first available gameplay frame when Link regains "
-                    "control after a cutscene. Disabled while Speedrun Mode is enabled.",
-                .isDisabled = [] {
-                    return getSettings().game.speedrunMode.getValue() || dusk::speedrun::isActive();
-                },
+                    "control after a cutscene. Disabled while Speedrun Mode is active.",
+                .isDisabled = [] { return dusk::speedrun::isActive(); },
             });
         addOption("Faster Climbing", getSettings().game.fastClimbing,
             "Quicker climbing on ladders and vines like the HD version.");
@@ -2622,7 +2620,7 @@ SettingsWindow::SettingsWindow(bool prelaunch)
                 .key = "Autosave",
                 .helpText = "Autosaves the game when going to a new area, opening a dungeon door, "
                             "or getting a new item.",
-                .isDisabled = [] { return getSettings().game.speedrunMode.getValue(); },
+                .isDisabled = [] { return dusk::speedrun::isActive(); },
             });
         addOption("Instant Saves", getSettings().game.instantSaves,
             "Skips the delay when writing to the Memory Card.");
@@ -2704,7 +2702,7 @@ SettingsWindow::SettingsWindow(bool prelaunch)
             std::function<void(DiscLoadingDelayMode)>{[](DiscLoadingDelayMode mode) {
                 updateDiscLoadingDelay();
             }},
-            [] { return getSettings().game.speedrunMode.getValue(); });
+            [] { return dusk::speedrun::isActive(); });
 
         config_bool_select(leftPane, rightPane, getSettings().game.theEtherNetBoyzExperience,
             {
@@ -2712,14 +2710,14 @@ SettingsWindow::SettingsWindow(bool prelaunch)
                 .helpText =
                     "Independent of Disc Loading Delay. Prevent Argorok's ending death cutscene from "
                     "loading after the final hit, so Link falls away while the boss death continues.",
-                .isDisabled = [] { return getSettings().game.speedrunMode.getValue(); },
+                .isDisabled = [] { return dusk::speedrun::isActive(); },
             });
 
         config_int_select(leftPane, rightPane, getSettings().game.discLoadingDelaySeconds,
             "Delay Duration", "Set how many seconds each DVD read is paused in Timed mode.",
             1, 10, 1,
             [] {
-                return getSettings().game.speedrunMode.getValue() ||
+                return dusk::speedrun::isActive() ||
                        getSettings().game.discLoadingDelayMode.getValue() !=
                            DiscLoadingDelayMode::Timed;
             },
@@ -2756,7 +2754,7 @@ SettingsWindow::SettingsWindow(bool prelaunch)
                 return Rml::String{kMagicArmorModes[static_cast<u8>(
                     getSettings().game.armorRupeeDrain.getValue())]};
             },
-            .isDisabled = [] { return getSettings().game.speedrunMode.getValue(); },
+            .isDisabled = [] { return dusk::speedrun::isActive(); },
             .activate = [] {
                 auto& behavior = getSettings().game.armorRupeeDrain;
                 behavior.setValue(static_cast<MagicArmorMode>(

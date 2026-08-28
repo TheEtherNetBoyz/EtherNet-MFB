@@ -16,6 +16,7 @@
 #include "m_Do/m_Do_audio.h"
 #if TARGET_PC
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
 #endif
 
 static void dKyw_pntlight_set(WIND_INFLUENCE* pntwind);
@@ -776,7 +777,7 @@ static void wether_move_housi() {
 
 #if TARGET_PC
 static bool twilight_visual_housi_enabled() {
-    return !dusk::getSettings().game.speedrunMode.getValue() &&
+    return !dusk::speedrun::isActive() &&
            dusk::getSettings().game.enableTwilightVisuals.getValue();
 }
 

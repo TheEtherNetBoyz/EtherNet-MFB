@@ -34,6 +34,7 @@
 #include "dusk/main.h"
 #include "dusk/presentation.hpp"
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
 #include "dusk/ui/ui.hpp"
 #include "f_pc/f_pc_manager.h"
 #include "f_pc/f_pc_name.h"
@@ -398,7 +399,7 @@ namespace dusk {
             cycle_bloom_mode();
         }
 
-        if (!getSettings().game.speedrunMode.getValue() &&
+        if (!dusk::speedrun::isActive() &&
             hotkey_event_pressed(event, hotkeys.toggleDiscLoadingDelay)) {
             toggleDiscLoadingDelay();
             const auto mode = getSettings().game.discLoadingDelayMode.getValue();
@@ -449,19 +450,19 @@ namespace dusk {
         }
 
         if (dusk::frame_interp::get_ui_tick_pending() && getSettings().game.moveLink.getValue() &&
-            !getSettings().game.speedrunMode &&
+            !dusk::speedrun::isActive() &&
             (mDoCPd_c::getHold(PAD_1) & (PAD_TRIGGER_R | PAD_TRIGGER_L)) == (PAD_TRIGGER_R | PAD_TRIGGER_L) &&
             mDoCPd_c::getTrigY(PAD_1))
         {
             getTransientSettings().moveLinkActive = !getTransientSettings().moveLinkActive;
         }
-        if (getSettings().game.speedrunMode || !getSettings().game.moveLink.getValue()) {
+        if (dusk::speedrun::isActive() || !getSettings().game.moveLink.getValue()) {
             getTransientSettings().moveLinkActive = false;
         }
 
         if (dusk::frame_interp::get_ui_tick_pending() &&
             getSettings().game.teleportLink.getValue() &&
-            !getSettings().game.speedrunMode && !dComIfGp_isEnableNextStage())
+            !dusk::speedrun::isActive() && !dComIfGp_isEnableNextStage())
         {
             const u32 held = mDoCPd_c::getUnfilteredHold(PAD_1);
             const u32 triggered = mDoCPd_c::getUnfilteredTrig(PAD_1);
