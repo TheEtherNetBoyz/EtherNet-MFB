@@ -21,6 +21,7 @@
 
 #include "dusk/menu_pointer.h"
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
 #include "dusk/ui/touch_controls.hpp"
 #endif
 
@@ -88,7 +89,8 @@ static void clearTeleportLinkDpadInput(interface_of_controller_pad* interface) {
 }
 
 static void updateCutsceneInputBuffer() {
-    if (!dusk::getSettings().game.cutsceneInputBuffering.getValue()) {
+    if (dusk::getSettings().game.speedrunMode.getValue() || dusk::speedrun::isActive() ||
+        !dusk::getSettings().game.cutsceneInputBuffering.getValue()) {
         sCutsceneBufferActive = false;
         return;
     }
@@ -113,9 +115,13 @@ static void updateCutsceneInputBuffer() {
 
 #if TARGET_PC
 void mDoCPd_c::applyCutsceneInputBuffer() {
-    if (!sCutsceneBufferActive ||
+    if (dusk::getSettings().game.speedrunMode.getValue() || dusk::speedrun::isActive() ||
         !dusk::getSettings().game.cutsceneInputBuffering.getValue())
     {
+        sCutsceneBufferActive = false;
+        return;
+    }
+    if (!sCutsceneBufferActive) {
         return;
     }
 

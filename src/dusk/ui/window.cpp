@@ -217,7 +217,6 @@ void Window::show() {
 }
 
 void Window::hide(bool close) {
-    save_persisted_size();
     mRoot->RemoveAttribute("open");
     mPendingClose = close;
 }
@@ -262,20 +261,19 @@ void Window::update_safe_area() noexcept {
 }
 
 void Window::apply_persisted_size() noexcept {
-    if (!mPersistSize || mPersistedSizeApplied || mRoot == nullptr || mDocument == nullptr) {
+    if (!mPersistSize || mResize.active || mRoot == nullptr || mDocument == nullptr) {
         return;
     }
-    mPersistedSizeApplied = true;
 
     auto* context = mDocument->GetContext();
     if (context == nullptr) {
         return;
     }
     const float dpRatio = context->GetDensityIndependentPixelRatio();
-    const float availableWidth =
-        static_cast<float>(context->GetDimensions().x) - mBodyPadding.left - mBodyPadding.right;
-    const float availableHeight =
-        static_cast<float>(context->GetDimensions().y) - mBodyPadding.top - mBodyPadding.bottom;
+    const float availableWidth = std::max(0.0f,
+        static_cast<float>(context->GetDimensions().x) - mBodyPadding.left - mBodyPadding.right);
+    const float availableHeight = std::max(0.0f,
+        static_cast<float>(context->GetDimensions().y) - mBodyPadding.top - mBodyPadding.bottom);
     const float minWidth = std::min(640.0f * dpRatio, availableWidth);
     const float minHeight = std::min(400.0f * dpRatio, availableHeight);
 
@@ -285,14 +283,17 @@ void Window::apply_persisted_size() noexcept {
                                   settings.menuWidthDp.getValue() : kDefaultMenuWidthDp;
     const int savedHeightDp = customized && settings.menuHeightDp.getValue() > 0 ?
                                    settings.menuHeightDp.getValue() : kDefaultMenuHeightDp;
-    if (savedWidthDp > 0) {
-        const float width = std::clamp(savedWidthDp * dpRatio, minWidth, availableWidth);
-        mRoot->SetProperty(Rml::PropertyId::Width, Rml::Property(width, Rml::Unit::PX));
+    const Rml::Vector2f size{
+        std::clamp(savedWidthDp * dpRatio, minWidth, availableWidth),
+        std::clamp(savedHeightDp * dpRatio, minHeight, availableHeight),
+    };
+    if (mPersistedSizeApplied && size == mAppliedMenuSize) {
+        return;
     }
-    if (savedHeightDp > 0) {
-        const float height = std::clamp(savedHeightDp * dpRatio, minHeight, availableHeight);
-        mRoot->SetProperty(Rml::PropertyId::Height, Rml::Property(height, Rml::Unit::PX));
-    }
+    mRoot->SetProperty(Rml::PropertyId::Width, Rml::Property(size.x, Rml::Unit::PX));
+    mRoot->SetProperty(Rml::PropertyId::Height, Rml::Property(size.y, Rml::Unit::PX));
+    mAppliedMenuSize = size;
+    mPersistedSizeApplied = true;
 }
 
 void Window::save_persisted_size() noexcept {
