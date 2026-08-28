@@ -2575,9 +2575,16 @@ SettingsWindow::SettingsWindow(bool prelaunch)
             "Rupees will not play cutscenes after you have collected them the first time.");
         addOption("Skip All Cutscenes", getSettings().game.skipAllCutscenes,
             "Allows additional cutscene skips.");
-        addOption("Input Buffering", getSettings().game.cutsceneInputBuffering,
-            "Presses buttons held on the first available gameplay frame when Link regains "
-            "control after a cutscene.");
+        config_bool_select(leftPane, rightPane, getSettings().game.cutsceneInputBuffering,
+            {
+                .key = "Input Buffering",
+                .helpText =
+                    "Presses buttons held on the first available gameplay frame when Link regains "
+                    "control after a cutscene. Disabled while Speedrun Mode is enabled.",
+                .isDisabled = [] {
+                    return getSettings().game.speedrunMode.getValue() || dusk::speedrun::isActive();
+                },
+            });
         addOption("Faster Climbing", getSettings().game.fastClimbing,
             "Quicker climbing on ladders and vines like the HD version.");
         addOption("Faster Tears of Light", getSettings().game.fastTears,

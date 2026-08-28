@@ -52,6 +52,7 @@ void resetForSpeedrunMode() {
     mDoMain::developmentMode = -1;
 
     getSettings().game.enableTurboKeybind.setSpeedrunValue(false);
+    getSettings().game.cutsceneInputBuffering.setSpeedrunValue(false);
 
     getSettings().game.damageMultiplier.setSpeedrunValue(1);
     getSettings().game.instantDeath.setSpeedrunValue(false);
