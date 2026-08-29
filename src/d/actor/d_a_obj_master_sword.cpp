@@ -29,10 +29,13 @@ static void completeMasterSwordGet(daObjMasterSword_c* i_this) {
 #if TARGET_PC
     const auto masterSword = dusk::mods::item_check_commit(
         ITEM_CHECK_MASTER_SWORD, dItemNo_MASTER_SWORD_e, i_this);
-    if (masterSword.itemNo == dItemNo_MASTER_SWORD_e) {
+    if (!masterSword.was_resolved) {
         dComIfGs_onItemFirstBit(dItemNo_MASTER_SWORD_e);
         dMeter2Info_setSword(dItemNo_MASTER_SWORD_e, false);
         dComIfGs_setSelectEquipSword(dItemNo_MASTER_SWORD_e);
+        // Preserve the vanilla event state, including when MFB's cutscene skip
+        // completes the reward without running the remainder of the event script.
+        dComIfGs_onEventBit(dSv_event_flag_c::F_0264);
         dusk::mods::item_check_complete(masterSword, i_this);
     } else if (masterSword.itemNo == dItemNo_NONE_e) {
         dusk::mods::item_check_complete(masterSword, i_this);
@@ -50,7 +53,7 @@ static void completeMasterSwordGet(daObjMasterSword_c* i_this) {
 #if TARGET_PC
     const auto shadowCrystal = dusk::mods::item_check_commit(
         ITEM_CHECK_SHADOW_CRYSTAL, dItemNo_SHADOW_CRYSTAL_e, i_this);
-    if (shadowCrystal.itemNo == dItemNo_SHADOW_CRYSTAL_e) {
+    if (!shadowCrystal.was_resolved) {
         execItemGet(shadowCrystal.itemNo, shadowCrystal.tag, i_this);
     } else if (shadowCrystal.itemNo == dItemNo_NONE_e) {
         dusk::mods::item_check_complete(shadowCrystal, i_this);
@@ -58,7 +61,6 @@ static void completeMasterSwordGet(daObjMasterSword_c* i_this) {
         dusk::mods::item_check_enqueue(shadowCrystal, dusk::mods::ItemGiveMode::Demo);
     }
 
-    dComIfGs_onEventBit(dSv_event_flag_c::F_0264);
 #endif
     dComIfGs_onEventBit(dSv_event_flag_c::saveBitLabels[i_this->getFlagNo()]);
     s_activeMasterSwordSkipActor = NULL;
@@ -247,11 +249,7 @@ void daObjMasterSword_c::create_init() {
 int daObjMasterSword_c::create() {
     fopAcM_ct(this, daObjMasterSword_c);
 
-#if TARGET_PC
-    if (dComIfGs_isEventBit(dSv_event_flag_c::F_0264)) {
-#else
     if (dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[getFlagNo()])) {
-#endif
         return cPhs_ERROR_e;
     }
 
