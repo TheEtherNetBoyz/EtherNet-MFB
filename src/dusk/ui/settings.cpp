@@ -2648,10 +2648,6 @@ SettingsWindow::SettingsWindow(bool prelaunch)
         addOption("Aiming Reticle", getSettings().game.aimingReticle,
             "Shows the aiming reticle for bow and slingshot.");
 
-        addSpeedrunDisabledOption("Area Reload", getSettings().game.areaReload,
-            "Press L+R+Start+A to reload the current area at its last entrance while preserving "
-            "temporary area state.");
-
         leftPane.add_section("Speedrunning");
         config_bool_select(leftPane, rightPane, getSettings().game.speedrunMode,
             {
@@ -2997,14 +2993,6 @@ SettingsWindow::SettingsWindow(bool prelaunch)
                 .helpText = "Show gyro sensor values in the input viewer.",
                 .isDisabled = [] { return !getSettings().game.showInputViewer; },
             });
-        config_bool_select(leftPane, rightPane, getSettings().game.nativePracticeMenu,
-            {
-                .key = "Native Practice Menu",
-                .helpText = "Draw the practice tools menu with the game's own engine so it scales "
-                            "with the resolution (controller only). When off, the practice menu "
-                            "uses the ImGui interface, which supports the mouse but does not scale "
-                            "at low resolutions.",
-            });
         leftPane.add_section("Game");
         register_favorite({
             .label = "Menu Scaling Mode",
@@ -3080,6 +3068,36 @@ SettingsWindow::SettingsWindow(bool prelaunch)
                     });
             }
         }
+    });
+
+    add_tab("Tools", [this](Rml::Element* content) {
+        auto& leftPane = add_child<Pane>(content, Pane::Type::Controlled);
+        auto& rightPane = add_child<Pane>(content, Pane::Type::Uncontrolled);
+
+        leftPane.add_section("Tools");
+        add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.enableMoveLinkCombo,
+            "Move Link (L+R+Y)",
+            "Enables the L+R+Y button combo to toggle freely repositioning Link.");
+        add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.enableTeleportCombo,
+            "Teleport (R+D-pad Up/Down)",
+            "R+D-pad Up stores Link's current position.<br/>"
+            "R+D-pad Down teleports Link back to it.");
+        add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.areaReload,
+            "Area Reload (L+R+Start+A)",
+            "Reloads the current area at its last entrance while preserving temporary area state.");
+        add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.gorgeVoidChecker,
+            "Gorge Void Checker",
+            "Enables the practice-menu checker for the Ordon Gorge void setup.");
+        add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.nativePracticeMenu,
+            "Native Practice Menu",
+            "Draws the practice tools menu with the game's renderer so it scales with resolution. "
+            "Disable this to use the mouse-capable ImGui version instead.");
+        add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.nativeInputViewer,
+            "Native Input Viewer",
+            "Shows the native input overlay used by the practice menu.");
+        add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.nativeLinkDebugInfo,
+            "Native Link Debug Info",
+            "Shows native Link position and movement debugging information.");
     });
 
     // Favorite entries are registered while their tabs are built. Build all tab callbacks once so

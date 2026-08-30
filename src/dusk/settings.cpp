@@ -194,8 +194,8 @@ UserSettings g_userSettings = {
         .speedrunMode {"game.speedrunMode", false},
         .liveSplitEnabled {"game.liveSplitEnabled", false},
         .showSpeedrunRTATimer {"game.showSpeedrunRTATimer", true},
-        .moveLink {"game.moveLink", false},
-        .teleportLink {"game.teleportLink", false},
+        .enableMoveLinkCombo {"game.enableMoveLinkCombo", false},
+        .enableTeleportCombo {"game.enableTeleportCombo", false},
         .areaReload {"game.areaReload", false},
         .gorgeVoidChecker {"game.gorgeVoidChecker", false},
         .recordingMode {"game.recordingMode", false},
@@ -204,10 +204,6 @@ UserSettings g_userSettings = {
         .showInputViewerGyro {"game.showInputViewerGyro", false},
         .nativeInputViewer {"game.nativeInputViewer", false},
         .nativeLinkDebugInfo {"game.nativeLinkDebugInfo", false},
-        .triggerViewDefinitions {
-            "tools.triggerViewDefinitions",
-            "[]"
-        },
         .nativePracticeMenu {"game.nativePracticeMenu", true},
         .lastSelectedGameModeId {"game.lastSelectedGameModeId", gamemode::kVanillaGameModeId}
     },
@@ -487,8 +483,8 @@ void registerSettings() {
     Register(g_userSettings.game.speedrunMode);
     Register(g_userSettings.game.liveSplitEnabled);
     Register(g_userSettings.game.showSpeedrunRTATimer);
-    Register(g_userSettings.game.moveLink);
-    Register(g_userSettings.game.teleportLink);
+    Register(g_userSettings.game.enableMoveLinkCombo);
+    Register(g_userSettings.game.enableTeleportCombo);
     Register(g_userSettings.game.areaReload);
     Register(g_userSettings.game.gorgeVoidChecker);
     Register(g_userSettings.game.recordingMode);
@@ -498,7 +494,6 @@ void registerSettings() {
     Register(g_userSettings.game.showInputViewerGyro);
     Register(g_userSettings.game.nativeInputViewer);
     Register(g_userSettings.game.nativeLinkDebugInfo);
-    Register(g_userSettings.game.triggerViewDefinitions);
     Register(g_userSettings.game.nativePracticeMenu);
     Register(g_userSettings.game.lastSelectedGameModeId);
     Register(g_userSettings.game.fastSpinner);
@@ -650,13 +645,27 @@ static TransientSettings g_transientSettings = {
     .collisionView = {
         .enableTerrainView = false,
         .enableWireframe = false,
-        .enableTriggerView = false,
         .enableAtView = false,
         .enableTgView = false,
         .enableCoView = false,
         .terrainViewOpacity = 50.0f,
         .colliderViewOpacity = 50.0f,
         .drawRange = 100.0f,
+    },
+    .triggerView = {
+        .loadZones = false,
+        .eventAreas = false,
+        .switchAreas = false,
+        .eventTags = false,
+        .midnaStops = false,
+        .twilightGates = false,
+        .checkpoints = false,
+        .paths = false,
+        .transformDists = false,
+        .attentionDists = false,
+        .purpleMistAvoid = false,
+        .leevers = false,
+        .opacity = 75.0f,
     },
     .skipFrameRateLimit = false,
     .forceThirtyFpsLimit = false,

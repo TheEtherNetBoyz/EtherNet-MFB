@@ -349,11 +349,15 @@ namespace dusk {
             if (eventRunning) {
                 ImGui::SetTooltip("Cannot enable while paused or during an active event.");
             } else {
-                ImGui::SetTooltip("Detach camera and fly freely.\n"
-                                  "WASD/Arrows/Left stick: move, Mouse/C-stick: look\n"
-                                  "Ctrl/L: down, Space/R: up, Shift/Z: fast\n"
-                                  "Q Key/Y: roll left, E Key/X: roll right\n"
-                                  "P: toggle mouse look");
+                ImGui::SetTooltip("Detach camera and fly freely.\n\n"
+                                  "Controls:\n"
+                                  "WASD/Arrows/Left stick - Move\n"
+                                  "Right Click+Mouse/C-stick - Look\n"
+                                  "Ctrl/L - Down\n"
+                                  "Space/R - Up\n"
+                                  "Shift/Z - Faster\n"
+                                  "Q Key/Y - Roll Left\n"
+                                  "E Key/X - Roll Right");
             }
         }
         if (eventRunning) {
@@ -373,11 +377,6 @@ namespace dusk {
         }
         if (!getSettings().game.debugFlyCam) {
             ImGui::EndDisabled();
-        }
-
-        bool mouseLook = dCamera_c::isDebugFlyCamMouseLookEnabled();
-        if (ImGui::Checkbox("Mouse Look (P)", &mouseLook)) {
-            dCamera_c::setDebugFlyCamMouseLookEnabled(mouseLook);
         }
 
         ImGui::SeparatorText("Keyframes");

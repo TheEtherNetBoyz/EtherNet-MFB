@@ -31,6 +31,7 @@
 
 #if TARGET_PC
 #include "dusk/camera_operators.hpp"
+#include "dusk/commands.hpp"
 #include "dusk/frame_interpolation.h"
 #include "dusk/logging.h"
 #include "dusk/action_bindings.h"
@@ -1066,6 +1067,11 @@ void dCamera_c::debugDrawInit() {
 bool dCamera_c::Run() {
 #if TARGET_PC
     ResetView();
+    if (dusk::isCameraDetached()) {
+        mFrameCounter++;
+        mTicks++;
+        return true;
+    }
     if (executeDebugFlyCam() || dusk::mods::camera_run_operators(this)) {
         mFrameCounter++;
         mTicks++;
@@ -7518,7 +7524,6 @@ static constexpr f32 FLYCAM_TRIGGER_DEADZONE = 20.0f;
 static constexpr s16 FLYCAM_ROLL_SPEED = 256;
 static ImVec2 sFlyCamLastMousePos = {-1.f, -1.f};
 static bool sFlyCamMouseLookEnabled = true;
-static bool sFlyCamMouseLookKeyWasDown = false;
 
 #if TARGET_PC
 static constexpr f32 TOUCH_CAMERA_CSTICK_EXIT_THRESHOLD = 0.05f;
@@ -7574,7 +7579,6 @@ bool dCamera_c::executeDebugFlyCam() {
             deactivateDebugFlyCam();
         }
         sFlyCamLastMousePos = {-1.f, -1.f};
-        sFlyCamMouseLookKeyWasDown = false;
         return false;
     }
 
@@ -7638,16 +7642,6 @@ bool dCamera_c::executeDebugFlyCam() {
 
     {
         ImGuiIO& io = ImGui::GetIO();
-        int keyboardStateCount = 0;
-        const bool* keyboardState = SDL_GetKeyboardState(&keyboardStateCount);
-        const bool mouseLookKeyDown =
-            keyboardState != nullptr && SDL_SCANCODE_P < keyboardStateCount &&
-            keyboardState[SDL_SCANCODE_P];
-        if (mouseLookKeyDown && !sFlyCamMouseLookKeyWasDown && !io.WantTextInput) {
-            setDebugFlyCamMouseLookEnabled(!sFlyCamMouseLookEnabled);
-        }
-        sFlyCamMouseLookKeyWasDown = mouseLookKeyDown;
-
         if (!io.WantCaptureKeyboard) {
             f32 kbX = 0.0f, kbY = 0.0f;
             if (ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_UpArrow)) kbY += 1.f;
@@ -7665,7 +7659,8 @@ bool dCamera_c::executeDebugFlyCam() {
             if (ImGui::IsKeyDown(ImGuiKey_E)) rollInput += 1.0f;
         }
         bool mouseValid = sFlyCamMouseLookEnabled && !io.WantCaptureMouse &&
-                          io.MousePos.x >= 0.0f && io.MousePos.y >= 0.0f;
+                          io.MousePos.x >= 0.0f && io.MousePos.y >= 0.0f &&
+                          ImGui::IsMouseDown(ImGuiMouseButton_Right);
         if (mouseValid && sFlyCamLastMousePos.x >= 0.0f) {
             cStickX -= (io.MousePos.x - sFlyCamLastMousePos.x) * 2.0f;
             cStickY -= (io.MousePos.y - sFlyCamLastMousePos.y) * 2.0f;
@@ -11216,6 +11211,9 @@ camera_class* dCam_getCamera() {
 
 dCamera_c* dCam_getBody() {
     camera_process_class* camera = (camera_process_class*)dCam_getCamera();
+#if TARGET_PC
+    if (camera == nullptr) { return nullptr; }
+#endif
     return &camera->mCamera;
 }
 

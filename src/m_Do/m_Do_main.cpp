@@ -64,6 +64,8 @@
 #include "dusk/tas_movie.h"
 #include "dusk/game_clock.h"
 #include "dusk/gyro.h"
+#include "dusk/commands.hpp"
+#include "dusk/game_combos.h"
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/imgui/ImGuiEngine.hpp"
 #include "dusk/iso_validate.hpp"
@@ -76,6 +78,7 @@
 #include "dusk/mouse.h"
 #include "dusk/os.h"
 #include "dusk/presentation.hpp"
+#include "dusk/ui/command_console.hpp"
 #include "dusk/ui/menu_bar.hpp"
 #include "dusk/ui/overlay.hpp"
 #include "dusk/ui/prelaunch.hpp"
@@ -310,10 +313,11 @@ void main01(void) {
                     }
                     dusk::game_clock::begin_sim_tick();
                     mDoCPd_c::read();
-                    dusk::update_area_reload_input();
                     dusk::mouse::read();
                     dusk::gyro::read(dusk::game_clock::sim_pace());
+                    dusk::processGameCombos();
                     fapGm_Execute();
+                    dusk::processCameraCommands();
                     dusk::tas_movie::restorePresentationCamera();
                     mDoAud_Execute();
                     dusk::game_clock::commit_sim_tick();
@@ -360,13 +364,14 @@ void main01(void) {
                 dusk::game_clock::begin_sim_tick();
                 // Game Inputs
                 mDoCPd_c::read();
-                dusk::update_area_reload_input();
                 dusk::mouse::read();
                 dusk::gyro::read(timing.dt);
+                dusk::processGameCombos();
 
                 // EXECUTE GAME LOGIC & RENDER
                 // This calls mDoGph_Painter -> JFWDisplay -> GX Functions
                 fapGm_Execute();
+                dusk::processCameraCommands();
                 dusk::tas_movie::restorePresentationCamera();
 
                 mDoAud_Execute();
@@ -818,6 +823,7 @@ int game_main(int argc, char* argv[]) {
     dusk::ui::push_document(std::make_unique<dusk::ui::Overlay>(), true, true);
     dusk::ui::push_document(std::make_unique<dusk::ui::TouchControls>(), false, true);
     dusk::ui::push_document(std::make_unique<dusk::ui::MenuBar>(), false);
+    dusk::ui::push_document(std::make_unique<dusk::ui::CommandConsole>(), false);
 
     // Invalidate a bad saved isoPath so that Dusklight can't get blocked from starting up.
     // This is only a metadata check; full hash verification is handled by the prelaunch UI.

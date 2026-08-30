@@ -609,7 +609,7 @@ bool gz_activate_generic_row(ImGuiPracticeSaves::MainCategory category, int row)
             if (row == 2) gz_set_bool(s.game.showInputViewer);
         } else if (s_gzToolsTab == 2) {
             if (row == 0) gz_set_bool(s.game.freeCamera);
-            if (row == 1) gz_set_bool(s.game.moveLink, !dusk::speedrun::isActive());
+            if (row == 1) gz_set_bool(s.game.enableMoveLinkCombo, !dusk::speedrun::isActive());
         }
         break;
     case ImGuiPracticeSaves::MainCategory::Warping:
@@ -785,7 +785,7 @@ void draw_gz_tools_panel() {
         gz_disabled_checkbox("timer");
     } else {
         gz_config_checkbox("free cam", s.game.freeCamera);
-        gz_config_checkbox("move link", s.game.moveLink, !dusk::speedrun::isActive());
+        gz_config_checkbox("move link", s.game.enableMoveLinkCombo, !dusk::speedrun::isActive());
         gz_disabled_checkbox("teleport");
     }
     ImGui::EndChild();
@@ -2440,7 +2440,7 @@ void ImGuiPracticeSaves::drawNative(bool menuOpen) {
                 disabledBool("timer");
             } else {
                 boolRow("free cam", s.game.freeCamera.getValue(), false);
-                boolRow("move link", s.game.moveLink.getValue(), dusk::speedrun::isActive());
+                boolRow("move link", s.game.enableMoveLinkCombo.getValue(), dusk::speedrun::isActive());
                 disabledBool("teleport");
             }
             break;

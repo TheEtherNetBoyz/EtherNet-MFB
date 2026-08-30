@@ -87,8 +87,13 @@ void resetForSpeedrunMode() {
     getSettings().backend.enableAdvancedSettings.setSpeedrunValue(false);
     getSettings().game.recordingMode.setSpeedrunValue(false);
     getSettings().game.debugFlyCam.setSpeedrunValue(false);
-    getSettings().game.moveLink.setSpeedrunValue(false);
-    getSettings().game.teleportLink.setSpeedrunValue(false);
+    getSettings().game.enableMoveLinkCombo.setSpeedrunValue(false);
+    getSettings().game.enableTeleportCombo.setSpeedrunValue(false);
+    getSettings().game.areaReload.setSpeedrunValue(false);
+    getSettings().game.gorgeVoidChecker.setSpeedrunValue(false);
+    getSettings().game.nativePracticeMenu.setSpeedrunValue(false);
+    getSettings().game.nativeInputViewer.setSpeedrunValue(false);
+    getSettings().game.nativeLinkDebugInfo.setSpeedrunValue(false);
 }
 
 static void clearSpeedrunOverrides() {
