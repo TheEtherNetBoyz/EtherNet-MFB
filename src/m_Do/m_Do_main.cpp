@@ -25,7 +25,6 @@
 #include "c/c_dylink.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_debug_pad.h"
-#include "d/d_meter2_info.h"
 #include "d/d_s_logo.h"
 #include "d/d_s_menu.h"
 #include "d/d_s_play.h"
@@ -42,7 +41,6 @@
 #include "m_Do/m_Do_printf.h"
 #include "m_Do/m_Do_ext2.h"
 #include "SSystem/SComponent/c_counter.h"
-#include <cstdint>
 #include <cstring>
 #include <sstream>
 
@@ -53,7 +51,6 @@
 #include <borealis/sentry.hpp>
 #include <borealis/version.h>
 #include <filesystem>
-#include <fmt/format.h>
 #include <system_error>
 #include <thread>
 #include "SSystem/SComponent/c_API.h"
@@ -61,7 +58,6 @@
 #include "dusk/data.hpp"
 #include "dusk/dusk.h"
 #include "dusk/frame_interpolation.h"
-#include "dusk/tas_movie.h"
 #include "dusk/game_clock.h"
 #include "dusk/gyro.h"
 #include "dusk/commands.hpp"
@@ -69,7 +65,6 @@
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/imgui/ImGuiEngine.hpp"
 #include "dusk/iso_validate.hpp"
-#include "dusk/video_latency.h"
 #include "dusk/logging.h"
 #include "dusk/main.h"
 #include "dusk/hq_minimap.hpp"
@@ -98,12 +93,10 @@
 #include "cxxopts.hpp"
 #include "d/actor/d_a_movie_player.h"
 #include "dusk/audio/DuskAudioSystem.h"
-#include "dusk/area_reload.hpp"
 #include "dusk/audio/DuskDsp.hpp"
 #include "dusk/config.hpp"
 #include "dusk/speedrun.h"
 #include "dusk/settings.h"
-#include "dusk/vector_rsqrt.h"
 #include "dusk/texture_replacements.hpp"
 #include "dusk/io.hpp"
 #include "dusk/version.hpp"
@@ -301,92 +294,62 @@ void main01(void) {
         dusk::ui::update();
 
         const auto timing = dusk::game_clock::advance();
+        const auto interpolationMode = dusk::getSettings().game.enableFrameInterpolation.getValue();
         if (timing.separatePresentation) {
-            const int tasSimTicks = dusk::tas_movie::simulationTicksForHostFrame(timing.numSimTicks);
-            const bool tasBatchActive = dusk::tas_movie::active();
-            if (tasSimTicks > 0) {
-                dusk::frame_interp::begin_frame(timing.interpolating, true, 0.0f);
+            if (timing.numSimTicks > 0) {
+                dusk::frame_interp::begin_frame(interpolationMode, true, 0.0f);
                 dusk::frame_interp::set_ui_tick_pending(true);
-                for (int i = 0; i < tasSimTicks; ++i) {
+                for (int i = 0; i < timing.numSimTicks; ++i) {
                     if (timing.interpolating) {
                         dusk::frame_interp::begin_sim_tick();
                     }
                     dusk::game_clock::begin_sim_tick();
                     mDoCPd_c::read();
                     dusk::mouse::read();
-                    dusk::gyro::read(dusk::game_clock::sim_pace());
+                    dusk::gyro::read(dusk::game_clock::kSimPeriod);
                     dusk::processGameCombos();
                     fapGm_Execute();
                     dusk::processCameraCommands();
-                    dusk::tas_movie::restorePresentationCamera();
                     mDoAud_Execute();
                     dusk::game_clock::commit_sim_tick();
-                    if (tasBatchActive &&
-                        (!dusk::tas_movie::active() || dusk::tas_movie::paused())) {
-                        break;
-                    }
                 }
             }
 
             const float interpolationStep =
                 timing.interpolating ? dusk::game_clock::sample_interpolation_step() : 1.0f;
-            dusk::frame_interp::begin_frame(timing.interpolating, false, interpolationStep);
-            static int sLastWindowStatus = -1;
-            const int windowStatus = dMeter2Info_getWindowStatus();
-            const auto isCaptureMenuStatus = [](int status) {
-                return status == 2 || status == 3 || status == 4 || status == 5 || status == 10;
-            };
-            if (windowStatus != sLastWindowStatus &&
-                (isCaptureMenuStatus(windowStatus) || isCaptureMenuStatus(sLastWindowStatus))) {
-                dusk::frame_interp::request_presentation_sync();
+            dusk::frame_interp::begin_frame(interpolationMode, false, interpolationStep);
+            if (timing.interpolating) {
+                dusk::frame_interp::interpolate();
+                dusk::frame_interp::begin_presentation_camera();
             }
-            sLastWindowStatus = windowStatus;
-            if (!dusk::frame_interp::presentation_skip_active()) {
-                if (timing.interpolating) {
-                    dusk::frame_interp::interpolate();
-                    dusk::frame_interp::begin_presentation_camera();
-                }
-                dusk::tas_movie::applyPresentationCamera(dComIfGd_getView());
-                fpcM_DrawIterater((fpcM_DrawIteraterFunc)fpcM_Draw);
-                cAPIGph_Painter();
-                dusk::tas_movie::restorePresentationCamera();
-                if (timing.interpolating) {
-                    dusk::frame_interp::end_presentation_camera();
-                }
+
+            fpcM_DrawIterater((fpcM_DrawIteraterFunc)fpcM_Draw);
+            cAPIGph_Painter();
+            if (timing.interpolating) {
+                dusk::frame_interp::end_presentation_camera();
             }
             dusk::frame_interp::set_ui_tick_pending(false);
         } else {
-            dusk::frame_interp::begin_frame(false, true, 0.0f);
+            dusk::frame_interp::begin_frame(dusk::FrameInterpMode::Off, true, 0.0f);
             dusk::frame_interp::set_ui_tick_pending(true);
-            const int tasSimTicks = dusk::tas_movie::simulationTicksForHostFrame(1);
-            const bool tasBatchActive = dusk::tas_movie::active();
-            for (int simTick = 0; simTick < tasSimTicks; ++simTick) {
-                dusk::game_clock::begin_sim_tick();
-                // Game Inputs
-                mDoCPd_c::read();
-                dusk::mouse::read();
-                dusk::gyro::read(timing.dt);
-                dusk::processGameCombos();
+            dusk::game_clock::begin_sim_tick();
 
-                // EXECUTE GAME LOGIC & RENDER
-                // This calls mDoGph_Painter -> JFWDisplay -> GX Functions
-                fapGm_Execute();
-                dusk::processCameraCommands();
-                dusk::tas_movie::restorePresentationCamera();
+            // Game Inputs
+            mDoCPd_c::read();
+            dusk::mouse::read();
+            dusk::gyro::read(timing.dt);
+            dusk::processGameCombos();
 
-                mDoAud_Execute();
-                dusk::game_clock::commit_sim_tick();
-                if (tasBatchActive &&
-                    (!dusk::tas_movie::active() || dusk::tas_movie::paused())) {
-                    break;
-                }
-            }
+            // EXECUTE GAME LOGIC & RENDER
+            // This calls mDoGph_Painter -> JFWDisplay -> GX Functions
+            fapGm_Execute();
+            dusk::processCameraCommands();
+
+            mDoAud_Execute();
+            dusk::game_clock::commit_sim_tick();
         }
 
-        dusk::video_latency::process();
         aurora_end_frame();
-        dusk::game_clock::finish_main_loop();
-
 
         FrameMark;
 
@@ -394,6 +357,28 @@ void main01(void) {
         dusk::discord::run_callbacks();
         dusk::discord::update_presence();
 #endif
+
+        static Limiter main_loop_limiter;
+        static double last_fps_setting = 0.0;
+        static Limiter::duration_t target_ns = 0;
+
+        if (dusk::getSettings().game.enableFrameInterpolation.getValue() ==
+                dusk::FrameInterpMode::Capped &&
+            !dusk::getTransientSettings().turboMode)
+        {
+            ZoneScopedN("Frame limiter");
+            double current_fps = dusk::getSettings().video.maxFrameRate.getValue();
+            if (current_fps != last_fps_setting) {
+                last_fps_setting = current_fps;
+                target_ns = static_cast<Limiter::duration_t>(1'000'000'000.0 / current_fps);
+            }
+
+            Limiter::duration_t sleepTime = main_loop_limiter.Sleep(target_ns);
+            dusk::frameUsagePct =
+                100.0f * (1.0f - static_cast<float>(sleepTime) / static_cast<float>(target_ns));
+        } else {
+            main_loop_limiter.Reset();
+        }
     } while (dusk::IsRunning);
 
     exit:;
@@ -597,7 +582,6 @@ int game_main(int argc, char* argv[]) {
             ("dvd", "Path to DVD image file", cxxopts::value<std::string>())
             ("mods", "Path to mods directory", cxxopts::value<std::string>())
             ("backend", "Graphics API backend to use (auto, d3d12, d3d11, metal, vulkan, null)", cxxopts::value<std::string>())
-            ("prelaunch", "Force the startup screen to appear even if it is set to be skipped", cxxopts::value<bool>()->default_value("false")->implicit_value("true"))
             ("cvar", "Override configuration variables without modifying config", cxxopts::value<std::vector<std::string>>())
             ("develop", "Enable the game's developer mode and OSReport for debugging", cxxopts::value<bool>()->default_value("false")->implicit_value("true"))
             ("load-save", "Skip the opening and load a save from slot 1-3", cxxopts::value<uint8_t>()->default_value("0"))
@@ -678,9 +662,6 @@ int game_main(int argc, char* argv[]) {
 
     dusk::config::load_from_user_preferences();
     ApplyCVarOverrides(parsed_arg_options["cvar"]);
-    dusk_set_native_vector_rsqrt(!dusk::getSettings().game.usePpcFastInvSqrt.getValue());
-    dusk::presentation::update_frame_rate_preference();
-#if BOREALIS_HAS_SENTRY
     borealis::sentry::Options sentryOptions{
         .release = fmt::format("{}@{}", dusk::AppInfo.appName, BOREALIS_APP_DESCRIBE),
         .databaseDirectory = dusk::CachePath / "sentry",
@@ -689,7 +670,6 @@ int game_main(int argc, char* argv[]) {
         sentryOptions.attachments.emplace_back(logPath);
     }
     borealis::sentry::initialize(sentryOptions);
-#endif
     borealis::crash::install();
     // TODO: How to handle this?
     // PADSetDefaultMapping(&defaultPadMapping, PAD_TYPE_STANDARD);
@@ -767,36 +747,12 @@ int game_main(int argc, char* argv[]) {
     } else {
         AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
     }
-    switch (dusk::getSettings().video.forcedAspectRatio.getValue()) {
-    case dusk::AspectRatioMode::Ratio16x9:
-        AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
-        VILockAspectRatio(16, 9);
-        break;
-    case dusk::AspectRatioMode::Ratio21x9:
-        AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
-        VILockAspectRatio(43, 18);
-        break;
-    case dusk::AspectRatioMode::Ratio3x2:
-        AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
-        VILockAspectRatio(3, 2);
-        break;
-    case dusk::AspectRatioMode::Off:
-    default:
-        VIUnlockAspectRatio();
-        break;
-    }
-    VISetFrameBufferScale(dusk::getSettings().game.internalResolutionScale.getValue());
-    switch (dusk::getSettings().game.resampler.getValue()) {
-    case dusk::Resampler::Area:
-        aurora_set_resampler(SAMPLER_AREA);
-        break;
-    case dusk::Resampler::Bilinear:
-    default:
-        aurora_set_resampler(SAMPLER_BILINEAR);
-        break;
-    }
+    dusk::applyInternalResolutionScale(dusk::getSettings().game.internalResolutionScale.getValue());
+    dusk::applyResampler(dusk::getSettings().game.resampler.getValue());
 
-    dusk::audio::ApplySettings();
+    dusk::audio::SetMasterVolume(dusk::audio::MasterVolumeToLinear(dusk::getSettings().audio.masterVolume / 100.0f));
+    dusk::audio::SetEnableReverb(dusk::getSettings().audio.enableReverb);
+    dusk::audio::EnableHrtf = dusk::getSettings().audio.enableHrtf;
 
     // Run ImGui UI loop if Aurora couldn't initialize a backend
     if (auroraInfo.backend == BACKEND_NULL) {
@@ -830,16 +786,19 @@ int game_main(int argc, char* argv[]) {
     bool forcePreLaunchUI = false;
     bool saveConfigBeforePrelaunch = false;
 
-    // Requested via the in-game "Return to Startup Screen" option (or --prelaunch). Show the
-    // startup screen even if "Skip Dusklight Main Menu" is enabled, without persisting that change.
-    const bool forceShowPrelaunch = parsed_arg_options.count("prelaunch") > 0;
+    borealis::io::PathAccess dvdPathAccess;
+    const auto resolveDvdLocation = [&dvdPathAccess](const std::string& location) {
+        dvdPathAccess = borealis::io::access_path(location);
+        return dvdPathAccess ? borealis::io::fs_path_to_string(dvdPathAccess.path()) : location;
+    };
 
-    const std::string p = dusk::getSettings().backend.isoPath;
+    const std::string savedLocation = dusk::getSettings().backend.isoPath;
     dusk::iso::DiscInfo discInfo{};
-    if (!p.empty() &&
-        dusk::iso::inspect(p.c_str(), discInfo) != dusk::iso::ValidationError::Success)
+    if (!savedLocation.empty() &&
+        dusk::iso::inspect(savedLocation.c_str(), discInfo) != dusk::iso::ValidationError::Success)
     {
-        DuskLog.warn("Saved DVD image path failed validation, clearing configured path: {}", p);
+        DuskLog.warn("Saved DVD image location failed validation, clearing it: {}",
+            borealis::io::display_name(savedLocation));
         dusk::getSettings().backend.isoPath.setValue("");
         dusk::getSettings().backend.isoVerification.setValue(dusk::DiscVerificationState::Unknown);
         forcePreLaunchUI = true;
@@ -847,22 +806,24 @@ int game_main(int argc, char* argv[]) {
     }
 
     bool skipPreLaunchUI = dusk::getSettings().backend.skipPreLaunchUI.getValue();
-    if (forceShowPrelaunch) {
-        skipPreLaunchUI = false;
-    }
 
-    std::string dvd_path = dusk::getSettings().backend.isoPath;
+    std::string dvdLocation = dusk::getSettings().backend.isoPath;
+    std::string dvdPath = resolveDvdLocation(dvdLocation);
     bool dvd_opened = false;
-    if (!forceShowPrelaunch && parsed_arg_options.count("dvd")) {
-        dvd_path = parsed_arg_options["dvd"].as<std::string>();
-        if (dusk::iso::inspect(dvd_path.c_str(), discInfo) == dusk::iso::ValidationError::Success) {
-            DuskLog.info("Loading DVD image from command line: {}", dvd_path);
-            dvd_opened = aurora_dvd_open(dvd_path.c_str());
+    if (parsed_arg_options.count("dvd")) {
+        dvdLocation = parsed_arg_options["dvd"].as<std::string>();
+        dvdPath = resolveDvdLocation(dvdLocation);
+        if (dusk::iso::inspect(dvdLocation.c_str(), discInfo) ==
+            dusk::iso::ValidationError::Success)
+        {
+            DuskLog.info("Loading DVD image from command line: {}", dvdPath);
+            dvd_opened = aurora_dvd_open(dvdPath.c_str());
             if (!dvd_opened) {
-                DuskLog.warn("Failed to open DVD image from command line: {}, opening prelaunch UI", dvd_path);
+                DuskLog.warn("Failed to open DVD image from command line: {}, opening prelaunch UI",
+                    dvdPath);
                 forcePreLaunchUI = true;
             } else {
-                dusk::getSettings().backend.isoPath.setValue(dvd_path);
+                dusk::getSettings().backend.isoPath.setValue(dvdLocation);
                 dusk::getSettings().backend.isoVerification.setValue(
                     dusk::DiscVerificationState::Unknown);
                 dusk::config::save();
@@ -870,13 +831,14 @@ int game_main(int argc, char* argv[]) {
                 skipPreLaunchUI = true;
             }
         } else {
-            DuskLog.warn("DVD image from command line failed validation: {}, opening prelaunch UI", dvd_path);
+            DuskLog.warn(
+                "DVD image from command line failed validation: {}, opening prelaunch UI", dvdPath);
             forcePreLaunchUI = true;
         }
     }
 
     // If we can't load right into the game, stop requesting to load a stage or save
-    if (forcePreLaunchUI || dvd_path.empty()) {
+    if (forcePreLaunchUI || dvdPath.empty()) {
         if (dusk::StageRequested.set) {
             DuskLog.warn("Cannot load stage {} because no iso path is set, opening prelaunch UI",dusk::StageRequested.stage);
             dusk::StageRequested = {};
@@ -936,33 +898,22 @@ int game_main(int argc, char* argv[]) {
             }
         }
 
-        dvd_path = dusk::getSettings().backend.isoPath;
-        if (dvd_path.empty()) {
+        dvdLocation = dusk::getSettings().backend.isoPath;
+        dvdPath = resolveDvdLocation(dvdLocation);
+        if (dvdPath.empty()) {
             DuskLog.fatal("No DVD image specified, unable to boot!");
         }
-        if (!dusk::IsGameLaunched &&
-            dusk::iso::inspect(dvd_path.c_str(), discInfo) != dusk::iso::ValidationError::Success)
+        if (!dusk::IsGameLaunched && dusk::iso::inspect(dvdLocation.c_str(), discInfo) !=
+                                         dusk::iso::ValidationError::Success)
         {
-            DuskLog.fatal("DVD image failed validation: {}", dvd_path);
+            DuskLog.fatal("DVD image failed validation: {}", dvdPath);
         }
-        DuskLog.info("Loading DVD image: {}", dvd_path);
-        if (!aurora_dvd_open(dvd_path.c_str())) {
-            DuskLog.fatal("Failed to open DVD image: {}", dvd_path);
+        DuskLog.info("Loading DVD image: {}", dvdPath);
+        if (!aurora_dvd_open(dvdPath.c_str())) {
+            DuskLog.fatal("Failed to open DVD image: {}", dvdPath);
         }
 
         dusk::IsGameLaunched = true;
-    }
-
-    dusk::updateDiscLoadingDelay();
-
-#if BOREALIS_HAS_SENTRY
-    if (borealis::sentry::get_consent() == borealis::sentry::Consent::Unknown) {
-        dusk::ui::push_document(std::make_unique<dusk::ui::CrashReportWindow>());
-    }
-#endif
-
-    if (!dusk::getSettings().backend.wasPresetChosen) {
-        dusk::ui::push_document(std::make_unique<dusk::ui::PresetWindow>());
     }
 
     dusk::version::init();

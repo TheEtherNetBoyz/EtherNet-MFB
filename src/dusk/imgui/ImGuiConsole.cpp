@@ -29,7 +29,6 @@
 #include "dusk/input_macro.h"
 #include "dusk/game_mode.hpp"
 #include "dusk/livesplit.h"
-#include "dusk/texture_replacements.hpp"
 #include "dusk/main.h"
 #include "dusk/presentation.hpp"
 #include "dusk/settings.h"
@@ -145,7 +144,6 @@ void toggle_config_bool(dusk::config::ConfigVar<bool>& value) {
 
 void toggle_texture_pack() {
     toggle_config_bool(dusk::getSettings().game.enableTextureReplacements);
-    dusk::texture_replacements::set_enabled(dusk::getSettings().game.enableTextureReplacements.getValue());
 }
 
 void cycle_bloom_mode() {

@@ -19,6 +19,8 @@ static void onSpeedrunModeDeactive() {
     if (getSettings().game.liveSplitEnabled) {
         speedrun::disconnectLiveSplit();
     }
+    g_speedrunInfo.reset();
+    reset();
 }
 
 void registerSpeedrunGameMode() {

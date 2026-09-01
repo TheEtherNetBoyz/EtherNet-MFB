@@ -1,13 +1,16 @@
 #include "dusk/settings.h"
-#include <aurora/aurora.h>
-#include <aurora/dvd.h>
-
-#include <algorithm>
-#include <SDL3/SDL_scancode.h>
 #include "dusk/config.hpp"
-#include "dusk/ui/ui.hpp"
 #include "dusk/game_mode.hpp"
 #include "dusk/speedrun.h"
+#include "dusk/texture_replacements.hpp"
+#include "dusk/ui/ui.hpp"
+
+#include <algorithm>
+
+#include <SDL3/SDL_scancode.h>
+#include <aurora/aurora.h>
+#include <aurora/dvd.h>
+#include <dolphin/vi.h>
 
 namespace dusk {
 
@@ -368,6 +371,22 @@ UserSettings& getSettings() {
     return g_userSettings;
 }
 
+void applyInternalResolutionScale(int scale) {
+    VISetFrameBufferScale(static_cast<float>(scale));
+}
+
+void applyResampler(Resampler resampler) {
+    switch (resampler) {
+    case Resampler::Area:
+        aurora_set_resampler(SAMPLER_AREA);
+        break;
+    case Resampler::Bilinear:
+    default:
+        aurora_set_resampler(SAMPLER_BILINEAR);
+        break;
+    }
+}
+
 void registerSettings() {
     Register(g_userSettings.ui.settingsFavorites);
     Register(g_userSettings.ui.menuWidthDp);
@@ -453,9 +472,12 @@ void registerSettings() {
     Register(g_userSettings.game.bloomMultiplier);
     Register(g_userSettings.game.depthOfFieldMode);
     Register(g_userSettings.game.disableWaterRefraction);
-    Register(g_userSettings.game.enableTextureReplacements);
-    Register(g_userSettings.game.internalResolutionScale);
-    Register(g_userSettings.game.resampler);
+    Register(g_userSettings.game.enableTextureReplacements,
+        [](const bool&, const bool&) { texture_replacements::reload(); });
+    Register(g_userSettings.game.internalResolutionScale,
+        [](const int& value, const int&) { applyInternalResolutionScale(value); });
+    Register(g_userSettings.game.resampler,
+        [](const Resampler& value, const Resampler&) { applyResampler(value); });
     Register(g_userSettings.game.shadowResolutionMultiplier);
     Register(g_userSettings.game.enableTwilightVisuals);
     Register(g_userSettings.game.enableTwilightVisualMusic);

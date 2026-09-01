@@ -1504,6 +1504,7 @@ set(DUSK_FILES
         src/dusk/mods/svc/camera.cpp
         src/dusk/mods/svc/config.cpp
         src/dusk/mods/svc/config.hpp
+        src/dusk/mods/svc/file.cpp
         src/dusk/mods/svc/game.cpp
         src/dusk/mods/svc/gfx.cpp
         src/dusk/mods/svc/flow.cpp
@@ -1561,6 +1562,8 @@ set(DUSK_FILES
         src/dusk/ui/graphics_tuner.hpp
         src/dusk/ui/group_button.cpp
         src/dusk/ui/group_button.hpp
+        src/dusk/ui/file_button.cpp
+        src/dusk/ui/file_button.hpp
         src/dusk/ui/icon_provider.cpp
         src/dusk/ui/icon_provider.hpp
         src/dusk/ui/input.cpp
