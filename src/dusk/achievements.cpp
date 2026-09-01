@@ -58,7 +58,7 @@ std::vector<AchievementSystem::Entry> AchievementSystem::makeEntries() {
         {
             {
                 "hero_of_twilight",
-                "Hero of Twilight",
+                "myfatballs",
                 "Deliver the finishing blow to Ganondorf.",
                 AchievementCategory::Challenge,
                 false, 0, 0, false
