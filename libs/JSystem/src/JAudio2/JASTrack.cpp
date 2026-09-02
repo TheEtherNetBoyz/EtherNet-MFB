@@ -6,6 +6,9 @@
 #include "JSystem/JAudio2/JASBank.h"
 #include "JSystem/JAudio2/JASAiCtrl.h"
 #include "JSystem/JAudio2/JASDSPInterface.h"
+#if TARGET_PC
+#include "dusk/audio/DuskAudioSystem.h"
+#endif
 
 JASTrack::JASTrack() : mDefaultChannelMgr(this), mChannelMgrCount(1), mStatus(0) {
     mChannelMgrs[0] = &mDefaultChannelMgr;
@@ -63,6 +66,10 @@ DUSK_GAME_DATA JASOscillator::Data const JASTrack::sPitchEnvOsc = {1, 1.0f, NULL
 
 // NONMATCHING JASPoolAllocObject_MultiThreaded<_> locations
 void JASTrack::init() {
+#if TARGET_PC
+    mDuskPalaceMusic = false;
+    mDuskBattleMusic = false;
+#endif
     JUT_ASSERT(104, mStatus == STATUS_FREE || mStatus == STATUS_STOPPED);
     mSeqCtrl.init();
     mTrackPort.init();
@@ -675,7 +682,20 @@ void JASTrack::channelUpdateCallback(u32 param_0, JASChannel* param_1,
     switch (param_0) {
     case 0:
     case 1:
-        param_1->setParams(channel_mgr->mParams);
+        {
+            JASChannelParams params = channel_mgr->mParams;
+#if TARGET_PC
+            // Last volume decision before the channel reaches the DSP. Sequence
+            // scripts, cached child parameters and detached tails cannot bypass it.
+            if (track->getRootTrack()->mDuskPalaceMusic) {
+                params.mVolume *= dusk::audio::TwilightPalaceGain();
+            }
+            if (track->getRootTrack()->mDuskBattleMusic) {
+                params.mVolume *= dusk::audio::TwilightBattleGain();
+            }
+#endif
+            param_1->setParams(params);
+        }
         track->updateChannel(param_1, param_2);
         break;
     case 3:

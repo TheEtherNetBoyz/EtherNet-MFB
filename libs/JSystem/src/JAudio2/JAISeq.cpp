@@ -5,6 +5,9 @@
 #include "JSystem/JAudio2/JAISoundChild.h"
 #include "JSystem/JAudio2/JASCriticalSection.h"
 #include "JSystem/JAudio2/JAIAudience.h"
+#if TARGET_PC
+#include "Z2AudioLib/Z2SeqMgr.h"
+#endif
 
 namespace {
 
@@ -219,6 +222,12 @@ void JAISeq::mixOut_(const JASSoundParams& params, JAISoundActivity activity) {
     if (field_0x3a8) {
         field_0x3a8->virtual4(this, outParams);
     }
+#if TARGET_PC
+    // Tag ownership only. The channel callback applies the gate without
+    // changing sequence parameters or stopping/pausing sustained notes.
+    inner_.outputTrack.mDuskPalaceMusic = getID() == Z2BGM_DUNGEON_LV8;
+    inner_.outputTrack.mDuskBattleMusic = getID() == Z2BGM_BATTLE_NORMAL || getID() == Z2BGM_BATTLE_TWILIGHT;
+#endif
 
     if (audible_) {
         int maxChannels = audience_->getMaxChannels();

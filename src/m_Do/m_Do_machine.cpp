@@ -4,6 +4,9 @@
  */
 
 #include "m_Do/m_Do_machine.h"
+#if TARGET_PC
+#include "dusk/audio/DuskAudioSystem.h"
+#endif
 #include "JSystem/JFramework/JFWSystem.h"
 #include "JSystem/JKernel/JKRHeap.h"
 #include "JSystem/JUtility/JUTConsole.h"
@@ -874,9 +877,17 @@ int mDoMch_Create() {
 
     JFWSystem::setFifoBufSize(0xA0000);
     #if DEBUG
-    JFWSystem::setAramAudioBufSize(0xB00000);
+    JFWSystem::setAramAudioBufSize(0xB00000
+    #if TARGET_PC
+        + dusk::audio::AstralStreamAramReserve
+    #endif
+    );
     #else
-    JFWSystem::setAramAudioBufSize(0xA00000);
+    JFWSystem::setAramAudioBufSize(0xA00000
+    #if TARGET_PC
+        + dusk::audio::AstralStreamAramReserve
+    #endif
+    );
     #endif
     JFWSystem::setAramGraphBufSize(-1);
 

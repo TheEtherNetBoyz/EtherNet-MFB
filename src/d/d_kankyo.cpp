@@ -39,12 +39,137 @@
 #if TARGET_PC
 #include "dusk/imgui/ImGuiBloomWindow.hpp"
 #include "dusk/settings.h"
+#include "dusk/audio/DuskAudioSystem.h"
 #include "dusk/frame_interpolation.h"
 #include "dusk/game_clock.h"
 static f32 timeScale = 1.0f;
 #endif
 
 static void GxXFog_set();
+
+#if TARGET_PC
+static bool dKy_visual_twilight_options_active();
+static void dKy_apply_visual_twilight_scene_fog();
+
+static void dKy_apply_dark_hour_palette(dScnKy_env_light_c& env) {
+    const char* stageName = dComIfGp_getStartStageName();
+    if (!g_dKyExternalVisualConfig.enabled || stageName == NULL ||
+        strncmp(stageName, "D_MN08", 6) == 0) {
+        return;
+    }
+
+    if (g_dKyExternalVisualConfig.style == 2) {
+        const auto astralTint = [](GXColorS10& color, bool warm) {
+            const f32 luma = 0.60f * std::max(
+                0.0f, color.r * 0.299f + color.g * 0.587f + color.b * 0.114f);
+            color.r = static_cast<s16>(std::clamp(luma * (warm ? 1.20f : 0.30f), 0.0f, 1023.0f));
+            color.g = static_cast<s16>(std::clamp(luma * (warm ? 0.22f : 0.48f), 0.0f, 1023.0f));
+            color.b = static_cast<s16>(std::clamp(luma * (warm ? 0.30f : 0.95f), 0.0f, 1023.0f));
+        };
+        for (int i = 0; i < 4; ++i) astralTint(env.bg_amb_col[i], i == 1);
+        for (int i = 0; i < 6; ++i) astralTint(env.dungeonlight_col[i], true);
+        astralTint(env.actor_amb_col, false);
+        // These are the exact post-0.75 values from the working standalone
+        // Astral Plane implementation (integer conversion intentionally
+        // truncates, matching its scale_color helper).
+        env.fog_col = {36, 54, 68, env.fog_col.a};
+        env.vrbox_sky_col = {18, 32, 46, env.vrbox_sky_col.a};
+        env.vrbox_kumo_top_col = {82, 43, 54, env.vrbox_kumo_top_col.a};
+        env.vrbox_kumo_bottom_col = {23, 36, 51, env.vrbox_kumo_bottom_col.a};
+        env.vrbox_kumo_shadow_col = {12, 21, 33, env.vrbox_kumo_shadow_col.a};
+        env.vrbox_kasumi_outer_col = {36, 52, 66, env.vrbox_kasumi_outer_col.a};
+        env.vrbox_kasumi_inner_col = {89, 54, 63, env.vrbox_kasumi_inner_col.a};
+        GXColor blend = *mDoGph_gInf_c::getBloom()->getBlendColor();
+        GXColor mono = *mDoGph_gInf_c::getBloom()->getMonoColor();
+        blend = {180, 40, 130, blend.a};
+        mono.a = 0;
+        mDoGph_gInf_c::getBloom()->setBlendColor(blend);
+        mDoGph_gInf_c::getBloom()->setMonoColor(mono);
+        return;
+    }
+
+    if (g_dKyExternalVisualConfig.style != 3) return;
+
+    const auto tint = [](GXColorS10& color) {
+        const f32 luma = std::max(0.0f,
+            color.r * 0.25f + color.g * 0.65f + color.b * 0.10f);
+        color.r = static_cast<s16>(std::clamp(luma * 0.28f, 0.0f, 1023.0f));
+        color.g = static_cast<s16>(std::clamp(luma * 1.08f, 0.0f, 1023.0f));
+        color.b = static_cast<s16>(std::clamp(luma * 0.40f, 0.0f, 1023.0f));
+    };
+
+    for (int i = 0; i < 4; ++i) {
+        tint(env.bg_amb_col[i]);
+    }
+    for (int i = 0; i < 6; ++i) {
+        tint(env.dungeonlight_col[i]);
+        env.dungeonlight[i].mColor.r = static_cast<u8>(
+            std::clamp<s16>(env.dungeonlight_col[i].r, 0, 255));
+        env.dungeonlight[i].mColor.g = static_cast<u8>(
+            std::clamp<s16>(env.dungeonlight_col[i].g, 0, 255));
+        env.dungeonlight[i].mColor.b = static_cast<u8>(
+            std::clamp<s16>(env.dungeonlight_col[i].b, 0, 255));
+    }
+
+    env.vrbox_sky_col = {12, 54, 25, env.vrbox_sky_col.a};
+    env.vrbox_kumo_top_col = {34, 102, 49, env.vrbox_kumo_top_col.a};
+    env.vrbox_kumo_bottom_col = {15, 61, 29, env.vrbox_kumo_bottom_col.a};
+    env.vrbox_kumo_shadow_col = {5, 27, 13, env.vrbox_kumo_shadow_col.a};
+    env.vrbox_kasumi_outer_col = {18, 67, 32, env.vrbox_kasumi_outer_col.a};
+    env.vrbox_kasumi_inner_col = {42, 112, 56, env.vrbox_kasumi_inner_col.a};
+
+    GXColor blend = *mDoGph_gInf_c::getBloom()->getBlendColor();
+    GXColor mono = *mDoGph_gInf_c::getBloom()->getMonoColor();
+    blend.r = 24;
+    blend.g = 220;
+    blend.b = 52;
+    mono.a = 0;
+    mDoGph_gInf_c::getBloom()->setBlendColor(blend);
+    mDoGph_gInf_c::getBloom()->setMonoColor(mono);
+}
+
+static void dKy_apply_visual_style_fog(GXColorS10& fog, f32& fogNear, f32& fogFar) {
+    const char* stageName = dComIfGp_getStartStageName();
+    if (!g_dKyExternalVisualConfig.enabled || stageName == NULL ||
+        strncmp(stageName, "D_MN08", 6) == 0) return;
+    if (g_dKyExternalVisualConfig.style == 2 || g_dKyExternalVisualConfig.style == 3) {
+        // Astral Plane uses the same dense, dark-distance fog profile as Dark
+        // Hour. This keeps far scenery from retaining its authored color while
+        // preserving Astral's separate environment and bloom palette.
+        const GXColorS10& ambient = g_env_light.bg_amb_col[0];
+        const f32 luma = std::max(0.0f,
+            ambient.r * 0.20f + ambient.g * 0.70f + ambient.b * 0.10f);
+        fog.r = static_cast<s16>(std::clamp(luma * 0.20f, 0.0f, 1023.0f));
+        fog.g = static_cast<s16>(std::clamp(luma * 0.90f + 24.0f, 0.0f, 1023.0f));
+        fog.b = static_cast<s16>(std::clamp(luma * 0.32f, 0.0f, 1023.0f));
+        fogFar = std::clamp(fogFar > 100.0f ? fogFar : 7000.0f, 500.0f, 7000.0f);
+        const f32 authoredNear = fogNear > 0.0f ? fogNear : fogFar * 0.18f;
+        fogNear = std::clamp(std::min(authoredNear, fogFar * 0.24f), 0.0f, fogFar - 1.0f);
+    }
+}
+
+static void dKy_apply_visual_twilight_scene_fog() {
+    const char* stageName = dComIfGp_getStartStageName();
+    if (!dKy_visual_twilight_options_active() || stageName == NULL ||
+        strncmp(stageName, "D_MN08", 6) == 0 ||
+        (g_dKyExternalVisualConfig.style != 2 &&
+         g_dKyExternalVisualConfig.style != 3)) {
+        return;
+    }
+
+    // Use the same scene-wide Dark Hour fog profile for Astral Plane so distant
+    // geometry is covered consistently with nearby objects.
+    const f32 fogFar = std::clamp(g_env_light.mFogFar > 100.0f ?
+                                      g_env_light.mFogFar : 7000.0f,
+                                  500.0f, 7000.0f);
+    const f32 authoredNear = g_env_light.mFogNear > 0.0f ?
+        g_env_light.mFogNear : fogFar * 0.18f;
+    g_env_light.mFogFar = fogFar;
+    g_env_light.mFogNear = std::clamp(std::min(authoredNear, fogFar * 0.28f),
+                                      0.0f, fogFar - 1.0f);
+}
+
+#endif
 
 static int s_visual_environment_layer = -1;
 static int s_visual_environment_room = -1;
@@ -57,10 +182,13 @@ static bool s_visual_environment_area_initialized = false;
 static bool s_twilight_visual_audio_state = false;
 static bool s_twilight_visual_audio_state_initialized = false;
 static u8 s_twilight_visual_original_bgm_status = 0xff;
+static bool s_twilight_visual_music_files_loaded = false;
+static cXyz s_dark_hour_moon_position(-30000.0f, 45000.0f, -65000.0f);
 #endif
 static bool s_visual_environment_forced = false;
 #if TARGET_PC
 static bool s_visual_enemy_form_context = false;
+dKy_external_visual_config_c g_dKyExternalVisualConfig{};
 #endif
 static bool s_has_faron_twilight_sky = false;
 static GXColorS10 s_faron_twilight_sky;
@@ -74,8 +202,7 @@ static GXColorS10 s_faron_twilight_kasumi_inner;
 static bool dKy_visual_twilight_stage_enabled() {
     const char* stageName = dComIfGp_getStartStageName();
     return stageName != NULL &&
-           !dusk::getSettings().game.speedrunMode.getValue() &&
-           dusk::getSettings().game.enableTwilightVisuals.getValue() &&
+           g_dKyExternalVisualConfig.enabled &&
            strncmp(stageName, "D_MN08", 6) != 0;
 }
 
@@ -112,10 +239,9 @@ static bool dKy_visual_twilight_monochrome_active() {
         return false;
     }
 
-    return !dusk::getSettings().game.speedrunMode.getValue() &&
+    return g_dKyExternalVisualConfig.enabled &&
            strncmp(stageName, "D_MN08", 6) != 0 &&
-           dusk::getSettings().game.twilightVisualStyle.getValue() ==
-               dusk::TwilightVisualStyle::BlackAndWhiteEnvironment;
+           g_dKyExternalVisualConfig.style == 1;
 }
 
 static void dKy_grayscale_visual_twilight_color(GXColorS10& color) {
@@ -164,7 +290,8 @@ static f32 dKy_get_visual_twilight_brightness() {
         return 1.0f;
     }
 
-    f32 brightness = dusk::getSettings().game.twilightVisualBrightness.getValue();
+    f32 brightness = g_dKyExternalVisualConfig.brightness;
+    if (g_dKyExternalVisualConfig.style == 2) brightness *= 0.65f;
     if (brightness < 0.0f) {
         return 0.0f;
     }
@@ -232,6 +359,7 @@ static void dKy_apply_visual_twilight_monochrome(dScnKy_env_light_c& env) {
 }
 #endif
 
+
 static u8 dKy_visual_twilight_bloom_id() {
     // Bloom entries 1 and 2 are the game's Twilight and Twilight Weak
     // profiles. Use the full Twilight profile when the map has no extended
@@ -242,9 +370,8 @@ static u8 dKy_visual_twilight_bloom_id() {
 static void dKy_apply_visual_twilight_sky_fallback(
     GXColorS10& sky_col, GXColorS10& kumo_top_col, GXColorS10& kumo_bottom_col,
     GXColorS10& kumo_shadow_col, GXColorS10& kasumi_outer_col, GXColorS10& kasumi_inner_col) {
-    const u8 skyVariant = static_cast<u8>(
-        dusk::getSettings().game.twilightSkyboxMode.getValue());
-    const bool authoredOverride = skyVariant != static_cast<u8>(dusk::TwilightSkyboxMode::TwilightDay);
+    const u8 skyVariant = g_dKyExternalVisualConfig.skyVariant;
+    const bool authoredOverride = skyVariant != 0;
     if (!dKy_darkworld_visual_check() ||
         (s_visual_environment_has_twilight_layer && !authoredOverride)) {
         return;
@@ -1561,7 +1688,7 @@ void dKy_apply_visual_twilight_weather() {
     static int wind_gust_timer = 0;
     static bool wind_gust_active = false;
 
-    const bool active = !dusk::getSettings().game.speedrunMode.getValue();
+    const bool active = g_dKyExternalVisualConfig.enabled;
     const dusk::TwilightWeather weather = dusk::getSettings().game.twilightWeather.getValue();
     if (!active || weather == dusk::TwilightWeather::Current) {
         wind_gust_timer = 0;
@@ -1725,9 +1852,8 @@ void dKy_apply_visual_twilight_weather() {
 #endif
 }
 
-static void dKy_update_visual_environment() {
-    dKy_apply_visual_twilight_weather();
 
+static void dKy_update_visual_environment() {
     const char* stageName = dComIfGp_getStartStageName();
     const int roomNo = dComIfGp_roomControl_getStayNo();
     const bool forceTwilight = dKy_visual_twilight_stage_enabled();
@@ -2194,7 +2320,7 @@ void dScnKy_env_light_c::setDaytime() {
             data_8074c978++;
         }
     }
-    #endif
+#endif
 
     if (daytime >= 360.0f) {
         daytime = 0.0f;
@@ -3169,16 +3295,6 @@ void dScnKy_env_light_c::setLight() {
 #if TARGET_PC
             dusk::ApplyBloomOverride();
 
-            if (dKy_visual_twilight_monochrome_active()) {
-                // Apply this after the optional ImGui bloom override so every
-                // bloom source remains monochrome in the black-and-white style.
-                GXColor monochromeBlend = *mDoGph_gInf_c::getBloom()->getBlendColor();
-                GXColor monochromeSubtract = *mDoGph_gInf_c::getBloom()->getMonoColor();
-                dKy_grayscale_visual_twilight_color(monochromeBlend);
-                dKy_grayscale_visual_twilight_color(monochromeSubtract);
-                mDoGph_gInf_c::getBloom()->setBlendColor(monochromeBlend);
-                mDoGph_gInf_c::getBloom()->setMonoColor(monochromeSubtract);
-            }
 #endif
 
             f32 var_f30;
@@ -3401,10 +3517,6 @@ void dScnKy_env_light_c::setLight() {
                 vrbox_kasumi_inner_col.b = 0;
             }
 
-            #if TARGET_PC
-            dKy_apply_visual_twilight_brightness(*this);
-            dKy_apply_visual_twilight_monochrome(*this);
-            #endif
             }
 
             #if DEBUG
@@ -3412,6 +3524,11 @@ void dScnKy_env_light_c::setLight() {
             #endif
         }
     }
+#if TARGET_PC
+    dKy_apply_dark_hour_palette(*this);
+    dKy_apply_visual_twilight_brightness(*this);
+    dKy_apply_visual_twilight_monochrome(*this);
+#endif
 }
 
 void dScnKy_env_light_c::setLight_bg(dKy_tevstr_c* tevstr_p, GXColorS10* bg_col_p,
@@ -3513,28 +3630,18 @@ void dScnKy_env_light_c::setLight_bg(dKy_tevstr_c* tevstr_p, GXColorS10* bg_col_
             dKy_WolfPowerup_FogNearFar(fog_near_p, fog_far_p);
         }
     }
-
-    #if TARGET_PC
-    const f32 twilight_brightness = dKy_get_visual_twilight_brightness();
-    if (twilight_brightness != 1.0f) {
-        for (i = 0; i < 4; ++i) {
-            dKy_scale_visual_twilight_color(bg_col_p[i], twilight_brightness);
-        }
-        for (i = 0; i < 6; ++i) {
-            dKy_scale_visual_twilight_light(tevstr_p->mLights[i], twilight_brightness);
-        }
-        dKy_scale_visual_twilight_color(*fog_col_p, twilight_brightness);
-    }
+#if TARGET_PC
+    dKy_apply_visual_style_fog(*fog_col_p, *fog_near_p, *fog_far_p);
+    const f32 brightness = dKy_get_visual_twilight_brightness();
+    for (int i = 0; i < 4; ++i) dKy_scale_visual_twilight_color(bg_col_p[i], brightness);
+    for (int i = 0; i < 6; ++i) dKy_scale_visual_twilight_light(tevstr_p->mLights[i], brightness);
+    dKy_scale_visual_twilight_color(*fog_col_p, brightness);
     if (dKy_visual_twilight_monochrome_active()) {
-        for (i = 0; i < 4; ++i) {
-            dKy_grayscale_visual_twilight_color(bg_col_p[i]);
-        }
-        for (i = 0; i < 6; ++i) {
-            dKy_grayscale_visual_twilight_light(tevstr_p->mLights[i]);
-        }
+        for (int i = 0; i < 4; ++i) dKy_grayscale_visual_twilight_color(bg_col_p[i]);
+        for (int i = 0; i < 6; ++i) dKy_grayscale_visual_twilight_light(tevstr_p->mLights[i]);
         dKy_grayscale_visual_twilight_color(*fog_col_p);
     }
-    #endif
+#endif
 }
 
 void dScnKy_env_light_c::setLight_actor(dKy_tevstr_c* tevstr_p, GXColorS10* fog_col_p,
@@ -3711,16 +3818,15 @@ void dScnKy_env_light_c::setLight_actor(dKy_tevstr_c* tevstr_p, GXColorS10* fog_
         }
     }
 
-    #if TARGET_PC
-    const f32 twilight_brightness = dKy_get_visual_twilight_brightness();
-    if (twilight_brightness != 1.0f) {
-        dKy_scale_visual_twilight_color(tevstr_p->AmbCol, twilight_brightness);
-        for (i = 0; i < 6; ++i) {
-            dKy_scale_visual_twilight_light(tevstr_p->mLights[i], twilight_brightness);
-        }
-        dKy_scale_visual_twilight_color(*fog_col_p, twilight_brightness);
+#if TARGET_PC
+    dKy_apply_visual_style_fog(*fog_col_p, *fog_near_p, *fog_far_p);
+    const f32 brightness = dKy_get_visual_twilight_brightness();
+    dKy_scale_visual_twilight_color(tevstr_p->AmbCol, brightness);
+    for (int i = 0; i < 6; ++i) {
+        dKy_scale_visual_twilight_light(tevstr_p->mLights[i], brightness);
     }
-    #endif
+    dKy_scale_visual_twilight_color(*fog_col_p, brightness);
+#endif
 }
 
 void dScnKy_env_light_c::settingTevStruct_colget_actor(cXyz* unused, dKy_tevstr_c* tevstr_p,
@@ -5432,7 +5538,6 @@ void dScnKy_env_light_c::exeKankyo() {
     setDaytime();
     dKyw_wether_proc();
     CalcTevColor();
-    dKy_apply_visual_twilight_weather();
     Sndpos();
     Eflight_flush_proc();
 
@@ -8847,17 +8952,22 @@ static int dKy_Draw(sub_kankyo__class* i_this) {
 
 #if TARGET_PC
 static void dKy_update_visual_twilight_audio() {
-    const bool enabled = !dusk::getSettings().game.speedrunMode.getValue() &&
-                         dusk::getSettings().game.enableTwilightVisuals.getValue() &&
-                         dusk::getSettings().game.enableTwilightVisualMusic.getValue();
+    const bool enabled = g_dKyExternalVisualConfig.enabled;
 
     if (!s_twilight_visual_audio_state_initialized) {
-        s_twilight_visual_audio_state = enabled;
+        // Reconcile a persisted enabled option after loading a save as well
+        // as when toggling it in-game.
+        s_twilight_visual_audio_state = false;
         s_twilight_visual_audio_state_initialized = true;
+    }
+
+    if (enabled == s_twilight_visual_audio_state &&
+        !(enabled && Z2IsTwilightVisualMusicRefreshPending())) {
         return;
     }
 
-    if (enabled == s_twilight_visual_audio_state) {
+    if (!Z2GetSceneMgr()->isSceneExist() || dComIfGp_isEnableNextStage() ||
+        Z2GetStatusMgr()->getDemoStatus() != 0 || dComIfGp_event_runCheck()) {
         return;
     }
 
@@ -8886,8 +8996,35 @@ static void dKy_update_visual_twilight_audio() {
 
 static int dKy_Execute(sub_kankyo__class* i_this) {
     UNUSED(i_this);
+#if TARGET_PC
+    const auto& twilightSettings = dusk::getSettings().game;
+    const bool twilightEnabled = twilightSettings.enableTwilightVisuals.getValue() &&
+                                 !twilightSettings.speedrunMode.getValue();
+    const auto twilightStyle = twilightSettings.twilightVisualStyle.getValue();
+    dKy_set_external_visual_config(
+        twilightEnabled, static_cast<u8>(twilightStyle),
+        twilightSettings.twilightVisualBrightness.getValue(),
+        twilightSettings.twilightChromaticAberration.getValue(),
+        static_cast<u8>(twilightSettings.twilightSkyboxMode.getValue()),
+        twilightEnabled ? static_cast<u8>(twilightSettings.twilightWeather.getValue()) : 0,
+        twilightEnabled && twilightSettings.skywardSwordRunning.getValue());
+    const bool darkHour = twilightEnabled && twilightStyle == dusk::TwilightVisualStyle::DarkHour;
+    dKy_set_external_moon_override(darkHour, darkHour, darkHour, darkHour, 4.0f,
+                                   &s_dark_hour_moon_position);
+    DuskSetTwilightMusicVolume(
+        twilightEnabled ? twilightSettings.twilightMusicVolume.getValue() / 100.0f : 0.0f);
+    if (!s_twilight_visual_music_files_loaded) {
+        DuskLoadTwilightExternalMusicV2("Astral Plane.mp3", "Astral Plane CM.mp3",
+                                        "tartarus 0d06.mp3", "Mass Destruction.mp3");
+        s_twilight_visual_music_files_loaded = true;
+    }
+    dKy_apply_visual_twilight_weather();
+#endif
     dScnKy_env_light_c* kankyo = dKy_getEnvlight();
     g_env_light.exeKankyo();
+#if TARGET_PC
+    dKy_apply_visual_twilight_scene_fog();
+#endif
     dKyw_wind_set();
     dKy_twilight_camelight_set();
 #if TARGET_PC
@@ -11761,8 +11898,7 @@ u8 dKy_darkworld_check() {
     const char* stageName = dComIfGp_getStartStageName();
     if (s_visual_enemy_form_context && stageName != NULL &&
         strncmp(stageName, "D_MN08", 6) != 0 &&
-        !dusk::getSettings().game.speedrunMode.getValue() &&
-        dusk::getSettings().game.enableTwilightVisuals.getValue()) {
+        g_dKyExternalVisualConfig.enabled) {
         check = TRUE;
     }
 #endif
@@ -11783,8 +11919,7 @@ u8 dKy_darkworld_visual_check() {
         return false;
     }
 
-    if (!dusk::getSettings().game.speedrunMode.getValue() &&
-        dusk::getSettings().game.enableTwilightVisuals.getValue()) {
+    if (g_dKyExternalVisualConfig.enabled) {
         return true;
     }
 
@@ -11798,6 +11933,23 @@ u8 dKy_darkworld_visual_check() {
     return dKy_darkworld_check();
 #else
     return dKy_darkworld_check();
+#endif
+}
+
+void dKy_set_external_visual_config(u8 enabled, u8 style, f32 brightness,
+                                    s32 chromaticAberration, u8 skyVariant,
+                                    u8 weather, u8 alternateRun) {
+#if TARGET_PC
+    g_dKyExternalVisualConfig = {enabled != 0, style, brightness,
+        chromaticAberration, skyVariant, weather, alternateRun != 0};
+#else
+    UNUSED(enabled);
+    UNUSED(style);
+    UNUSED(brightness);
+    UNUSED(chromaticAberration);
+    UNUSED(skyVariant);
+    UNUSED(weather);
+    UNUSED(alternateRun);
 #endif
 }
 
@@ -11822,8 +11974,7 @@ u8 dKy_darkworld_visual_effect_check() {
 
 u8 dKy_visual_snow_storm_check() {
 #if TARGET_PC
-    return !dusk::getSettings().game.speedrunMode.getValue() &&
-           dusk::getSettings().game.twilightWeather.getValue() == dusk::TwilightWeather::SnowStorm;
+    return g_dKyExternalVisualConfig.weather == 6;
 #else
     return false;
 #endif

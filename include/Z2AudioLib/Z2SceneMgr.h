@@ -162,4 +162,9 @@ enum Z2Scene {
     /* 0x50 */ Z2SCENE_FARON_WOODS_CAVE,
 };
 
+#if TARGET_PC
+bool Z2IsTwilightVisualMusicScene();
+bool Z2IsTwilightVisualMusicRefreshPending();
+#endif
+
 #endif /* Z2SCENEMGR_H */

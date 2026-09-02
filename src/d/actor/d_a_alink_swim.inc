@@ -344,6 +344,24 @@ int daAlink_c::checkNextActionSwim() {
 }
 
 int daAlink_c::checkSwimAction(int param_0) {
+#if TARGET_PC
+    if (checkDuskMagicArmorWaterRun()) {
+        offModeFlg(MODE_SWIMMING);
+        offNoResetFlg0(FLG0_WATER_IN_MOVE);
+        offNoResetFlg0(FLG0_SWIM_UP);
+        mZ2Link.setInWater(false);
+        current.pos.y = mWaterY + 2.0f;
+        speed.y = 0.0f;
+        mFallHeight = current.pos.y;
+        if (mProcID == PROC_SWIM_UP || mProcID == PROC_SWIM_WAIT ||
+            mProcID == PROC_SWIM_MOVE || mProcID == PROC_SWIM_DIVE ||
+            mProcID == PROC_FALL || mProcID == PROC_AUTO_JUMP ||
+            mProcID == PROC_DIVE_JUMP) {
+            procMoveInit();
+        }
+        return 0;
+    }
+#endif
     f32 var_f31;
     if (checkWolf()) {
         if (getMoveBGActorName(mLinkAcch.m_gnd, 0) == fpcNm_Obj_ITA_e) {

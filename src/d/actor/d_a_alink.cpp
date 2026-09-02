@@ -75,6 +75,14 @@ static fopAc_ac_c* daAlink_searchTagKandelaar(fopAc_ac_c* i_actor, void* i_data)
 static bool s_duskForceHumanFormWaitInit;
 #if TARGET_PC
 bool daAlink_c::sDuskHumanWarpRequest = false;
+
+static bool duskSkywardSwordRunningEnabled() {
+    return g_dKyExternalVisualConfig.enabled && g_dKyExternalVisualConfig.alternateRun;
+}
+
+static bool duskCutsceneRunButtonHeld() {
+    return duskSkywardSwordRunningEnabled() && mDoCPd_c::getHoldA(PAD_1);
+}
 #endif
 
 // Instant Movement (EXPERIMENTAL): when enabled, the player's load-start demo --
@@ -7739,6 +7747,12 @@ void daAlink_c::setBlendMoveAnime(f32 i_morf) {
     f32 sp28 = mpHIO->mMove.m.mFootPositionRatio;
     BOOL sp24 = checkEventRun();
     BOOL sp20 = checkBootsMoveAnime(1) IF_DUSK(&& !dusk::getSettings().game.enableFastIronBoots);
+#if TARGET_PC
+    if (duskCutsceneRunButtonHeld() && checkSnowCode() && !checkBootsOrArmorHeavy() &&
+        !checkWolf() && !checkEventRun() && mProcID == PROC_MOVE && mStickValue > 0.1f) {
+        sp20 = false;
+    }
+#endif
 
     f32 var_f29;
 
@@ -7775,7 +7789,12 @@ void daAlink_c::setBlendMoveAnime(f32 i_morf) {
 
     daAlink_ANM var_r28 = ANM_WALK;
     daAlink_ANM sp18;
-    if (mDemo.getDemoMode() == daPy_demo_c::DEMO_UNK_38_e) {
+    if (mDemo.getDemoMode() == daPy_demo_c::DEMO_UNK_38_e
+#if TARGET_PC
+        || (duskCutsceneRunButtonHeld() && !checkWolf() && !checkEventRun() &&
+            mProcID == PROC_MOVE && mStickValue > 0.1f)
+#endif
+    ) {
         sp18 = ANM_RUN_B;
     } else {
         sp18 = ANM_RUN;
@@ -9703,6 +9722,9 @@ void daAlink_c::setStickData() {
             mItemButton |= (daAlink_ITEM_BTN)BTN_R;
         }
 
+#if TARGET_PC
+        const f32 duskUnscaledStickValue = mStickValue;
+#endif
         if (checkHeavyStateOn(TRUE, TRUE) &&
             (!checkBootsOrArmorHeavy() || !checkNoResetFlg0(FLG0_WATER_IN_MOVE)))
         {
@@ -9736,6 +9758,16 @@ void daAlink_c::setStickData() {
             mStickValue *= mpHIO->mWolf.m.mUnderwaterInputRate;
             mHeavySpeedMultiplier = mpHIO->mWolf.m.mUnderwaterInputRate;
         }
+#if TARGET_PC
+        if (duskCutsceneRunButtonHeld() && checkSnowCode() && !checkBootsOrArmorHeavy() &&
+            !checkWolf() && !checkEventRun()) {
+            // Heavy snow scales stick input before movement speed is resolved.
+            // Restore only that snow penalty while sprinting; equipment-based
+            // heavy states retain their native restrictions.
+            mStickValue = duskUnscaledStickValue;
+            mHeavySpeedMultiplier = 1.0f;
+        }
+#endif
     }
 
     s16 angle_diff = mStickAngle - mPrevStickAngle;
@@ -10284,6 +10316,14 @@ void daAlink_c::setSpeedAndAngleNormal() {
     }
 
     setNormalSpeedF(speed, mpHIO->mMove.m.mDeceleration);
+#if TARGET_PC
+    if (duskCutsceneRunButtonHeld() && !checkWolf() && !checkEventRun() &&
+        mProcID == PROC_MOVE && mStickValue > 0.1f &&
+        (mLinkAcch.ChkGroundHit() || checkDuskMagicArmorWaterRun()) &&
+        !checkMagneBootsOn() && !checkModeFlg(MODE_SWIMMING)) {
+        mNormalSpeed = 37.0f;
+    }
+#endif
 }
 
 void daAlink_c::setSpeedAndAngleAtn() {
@@ -10904,6 +10944,11 @@ BOOL daAlink_c::checkLandAction(int param_0) {
     int move_direction = getDirectionFromAngle(current.angle.y - shape_angle.y);
     BOOL isRollLand = mStickValue > 0.8f && move_direction != DIR_BACKWARD && !checkGrabAnime() &&
                    mProcID != PROC_CUT_HEAD && face_direction == DIR_FORWARD;
+#if TARGET_PC
+    if (duskSkywardSwordRunningEnabled() && !checkWolf() && !checkEventRun()) {
+        isRollLand = false;
+    }
+#endif
 
     if ((param_0 || temp_f31 >= mpHIO->mDamage.mDamFall.m.mMinRollHeight) &&
         temp_f31 < mpHIO->mDamage.mDamFall.m.mMaxRollHeight && isRollLand)
@@ -10975,6 +11020,15 @@ BOOL daAlink_c::checkSlideAction() {
 }
 
 BOOL daAlink_c::checkAutoJumpAction() {
+#if TARGET_PC
+    // The water surface is the effective floor while Magic Armor water-running.
+    // Without this guard, the normal missing-ground test repeatedly starts an
+    // auto-jump before checkSwimAction() can keep Link on the surface.
+    if (checkDuskMagicArmorWaterRun()) {
+        return 0;
+    }
+#endif
+
     if (checkMagneBootsFly()) {
         return 1;
     }
@@ -11109,7 +11163,15 @@ BOOL daAlink_c::checkAutoJumpAction() {
                                     return procDiveJumpInit();
                                 }
 
-                                return procAutoJumpInit(0);
+                                int autoJumpParam = 0;
+#if TARGET_PC
+                                const bool duskSkywardLedgeRunBoost =
+                                    duskCutsceneRunButtonHeld() && !checkWolf() && !checkEventRun() &&
+                                    mProcID == PROC_MOVE && mStickValue > 0.1f &&
+                                    !checkMagneBootsOn() && !checkModeFlg(MODE_SWIMMING);
+                                autoJumpParam = duskSkywardLedgeRunBoost ? 2 : 0;
+#endif
+                                return procAutoJumpInit(autoJumpParam);
                             }
                         }
 
@@ -11196,10 +11258,25 @@ BOOL daAlink_c::checkCutJumpInFly() {
 BOOL daAlink_c::checkFrontWallTypeAction() {
     setFrontWallType();
 
+#if TARGET_PC
+    // SS Running may step directly onto authored high ledges, but never treats
+    // an unclassified flat wall as climbable. Types 7-9 are the vanilla
+    // grab/climb-height ledge probes with a valid destination in field_0x34ec.
+    const bool duskSkywardHighLedgeStep =
+        duskCutsceneRunButtonHeld() && !checkWolf() && !checkEventRun() &&
+        mProcID == PROC_MOVE && mStickValue > 0.1f && mLinkAcch.ChkWallHit() &&
+        !checkMagneBootsOn() && !checkModeFlg(MODE_SWIMMING) &&
+        (field_0x2f91 == 7 || field_0x2f91 == 8 || field_0x2f91 == 9);
+#endif
+
     s16 var_r27 = field_0x3078;
     field_0x3078 = 0;
 
-    if (!checkInputOnR() && !checkModeFlg(2)) {
+    if (!checkInputOnR() && !checkModeFlg(2)
+#if TARGET_PC
+        && !duskSkywardHighLedgeStep
+#endif
+    ) {
         return 0;
     }
 
@@ -11279,6 +11356,12 @@ BOOL daAlink_c::checkFrontWallTypeAction() {
 
         field_0x3078 = var_r27 + 1;
 
+#if TARGET_PC
+        if (duskSkywardHighLedgeStep &&
+            field_0x3078 > mpHIO->mWallHang.m.grab_input_time) {
+            return procStepMoveInit();
+        }
+#endif
         if (field_0x2f91 == 6) {
             if (field_0x3078 > mpHIO->mWallHang.m.small_jump_input_time) {
                 if (checkWolf()) {
@@ -11733,6 +11816,33 @@ int daAlink_c::orderZTalk() {
 }
 
 int daAlink_c::checkNormalAction() {
+#if TARGET_PC
+    const bool skywardSwordRunning = duskCutsceneRunButtonHeld() && !checkWolf() &&
+        !checkEventRun() && mProcID == PROC_MOVE && mStickValue > 0.1f &&
+        (mLinkAcch.ChkGroundHit() || checkDuskMagicArmorWaterRun()) &&
+        !checkMagneBootsOn() && !checkModeFlg(MODE_SWIMMING);
+
+    if (skywardSwordRunning && spActionTrigger()) {
+        return procFrontRollInit();
+    }
+
+    if (skywardSwordRunning && swordTrigger()) {
+        if (mEquipItem == 0x103 && !checkEquipAnime()) {
+            return procCutJumpInit(FALSE);
+        }
+
+        if (mEquipItem != 0x103 && checkSwordGet() && !checkEquipAnime() &&
+            !checkNotBattleStage() && (!checkModeFlg(0x40000) || checkEquipHeavyBoots())) {
+            swordEquip(TRUE);
+            return 1;
+        }
+    }
+
+    // Do not consume the normal action here. A is also the game's context
+    // action, so returning early prevented prompts such as grabbing from
+    // reaching the vanilla interaction handlers below. The sprint animation
+    // and speed remain controlled by the held-A checks above.
+#endif
     int wall_grab_status = getWallGrabStatus();
 
     if (wallGrabTrigger()) {
@@ -12101,6 +12211,11 @@ BOOL daAlink_c::checkMoveDoAction() {
         }
 
         if (dComIfGp_getDoStatus() == BUTTON_STATUS_UNK_121) {
+#if TARGET_PC
+            if (duskSkywardSwordRunningEnabled() && !checkWolf() && !checkEventRun()) {
+                return false;
+            }
+#endif
             if (!checkAttentionLock() && checkInputOnR()) {
                 shape_angle.y = mMoveAngle;
             }
@@ -12117,6 +12232,11 @@ BOOL daAlink_c::checkMoveDoAction() {
 }
 
 BOOL daAlink_c::checkSideRollAction(int param_0) {
+#if TARGET_PC
+    if (duskSkywardSwordRunningEnabled() && !checkWolf() && !checkEventRun()) {
+        return false;
+    }
+#endif
     if (checkNotJumpSinkLimit()
         || checkHeavyStateOn(TRUE, TRUE)
         || !checkInputOnR()
@@ -13182,6 +13302,9 @@ void daAlink_c::posMove() {
     f32 temp_f30 = cM_ssin(shape_angle.y);
     f32 temp_f29 = cM_scos(shape_angle.y);
     cXyz sp108;
+#if TARGET_PC
+    const bool duskWaterRun = checkDuskMagicArmorWaterRun();
+#endif
 
     if (!checkNoResetFlg3(FLG3_UNK_4000)) {
         initGravity();
@@ -13320,7 +13443,13 @@ void daAlink_c::posMove() {
                 speed.y = mpHIO->mSwim.m.mMaxFloatUpSpeed;
             }
         }
-    } else if (!checkModeFlg(0x400)) {
+    }
+#if TARGET_PC
+    else if (duskWaterRun) {
+        speed.y = 0.0f;
+    }
+#endif
+    else if (!checkModeFlg(0x400)) {
         if (checkHeavyStateOn(TRUE, TRUE) && mProcID != PROC_SPINNER_READY &&
             !checkNoResetFlg0(FLG0_WATER_IN_MOVE))
         {
@@ -13563,6 +13692,13 @@ void daAlink_c::posMove() {
             current.pos.z += sp9C.z;
         }
     }
+#if TARGET_PC
+    if (duskWaterRun) {
+        current.pos.y = mWaterY + 2.0f;
+        speed.y = 0.0f;
+        mFallHeight = current.pos.y;
+    }
+#endif
 }
 
 void daAlink_c::autoGroundHit() {
@@ -14485,6 +14621,19 @@ BOOL daAlink_c::checkZoraWearAbility() const {
 BOOL daAlink_c::checkMagicArmorWearAbility() const {
     return (!checkWolf() && checkMagicArmorWearFlg()) && !checkNoResetFlg2(FLG2_UNK_80000);
 }
+
+#if TARGET_PC
+bool daAlink_c::checkDuskMagicArmorWaterRun() const {
+    if (!duskCutsceneRunButtonHeld() || checkWolf() || checkEventRun() ||
+        !checkMagicArmorWearAbility() || checkMagneBootsOn() ||
+        mWaterY == -G_CM3D_F_INF) {
+        return false;
+    }
+
+    const f32 waterOffset = mWaterY - current.pos.y;
+    return waterOffset > -120.0f && waterOffset < 180.0f;
+}
+#endif
 
 J3DModelData* daAlink_c::loadAramBmd(u16 i_resIdx, u32 i_bufSize) {
     JKRArchive* anmArchive = dComIfGp_getAnmArchive();
@@ -16907,6 +17056,10 @@ int daAlink_c::procSlip() {
 }
 
 int daAlink_c::procAutoJumpInit(int param_0) {
+    // Parameter 2 is reserved for the Skyward Sword Running ledge launch.
+    // It keeps the normal auto-jump calculation intact and only adds a
+    // horizontal launch boost for the one-time jump off a ledge.
+    const bool duskSkywardLedgeRunBoost = param_0 == 2;
     u32 chk_mode_400 = checkModeFlg(0x400);
     BOOL not_front_roll;
     if (mProcID == PROC_FRONT_ROLL) {
@@ -16988,7 +17141,7 @@ int daAlink_c::procAutoJumpInit(int param_0) {
     if (chk_mode_400) {
         speedF = mMaxSpeed * 0.75f;
     } else {
-        if (speedF > mMaxSpeed || param_0 ||
+        if (speedF > mMaxSpeed || param_0 == 1 ||
             mpHIO->mAutoJump.m.mAlwaysMaxSpeedJump == true)
         {
             speedF = mMaxSpeed;
@@ -17003,6 +17156,11 @@ int daAlink_c::procAutoJumpInit(int param_0) {
 
     if (isCuccoJump) {
         mNormalSpeed = mpHIO->mAutoJump.m.mCuccoStartSpeed;
+    }
+
+    if (duskSkywardLedgeRunBoost) {
+        // Make the ledge launch clearly faster than the normal running jump.
+        mNormalSpeed *= 1.50f;
     }
 
     field_0x3588 = l_waitBaseAnime;

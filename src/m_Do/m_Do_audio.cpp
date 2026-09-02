@@ -16,6 +16,7 @@
 
 #if TARGET_PC
 #include "dusk/settings.h"
+#include "dusk/audio/DuskAudioSystem.h"
 #endif
 
 #if PLATFORM_WII || PLATFORM_SHIELD
@@ -131,7 +132,11 @@ static void mDoAud_Create() {
 #else
             const int audioMemSize = 0xB00000;
 #endif
-            g_mDoAud_zelAudio.init(g_mDoAud_audioHeap, audioMemSize, l_affCommand->getMemAddress(), l_arcCommand->getArchive());
+            g_mDoAud_zelAudio.init(g_mDoAud_audioHeap, audioMemSize
+#if TARGET_PC
+                + dusk::audio::AstralStreamAramReserve
+#endif
+                , l_affCommand->getMemAddress(), l_arcCommand->getArchive());
 #if PLATFORM_WII || PLATFORM_SHIELD
             Z2AudioCS::init(mDoExt_getGameHeap(), l_CSarcCommand->getArchive(), 15, 1);
 #endif

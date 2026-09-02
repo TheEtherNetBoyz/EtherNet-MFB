@@ -1,5 +1,6 @@
 #include "d/actor/d_grass.h"
 #include "d/d_com_inf_game.h"
+#include "d/d_kankyo.h"
 #include "d/actor/d_a_player.h"
 #include "d/d_s_play.h"
 #include "JSystem/J3DGraphBase/J3DDrawBuffer.h"
@@ -31,10 +32,8 @@ static TGXTexObj s_grassMonochromeKusaTexObj;
 static TGXTexObj s_grassMonochromeHijikiTexObj;
 
 static bool grass_monochrome_active() {
-    const auto& settings = dusk::getSettings().game;
-    return !settings.speedrunMode.getValue() &&
-           settings.twilightVisualStyle.getValue() ==
-               dusk::TwilightVisualStyle::BlackAndWhiteEnvironment &&
+    return g_dKyExternalVisualConfig.enabled &&
+           g_dKyExternalVisualConfig.style == 1 &&
            strcmp(dComIfGp_getStartStageName(), "D_MN08") != 0;
 }
 

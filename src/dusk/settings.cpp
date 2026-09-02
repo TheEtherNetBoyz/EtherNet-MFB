@@ -103,8 +103,11 @@ UserSettings g_userSettings = {
         .enableTwilightVisualMusic {"game.enableTwilightVisualMusic", true},
         .twilightVisualStyle {"game.twilightVisualStyle", TwilightVisualStyle::Normal},
         .twilightVisualBrightness {"game.twilightVisualBrightness", 1.0f},
+        .twilightChromaticAberration {"game.twilightChromaticAberration", 80},
         .twilightSkyboxMode {"game.twilightSkyboxMode", TwilightSkyboxMode::TwilightDay},
         .twilightWeather {"game.twilightWeather", TwilightWeather::Current},
+        .twilightMusicVolume {"game.twilightMusicVolume", 100},
+        .skywardSwordRunning {"game.skywardSwordRunning", false},
         .enableMapBackground {"game.enableMapBackground", true},
         .disableCutscenePillarboxing {"game.disableCutscenePillarboxing", false},
         .enableHighQualityMinimapTextures {"game.enableHighQualityMinimapTextures", true},
@@ -464,8 +467,11 @@ void registerSettings() {
     Register(g_userSettings.game.enableTwilightVisualMusic);
     Register(g_userSettings.game.twilightVisualStyle);
     Register(g_userSettings.game.twilightVisualBrightness);
+    Register(g_userSettings.game.twilightChromaticAberration);
     Register(g_userSettings.game.twilightSkyboxMode);
     Register(g_userSettings.game.twilightWeather);
+    Register(g_userSettings.game.twilightMusicVolume);
+    Register(g_userSettings.game.skywardSwordRunning);
     Register(g_userSettings.game.enableMapBackground);
     Register(g_userSettings.game.disableCutscenePillarboxing);
     Register(g_userSettings.game.enableHighQualityMinimapTextures);

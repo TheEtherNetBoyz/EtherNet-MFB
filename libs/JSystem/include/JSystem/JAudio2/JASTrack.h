@@ -269,6 +269,11 @@ struct JASTrack : public JASPoolAllocObject_MultiThreaded<JASTrack> {
     /* 0x233 */ u8 mGateRate;
     /* 0x234 */ u16 mMixConfig[6];
     /* 0x240 */ JGadget::TLinkListNode field_0x240;
+#if TARGET_PC
+    // Root-track ownership tag; the audio callback gates all descendant notes.
+    bool mDuskPalaceMusic = false;
+    bool mDuskBattleMusic = false;
+#endif
 };
 
 #if TARGET_PC

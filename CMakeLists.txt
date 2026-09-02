@@ -419,6 +419,10 @@ if (DUSK_ENABLE_CODE_MODS)
         # Game ABI exports & import library for mod linking
         include(cmake/WindowsExports.cmake)
         setup_windows_exports(dusklight)
+        # symgen records the executable's PDB identity in the embedded manifest.
+        # Ensure the linker emits the matching CodeView debug directory so Dusk can
+        # validate that manifest at runtime in RelWithDebInfo builds.
+        target_link_options(dusklight PRIVATE "/DEBUG")
     endif ()
     # Post-link symbol manifest: hookable-surface name->address map keyed to the build.
     setup_symbol_manifest(dusklight)

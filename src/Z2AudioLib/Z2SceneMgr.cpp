@@ -11,6 +11,7 @@
 #include "Z2AudioLib/Z2SoundObjMgr.h"
 #include "Z2AudioLib/Z2StatusMgr.h"
 #include "d/d_com_inf_game.h"
+#include "d/d_kankyo.h"
 #if TARGET_PC
 #include "dusk/settings.h"
 #include "m_Do/m_Do_Reset.h"
@@ -48,6 +49,9 @@ static u32 z2FastLoadAudioFadeFrames(u32 frames) {
 
 #if TARGET_PC
 static bool s_twilightVisualsPalaceMusicForced = false;
+static bool s_twilightVisualMusicRefreshPending = false;
+bool Z2IsTwilightVisualMusicRefreshPending() { return s_twilightVisualMusicRefreshPending; }
+bool Z2IsTwilightVisualMusicScene() { return s_twilightVisualsPalaceMusicForced; }
 static s32 s_twilightVisualsPalaceMusicStatus = 0;
 static bool s_bgmOnlyDynamicWaveRefresh = false;
 static s32 s_bgmStatusAfterRefresh = -1;
@@ -1712,16 +1716,18 @@ void Z2SceneMgr::setSceneName(char* spot, s32 room, s32 layer) {
     const bool isPalaceScene = spotNo >= Z2SCENE_PALACE_OF_TWILIGHT &&
                                spotNo <= Z2SCENE_PALACE_OF_TWILIGHT_BOSS;
     const bool isKakarikoVillage = spotNo == Z2SCENE_KAKARIKO_VILLAGE;
-    const bool preserveSceneMusic = z2TwilightVisualsPreserveSceneMusic(spotNo) ||
-                                    Z2GetStatusMgr()->getDemoStatus() != 0;
+    const bool preserveSceneMusic = z2TwilightVisualsPreserveSceneMusic(spotNo);
     const bool isExteriorLoad = spot != NULL && strncmp(spot, "F_", 2) == 0;
     const bool isInteriorLoad = spot != NULL && strncmp(spot, "R_", 2) == 0;
-    if (!dusk::getSettings().game.speedrunMode.getValue() &&
-        dusk::getSettings().game.enableTwilightVisuals.getValue() &&
-        dusk::getSettings().game.enableTwilightVisualMusic.getValue() &&
+    const bool twilightMusicSceneEligible = g_dKyExternalVisualConfig.enabled &&
         !isPalaceScene && !preserveSceneMusic &&
         (!inDarkness_ && (demo_wave == 0 || isKakarikoVillage)) &&
-        (isExteriorLoad || isInteriorLoad)) {
+        (isExteriorLoad || isInteriorLoad);
+    // Save entry can select the scene while a loading/demo status is still
+    // active. Retry once it clears instead of keeping the map track forever.
+    s_twilightVisualMusicRefreshPending = twilightMusicSceneEligible &&
+        Z2GetStatusMgr()->getDemoStatus() != 0;
+    if (twilightMusicSceneEligible && !s_twilightVisualMusicRefreshPending) {
         bgm_id = Z2BGM_DUNGEON_LV8;
         bgm_wave1 = 0x28;
         bgm_wave2 = 0;

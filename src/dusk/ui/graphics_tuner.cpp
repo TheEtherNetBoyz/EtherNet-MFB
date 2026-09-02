@@ -117,7 +117,7 @@ void set_value(GraphicsOption option, int value) {
     case GraphicsOption::TwilightVisualStyle:
         getSettings().game.twilightVisualStyle.setValue(static_cast<TwilightVisualStyle>(
             std::clamp(value, static_cast<int>(TwilightVisualStyle::Normal),
-                static_cast<int>(TwilightVisualStyle::BlackAndWhiteEnvironment))));
+                static_cast<int>(TwilightVisualStyle::DarkHour))));
         break;
     case GraphicsOption::TwilightVisualBrightness:
         getSettings().game.twilightVisualBrightness.setValue(
@@ -282,6 +282,10 @@ Rml::String format_graphics_setting_value(GraphicsOption option, int value) {
         switch (static_cast<TwilightVisualStyle>(value)) {
         case TwilightVisualStyle::BlackAndWhiteEnvironment:
             return "Black and White";
+        case TwilightVisualStyle::AstralPlane:
+            return "Astral Plane";
+        case TwilightVisualStyle::DarkHour:
+            return "The Dark Hour";
         case TwilightVisualStyle::Normal:
         default:
             return "Normal Twilight";

@@ -1032,6 +1032,19 @@ BOOL dKy_TeachWind_existence_chk();
 u8 dKy_darkworld_stage_check(char const* stageName, int roomNo);
 BOOL dKy_withwarp_capture_check();
 void dKy_visual_enemy_form_context_set(u8 enabled);
+struct dKy_external_visual_config_c {
+    bool enabled;
+    u8 style;
+    f32 brightness;
+    s32 chromaticAberration;
+    u8 skyVariant;
+    u8 weather;
+    bool alternateRun;
+};
+extern dKy_external_visual_config_c g_dKyExternalVisualConfig;
+void dKy_set_external_visual_config(u8 enabled, u8 style, f32 brightness,
+                                    s32 chromaticAberration, u8 skyVariant,
+                                    u8 weather, u8 alternateRun);
 u8 dKy_darkworld_check();
 u8 dKy_darkworld_visual_check();
 u8 dKy_darkworld_visual_effect_check();
@@ -1065,7 +1078,6 @@ void dKy_set_actcol_ratio(f32 ratio);
 void dKy_set_bgcol_ratio(f32 ratio);
 void dKy_set_fogcol_ratio(f32 ratio);
 void dKy_set_vrboxcol_ratio(f32 ratio);
-void dKy_apply_visual_twilight_weather();
 f32 dKy_get_parcent(f32 max, f32 min, f32 value);
 void dKy_setLight_nowroom_grass(char room_no, f32 light_ratio);
 void dKy_Global_amb_set(dKy_tevstr_c* tevstr_p);
