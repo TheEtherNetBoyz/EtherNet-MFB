@@ -70,8 +70,6 @@ struct PresentationCamera {
     bool enabled = false;
     bool controlsEnabled = false;
     bool initialized = false;
-    bool mouseLookEnabled = true;
-    bool pWasDown = false;
     bool captureWasDown = false;
     cXyz eye;
     cXyz center;
@@ -688,7 +686,6 @@ bool presentationCameraEnabled() {
 
 void setPresentationCameraControlEnabled(bool enabled) {
     sPresentationCamera.controlsEnabled = enabled && sPresentationCamera.enabled;
-    sPresentationCamera.pWasDown = false;
     sPresentationCamera.captureWasDown = false;
     if (sPresentationCamera.controlsEnabled) {
         stopCameraTrack();
@@ -697,14 +694,6 @@ void setPresentationCameraControlEnabled(bool enabled) {
 
 bool presentationCameraControlEnabled() {
     return sPresentationCamera.controlsEnabled;
-}
-
-void setPresentationCameraMouseLookEnabled(bool enabled) {
-    sPresentationCamera.mouseLookEnabled = enabled;
-}
-
-bool presentationCameraMouseLookEnabled() {
-    return sPresentationCamera.mouseLookEnabled;
 }
 
 bool presentationCameraDualCullingEnabled() {
@@ -824,19 +813,16 @@ void updatePresentationCameraControls(float deltaSeconds) {
         return static_cast<int>(key) < keyCount && keys[key];
     };
 
-    const bool pDown = down(SDL_SCANCODE_P);
-    if (pDown && !sPresentationCamera.pWasDown) {
-        sPresentationCamera.mouseLookEnabled = !sPresentationCamera.mouseLookEnabled;
-    }
-    sPresentationCamera.pWasDown = pDown;
-
     const bool captureDown = down(SDL_SCANCODE_K);
     if (captureDown && !sPresentationCamera.captureWasDown) {
         captureCameraKeyframe();
     }
     sPresentationCamera.captureWasDown = captureDown;
 
-    if (sPresentationCamera.mouseLookEnabled) {
+    const bool mouseValid = !io.WantCaptureMouse && io.MousePos.x >= 0.0f &&
+                            io.MousePos.y >= 0.0f &&
+                            ImGui::IsMouseDown(ImGuiMouseButton_Right);
+    if (mouseValid) {
         sPresentationCamera.yaw += io.MouseDelta.x * kCameraLookSensitivity;
         sPresentationCamera.pitch -= io.MouseDelta.y * kCameraLookSensitivity;
         sPresentationCamera.pitch =

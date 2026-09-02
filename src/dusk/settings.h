@@ -424,8 +424,8 @@ struct UserSettings {
         ConfigVar<bool> speedrunMode;
         ConfigVar<bool> liveSplitEnabled;
         ConfigVar<bool> showSpeedrunRTATimer;
-        ConfigVar<bool> moveLink;
-        ConfigVar<bool> teleportLink;
+        ConfigVar<bool> enableMoveLinkCombo;
+        ConfigVar<bool> enableTeleportCombo;
         ConfigVar<bool> areaReload;
         ConfigVar<bool> gorgeVoidChecker;
         ConfigVar<bool> recordingMode;
@@ -434,7 +434,6 @@ struct UserSettings {
         ConfigVar<bool> showInputViewerGyro;
         ConfigVar<bool> nativeInputViewer;
         ConfigVar<bool> nativeLinkDebugInfo;
-        ConfigVar<std::string> triggerViewDefinitions;
         // When true, the practice-tools menu renders natively (J2D/GX), which
         // scales with resolution but is controller-only. When false, it uses
         // the imgui menu (mouse-capable).
@@ -493,12 +492,14 @@ UserSettings& getSettings();
 
 void registerSettings();
 
+void applyInternalResolutionScale(int scale);
+void applyResampler(Resampler resampler);
+
 // Transient settings
 
 struct CollisionViewSettings {
     bool enableTerrainView;
     bool enableWireframe;
-    bool enableTriggerView;
     bool enableAtView;
     bool enableTgView;
     bool enableCoView;
@@ -507,8 +508,25 @@ struct CollisionViewSettings {
     float drawRange;
 };
 
+struct TriggerViewSettings {
+    bool loadZones;
+    bool eventAreas;
+    bool switchAreas;
+    bool eventTags;
+    bool midnaStops;
+    bool twilightGates;
+    bool checkpoints;
+    bool paths;
+    bool transformDists;
+    bool attentionDists;
+    bool purpleMistAvoid;
+    bool leevers;
+    float opacity;
+};
+
 struct TransientSettings {
     CollisionViewSettings collisionView;
+    TriggerViewSettings triggerView;
     bool skipFrameRateLimit;
     bool forceThirtyFpsLimit;
     bool turboMode;

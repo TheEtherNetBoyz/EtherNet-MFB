@@ -14,6 +14,7 @@
 
 #include "dusk/frame_interpolation.h"
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
 
 #include <algorithm>
 

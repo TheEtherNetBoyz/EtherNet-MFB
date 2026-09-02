@@ -60,6 +60,7 @@
 #include "dusk/logging.h"
 #include "dusk/settings.h"
 #include <vector>
+#include "dusk/speedrun.h"
 #endif
 
 class mDoGph_HIO_c : public JORReflexible {

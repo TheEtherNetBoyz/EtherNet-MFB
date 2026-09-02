@@ -26,6 +26,8 @@
 #include "helpers/string.hpp"
 #if TARGET_PC
 #include "dusk/mods/svc/stage.hpp"
+#include "dusk/settings.h"
+#include "dusk/speedrun.h"
 #include <format>
 #include <fmt/ranges.h>
 #endif
@@ -1537,6 +1539,27 @@ dStage_objectNameInf* dStage_searchName(char const* objName) {
     return NULL;
 }
 
+#if TARGET_PC
+dStage_objectNameInf* dStage_searchNameCI(char const* objName) {
+    dStage_objectNameInf* obj = l_objectName;
+
+    for (u32 i = 0; i < ARRAY_SIZEU(l_objectName); i++) {
+        const char* a = obj->name;
+        const char* b = objName;
+        while (*a && *b && tolower((unsigned char)*a) == tolower((unsigned char)*b)) {
+            ++a;
+            ++b;
+        }
+        if (*a == '\0' && *b == '\0') {
+            return obj;
+        }
+        obj++;
+    }
+
+    return NULL;
+}
+#endif
+
 const char* dStage_getName(s16 procName, s8 argument) {
     static char tmp_name[dStage_NAME_LENGTH];
 
@@ -1594,7 +1617,7 @@ u8 dStage_roomControl_c::mNoArcBank;
 #endif
 
 #if TARGET_PC
-static s16 dStage_getVisualTwilightEnemyProcName(s16 procName, BE(u32)* parameters);
+static s16 dStage_getVisualTwilightEnemyProcName(s16 procName);
 static void dStage_actorCreate(stage_actor_data_class* i_actorData, fopAcM_prm_class* i_actorPrm,
                                size_t recordSize = sizeof(stage_actor_data_class)) {
     if (!dusk::mods::svc::stage_apply_actor_edits(i_actorData, i_actorPrm, recordSize,
@@ -1614,8 +1637,7 @@ static void dStage_actorCreate(stage_actor_data_class* i_actorData, fopAcM_prm_c
     } else {
         i_actorPrm->argument = actorInf->argument;
 #if TARGET_PC
-        const s16 procName = dStage_getVisualTwilightEnemyProcName(
-            actorInf->procname, &i_actorPrm->base.parameters);
+        const s16 procName = dStage_getVisualTwilightEnemyProcName(actorInf->procname);
 #else
         const s16 procName = actorInf->procname;
 #endif
@@ -2757,13 +2779,20 @@ bool dStage_setEnvironmentLayer(int layerNo) {
 
 #if TARGET_PC
 static bool dStage_visualTwilightEnemyLayerEnabled() {
+    // Enemy replacement belongs exclusively to the optional Twilight Visuals
+    // feature. Native Twilight state must never enable it on its own.
+    if (dusk::speedrun::isActive() ||
+        !dusk::getSettings().game.enableTwilightVisuals.getValue()) {
+        return false;
+    }
+
     const char* stageName = dComIfGp_getStartStageName();
     return stageName != NULL &&
            dComIfG_play_c::getLayerNo(0) != 14 &&
            dKy_darkworld_visual_check() != 0;
 }
 
-static s16 dStage_getVisualTwilightEnemyProcName(s16 procName, BE(u32)* parameters) {
+static s16 dStage_getVisualTwilightEnemyProcName(s16 procName) {
     if (!dStage_visualTwilightEnemyLayerEnabled()) {
         return procName;
     }
@@ -2784,9 +2813,6 @@ static s16 dStage_getVisualTwilightEnemyProcName(s16 procName, BE(u32)* paramete
         return fpcNm_E_YR_e;
     case fpcNm_E_MS_e:  // Rat -> Twilight Vermin
         return fpcNm_E_YG_e;
-    case fpcNm_E_YM_e:  // Insect -> Twilight insect variant
-        *parameters = (*parameters & ~0xFFu) | 6;
-        return fpcNm_E_YM_e;
     default:
         return procName;
     }

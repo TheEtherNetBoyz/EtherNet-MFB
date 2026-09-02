@@ -40,6 +40,7 @@
 #include "dusk/imgui/ImGuiBloomWindow.hpp"
 #include "dusk/settings.h"
 #include "dusk/audio/DuskAudioSystem.h"
+#include "dusk/speedrun.h"
 #include "dusk/frame_interpolation.h"
 #include "dusk/game_clock.h"
 static f32 timeScale = 1.0f;
@@ -8952,7 +8953,8 @@ static int dKy_Draw(sub_kankyo__class* i_this) {
 
 #if TARGET_PC
 static void dKy_update_visual_twilight_audio() {
-    const bool enabled = g_dKyExternalVisualConfig.enabled;
+    const bool enabled = g_dKyExternalVisualConfig.enabled &&
+                         dusk::getSettings().game.enableTwilightVisualMusic.getValue();
 
     if (!s_twilight_visual_audio_state_initialized) {
         // Reconcile a persisted enabled option after loading a save as well

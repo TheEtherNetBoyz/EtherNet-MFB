@@ -15,6 +15,7 @@
 
 #include "dusk/action_bindings.h"
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
 
 namespace dusk::ui::input {
 namespace {
@@ -158,7 +159,8 @@ bool any_menu_chord() noexcept {
 }
 
 bool area_reload_menu_blocked(u32 port) noexcept {
-    if (!getSettings().game.areaReload.getValue() || port >= sPadHoldMasks.size()) {
+    if (speedrun::isActive() || !getSettings().game.areaReload.getValue() ||
+        port >= sPadHoldMasks.size()) {
         return false;
     }
 

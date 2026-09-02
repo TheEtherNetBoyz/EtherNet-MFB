@@ -82,14 +82,8 @@ static void clearPracticeMenuInput(interface_of_controller_pad* interface) {
     interface->mTrigLockR = false;
 }
 
-static void clearTeleportLinkDpadInput(interface_of_controller_pad* interface) {
-    constexpr u32 kTeleportDpadMask = PAD_BUTTON_UP | PAD_BUTTON_DOWN;
-    interface->mButtonFlags &= ~kTeleportDpadMask;
-    interface->mPressedButtonFlags &= ~kTeleportDpadMask;
-}
-
 static void updateCutsceneInputBuffer() {
-    if (dusk::getSettings().game.speedrunMode.getValue() || dusk::speedrun::isActive() ||
+    if (dusk::speedrun::isActive() ||
         !dusk::getSettings().game.cutsceneInputBuffering.getValue()) {
         sCutsceneBufferActive = false;
         return;
@@ -115,7 +109,7 @@ static void updateCutsceneInputBuffer() {
 
 #if TARGET_PC
 void mDoCPd_c::applyCutsceneInputBuffer() {
-    if (dusk::getSettings().game.speedrunMode.getValue() || dusk::speedrun::isActive() ||
+    if (dusk::speedrun::isActive() ||
         !dusk::getSettings().game.cutsceneInputBuffering.getValue())
     {
         sCutsceneBufferActive = false;
@@ -250,13 +244,6 @@ void mDoCPd_c::read() {
         mDoRst_resetCallBack(-1, NULL);
     }
 
-    if (dusk::getSettings().game.teleportLink.getValue() &&
-        !dusk::getSettings().game.speedrunMode.getValue() &&
-        (m_unfilteredButtonFlags[PAD_1] & PAD_TRIGGER_R) != 0 &&
-        (m_unfilteredButtonFlags[PAD_1] & PAD_TRIGGER_L) == 0)
-    {
-        clearTeleportLinkDpadInput(&m_cpadInfo[PAD_1]);
-    }
 #endif
 }
 

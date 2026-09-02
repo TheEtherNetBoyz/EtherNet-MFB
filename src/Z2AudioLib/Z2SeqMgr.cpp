@@ -18,6 +18,7 @@
 #include "d/d_kankyo.h"
 #include "m_Do/m_Do_Reset.h"
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
 #include "dusk/version.hpp"
 #endif
 

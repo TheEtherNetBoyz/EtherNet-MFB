@@ -26,14 +26,13 @@
 #include "dusk/config.hpp"
 #include "dusk/data.hpp"
 #include "dusk/dusk.h"
-#include "dusk/frame_interpolation.h"
 #include "dusk/input_macro.h"
 #include "dusk/game_mode.hpp"
 #include "dusk/livesplit.h"
-#include "dusk/texture_replacements.hpp"
 #include "dusk/main.h"
 #include "dusk/presentation.hpp"
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
 #include "dusk/ui/ui.hpp"
 #include "f_pc/f_pc_manager.h"
 #include "f_pc/f_pc_name.h"
@@ -54,16 +53,6 @@ using namespace std::string_literals;
 using namespace std::string_view_literals;
 
 namespace {
-struct LinkTeleportPoint {
-    cXyz position = cXyz::Zero;
-    s16 angleY = 0;
-    std::string stage;
-    s8 room = -1;
-    s8 layer = -1;
-    bool valid = false;
-};
-
-LinkTeleportPoint sLinkTeleportPoint;
 constexpr float kTurboTimeScale = 4.f;
 
 ImGuiWindow* FindDragScrollWindow(ImGuiWindow* window) {
@@ -155,7 +144,6 @@ void toggle_config_bool(dusk::config::ConfigVar<bool>& value) {
 
 void toggle_texture_pack() {
     toggle_config_bool(dusk::getSettings().game.enableTextureReplacements);
-    dusk::texture_replacements::set_enabled(dusk::getSettings().game.enableTextureReplacements.getValue());
 }
 
 void cycle_bloom_mode() {
@@ -387,9 +375,9 @@ namespace dusk {
             toggle_config_bool(getSettings().game.showInputViewer);
         }
 
-        if (hotkey_event_pressed(event, hotkeys.moveLink)) {
-            toggle_config_bool(getSettings().game.moveLink);
-            if (!getSettings().game.moveLink.getValue()) {
+        if (!dusk::speedrun::isActive() && hotkey_event_pressed(event, hotkeys.moveLink)) {
+            toggle_config_bool(getSettings().game.enableMoveLinkCombo);
+            if (!getSettings().game.enableMoveLinkCombo.getValue()) {
                 getTransientSettings().moveLinkActive = false;
             }
         }
@@ -398,7 +386,7 @@ namespace dusk {
             cycle_bloom_mode();
         }
 
-        if (!getSettings().game.speedrunMode.getValue() &&
+        if (!dusk::speedrun::isActive() &&
             hotkey_event_pressed(event, hotkeys.toggleDiscLoadingDelay)) {
             toggleDiscLoadingDelay();
             const auto mode = getSettings().game.discLoadingDelayMode.getValue();
@@ -435,7 +423,6 @@ namespace dusk {
         }
         previousTurboActive = turboActive;
         previousSlowActive = slowDown;
-
         static int sFrameBufferScaleApplyFrames = 0;
         static int sLastFrameBufferScale = getSettings().game.internalResolutionScale.getValue();
         int frameBufferScale = getSettings().game.internalResolutionScale.getValue();
@@ -446,70 +433,6 @@ namespace dusk {
         if (sFrameBufferScaleApplyFrames > 0) {
             VISetFrameBufferScale(static_cast<float>(frameBufferScale));
             sFrameBufferScaleApplyFrames--;
-        }
-
-        if (dusk::frame_interp::get_ui_tick_pending() && getSettings().game.moveLink.getValue() &&
-            !getSettings().game.speedrunMode &&
-            (mDoCPd_c::getHold(PAD_1) & (PAD_TRIGGER_R | PAD_TRIGGER_L)) == (PAD_TRIGGER_R | PAD_TRIGGER_L) &&
-            mDoCPd_c::getTrigY(PAD_1))
-        {
-            getTransientSettings().moveLinkActive = !getTransientSettings().moveLinkActive;
-        }
-        if (getSettings().game.speedrunMode || !getSettings().game.moveLink.getValue()) {
-            getTransientSettings().moveLinkActive = false;
-        }
-
-        if (dusk::frame_interp::get_ui_tick_pending() &&
-            getSettings().game.teleportLink.getValue() &&
-            !getSettings().game.speedrunMode && !dComIfGp_isEnableNextStage())
-        {
-            const u32 held = mDoCPd_c::getUnfilteredHold(PAD_1);
-            const u32 triggered = mDoCPd_c::getUnfilteredTrig(PAD_1);
-            const u32 setChord = PAD_TRIGGER_R | PAD_BUTTON_UP;
-            const u32 warpChord = PAD_TRIGGER_R | PAD_BUTTON_DOWN;
-            const bool setPressed =
-                (held & PAD_TRIGGER_L) == 0 &&
-                (held & setChord) == setChord && (triggered & setChord) != 0;
-            const bool warpPressed =
-                (held & PAD_TRIGGER_L) == 0 &&
-                (held & warpChord) == warpChord && (triggered & warpChord) != 0;
-            daPy_py_c* player = daPy_getPlayerActorClass();
-
-            if (setPressed && player != nullptr) {
-                sLinkTeleportPoint.position = player->current.pos;
-                sLinkTeleportPoint.angleY = player->shape_angle.y;
-                sLinkTeleportPoint.stage = dComIfGp_getStartStageName();
-                sLinkTeleportPoint.room =
-                    static_cast<s8>(dComIfGp_roomControl_getStayNo());
-                sLinkTeleportPoint.layer = dComIfGp_getStartStageLayer();
-                sLinkTeleportPoint.valid = true;
-                DuskToast(
-                    fmt::format(
-                        "Teleport point set: {:.4f}, {:.4f}, {:.4f}",
-                        sLinkTeleportPoint.position.x,
-                        sLinkTeleportPoint.position.y,
-                        sLinkTeleportPoint.position.z),
-                    2.0f);
-            } else if (warpPressed) {
-                if (!sLinkTeleportPoint.valid) {
-                    DuskToast("Set a teleport point with D-pad Up + R first.", 2.0f);
-                } else if (
-                    player == nullptr ||
-                    sLinkTeleportPoint.stage != dComIfGp_getStartStageName() ||
-                    sLinkTeleportPoint.room != dComIfGp_roomControl_getStayNo() ||
-                    sLinkTeleportPoint.layer != dComIfGp_getStartStageLayer())
-                {
-                    DuskToast(
-                        "Teleport point is in a different loaded area.", 2.0f);
-                } else {
-                    player->setPlayerPosAndAngle(
-                        &sLinkTeleportPoint.position,
-                        sLinkTeleportPoint.angleY, TRUE);
-                    player->speed = cXyz::Zero;
-                    player->speedF = 0.0f;
-                    DuskToast("Teleported Link.", 1.5f);
-                }
-            }
         }
     }
 

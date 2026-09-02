@@ -14,6 +14,7 @@
 #include "d/d_kankyo.h"
 #if TARGET_PC
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
 #include "m_Do/m_Do_Reset.h"
 #endif
 #include <cstring>
@@ -1720,6 +1721,7 @@ void Z2SceneMgr::setSceneName(char* spot, s32 room, s32 layer) {
     const bool isExteriorLoad = spot != NULL && strncmp(spot, "F_", 2) == 0;
     const bool isInteriorLoad = spot != NULL && strncmp(spot, "R_", 2) == 0;
     const bool twilightMusicSceneEligible = g_dKyExternalVisualConfig.enabled &&
+        dusk::getSettings().game.enableTwilightVisualMusic.getValue() &&
         !isPalaceScene && !preserveSceneMusic &&
         (!inDarkness_ && (demo_wave == 0 || isKakarikoVillage)) &&
         (isExteriorLoad || isInteriorLoad);

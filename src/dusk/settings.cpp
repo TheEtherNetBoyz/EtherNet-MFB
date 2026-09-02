@@ -1,12 +1,16 @@
 #include "dusk/settings.h"
-#include <aurora/aurora.h>
-#include <aurora/dvd.h>
+#include "dusk/config.hpp"
+#include "dusk/game_mode.hpp"
+#include "dusk/speedrun.h"
+#include "dusk/texture_replacements.hpp"
+#include "dusk/ui/ui.hpp"
 
 #include <algorithm>
+
 #include <SDL3/SDL_scancode.h>
-#include "dusk/config.hpp"
-#include "dusk/ui/ui.hpp"
-#include "dusk/game_mode.hpp"
+#include <aurora/aurora.h>
+#include <aurora/dvd.h>
+#include <dolphin/vi.h>
 
 namespace dusk {
 
@@ -196,8 +200,8 @@ UserSettings g_userSettings = {
         .speedrunMode {"game.speedrunMode", false},
         .liveSplitEnabled {"game.liveSplitEnabled", false},
         .showSpeedrunRTATimer {"game.showSpeedrunRTATimer", true},
-        .moveLink {"game.moveLink", false},
-        .teleportLink {"game.teleportLink", false},
+        .enableMoveLinkCombo {"game.enableMoveLinkCombo", false},
+        .enableTeleportCombo {"game.enableTeleportCombo", false},
         .areaReload {"game.areaReload", false},
         .gorgeVoidChecker {"game.gorgeVoidChecker", false},
         .recordingMode {"game.recordingMode", false},
@@ -206,10 +210,6 @@ UserSettings g_userSettings = {
         .showInputViewerGyro {"game.showInputViewerGyro", false},
         .nativeInputViewer {"game.nativeInputViewer", false},
         .nativeLinkDebugInfo {"game.nativeLinkDebugInfo", false},
-        .triggerViewDefinitions {
-            "tools.triggerViewDefinitions",
-            "[]"
-        },
         .nativePracticeMenu {"game.nativePracticeMenu", true},
         .lastSelectedGameModeId {"game.lastSelectedGameModeId", gamemode::kVanillaGameModeId}
     },
@@ -374,6 +374,22 @@ UserSettings& getSettings() {
     return g_userSettings;
 }
 
+void applyInternalResolutionScale(int scale) {
+    VISetFrameBufferScale(static_cast<float>(scale));
+}
+
+void applyResampler(Resampler resampler) {
+    switch (resampler) {
+    case Resampler::Area:
+        aurora_set_resampler(SAMPLER_AREA);
+        break;
+    case Resampler::Bilinear:
+    default:
+        aurora_set_resampler(SAMPLER_BILINEAR);
+        break;
+    }
+}
+
 void registerSettings() {
     Register(g_userSettings.ui.settingsFavorites);
     Register(g_userSettings.ui.menuWidthDp);
@@ -459,9 +475,12 @@ void registerSettings() {
     Register(g_userSettings.game.bloomMultiplier);
     Register(g_userSettings.game.depthOfFieldMode);
     Register(g_userSettings.game.disableWaterRefraction);
-    Register(g_userSettings.game.enableTextureReplacements);
-    Register(g_userSettings.game.internalResolutionScale);
-    Register(g_userSettings.game.resampler);
+    Register(g_userSettings.game.enableTextureReplacements,
+        [](const bool&, const bool&) { texture_replacements::reload(); });
+    Register(g_userSettings.game.internalResolutionScale,
+        [](const int& value, const int&) { applyInternalResolutionScale(value); });
+    Register(g_userSettings.game.resampler,
+        [](const Resampler& value, const Resampler&) { applyResampler(value); });
     Register(g_userSettings.game.shadowResolutionMultiplier);
     Register(g_userSettings.game.enableTwilightVisuals);
     Register(g_userSettings.game.enableTwilightVisualMusic);
@@ -492,8 +511,8 @@ void registerSettings() {
     Register(g_userSettings.game.speedrunMode);
     Register(g_userSettings.game.liveSplitEnabled);
     Register(g_userSettings.game.showSpeedrunRTATimer);
-    Register(g_userSettings.game.moveLink);
-    Register(g_userSettings.game.teleportLink);
+    Register(g_userSettings.game.enableMoveLinkCombo);
+    Register(g_userSettings.game.enableTeleportCombo);
     Register(g_userSettings.game.areaReload);
     Register(g_userSettings.game.gorgeVoidChecker);
     Register(g_userSettings.game.recordingMode);
@@ -503,7 +522,6 @@ void registerSettings() {
     Register(g_userSettings.game.showInputViewerGyro);
     Register(g_userSettings.game.nativeInputViewer);
     Register(g_userSettings.game.nativeLinkDebugInfo);
-    Register(g_userSettings.game.triggerViewDefinitions);
     Register(g_userSettings.game.nativePracticeMenu);
     Register(g_userSettings.game.lastSelectedGameModeId);
     Register(g_userSettings.game.fastSpinner);
@@ -655,13 +673,27 @@ static TransientSettings g_transientSettings = {
     .collisionView = {
         .enableTerrainView = false,
         .enableWireframe = false,
-        .enableTriggerView = false,
         .enableAtView = false,
         .enableTgView = false,
         .enableCoView = false,
         .terrainViewOpacity = 50.0f,
         .colliderViewOpacity = 50.0f,
         .drawRange = 100.0f,
+    },
+    .triggerView = {
+        .loadZones = false,
+        .eventAreas = false,
+        .switchAreas = false,
+        .eventTags = false,
+        .midnaStops = false,
+        .twilightGates = false,
+        .checkpoints = false,
+        .paths = false,
+        .transformDists = false,
+        .attentionDists = false,
+        .purpleMistAvoid = false,
+        .leevers = false,
+        .opacity = 75.0f,
     },
     .skipFrameRateLimit = false,
     .forceThirtyFpsLimit = false,
@@ -677,8 +709,8 @@ TransientSettings& getTransientSettings() {
 
 void updateDiscLoadingDelay() {
     const int delaySeconds = std::clamp(getSettings().game.discLoadingDelaySeconds.getValue(), 1, 10);
-    const auto mode = getSettings().game.speedrunMode.getValue() ? DiscLoadingDelayMode::Off :
-                                                                   getSettings().game.discLoadingDelayMode.getValue();
+    const auto mode = speedrun::isActive() ? DiscLoadingDelayMode::Off :
+                                             getSettings().game.discLoadingDelayMode.getValue();
 
     aurora_dvd_set_read_delay_seconds(static_cast<u32>(delaySeconds));
     const u32 dvdMode = mode == DiscLoadingDelayMode::Off ? AURORA_DVD_READ_DELAY_OFF :
@@ -688,7 +720,7 @@ void updateDiscLoadingDelay() {
 }
 
 void toggleDiscLoadingDelay() {
-    if (getSettings().game.speedrunMode.getValue()) {
+    if (speedrun::isActive()) {
         return;
     }
     auto& mode = getSettings().game.discLoadingDelayMode;
