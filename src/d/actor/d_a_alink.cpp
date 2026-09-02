@@ -7748,6 +7748,16 @@ void daAlink_c::setBlendMoveAnime(f32 i_morf) {
     BOOL sp24 = checkEventRun();
     BOOL sp20 = checkBootsMoveAnime(1) IF_DUSK(&& !dusk::getSettings().game.enableFastIronBoots);
 #if TARGET_PC
+    const bool duskSkywardIronBootsRun =
+        duskCutsceneRunButtonHeld() && !checkWolf() && !checkEventRun() &&
+        mProcID == PROC_MOVE && mStickValue > 0.1f && checkEquipHeavyBoots() &&
+        (mLinkAcch.ChkGroundHit() || checkDuskMagicArmorWaterRun()) &&
+        !checkModeFlg(MODE_SWIMMING);
+    if (duskSkywardIronBootsRun) {
+        // Keep the SS running animation instead of letting the vanilla heavy-boot
+        // branch replace it with the accelerated heavy walk animation.
+        sp20 = false;
+    }
     if (duskCutsceneRunButtonHeld() && checkSnowCode() && !checkBootsOrArmorHeavy() &&
         !checkWolf() && !checkEventRun() && mProcID == PROC_MOVE && mStickValue > 0.1f) {
         sp20 = false;
@@ -7839,6 +7849,17 @@ void daAlink_c::setBlendMoveAnime(f32 i_morf) {
         var_f29 = mpHIO->mSlide.m.mClimbAnmMinSpeed + (var_f31 * (mpHIO->mSlide.m.mMaxClimbAnmSpeed - mpHIO->mSlide.m.mClimbAnmMinSpeed));
         sp2C = var_f29;
     }
+#if TARGET_PC
+    if (duskSkywardIronBootsRun) {
+        // The reduced boot speed can otherwise leave the normal walk/run blend
+        // below its run threshold. Keep the SS sprint animation selected so the
+        // boots do not turn it back into a weighted waddle.
+        var_r28 = sp18;
+        // Iron boots retain a proper run, but at 70% of the normal SS-running
+        // animation rate to preserve their weight.
+        sp2C *= 0.7f;
+    }
+#endif
 
     int sp10;
     f32 var_f28;
@@ -10320,8 +10341,8 @@ void daAlink_c::setSpeedAndAngleNormal() {
     if (duskCutsceneRunButtonHeld() && !checkWolf() && !checkEventRun() &&
         mProcID == PROC_MOVE && mStickValue > 0.1f &&
         (mLinkAcch.ChkGroundHit() || checkDuskMagicArmorWaterRun()) &&
-        !checkMagneBootsOn() && !checkModeFlg(MODE_SWIMMING)) {
-        mNormalSpeed = 37.0f;
+        !checkModeFlg(MODE_SWIMMING)) {
+        mNormalSpeed = 37.0f * (checkEquipHeavyBoots() ? 0.7f : 1.0f);
     }
 #endif
 }
