@@ -25,6 +25,7 @@
 #include "c/c_dylink.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_debug_pad.h"
+#include "d/d_meter2_info.h"
 #include "d/d_s_logo.h"
 #include "d/d_s_menu.h"
 #include "d/d_s_play.h"
@@ -58,6 +59,7 @@
 #include "dusk/data.hpp"
 #include "dusk/dusk.h"
 #include "dusk/frame_interpolation.h"
+#include "dusk/tas_movie.h"
 #include "dusk/game_clock.h"
 #include "dusk/gyro.h"
 #include "dusk/commands.hpp"
@@ -65,6 +67,7 @@
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/imgui/ImGuiEngine.hpp"
 #include "dusk/iso_validate.hpp"
+#include "dusk/video_latency.h"
 #include "dusk/logging.h"
 #include "dusk/main.h"
 #include "dusk/hq_minimap.hpp"
@@ -93,10 +96,12 @@
 #include "cxxopts.hpp"
 #include "d/actor/d_a_movie_player.h"
 #include "dusk/audio/DuskAudioSystem.h"
+#include "dusk/area_reload.hpp"
 #include "dusk/audio/DuskDsp.hpp"
 #include "dusk/config.hpp"
 #include "dusk/speedrun.h"
 #include "dusk/settings.h"
+#include "dusk/vector_rsqrt.h"
 #include "dusk/texture_replacements.hpp"
 #include "dusk/io.hpp"
 #include "dusk/version.hpp"
@@ -296,60 +301,85 @@ void main01(void) {
         const auto timing = dusk::game_clock::advance();
         const auto interpolationMode = dusk::getSettings().game.enableFrameInterpolation.getValue();
         if (timing.separatePresentation) {
-            if (timing.numSimTicks > 0) {
+            const int tasSimTicks = dusk::tas_movie::simulationTicksForHostFrame(timing.numSimTicks);
+            const bool tasBatchActive = dusk::tas_movie::active();
+            if (tasSimTicks > 0) {
                 dusk::frame_interp::begin_frame(interpolationMode, true, 0.0f);
                 dusk::frame_interp::set_ui_tick_pending(true);
-                for (int i = 0; i < timing.numSimTicks; ++i) {
+                for (int i = 0; i < tasSimTicks; ++i) {
                     if (timing.interpolating) {
                         dusk::frame_interp::begin_sim_tick();
                     }
                     dusk::game_clock::begin_sim_tick();
                     mDoCPd_c::read();
                     dusk::mouse::read();
-                    dusk::gyro::read(dusk::game_clock::kSimPeriod);
+                    dusk::gyro::read(dusk::game_clock::sim_pace());
                     dusk::processGameCombos();
                     fapGm_Execute();
                     dusk::processCameraCommands();
+                    dusk::tas_movie::restorePresentationCamera();
                     mDoAud_Execute();
                     dusk::game_clock::commit_sim_tick();
+                    if (tasBatchActive &&
+                        (!dusk::tas_movie::active() || dusk::tas_movie::paused())) {
+                        break;
+                    }
                 }
             }
 
             const float interpolationStep =
                 timing.interpolating ? dusk::game_clock::sample_interpolation_step() : 1.0f;
             dusk::frame_interp::begin_frame(interpolationMode, false, interpolationStep);
-            if (timing.interpolating) {
-                dusk::frame_interp::interpolate();
-                dusk::frame_interp::begin_presentation_camera();
+            static int sLastWindowStatus = -1;
+            const int windowStatus = dMeter2Info_getWindowStatus();
+            const auto isCaptureMenuStatus = [](int status) {
+                return status == 2 || status == 3 || status == 4 || status == 5 || status == 10;
+            };
+            if (windowStatus != sLastWindowStatus &&
+                (isCaptureMenuStatus(windowStatus) || isCaptureMenuStatus(sLastWindowStatus))) {
+                dusk::frame_interp::request_presentation_sync();
             }
-
-            fpcM_DrawIterater((fpcM_DrawIteraterFunc)fpcM_Draw);
-            cAPIGph_Painter();
-            if (timing.interpolating) {
-                dusk::frame_interp::end_presentation_camera();
+            sLastWindowStatus = windowStatus;
+            if (!dusk::frame_interp::presentation_skip_active()) {
+                if (timing.interpolating) {
+                    dusk::frame_interp::interpolate();
+                    dusk::frame_interp::begin_presentation_camera();
+                }
+                dusk::tas_movie::applyPresentationCamera(dComIfGd_getView());
+                fpcM_DrawIterater((fpcM_DrawIteraterFunc)fpcM_Draw);
+                cAPIGph_Painter();
+                dusk::tas_movie::restorePresentationCamera();
+                if (timing.interpolating) {
+                    dusk::frame_interp::end_presentation_camera();
+                }
             }
             dusk::frame_interp::set_ui_tick_pending(false);
         } else {
             dusk::frame_interp::begin_frame(dusk::FrameInterpMode::Off, true, 0.0f);
             dusk::frame_interp::set_ui_tick_pending(true);
-            dusk::game_clock::begin_sim_tick();
-
-            // Game Inputs
-            mDoCPd_c::read();
-            dusk::mouse::read();
-            dusk::gyro::read(timing.dt);
-            dusk::processGameCombos();
-
-            // EXECUTE GAME LOGIC & RENDER
-            // This calls mDoGph_Painter -> JFWDisplay -> GX Functions
-            fapGm_Execute();
-            dusk::processCameraCommands();
-
-            mDoAud_Execute();
-            dusk::game_clock::commit_sim_tick();
+            const int tasSimTicks = dusk::tas_movie::simulationTicksForHostFrame(1);
+            const bool tasBatchActive = dusk::tas_movie::active();
+            for (int simTick = 0; simTick < tasSimTicks; ++simTick) {
+                dusk::game_clock::begin_sim_tick();
+                mDoCPd_c::read();
+                dusk::mouse::read();
+                dusk::gyro::read(timing.dt);
+                dusk::processGameCombos();
+                fapGm_Execute();
+                dusk::processCameraCommands();
+                dusk::tas_movie::restorePresentationCamera();
+                mDoAud_Execute();
+                dusk::game_clock::commit_sim_tick();
+                if (tasBatchActive &&
+                    (!dusk::tas_movie::active() || dusk::tas_movie::paused())) {
+                    break;
+                }
+            }
         }
 
+        dusk::video_latency::process();
         aurora_end_frame();
+        dusk::game_clock::finish_main_loop();
 
         FrameMark;
 
@@ -358,27 +388,6 @@ void main01(void) {
         dusk::discord::update_presence();
 #endif
 
-        static Limiter main_loop_limiter;
-        static double last_fps_setting = 0.0;
-        static Limiter::duration_t target_ns = 0;
-
-        if (dusk::getSettings().game.enableFrameInterpolation.getValue() ==
-                dusk::FrameInterpMode::Capped &&
-            !dusk::getTransientSettings().turboMode)
-        {
-            ZoneScopedN("Frame limiter");
-            double current_fps = dusk::getSettings().video.maxFrameRate.getValue();
-            if (current_fps != last_fps_setting) {
-                last_fps_setting = current_fps;
-                target_ns = static_cast<Limiter::duration_t>(1'000'000'000.0 / current_fps);
-            }
-
-            Limiter::duration_t sleepTime = main_loop_limiter.Sleep(target_ns);
-            dusk::frameUsagePct =
-                100.0f * (1.0f - static_cast<float>(sleepTime) / static_cast<float>(target_ns));
-        } else {
-            main_loop_limiter.Reset();
-        }
     } while (dusk::IsRunning);
 
     exit:;
@@ -662,6 +671,7 @@ int game_main(int argc, char* argv[]) {
 
     dusk::config::load_from_user_preferences();
     ApplyCVarOverrides(parsed_arg_options["cvar"]);
+    dusk_set_native_vector_rsqrt(!dusk::getSettings().game.usePpcFastInvSqrt.getValue());
     borealis::sentry::Options sentryOptions{
         .release = fmt::format("{}@{}", dusk::AppInfo.appName, BOREALIS_APP_DESCRIBE),
         .databaseDirectory = dusk::CachePath / "sentry",
@@ -747,12 +757,28 @@ int game_main(int argc, char* argv[]) {
     } else {
         AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
     }
+    switch (dusk::getSettings().video.forcedAspectRatio.getValue()) {
+    case dusk::AspectRatioMode::Ratio16x9:
+        AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
+        VILockAspectRatio(16, 9);
+        break;
+    case dusk::AspectRatioMode::Ratio21x9:
+        AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
+        VILockAspectRatio(43, 18);
+        break;
+    case dusk::AspectRatioMode::Ratio3x2:
+        AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
+        VILockAspectRatio(3, 2);
+        break;
+    case dusk::AspectRatioMode::Off:
+    default:
+        VIUnlockAspectRatio();
+        break;
+    }
     dusk::applyInternalResolutionScale(dusk::getSettings().game.internalResolutionScale.getValue());
     dusk::applyResampler(dusk::getSettings().game.resampler.getValue());
 
-    dusk::audio::SetMasterVolume(dusk::audio::MasterVolumeToLinear(dusk::getSettings().audio.masterVolume / 100.0f));
-    dusk::audio::SetEnableReverb(dusk::getSettings().audio.enableReverb);
-    dusk::audio::EnableHrtf = dusk::getSettings().audio.enableHrtf;
+    dusk::audio::ApplySettings();
 
     // Run ImGui UI loop if Aurora couldn't initialize a backend
     if (auroraInfo.backend == BACKEND_NULL) {
@@ -916,6 +942,7 @@ int game_main(int argc, char* argv[]) {
         dusk::IsGameLaunched = true;
     }
 
+    dusk::updateDiscLoadingDelay();
     dusk::version::init();
     LanguageInit();
 

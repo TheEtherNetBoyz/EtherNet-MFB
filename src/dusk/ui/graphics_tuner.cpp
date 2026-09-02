@@ -67,6 +67,8 @@ Rml::String format_post_process_mode(int value) {
         return "Classic";
     case BloomMode::Dusk:
         return "Dusklight";
+    case BloomMode::Legacy:
+        return "Legacy";
     default:
         return "";
     }
@@ -77,6 +79,29 @@ Rml::String format_times(int value) { return fmt::format("{}×", value); }
 Rml::String format_percent(int value) { return fmt::format("{}%", value); }
 
 Rml::String format_bool(int value) { return value ? "On" : "Off"; }
+
+Rml::String format_twilight_style(int value) {
+    return static_cast<TwilightVisualStyle>(value) ==
+                   TwilightVisualStyle::BlackAndWhiteEnvironment
+               ? "Black and White"
+               : "Normal Twilight";
+}
+
+Rml::String format_twilight_skybox(int value) {
+    static constexpr const char* modes[] = {
+        "Day", "Night", "Sunrise", "Sunset", "Overcast / Storm", "Faron Twilight",
+        "Eldin Twilight", "Lanayru Twilight", "Palace of Twilight", "Sacred Grove",
+        "Snowpeak", "Gerudo Desert", "Lake Hylia", "Fishing Hole", "Ordon",
+        "Hyrule Field", "Castle Town"};
+    return value >= 0 && value < static_cast<int>(std::size(modes)) ? modes[value] : "";
+}
+
+Rml::String format_weather(int value) {
+    static constexpr const char* modes[] = {
+        "Current", "Clear", "Rain", "Snow", "Lightning", "Wind Storm", "Snow Storm",
+        "Heavy Fog"};
+    return value >= 0 && value < static_cast<int>(std::size(modes)) ? modes[value] : "";
+}
 
 template <typename T>
 int read_cvar(const ConfigVar<T>& var) {
@@ -154,10 +179,28 @@ const GraphicsSetting& GraphicsSetting::of(GraphicsOption option) {
             Resampler::Bilinear, Resampler::Area, Resampler::Bilinear, 1, format_resampler);
     case GraphicsOption::BloomMode:
         return bind<[]() -> auto& { return getSettings().game.bloomMode; }>(
-            BloomMode::Off, BloomMode::Dusk, BloomMode::Classic, 1, format_post_process_mode);
+            BloomMode::Off, BloomMode::Legacy, BloomMode::Classic, 1, format_post_process_mode);
     case GraphicsOption::BloomMultiplier:
         return bind<[]() -> auto& { return getSettings().game.bloomMultiplier; }>(
             0, 100, 100, 10, format_percent);
+    case GraphicsOption::TwilightVisualsEnabled:
+        return bind<[]() -> auto& { return getSettings().game.enableTwilightVisuals; }>(
+            0, 1, 0, 1, format_bool);
+    case GraphicsOption::TwilightVisualStyle:
+        return bind<[]() -> auto& { return getSettings().game.twilightVisualStyle; }>(
+            TwilightVisualStyle::Normal, TwilightVisualStyle::BlackAndWhiteEnvironment,
+            TwilightVisualStyle::Normal, 1, format_twilight_style);
+    case GraphicsOption::TwilightVisualBrightness:
+        return bind<[]() -> auto& { return getSettings().game.twilightVisualBrightness; }>(
+            0, 120, 100, 5, format_percent);
+    case GraphicsOption::TwilightSkybox:
+        return bind<[]() -> auto& { return getSettings().game.twilightSkyboxMode; }>(
+            TwilightSkyboxMode::TwilightDay, TwilightSkyboxMode::CastleTown,
+            TwilightSkyboxMode::TwilightDay, 1, format_twilight_skybox);
+    case GraphicsOption::Weather:
+        return bind<[]() -> auto& { return getSettings().game.twilightWeather; }>(
+            TwilightWeather::Current, TwilightWeather::HeavyFog, TwilightWeather::Current, 1,
+            format_weather);
     case GraphicsOption::DepthOfFieldMode:
         return bind<[]() -> auto& { return getSettings().game.depthOfFieldMode; }>(
             DepthOfFieldMode::Off, DepthOfFieldMode::Dusk, DepthOfFieldMode::Classic, 1,

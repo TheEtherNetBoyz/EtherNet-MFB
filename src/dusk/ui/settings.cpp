@@ -12,6 +12,7 @@
 #include "dusk/imgui/ImGuiEngine.hpp"
 #include "dusk/io.hpp"
 #include "dusk/language.hpp"
+#include "dusk/main.h"
 #include "dusk/presentation.hpp"
 #include <borealis/io.hpp>
 #include <borealis/file_select.hpp>
@@ -27,10 +28,14 @@
 #include "pane.hpp"
 #include "prelaunch.hpp"
 #include "touch_controls_editor.hpp"
+#include "touch_controls_common.hpp"
 #include "ui.hpp"
 
 #include <aurora/lib/window.hpp>
+#include <dolphin/vi.h>
 #include <SDL3/SDL_filesystem.h>
+#include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_scancode.h>
 #include <fmt/format.h>
 
 #if BOREALIS_HAS_SENTRY
@@ -39,6 +44,8 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <memory>
+#include <optional>
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
@@ -89,6 +96,240 @@ constexpr std::array kGyroInputModeLabels = {
     "Mouse",
 };
 
+enum class HotkeyAction {
+    ToggleImGuiMenu,
+    ToggleThirtyFps,
+    TurboSpeed,
+    ToggleFullscreen,
+    HideShowImGuiMenu,
+    ProcessManagement,
+    DebugOverlay,
+    HeapViewer,
+    PlayerInfo,
+    SaveEditor,
+    StateShare,
+    DebugCamera,
+    CaptureCameraKeyframe,
+    AudioDebug,
+    UseTexturePack,
+    GyroAim,
+    ShowInputViewer,
+    MoveLink,
+    CycleBloomMode,
+    ToggleDiscLoadingDelay,
+};
+
+struct HotkeyEntry {
+    HotkeyAction action;
+    const char* label;
+    const char* helpText;
+};
+
+constexpr std::array kHotkeyEntries = {
+    HotkeyEntry{HotkeyAction::ToggleImGuiMenu, "Toggle ImGui Menu", "Show or hide the ImGui menu bar."},
+    HotkeyEntry{HotkeyAction::ToggleThirtyFps, "Toggle 30 FPS Cap", "Force 30 FPS mode until toggled again."},
+    HotkeyEntry{HotkeyAction::TurboSpeed, "Turbo Speed Key", "Hold to use turbo frame pacing."},
+    HotkeyEntry{HotkeyAction::ToggleFullscreen, "Toggle Fullscreen", "Switch between windowed and fullscreen."},
+    HotkeyEntry{HotkeyAction::HideShowImGuiMenu, "Hide/Show ImGui Menu", "Alternate shortcut for showing or hiding the ImGui menu bar."},
+    HotkeyEntry{HotkeyAction::ProcessManagement, "Process Management", "Show process and task information."},
+    HotkeyEntry{HotkeyAction::DebugOverlay, "Debug Overlay", "Show frame, backend, and renderer statistics."},
+    HotkeyEntry{HotkeyAction::HeapViewer, "Heap Viewer", "Show memory heap information."},
+    HotkeyEntry{HotkeyAction::PlayerInfo, "Player Info", "Show Link and Epona position, angle, and speed."},
+    HotkeyEntry{HotkeyAction::SaveEditor, "Save Editor", "Open the save editor."},
+    HotkeyEntry{HotkeyAction::StateShare, "State Share", "Open the state share window."},
+    HotkeyEntry{HotkeyAction::DebugCamera, "Debug Camera", "Show the developer camera tools."},
+    HotkeyEntry{HotkeyAction::CaptureCameraKeyframe, "Capture Camera Keyframe", "Capture the current Fly Mode camera transform."},
+    HotkeyEntry{HotkeyAction::AudioDebug, "Audio Debug", "Open the audio debug window."},
+    HotkeyEntry{HotkeyAction::UseTexturePack, "Use Texture Pack", "Enable or disable texture replacements."},
+    HotkeyEntry{HotkeyAction::GyroAim, "Gyro Aim", "Enable or disable gyro aiming for supported actions."},
+    HotkeyEntry{HotkeyAction::ShowInputViewer, "Show Input Viewer", "Show or hide the controller input overlay."},
+    HotkeyEntry{HotkeyAction::MoveLink, "Move Link", "Allow or block the Move Link activation combo."},
+    HotkeyEntry{HotkeyAction::CycleBloomMode, "Cycle Bloom Mode", "Cycle through Off, Classic, Dusklight, and Legacy bloom modes."},
+    HotkeyEntry{HotkeyAction::ToggleDiscLoadingDelay, "Toggle Disc Loading Delay", "Toggle the disc loading delay master switch."},
+};
+
+UserSettings::HotkeyBinding& hotkey_binding(HotkeyAction action) {
+    auto& hotkeys = getSettings().hotkeys;
+    switch (action) {
+    case HotkeyAction::ToggleImGuiMenu: return hotkeys.toggleImGuiMenu;
+    case HotkeyAction::ToggleThirtyFps: return hotkeys.toggleThirtyFps;
+    case HotkeyAction::TurboSpeed: return hotkeys.turboSpeed;
+    case HotkeyAction::ToggleFullscreen: return hotkeys.toggleFullscreen;
+    case HotkeyAction::HideShowImGuiMenu: return hotkeys.hideShowImGuiMenu;
+    case HotkeyAction::ProcessManagement: return hotkeys.processManagement;
+    case HotkeyAction::DebugOverlay: return hotkeys.debugOverlay;
+    case HotkeyAction::HeapViewer: return hotkeys.heapViewer;
+    case HotkeyAction::PlayerInfo: return hotkeys.playerInfo;
+    case HotkeyAction::SaveEditor: return hotkeys.saveEditor;
+    case HotkeyAction::StateShare: return hotkeys.stateShare;
+    case HotkeyAction::DebugCamera: return hotkeys.debugCamera;
+    case HotkeyAction::CaptureCameraKeyframe: return hotkeys.captureCameraKeyframe;
+    case HotkeyAction::AudioDebug: return hotkeys.audioDebug;
+    case HotkeyAction::UseTexturePack: return hotkeys.useTexturePack;
+    case HotkeyAction::GyroAim: return hotkeys.gyroAim;
+    case HotkeyAction::ShowInputViewer: return hotkeys.showInputViewer;
+    case HotkeyAction::MoveLink: return hotkeys.moveLink;
+    case HotkeyAction::CycleBloomMode: return hotkeys.cycleBloomMode;
+    case HotkeyAction::ToggleDiscLoadingDelay: return hotkeys.toggleDiscLoadingDelay;
+    }
+    return hotkeys.toggleImGuiMenu;
+}
+
+int current_hotkey_modifiers() {
+    int keyCount = 0;
+    const bool* keys = SDL_GetKeyboardState(&keyCount);
+    int modifiers = HOTKEY_MOD_NONE;
+    if (keys == nullptr) return modifiers;
+    if ((SDL_SCANCODE_LCTRL < keyCount && keys[SDL_SCANCODE_LCTRL]) ||
+        (SDL_SCANCODE_RCTRL < keyCount && keys[SDL_SCANCODE_RCTRL])) modifiers |= HOTKEY_MOD_CTRL;
+    if ((SDL_SCANCODE_LSHIFT < keyCount && keys[SDL_SCANCODE_LSHIFT]) ||
+        (SDL_SCANCODE_RSHIFT < keyCount && keys[SDL_SCANCODE_RSHIFT])) modifiers |= HOTKEY_MOD_SHIFT;
+    if ((SDL_SCANCODE_LALT < keyCount && keys[SDL_SCANCODE_LALT]) ||
+        (SDL_SCANCODE_RALT < keyCount && keys[SDL_SCANCODE_RALT])) modifiers |= HOTKEY_MOD_ALT;
+    return modifiers;
+}
+
+bool is_modifier_scancode(int scancode) {
+    return scancode == SDL_SCANCODE_LCTRL || scancode == SDL_SCANCODE_RCTRL ||
+           scancode == SDL_SCANCODE_LSHIFT || scancode == SDL_SCANCODE_RSHIFT ||
+           scancode == SDL_SCANCODE_LALT || scancode == SDL_SCANCODE_RALT;
+}
+
+bool hotkey_input_neutral() {
+    int keyCount = 0;
+    const bool* keys = SDL_GetKeyboardState(&keyCount);
+    if (keys != nullptr) {
+        for (int i = 0; i < keyCount; ++i) if (keys[i]) return false;
+    }
+    for (int port = PAD_CHAN0; port < PAD_CHANMAX; ++port) {
+        if (PADGetNativeButtonPressed(port) != -1) return false;
+    }
+    return true;
+}
+
+int keyboard_key_pressed() {
+    int keyCount = 0;
+    const bool* keys = SDL_GetKeyboardState(&keyCount);
+    if (keys == nullptr) return SDL_SCANCODE_UNKNOWN;
+    for (int i = 1; i < keyCount; ++i) if (keys[i] && !is_modifier_scancode(i)) return i;
+    return SDL_SCANCODE_UNKNOWN;
+}
+
+int controller_button_pressed() {
+    for (int port = PAD_CHAN0; port < PAD_CHANMAX; ++port) {
+        const int button = PADGetNativeButtonPressed(port);
+        if (button != -1) return button;
+    }
+    return static_cast<int>(PAD_NATIVE_BUTTON_INVALID);
+}
+
+void clear_hotkey_binding(UserSettings::HotkeyBinding& binding) {
+    binding.key.setValue(SDL_SCANCODE_UNKNOWN);
+    binding.modifiers.setValue(HOTKEY_MOD_NONE);
+    binding.controllerButton.setValue(PAD_NATIVE_BUTTON_INVALID);
+}
+
+Rml::String hotkey_binding_name(const UserSettings::HotkeyBinding& binding) {
+    const int scancode = binding.key.getValue();
+    const int controllerButton = binding.controllerButton.getValue();
+    if (scancode == SDL_SCANCODE_UNKNOWN &&
+        static_cast<u32>(controllerButton) == PAD_NATIVE_BUTTON_INVALID) return "Unbound";
+    Rml::String out;
+    if (scancode != SDL_SCANCODE_UNKNOWN) {
+        const int modifiers = binding.modifiers.getValue();
+        if (modifiers & HOTKEY_MOD_CTRL) out += "Ctrl+";
+        if (modifiers & HOTKEY_MOD_SHIFT) out += "Shift+";
+        if (modifiers & HOTKEY_MOD_ALT) out += "Alt+";
+        const char* name = scancode >= 0 && scancode < SDL_SCANCODE_COUNT
+                               ? SDL_GetScancodeName(static_cast<SDL_Scancode>(scancode))
+                               : nullptr;
+        out += name != nullptr && name[0] != '\0' ? name : "Unknown";
+    }
+    if (static_cast<u32>(controllerButton) != PAD_NATIVE_BUTTON_INVALID) {
+        if (!out.empty()) out += " / ";
+        out += native_button_name(nullptr, static_cast<u32>(controllerButton));
+    }
+    return out;
+}
+
+class HotkeyConfigWindow : public Window {
+public:
+    HotkeyConfigWindow() {
+        add_tab("Configure Hotkeys", [this](Rml::Element* content) {
+            auto& leftPane = add_child<Pane>(content, Pane::Type::Controlled);
+            auto& rightPane = add_child<Pane>(content, Pane::Type::Uncontrolled);
+            leftPane.add_section("Hotkeys");
+            for (const auto& entry : kHotkeyEntries) {
+                auto& button = leftPane.add_select_button({
+                    .key = entry.label,
+                    .getValue = [this, action = entry.action] {
+                        return mPendingHotkey == action ? Rml::String{"Press key..."}
+                                                        : hotkey_binding_name(hotkey_binding(action));
+                    },
+                    .isDisabled = [action = entry.action] {
+                        return action == HotkeyAction::ToggleDiscLoadingDelay &&
+                               dusk::speedrun::isActive();
+                    },
+                    .isModified = [action = entry.action] {
+                        const auto& binding = hotkey_binding(action);
+                        return binding.key.getValue() != binding.key.getDefaultValue() ||
+                               binding.modifiers.getValue() != binding.modifiers.getDefaultValue() ||
+                               binding.controllerButton.getValue() !=
+                                   binding.controllerButton.getDefaultValue();
+                    },
+                });
+                button.on_pressed([this, action = entry.action] {
+                    mPendingHotkey = action;
+                    mSuppressCaptureUntilNeutral = true;
+                });
+                leftPane.register_control(button, rightPane,
+                    [helpText = entry.helpText](Pane& pane) {
+                        pane.add_text(helpText);
+                        pane.add_rml("<br/>Press A/Enter to bind a key or controller button. "
+                                     "Press Escape while binding to clear it.");
+                    });
+            }
+        });
+    }
+
+    void update() override {
+        if (mPendingHotkey.has_value()) {
+            if (mSuppressCaptureUntilNeutral) {
+                if (hotkey_input_neutral()) mSuppressCaptureUntilNeutral = false;
+            } else {
+                int keyCount = 0;
+                const bool* keys = SDL_GetKeyboardState(&keyCount);
+                auto& binding = hotkey_binding(*mPendingHotkey);
+                if (keys != nullptr && SDL_SCANCODE_ESCAPE < keyCount &&
+                    keys[SDL_SCANCODE_ESCAPE]) {
+                    clear_hotkey_binding(binding);
+                    config::save();
+                    mPendingHotkey.reset();
+                } else if (const int button = controller_button_pressed();
+                           static_cast<u32>(button) != PAD_NATIVE_BUTTON_INVALID) {
+                    binding.key.setValue(SDL_SCANCODE_UNKNOWN);
+                    binding.modifiers.setValue(HOTKEY_MOD_NONE);
+                    binding.controllerButton.setValue(button);
+                    config::save();
+                    mPendingHotkey.reset();
+                } else if (const int scancode = keyboard_key_pressed();
+                           scancode != SDL_SCANCODE_UNKNOWN) {
+                    binding.key.setValue(scancode);
+                    binding.modifiers.setValue(current_hotkey_modifiers());
+                    binding.controllerButton.setValue(PAD_NATIVE_BUTTON_INVALID);
+                    config::save();
+                    mPendingHotkey.reset();
+                }
+            }
+        }
+        Window::update();
+    }
+
+private:
+    std::optional<HotkeyAction> mPendingHotkey;
+    bool mSuppressCaptureUntilNeutral = false;
+};
+
 constexpr std::array kMenuScalingModeLabels = {
     "GameCube",
     "Wii",
@@ -102,6 +343,90 @@ constexpr std::array kMagicArmorModes = {
     "Invincible",
     "Cosmetic",
 };
+
+constexpr std::array kFrameRateLimitValues = {30, 60, 120, 240, 360, 480, 0};
+constexpr std::array kFrameRateLimitNames = {
+    "30 FPS", "60 FPS", "120 FPS", "240 FPS", "360 FPS", "480 FPS", "Unlocked"};
+
+constexpr std::array kAspectRatioModeNames = {"Off", "4:3", "3:2", "16:9", "21:9"};
+
+constexpr std::array kDiscLoadingDelayModes = {"Off", "On", "Timed"};
+
+void apply_aspect_ratio_settings() {
+    switch (getSettings().video.forcedAspectRatio.getValue()) {
+    case AspectRatioMode::Ratio16x9:
+        AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
+        VILockAspectRatio(16, 9);
+        break;
+    case AspectRatioMode::Ratio21x9:
+        AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
+        VILockAspectRatio(43, 18);
+        break;
+    case AspectRatioMode::Ratio3x2:
+        AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
+        VILockAspectRatio(3, 2);
+        break;
+    case AspectRatioMode::Off:
+    default:
+        VIUnlockAspectRatio();
+        AuroraSetViewportPolicy(getSettings().video.lockAspectRatio.getValue()
+                                    ? AURORA_VIEWPORT_FIT
+                                    : AURORA_VIEWPORT_STRETCH);
+        break;
+    }
+}
+
+int aspect_ratio_mode_index() {
+    switch (getSettings().video.forcedAspectRatio.getValue()) {
+    case AspectRatioMode::Ratio3x2:
+        return 2;
+    case AspectRatioMode::Ratio16x9:
+        return 3;
+    case AspectRatioMode::Ratio21x9:
+        return 4;
+    default:
+        return getSettings().video.lockAspectRatio.getValue() ? 1 : 0;
+    }
+}
+
+void set_aspect_ratio_mode_index(int index) {
+    index = std::clamp(index, 0, static_cast<int>(kAspectRatioModeNames.size()) - 1);
+    getSettings().video.lockAspectRatio.setValue(index == 1);
+    getSettings().video.forcedAspectRatio.setValue(
+        index == 2 ? AspectRatioMode::Ratio3x2
+                   : index == 3 ? AspectRatioMode::Ratio16x9
+                                : index == 4 ? AspectRatioMode::Ratio21x9
+                                             : AspectRatioMode::Off);
+    apply_aspect_ratio_settings();
+    config::save();
+}
+
+int frame_rate_limit_index() {
+    if (getSettings().game.enableFrameInterpolation.getValue() == FrameInterpMode::Off) {
+        return 0;
+    }
+    const int limit = getSettings().game.frameRateLimit.getValue();
+    for (int i = 1; i < static_cast<int>(kFrameRateLimitValues.size()); ++i) {
+        if (kFrameRateLimitValues[i] == limit) {
+            return i;
+        }
+    }
+    return static_cast<int>(kFrameRateLimitValues.size()) - 1;
+}
+
+void set_frame_rate_limit_index(int index) {
+    index = std::clamp(index, 0, static_cast<int>(kFrameRateLimitValues.size()) - 1);
+    getSettings().game.enableFrameInterpolation.setValue(
+        index == 0 ? FrameInterpMode::Off
+                   : kFrameRateLimitValues[index] == 0 ? FrameInterpMode::Unlimited
+                                                       : FrameInterpMode::Capped);
+    getSettings().game.frameRateLimit.setValue(index == 0 ? 0 : kFrameRateLimitValues[index]);
+    if (index > 0 && kFrameRateLimitValues[index] > 0) {
+        getSettings().video.maxFrameRate.setValue(kFrameRateLimitValues[index]);
+    }
+    presentation::update_frame_rate_preference();
+    config::save();
+}
 
 bool try_parse_backend(std::string_view backend, AuroraBackend& outBackend) {
     if (backend == "auto") {
@@ -340,6 +665,173 @@ Rml::String touch_targeting_label(TouchTargeting targeting) {
     return kTouchTargetingLabels[index];
 }
 
+struct FavoriteEntry {
+    std::string id;
+    Rml::String label;
+    std::function<Rml::String()> value;
+    std::function<void(Pane&)> details;
+    std::function<bool()> isDisabled;
+    std::function<void()> activate;
+};
+
+class FavoritesPane;
+FavoritesPane* sFavoritesPane = nullptr;
+SettingsWindow* sActiveSettingsWindow = nullptr;
+std::vector<FavoriteEntry> sFavoriteEntries;
+
+FavoriteEntry* find_favorite_entry(std::string_view id) {
+    const auto it = std::find_if(sFavoriteEntries.begin(), sFavoriteEntries.end(),
+        [id](const FavoriteEntry& entry) { return entry.id == id; });
+    return it == sFavoriteEntries.end() ? nullptr : &*it;
+}
+
+std::vector<std::string> favorite_ids() {
+    const std::string& serialized = getSettings().ui.settingsFavorites.getValue();
+    std::vector<std::string> ids;
+    size_t start = 0;
+    while (start <= serialized.size()) {
+        const size_t end = serialized.find('\n', start);
+        const std::string id = serialized.substr(
+            start, end == std::string::npos ? std::string::npos : end - start);
+        if (!id.empty() && std::find(ids.begin(), ids.end(), id) == ids.end()) {
+            ids.emplace_back(id);
+        }
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return ids;
+}
+
+void mark_favorites_dirty();
+
+void set_favorite(std::string id, bool favorite) {
+    auto ids = favorite_ids();
+    std::erase(ids, id);
+    if (favorite) ids.emplace_back(std::move(id));
+    std::string serialized;
+    for (const auto& value : ids) {
+        if (!serialized.empty()) serialized += '\n';
+        serialized += value;
+    }
+    getSettings().ui.settingsFavorites.setValue(std::move(serialized));
+    config::save();
+    mark_favorites_dirty();
+}
+
+bool is_favorite(std::string_view id) {
+    const auto ids = favorite_ids();
+    return std::find(ids.begin(), ids.end(), id) != ids.end();
+}
+
+void register_favorite(FavoriteEntry entry, config::ConfigVarBase& var) {
+    entry.id = var.getName();
+    if (find_favorite_entry(entry.id) == nullptr) {
+        sFavoriteEntries.emplace_back(std::move(entry));
+    }
+}
+
+template <typename T>
+T& add_favorite_star(T& component, std::string id) {
+    auto* root = component.root();
+    root->SetClass("has-favorite-star", true);
+    if (root->GetTagName() == "button") {
+        const Rml::String labelRml = root->GetInnerRML();
+        root->SetInnerRML("");
+        auto* label = append(root, "favorite-label");
+        label->SetInnerRML(labelRml);
+    }
+    auto* star = append(root, "favorite-star");
+    const auto refreshStar = [star, id] {
+        const bool favorite = is_favorite(id);
+        star->SetInnerRML(favorite ? "&#xe838;" : "&#xe83a;");
+        star->SetClass("selected", favorite);
+    };
+    refreshStar();
+    const auto toggle = [id = std::move(id), refreshStar] {
+        set_favorite(id, !is_favorite(id));
+        refreshStar();
+    };
+    auto& base = static_cast<Component&>(component);
+    base.listen(star, Rml::EventId::Click,
+        [toggle](Rml::Event& event) {
+            toggle();
+            event.StopImmediatePropagation();
+        }, true);
+    base.listen(root, "favoritetoggle",
+        [toggle](Rml::Event& event) {
+            toggle();
+            event.StopImmediatePropagation();
+        }, true);
+    return component;
+}
+
+class FavoritesPane final : public Pane {
+public:
+    explicit FavoritesPane(Rml::Element* parent) : Pane(parent, Type::Controlled) {
+        mDetails = std::make_unique<Pane>(parent, Type::Uncontrolled);
+        sFavoritesPane = this;
+    }
+
+    ~FavoritesPane() override {
+        if (sFavoritesPane == this) sFavoritesPane = nullptr;
+    }
+
+    void refresh() { mDirty = true; }
+
+    void update() override {
+        if (mDirty) {
+            clear();
+            mDetails->clear();
+            while (root()->GetNumChildren() != 0) root()->RemoveChild(root()->GetFirstChild());
+            add_section("Favorites");
+            bool any = false;
+            for (const auto& id : favorite_ids()) {
+                auto* entry = find_favorite_entry(id);
+                if (entry == nullptr) continue;
+                any = true;
+                auto& button = add_select_button({
+                    .key = entry->label,
+                    .getValue = [id] {
+                        auto* favorite = find_favorite_entry(id);
+                        return favorite != nullptr && favorite->value ? favorite->value()
+                                                                        : Rml::String{};
+                    },
+                    .isDisabled = [id] {
+                        auto* favorite = find_favorite_entry(id);
+                        return favorite != nullptr && favorite->isDisabled &&
+                               favorite->isDisabled();
+                    },
+                    .submit = false,
+                });
+                button.on_nav_command([id](Rml::Event&, NavCommand cmd) {
+                    if (cmd != NavCommand::Confirm) return false;
+                    auto* favorite = find_favorite_entry(id);
+                    if (favorite != nullptr && favorite->activate &&
+                        !(favorite->isDisabled && favorite->isDisabled())) {
+                        favorite->activate();
+                    }
+                    return true;
+                });
+                register_control(button, *mDetails, [id](Pane& pane) {
+                    auto* favorite = find_favorite_entry(id);
+                    if (favorite != nullptr && favorite->details) favorite->details(pane);
+                });
+            }
+            if (!any) add_text("Select the star on a setting to add it here.");
+            mDirty = false;
+        }
+        Pane::update();
+    }
+
+private:
+    std::unique_ptr<Pane> mDetails;
+    bool mDirty = true;
+};
+
+void mark_favorites_dirty() {
+    if (sFavoritesPane != nullptr) sFavoritesPane->refresh();
+}
+
 struct ConfigBoolProps {
     Rml::String key;
     Rml::String icon;
@@ -350,24 +842,38 @@ struct ConfigBoolProps {
 
 SelectButton& config_bool_select(
     Pane& leftPane, Pane& rightPane, ConfigVar<bool>& var, ConfigBoolProps props) {
+    const std::string favoriteId = var.getName();
+    auto onChange = std::make_shared<std::function<void(bool)>>(std::move(props.onChange));
+    auto isDisabled = std::make_shared<std::function<bool()>>(std::move(props.isDisabled));
+    register_favorite({
+        .label = props.key,
+        .value = [&var] { return var.getValue() ? Rml::String{"On"} : Rml::String{"Off"}; },
+        .details = [helpText = props.helpText](Pane& pane) { pane.add_rml(helpText); },
+        .isDisabled = [isDisabled] { return *isDisabled && (*isDisabled)(); },
+        .activate = [&var, onChange] {
+            const bool value = !var.getValue();
+            var.setValue(value);
+            config::save();
+            if (*onChange) (*onChange)(value);
+        },
+    }, var);
     auto& button = leftPane.add_child<BoolButton>(BoolButton::Props{
         .key = std::move(props.key),
         .icon = std::move(props.icon),
         .getValue = [&var] { return var.getValue(); },
         .setValue =
-            [&var, callback = std::move(props.onChange)](bool value) {
+            [&var, onChange](bool value) {
                 if (value == var.getValue()) {
                     return;
                 }
                 var.setValue(value);
                 config::save();
-                if (callback) {
-                    callback(value);
-                }
+                if (*onChange) (*onChange)(value);
             },
-        .isDisabled = std::move(props.isDisabled),
+        .isDisabled = [isDisabled] { return *isDisabled && (*isDisabled)(); },
         .isModified = [&var] { return var.getValue() != var.getDefaultValue(); },
     });
+    add_favorite_star(button, favoriteId);
     leftPane.register_control(
         button, rightPane, [helpText = std::move(props.helpText)](Pane& pane) {
             pane.clear();
@@ -388,6 +894,19 @@ void add_speedrun_disabled_option(Pane& leftPane, Pane& rightPane, ConfigVar<boo
 SelectButton& config_percent_select(Pane& leftPane, Pane& rightPane, ConfigVar<float>& var,
     Rml::String key, Rml::String helpText, int min, int max, int step = 5,
     std::function<bool()> isDisabled = {}) {
+    const std::string favoriteId = var.getName();
+    const Rml::String favoriteLabel = key;
+    auto disabled = std::make_shared<std::function<bool()>>(std::move(isDisabled));
+    register_favorite({
+        .label = favoriteLabel,
+        .value = [&var] { return fmt::format("{}%", float_setting_percent(var)); },
+        .details = [helpText](Pane& pane) { pane.add_rml(helpText); },
+        .isDisabled = [disabled] { return *disabled && (*disabled)(); },
+        .activate = [&var, min, max, step] {
+            var.setValue(std::clamp(float_setting_percent(var) + step, min, max) / 100.0f);
+            config::save();
+        },
+    }, var);
     auto& button = leftPane.add_child<NumberButton>(NumberButton::Props{
         .key = std::move(key),
         .getValue = [&var] { return float_setting_percent(var); },
@@ -396,13 +915,14 @@ SelectButton& config_percent_select(Pane& leftPane, Pane& rightPane, ConfigVar<f
                 var.setValue(std::clamp(value, min, max) / 100.0f);
                 config::save();
             },
-        .isDisabled = std::move(isDisabled),
+        .isDisabled = [disabled] { return *disabled && (*disabled)(); },
         .isModified = [&var] { return var.getValue() != var.getDefaultValue(); },
         .min = min,
         .max = max,
         .step = step,
         .suffix = "%",
     });
+    add_favorite_star(button, favoriteId);
     leftPane.register_control(button, rightPane, [helpText = std::move(helpText)](Pane& pane) {
         pane.clear();
         pane.add_rml(helpText);
@@ -414,25 +934,41 @@ SelectButton& config_int_select(Pane& leftPane, Pane& rightPane, ConfigVar<int>&
     Rml::String key, Rml::String helpText, int min, int max, int step = 5,
     std::function<bool()> isDisabled = {}, std::function<void(int)> onChange = {},
     std::string suffix = "") {
+    const std::string favoriteId = var.getName();
+    const Rml::String favoriteLabel = key;
+    const std::string favoriteSuffix = suffix;
+    auto disabled = std::make_shared<std::function<bool()>>(std::move(isDisabled));
+    auto callback = std::make_shared<std::function<void(int)>>(std::move(onChange));
+    register_favorite({
+        .label = favoriteLabel,
+        .value = [&var, favoriteSuffix] { return fmt::format("{}{}", var.getValue(), favoriteSuffix); },
+        .details = [helpText](Pane& pane) { pane.add_text(helpText); },
+        .isDisabled = [disabled] { return *disabled && (*disabled)(); },
+        .activate = [&var, min, max, step, callback] {
+            const int value = std::clamp(var.getValue() + step, min, max);
+            var.setValue(value);
+            config::save();
+            if (*callback) (*callback)(value);
+        },
+    }, var);
     auto& button = leftPane.add_child<NumberButton>(NumberButton::Props{
         .key = std::move(key),
         .getValue = [&var] { return var.getValue(); },
         .setValue =
-            [&var, min, max, callback = std::move(onChange)](int value) {
+            [&var, min, max, callback](int value) {
                 const int clampedValue = std::clamp(value, min, max);
                 var.setValue(clampedValue);
                 config::save();
-                if (callback) {
-                    callback(clampedValue);
-                }
+                if (*callback) (*callback)(clampedValue);
             },
-        .isDisabled = std::move(isDisabled),
+        .isDisabled = [disabled] { return *disabled && (*disabled)(); },
         .isModified = [&var] { return var.getValue() != var.getDefaultValue(); },
         .min = min,
         .max = max,
         .step = step,
         .suffix = suffix,
     });
+    add_favorite_star(button, favoriteId);
     leftPane.register_control(button, rightPane, [helpText = std::move(helpText)](Pane& pane) {
         pane.clear();
         pane.add_text(helpText);
@@ -440,17 +976,91 @@ SelectButton& config_int_select(Pane& leftPane, Pane& rightPane, ConfigVar<int>&
     return button;
 }
 
+template <typename T, size_t N>
+SelectButton& config_enum_select(Pane& leftPane, Pane& rightPane, ConfigVar<T>& var,
+    Rml::String key, Rml::String helpText, const std::array<const char*, N>& labels,
+    std::function<void(T)> onChange = {}, std::function<bool()> isDisabled = {}) {
+    const std::string favoriteId = var.getName();
+    const Rml::String favoriteLabel = key;
+    auto callback = std::make_shared<std::function<void(T)>>(std::move(onChange));
+    auto disabled = std::make_shared<std::function<bool()>>(std::move(isDisabled));
+    register_favorite({
+        .label = favoriteLabel,
+        .value = [&var, &labels] {
+            const int index = static_cast<int>(var.getValue());
+            return Rml::String{index >= 0 && index < static_cast<int>(N) ? labels[index] : "Unknown"};
+        },
+        .details = [helpText](Pane& pane) { pane.add_text(helpText); },
+        .isDisabled = [disabled] { return *disabled && (*disabled)(); },
+        .activate = [&var, &labels, callback] {
+            int index = static_cast<int>(var.getValue());
+            index = index < 0 || index >= static_cast<int>(N) ? 0 : (index + 1) % static_cast<int>(N);
+            var.setValue(static_cast<T>(index));
+            config::save();
+            if (*callback) (*callback)(static_cast<T>(index));
+        },
+    }, var);
+    auto& button = leftPane.add_select_button({
+        .key = std::move(key),
+        .getValue = [&var, &labels] {
+            const int index = static_cast<int>(var.getValue());
+            return Rml::String{index >= 0 && index < static_cast<int>(N) ? labels[index]
+                                                                            : "Unknown"};
+        },
+        .isDisabled = [disabled] { return *disabled && (*disabled)(); },
+        .isModified = [&var] { return var.getValue() != var.getDefaultValue(); },
+        .submit = true,
+    });
+    add_favorite_star(button, favoriteId);
+    leftPane.register_control(button, rightPane,
+        [&var, &labels, callback, helpText = std::move(helpText)](Pane& pane) {
+            pane.clear();
+            for (int i = 0; i < static_cast<int>(N); ++i) {
+                pane.add_button({
+                    .text = labels[i],
+                    .isSelected = [&var, i] { return static_cast<int>(var.getValue()) == i; },
+                }).on_pressed([&var, i, callback] {
+                    mDoAud_seStartMenu(kSoundItemChange);
+                    var.setValue(static_cast<T>(i));
+                    config::save();
+                    if (*callback) {
+                        (*callback)(static_cast<T>(i));
+                    }
+                });
+            }
+            pane.add_text(helpText);
+        });
+    return button;
+}
+
+template <typename T>
 void graphics_tuner_control(Window& window, Pane& leftPane, Pane& rightPane,
-    const GraphicsTunerProps& props) {
+    ConfigVar<T>& var, const GraphicsTunerProps& props,
+    std::function<bool()> isDisabled = {}) {
     const auto setting = GraphicsSetting::of(props.option);
+    const std::string favoriteId = var.getName();
+    auto disabled = std::make_shared<std::function<bool()>>(std::move(isDisabled));
+    register_favorite({
+        .label = props.title,
+        .value = [setting] { return setting.text(); },
+        .details = [helpText = props.helpText](Pane& pane) { pane.add_text(helpText); },
+        .isDisabled = [disabled] { return *disabled && (*disabled)(); },
+        .activate = [props, disabled] {
+            if (sActiveSettingsWindow != nullptr && !(*disabled && (*disabled)())) {
+                sActiveSettingsWindow->push(std::make_unique<GraphicsTuner>(props));
+            }
+        },
+    }, var);
+    auto& button = leftPane.add_select_button({
+        .key = props.title,
+        .getValue = [setting] { return setting.text(); },
+        .isDisabled = [disabled] { return *disabled && (*disabled)(); },
+        .isModified = [setting] { return setting.isModified(); },
+        .submit = false,
+    });
+    add_favorite_star(button, favoriteId);
     leftPane.register_control(
-        leftPane
-            .add_select_button({
-                .key = props.title,
-                .getValue = [setting] { return setting.text(); },
-                .isModified = [setting] { return setting.isModified(); },
-                .submit = false,
-            })
+        button
             .on_nav_command([&window, props](Rml::Event&, NavCommand cmd) {
                 if (cmd == NavCommand::Confirm || cmd == NavCommand::Left ||
                     cmd == NavCommand::Right) {
@@ -465,9 +1075,33 @@ void graphics_tuner_control(Window& window, Pane& leftPane, Pane& rightPane,
         });
 }
 
+void confirm_return_to_startup() {
+    auto dismiss = [](Modal& modal) {
+        mDoAud_seStartMenu(kSoundWindowClose);
+        modal.pop();
+    };
+    push_document(std::make_unique<Modal>(Modal::Props{
+        .title = "Return to Startup Screen",
+        .bodyRml = "Dusklight will restart and return to the startup screen, where you can change "
+                   "your disc image, language, graphics backend, and other startup options."
+                   "<br/><br/>Any unsaved progress will be lost.",
+        .actions = {
+            ModalAction{.label = "Cancel", .onPressed = dismiss},
+            ModalAction{
+                .label = "Restart",
+                .onPressed = [](Modal&) { dusk::RequestReturnToPrelaunch(); },
+            },
+        },
+        .onDismiss = dismiss,
+        .icon = "warning",
+    }));
+    if (auto* doc = top_document()) doc->focus();
+}
+
 }  // namespace
 
 SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
+    sActiveSettingsWindow = this;
     if (prelaunch) {
         add_tab("Prelaunch", [this](Rml::Element* content) {
             auto& leftPane = add_child<Pane>(content, Pane::Type::Controlled);
@@ -653,6 +1287,10 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         });
     }
 
+    add_tab("Favorites", [this](Rml::Element* content) {
+        add_child<FavoritesPane>(content);
+    });
+
     add_tab("Video", [this](Rml::Element* content) {
         auto& leftPane = add_child<Pane>(content, Pane::Type::Controlled);
         auto& rightPane = add_child<Pane>(content, Pane::Type::Uncontrolled);
@@ -674,21 +1312,57 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             VICenterWindow();
         }),
             rightPane, [](Pane& pane) { pane.clear(); });
+        leftPane.register_control(leftPane.add_button("Reset Dusk Menu Size").on_pressed([this] {
+            auto& uiSettings = getSettings().ui;
+            uiSettings.menuWidthDp.setValue(uiSettings.menuWidthDp.getDefaultValue());
+            uiSettings.menuHeightDp.setValue(uiSettings.menuHeightDp.getDefaultValue());
+            uiSettings.menuSizeCustomized.setValue(false);
+            mPersistedSizeApplied = false;
+            apply_persisted_size();
+            config::save();
+        }),
+            rightPane, [](Pane& pane) {
+                pane.clear();
+                pane.add_text("Restore the Dusk menu to its original default size.");
+            });
         config_bool_select(leftPane, rightPane, getSettings().video.enableVsync,
             {
                 .key = "Enable VSync",
                 .helpText = "Synchronizes the frame rate to your monitor's refresh rate.",
                 .onChange = [](bool value) { aurora_enable_vsync(value); },
             });
-        config_bool_select(leftPane, rightPane, getSettings().video.lockAspectRatio,
-            {
-                .key = "Lock 4:3 Aspect Ratio",
-                .helpText = "Lock the game's aspect ratio to the original.",
-                .onChange =
-                    [](bool value) {
-                        AuroraSetViewportPolicy(
-                            value ? AURORA_VIEWPORT_FIT : AURORA_VIEWPORT_STRETCH);
-                    },
+        register_favorite({
+            .label = "Aspect Ratio",
+            .value = [] { return Rml::String{kAspectRatioModeNames[aspect_ratio_mode_index()]}; },
+            .isDisabled = [] { return false; },
+            .activate = [] {
+                set_aspect_ratio_mode_index((aspect_ratio_mode_index() + 1) %
+                    static_cast<int>(kAspectRatioModeNames.size()));
+            },
+        }, getSettings().video.lockAspectRatio);
+        leftPane.register_control(
+            add_favorite_star(leftPane.add_select_button({
+                .key = "Aspect Ratio",
+                .getValue = [] { return Rml::String{kAspectRatioModeNames[aspect_ratio_mode_index()]}; },
+                .isModified = [] {
+                    return getSettings().video.lockAspectRatio.getValue() !=
+                               getSettings().video.lockAspectRatio.getDefaultValue() ||
+                           getSettings().video.forcedAspectRatio.getValue() !=
+                               getSettings().video.forcedAspectRatio.getDefaultValue();
+                },
+            }), getSettings().video.lockAspectRatio.getName()),
+            rightPane, [](Pane& pane) {
+                for (int i = 0; i < static_cast<int>(kAspectRatioModeNames.size()); ++i) {
+                    pane.add_button({
+                        .text = kAspectRatioModeNames[i],
+                        .isSelected = [i] { return aspect_ratio_mode_index() == i; },
+                    }).on_pressed([i] {
+                        mDoAud_seStartMenu(kSoundItemChange);
+                        set_aspect_ratio_mode_index(i);
+                    });
+                }
+                pane.add_text("Choose the viewport aspect ratio. Off follows the window; 4:3 uses "
+                              "the original presentation.");
             });
         config_bool_select(leftPane, rightPane, getSettings().game.pauseOnFocusLost,
             {
@@ -770,38 +1444,82 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
 
         leftPane.add_section("Resolution");
         graphics_tuner_control(*this, leftPane, rightPane,
+            getSettings().game.internalResolutionScale,
             GraphicsTunerProps{
                 .option = GraphicsOption::InternalResolution,
                 .title = "Internal Resolution",
                 .helpText = kInternalResolutionHelpText,
             });
         graphics_tuner_control(*this, leftPane, rightPane,
+            getSettings().game.shadowResolutionMultiplier,
             GraphicsTunerProps{
                 .option = GraphicsOption::ShadowResolution,
                 .title = "Shadow Resolution",
                 .helpText = kShadowResolutionHelpText,
             });
         graphics_tuner_control(*this, leftPane, rightPane,
+            getSettings().game.resampler,
             GraphicsTunerProps{
                 .option = GraphicsOption::Resampler,
                 .title = "Output Resampling",
                 .helpText = kResamplerHelpText,
             });
 
+        leftPane.add_section("Twilight Visuals");
+        graphics_tuner_control(*this, leftPane, rightPane,
+            getSettings().game.enableTwilightVisuals,
+            {.option = GraphicsOption::TwilightVisualsEnabled,
+                .title = "Enable Twilight Visuals",
+                .helpText = "Apply the Faron, Eldin, and Lanayru Twilight environment layers anywhere."},
+            [] { return dusk::speedrun::isActive(); });
+        graphics_tuner_control(*this, leftPane, rightPane,
+            getSettings().game.twilightVisualStyle,
+            {.option = GraphicsOption::TwilightVisualStyle,
+                .title = "Twilight Visual Style",
+                .helpText = "Choose normal Twilight or Black and White like the E3 2005 demo."},
+            [] { return dusk::speedrun::isActive(); });
+        config_bool_select(leftPane, rightPane, getSettings().game.enableTwilightVisualMusic,
+            {.key = "Use Palace Music",
+                .helpText = "Replace normal map music with Palace of Twilight music while Twilight "
+                            "Visuals is active. Twilight enemy music remains active during encounters "
+                            "when this is disabled.",
+                .isDisabled = [] { return dusk::speedrun::isActive(); }});
+        graphics_tuner_control(*this, leftPane, rightPane,
+            getSettings().game.twilightVisualBrightness,
+            {.option = GraphicsOption::TwilightVisualBrightness,
+                .title = "Twilight Visual Brightness",
+                .helpText = "Adjust Twilight map lighting, actors, fog, sky, and bloom."},
+            [] { return dusk::speedrun::isActive(); });
+        graphics_tuner_control(*this, leftPane, rightPane,
+            getSettings().game.twilightSkyboxMode,
+            {.option = GraphicsOption::TwilightSkybox,
+                .title = "Twilight Skybox",
+                .helpText = "Choose an authored Twilight skybox while previewing it in game."},
+            [] { return dusk::speedrun::isActive(); });
+
         leftPane.add_section("Post-Processing");
         graphics_tuner_control(*this, leftPane, rightPane,
+            getSettings().game.twilightWeather,
+            {.option = GraphicsOption::Weather,
+                .title = "Weather",
+                .helpText = "Override the current map weather."},
+            [] { return dusk::speedrun::isActive(); });
+        graphics_tuner_control(*this, leftPane, rightPane,
+            getSettings().game.bloomMode,
             GraphicsTunerProps{
                 .option = GraphicsOption::BloomMode,
                 .title = "Bloom",
                 .helpText = kBloomHelpText,
             });
         graphics_tuner_control(*this, leftPane, rightPane,
+            getSettings().game.bloomMultiplier,
             GraphicsTunerProps{
                 .option = GraphicsOption::BloomMultiplier,
                 .title = "Bloom Brightness",
                 .helpText = kBloomBrightnessHelpText,
             });
         graphics_tuner_control(*this, leftPane, rightPane,
+            getSettings().game.depthOfFieldMode,
             GraphicsTunerProps{
                 .option = GraphicsOption::DepthOfFieldMode,
                 .title = "Depth of Field",
@@ -810,46 +1528,52 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
 
         leftPane.add_section("Rendering");
         graphics_tuner_control(*this, leftPane, rightPane,
+            getSettings().game.enableTextureReplacements,
             GraphicsTunerProps{
                 .option = GraphicsOption::TextureReplacements,
                 .title = "Enable Texture Replacements",
                 .helpText = kTextureReplacementHelpText,
             });
+        register_favorite({
+            .label = "Frame Rate Limit",
+            .value = [] { return Rml::String{kFrameRateLimitNames[frame_rate_limit_index()]}; },
+            .isDisabled = [] { return false; },
+            .activate = [] {
+                set_frame_rate_limit_index((frame_rate_limit_index() + 1) %
+                    static_cast<int>(kFrameRateLimitNames.size()));
+            },
+        }, getSettings().game.frameRateLimit);
         leftPane.register_control(
-            leftPane.add_select_button({
-                .key = "Unlock Framerate",
-                .getValue =
-                    [] {
-                        return kInterpolationModes[static_cast<u8>(getSettings().game.enableFrameInterpolation.getValue())];
-                    },
-                .isModified =
-                    [] {
-                        return getSettings().game.enableFrameInterpolation.getValue() !=
-                               getSettings().game.enableFrameInterpolation.getDefaultValue();
-                    },
-            }),
+            add_favorite_star(leftPane.add_select_button({
+                .key = "Frame Rate Limit",
+                .getValue = [] { return Rml::String{kFrameRateLimitNames[frame_rate_limit_index()]}; },
+                .isModified = [] {
+                    return getSettings().game.enableFrameInterpolation.getValue() !=
+                               getSettings().game.enableFrameInterpolation.getDefaultValue() ||
+                           getSettings().game.frameRateLimit.getValue() !=
+                               getSettings().game.frameRateLimit.getDefaultValue();
+                },
+            }), getSettings().game.frameRateLimit.getName()),
             rightPane, [](Pane& pane) {
-                for (int i = 0; i < kInterpolationModes.size(); i++) {
+                for (int i = 0; i < static_cast<int>(kFrameRateLimitNames.size()); ++i) {
                     pane.add_button({
-                            .text = kInterpolationModes[i],
-                            .isSelected =
-                                [i] {
-                                    return getSettings().game.enableFrameInterpolation.getValue() == static_cast<FrameInterpMode>(i);
-                                },
-                        })
-                        .on_pressed([i] {
-                            mDoAud_seStartMenu(kSoundItemChange);
-                            getSettings().game.enableFrameInterpolation.setValue(static_cast<FrameInterpMode>(i));
-                            presentation::update_frame_rate_preference();
-                            config::save();
-                        });
+                        .text = kFrameRateLimitNames[i],
+                        .isSelected = [i] { return frame_rate_limit_index() == i; },
+                    }).on_pressed([i] {
+                        mDoAud_seStartMenu(kSoundItemChange);
+                        set_frame_rate_limit_index(i);
+                    });
                 }
                 pane.add_rml(kUnlockFramerateHelpText);
             });
-        config_int_select(leftPane, rightPane, getSettings().video.maxFrameRate,
-            "Framerate Cap", "Limit the framerate to the specified value.", 30, 540, 1,
-            [] { return getSettings().game.enableFrameInterpolation.getValue() != FrameInterpMode::Capped; },
-            [](int) { presentation::update_frame_rate_preference(); });
+        config_bool_select(leftPane, rightPane, getSettings().game.lowLatencyPresentation,
+            {.key = "Low Latency Presentation",
+                .helpText = "Reduces the extra presentation delay used by normal frame pacing. "
+                            "Only available in 30 FPS mode.",
+                .isDisabled = [] { return frame_rate_limit_index() != 0; }});
+        config_int_select(leftPane, rightPane, getSettings().game.inputLagMs,
+            "Video Latency", "Delay the rendered image without changing input simulation timing.",
+            0, 150, 1, {}, {}, " ms");
         config_bool_select(leftPane, rightPane, getSettings().game.enableMapBackground,
             {
                 .key = "Enable Mini-Map Shadows",
@@ -886,6 +1610,15 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             rightPane, [](Pane& pane) {
                 pane.clear();
                 pane.add_text("Open input binding configuration.");
+            });
+        leftPane.register_control(
+            leftPane.add_button("Configure Hotkeys").on_pressed([this] {
+                mDoAud_seStartMenu(kSoundClick);
+                push(std::make_unique<HotkeyConfigWindow>());
+            }),
+            rightPane, [](Pane& pane) {
+                pane.clear();
+                pane.add_text("Configure MFB keyboard and controller shortcuts.");
             });
         config_bool_select(leftPane, rightPane, getSettings().game.allowBackgroundInput,
             {
@@ -971,6 +1704,28 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         addOption("Invert Camera Y Axis", getSettings().game.invertCameraYAxis,
             "Invert vertical camera movement.<br/><br/>Applies to the control stick only.",
             [] { return !getSettings().game.freeCamera; });
+        addOption("Custom Camera Speeds", getSettings().game.enableCameraSpeedControls,
+            "Enable separate regular, freecam, and aiming camera speed controls.");
+        config_percent_select(leftPane, rightPane,
+            getSettings().game.regularCameraSensitivityLevel, "Camera Speed",
+            "Adjust horizontal C-Stick camera rotation speed. 100% is the original speed.",
+            100, 1000, 10, [] {
+                return !getSettings().game.enableCameraSpeedControls ||
+                       getSettings().game.freeCamera;
+            });
+        config_percent_select(leftPane, rightPane,
+            getSettings().game.freeCameraSensitivityLevel, "Freecam Speed",
+            "Adjust free camera movement speed. 100% is the original speed.", 100, 1000, 10,
+            [] {
+                return !getSettings().game.enableCameraSpeedControls ||
+                       !getSettings().game.freeCamera;
+            });
+        config_percent_select(leftPane, rightPane,
+            getSettings().game.aimingCameraSensitivityLevel, "Aiming Speed",
+            "Adjust stick and gyro sensitivity while aiming or using first-person camera. "
+            "100% is the original speed.",
+            100, 1000, 10,
+            [] { return !getSettings().game.enableCameraSpeedControls; });
         addOption("Invert First Person X Axis", getSettings().game.invertFirstPersonXAxis,
             "Invert horizontal movement while aiming with items or first person camera.<br/><br/>Applies to the control stick only.");
         addOption("Invert First Person Y Axis", getSettings().game.invertFirstPersonYAxis,
@@ -1046,28 +1801,11 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
 
         // TODO: Individual sliders for Main Music, Sub Music, Sound Effects, and Fanfare.
         leftPane.add_section("Volume");
-        leftPane.register_control(
-            leftPane.add_child<NumberButton>(NumberButton::Props{
-                .key = "Master Volume",
-                .getValue = [] { return getSettings().audio.masterVolume.getValue(); },
-                .setValue =
-                    [](int value) {
-                        getSettings().audio.masterVolume.setValue(value);
-                        config::save();
-                        audio::SetMasterVolume(audio::MasterVolumeToLinear(value / 100.0f));
-                    },
-                .isModified =
-                    [] {
-                        return getSettings().audio.masterVolume.getValue() !=
-                               getSettings().audio.masterVolume.getDefaultValue();
-                    },
-                .max = 100,
-                .suffix = "%",
-            }),
-            rightPane, [](Pane& pane) {
-                pane.clear();
-                pane.add_text("Adjusts the volume of all sounds in the game.");
-            });
+        config_int_select(leftPane, rightPane, getSettings().audio.masterVolume,
+            "Master Volume", "Adjusts the volume of all sounds in the game.", 0, 100, 5, {},
+            [](int value) {
+                audio::SetMasterVolume(audio::MasterVolumeToLinear(value / 100.0f));
+            }, "%");
 
         leftPane.add_section("Effects");
         config_bool_select(leftPane, rightPane, getSettings().audio.enableReverb,
@@ -1132,35 +1870,18 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             [] { return getSettings().game.minimalHUD.getValue(); });
         addOption("Restore Wii 1.0 Glitches", getSettings().game.restoreWiiGlitches,
             "Restores patched glitches from Wii USA 1.0, the first released version.");
+        addOption("PPC Fast InvSqrt", getSettings().game.usePpcFastInvSqrt,
+            "Use the original GameCube/Wii reciprocal square-root estimate for vector and "
+            "distance calculations.");
         addOption("Enable Rotating Link Doll", getSettings().game.enableLinkDollRotation,
             "Enables rotating Link in the collection menu with the C-Stick.");
         addOption("Hide Owl Statue Markers", getSettings().game.removeQuestMapMarkers,
             "Removes completed Owl Statue markers from the map and Minimap.");
 
         leftPane.add_section("Difficulty");
-        leftPane.register_control(
-            leftPane.add_child<NumberButton>(NumberButton::Props{
-                .key = "Damage Multiplier",
-                .getValue = [] { return getSettings().game.damageMultiplier.getValue(); },
-                .setValue =
-                    [](int value) {
-                        getSettings().game.damageMultiplier.setValue(value);
-                        config::save();
-                    },
-                .isDisabled = [] { return dusk::speedrun::isActive(); },
-                .isModified =
-                    [] {
-                        return getSettings().game.damageMultiplier.getValue() !=
-                               getSettings().game.damageMultiplier.getDefaultValue();
-                    },
-                .min = 1,
-                .max = 8,
-                .suffix = "×",
-            }),
-            rightPane, [](Pane& pane) {
-                pane.clear();
-                pane.add_text("Multiplies incoming damage.");
-            });
+        config_int_select(leftPane, rightPane, getSettings().game.damageMultiplier,
+            "Damage Multiplier", "Multiplies incoming damage.", 1, 8, 1,
+            [] { return dusk::speedrun::isActive(); }, {}, "×");
         addSpeedrunDisabledOption(
             "Instant Death", getSettings().game.instantDeath, "Any hit will instantly kill you.");
         addSpeedrunDisabledOption("No Heart Drops", getSettings().game.noHeartDrops,
@@ -1171,10 +1892,38 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Wallet sizes are like in the HD version. (500, 1000, 2000)");
         addOption("Disable Rupee Cutscenes", getSettings().game.disableRupeeCutscenes,
             "Rupees will not play cutscenes after you have collected them the first time.");
+        addOption("Skip All Cutscenes", getSettings().game.skipAllCutscenes,
+            "Allow the additional MFB cutscene skips.");
+        config_bool_select(leftPane, rightPane, getSettings().game.cutsceneInputBuffering,
+            {.key = "Input Buffering",
+                .helpText = "Apply buttons held on the first available gameplay frame after a "
+                            "cutscene. Disabled in Speedrun Mode.",
+                .isDisabled = [] { return dusk::speedrun::isActive(); }});
         addOption("Faster Climbing", getSettings().game.fastClimbing,
             "Quicker climbing on ladders and vines like the HD version.");
         addOption("Faster Tears of Light", getSettings().game.fastTears,
             "Tears of Light dropped by Shadow Insects pop out faster like the HD version.");
+        config_bool_select(leftPane, rightPane, getSettings().game.enableFastLoads,
+            {.key = "Fast Loads",
+                .helpText = "Shorten area transition waits and fades.",
+                .onChange = [](bool value) {
+                    if (value) {
+                        getSettings().game.enableInstaLoads.setValue(false);
+                        config::save();
+                    }
+                }});
+        config_bool_select(leftPane, rightPane, getSettings().game.enableInstaLoads,
+            {.key = "Insta Loads",
+                .helpText = "Load areas in one frame. Skipping too quickly can break cutscenes.",
+                .onChange = [](bool value) {
+                    if (value) {
+                        getSettings().game.enableFastLoads.setValue(false);
+                        config::save();
+                    }
+                }});
+        addOption("Instant Movement", getSettings().game.instantMovement,
+            "Experimental: give control of Link immediately after a load by skipping the start "
+            "demo. This can break stages that depend on a start cutscene.");
         addSpeedrunDisabledOption("Autosave", getSettings().game.autoSave,
             "Autosaves the game when going to a new area or opening a dungeon door.");
         addOption("Instant Saves", getSettings().game.instantSaves,
@@ -1198,6 +1947,8 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Allows Wolf Link to howl and change the time of day.");
         addOption("Quick Transform (R+Y)", getSettings().game.enableQuickTransform,
             "Transform instantly by pressing R and Y simultaneously.");
+        addOption("Warp as Human", getSettings().game.humanMidnaWarp,
+            "Map and Midna warps no longer force Wolf Link transformation.");
         addOption("Aiming Reticle", getSettings().game.aimingReticle,
             "Shows the aiming reticle for bow and slingshot.");
 
@@ -1241,6 +1992,29 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .helpText = "Display the RTA timer. IGT is always visible.",
                 .isDisabled = [] { return !dusk::speedrun::isActive(); },
             });
+
+        leftPane.add_section("Load Delays");
+        config_enum_select(leftPane, rightPane, getSettings().game.discLoadingDelayMode,
+            "Load Delays",
+            "Off leaves DVD reads unchanged. On holds new reads until disabled. Timed pauses each "
+            "read for the configured duration.",
+            kDiscLoadingDelayModes,
+            std::function<void(DiscLoadingDelayMode)>{
+                [](DiscLoadingDelayMode) { updateDiscLoadingDelay(); }},
+            std::function<bool()>{[] { return dusk::speedrun::isActive(); }});
+        config_bool_select(leftPane, rightPane, getSettings().game.theEtherNetBoyzExperience,
+            {.key = "TheEtherNetBoyz Experience",
+                .helpText = "Prevent Argorok's ending death cutscene from loading after the final "
+                            "hit, independently of Load Delays.",
+                .isDisabled = [] { return dusk::speedrun::isActive(); }});
+        config_int_select(leftPane, rightPane, getSettings().game.discLoadingDelaySeconds,
+            "Delay Duration", "Seconds to pause each DVD read in Timed mode.", 1, 10, 1,
+            [] {
+                return dusk::speedrun::isActive() ||
+                       getSettings().game.discLoadingDelayMode.getValue() !=
+                           DiscLoadingDelayMode::Timed;
+            },
+            [](int) { updateDiscLoadingDelay(); }, " s");
     });
 
     add_tab("Cheats", [this](Rml::Element* content) {
@@ -1315,6 +2089,9 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             });
         addCheat("Invincible Enemies", getSettings().game.invincibleEnemies,
             "Prevents enemies from taking damage.");
+        addCheat("Transform without Shadow Crystal",
+            getSettings().game.transformWithoutShadowCrystal,
+            "Allow Quick Transform before obtaining the Shadow Crystal.");
     });
 
     add_tab("Interface", [this](Rml::Element* content) {
@@ -1443,6 +2220,10 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .helpText = "Checks GitHub releases for a new Dusklight version on startup.<br/><br/>"
                             "No personal information is transmitted or collected.",
             });
+        config_bool_select(leftPane, rightPane, getSettings().backend.showPipelineCompilation,
+            {.key = "Show Pipeline Compilation",
+                .helpText = "Show an overlay while graphics pipelines are being compiled for your "
+                            "hardware."});
 #if BOREALIS_HAS_DISCORD
         config_bool_select(leftPane, rightPane, getSettings().game.enableDiscordPresence,
             {
@@ -1522,6 +2303,23 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.recordingMode,
             "Recording Mode",
             "Disables the game HUD and all background music.<br/><br/>Useful for recording footage.");
+
+        if (!mPrelaunch) {
+            if constexpr (dusk::SupportsProcessRestart) {
+                leftPane.add_section("System");
+                leftPane.register_control(
+                    leftPane.add_button("Return to Startup Screen").on_pressed([] {
+                        mDoAud_seStartMenu(kSoundClick);
+                        confirm_return_to_startup();
+                    }),
+                    rightPane, [](Pane& pane) {
+                        pane.add_text(
+                            "Restart Dusklight and return to the startup screen, where you can "
+                            "change your disc image, language, graphics backend, and other startup "
+                            "options.");
+                    });
+            }
+        }
     });
 
     add_tab("Tools", [this](Rml::Element* content) {
@@ -1536,7 +2334,31 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Teleport (R+D-pad Up/Down)",
             "R+D-pad Up stores Link's current position.<br/>"
             "R+D-pad Down teleports Link back to it.");
+        add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.areaReload,
+            "Area Reload (L+R+Start+A)",
+            "Reloads the current area at its last entrance while preserving temporary area state.");
+        add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.gorgeVoidChecker,
+            "Gorge Void Checker",
+            "Enables the practice-menu checker for the Ordon Gorge void setup.");
+        add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.nativePracticeMenu,
+            "Native Practice Menu",
+            "Draws the practice tools menu with the game's renderer so it scales with resolution. "
+            "Disable this to use the mouse-capable ImGui version instead.");
+        add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.nativeInputViewer,
+            "Native Input Viewer",
+            "Shows the native input overlay used by the practice menu.");
+        add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.nativeLinkDebugInfo,
+            "Native Link Debug Info",
+            "Shows native Link position and movement debugging information.");
     });
+
+    // Favorite entries are registered while their tabs are built. Build every tab once so the
+    // Favorites tab has the complete list the first time it opens.
+    mTabBar->initialize_callbacks();
+}
+
+SettingsWindow::~SettingsWindow() {
+    if (sActiveSettingsWindow == this) sActiveSettingsWindow = nullptr;
 }
 
 void SettingsWindow::update() {
