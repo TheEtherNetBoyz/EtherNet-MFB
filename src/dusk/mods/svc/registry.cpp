@@ -231,6 +231,7 @@ void ModLoader::init_services() {
             &svc::g_flowModule,
             &svc::g_messageModule,
             &svc::g_gamemodeModule,
+            &svc::g_actorModule,
         })
     {
         svc::register_module(*module);

@@ -183,7 +183,6 @@ HttpError map_error(borealis::http::Error error) {
     case borealis::http::Error::Io:
         return HTTP_ERROR_IO;
     case borealis::http::Error::NoBackend:
-    case borealis::http::Error::NotInitialized:
     case borealis::http::Error::Network:
         return HTTP_ERROR_NETWORK;
     default:
@@ -438,14 +437,12 @@ ModResult start_request(LoadedMod& mod, const HttpRequestDesc& desc, HttpComplet
         .connectTimeout = desc.connect_timeout_ms != 0 ?
                               std::chrono::milliseconds{desc.connect_timeout_ms} :
                               DefaultTimeout,
-        .idleTimeout = desc.idle_timeout_ms != 0 ?
-                           std::chrono::milliseconds{desc.idle_timeout_ms} :
-                           DefaultTimeout,
+        .idleTimeout = desc.idle_timeout_ms != 0 ? std::chrono::milliseconds{desc.idle_timeout_ms} :
+                                                   DefaultTimeout,
         .totalTimeout = desc.total_timeout_ms != 0 ?
                             std::optional{std::chrono::milliseconds{desc.total_timeout_ms}} :
                             std::nullopt,
-        .maxBodyBytes =
-            desc.max_body_bytes != 0 ? desc.max_body_bytes : DefaultResponseBodyBytes,
+        .maxBodyBytes = desc.max_body_bytes != 0 ? desc.max_body_bytes : DefaultResponseBodyBytes,
     };
     request.headers.reserve(desc.header_count + 1);
     for (uint32_t i = 0; i < desc.header_count; ++i) {
@@ -463,9 +460,7 @@ ModResult start_request(LoadedMod& mod, const HttpRequestDesc& desc, HttpComplet
         if (!immediate.has_value()) {
             return MOD_UNAVAILABLE;
         }
-        if (immediate->error == borealis::http::Error::NoBackend ||
-            immediate->error == borealis::http::Error::NotInitialized)
-        {
+        if (immediate->error == borealis::http::Error::NoBackend) {
             return MOD_UNAVAILABLE;
         }
         task = borealis::detail::make_ready_task(std::move(*immediate));
@@ -550,7 +545,7 @@ void http_shutdown() {
 }
 
 bool http_available() {
-    return borealis::http::available() && borealis::http::initialize();
+    return borealis::http::available();
 }
 
 constexpr HttpService s_httpService{

@@ -48,9 +48,9 @@
 #include <borealis/aurora_log.h>
 #include <borealis/cli.hpp>
 #include <borealis/crash.hpp>
-#include <borealis/http.hpp>
 #include <borealis/io.hpp>
 #include <borealis/sentry.hpp>
+#include <borealis/task.hpp>
 #include <borealis/version.h>
 #include <filesystem>
 #include <system_error>
@@ -784,6 +784,7 @@ int game_main(int argc, char* argv[]) {
     // Run ImGui UI loop if Aurora couldn't initialize a backend
     if (auroraInfo.backend == BACKEND_NULL) {
         launchUILoop();
+        borealis::shutdown();
         borealis::sentry::shutdown();
         borealis::log::shutdown();
         fflush(stdout);
@@ -794,10 +795,6 @@ int game_main(int argc, char* argv[]) {
         dusk::ui::shutdown();
         aurora_shutdown();
         return 0;
-    }
-
-    if (borealis::http::available() && !borealis::http::initialize()) {
-        DuskLog.warn("Failed to initialize the HTTP worker pool");
     }
 
     if (dusk::getSettings().game.enableHighQualityMinimapTextures.getValue()) {
@@ -916,7 +913,7 @@ int game_main(int argc, char* argv[]) {
 
             // pre game launch ui main loop
             if (!launchUILoop()) {
-                borealis::http::shutdown();
+                borealis::shutdown();
                 borealis::sentry::shutdown();
                 borealis::log::shutdown();
                 fflush(stdout);
@@ -1008,7 +1005,7 @@ int game_main(int argc, char* argv[]) {
     OSReport("Starting main01 (Game Loop)...\n");
 
     main01();
-    borealis::http::shutdown();
+    borealis::shutdown();
 
     // We need to cleanly shut down the threads to avoid crashes on shutdown.
     if (daMP_c::m_myObj) {
