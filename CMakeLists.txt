@@ -591,6 +591,7 @@ if (DUSK_ENABLE_CODE_MODS AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR
     if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mods/twilight_visuals_mod/CMakeLists.txt")
         add_subdirectory(mods/twilight_visuals_mod)
     endif ()
+    add_subdirectory(mods/randomizer)
 endif ()
 
 if (APPLE)
