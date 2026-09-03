@@ -588,6 +588,9 @@ if (DUSK_ENABLE_CODE_MODS AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR
     add_subdirectory(mods/window_demo)
     add_subdirectory(mods/flow_demo)
     add_subdirectory(mods/basic_cosmetics_mod)
+    if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mods/twilight_visuals_mod/CMakeLists.txt")
+        add_subdirectory(mods/twilight_visuals_mod)
+    endif ()
 endif ()
 
 if (APPLE)

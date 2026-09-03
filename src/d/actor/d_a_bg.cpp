@@ -19,45 +19,6 @@
 #include <cstring>
 #include <vector>
 
-#if TARGET_PC
-static void daBg_applyAstralFarFog(J3DModelData* modelData, dKy_tevstr_c* tevstr,
-                                   std::vector<J3DFogInfo*>& temporarilyEnabledFog) {
-    if (!g_dKyExternalVisualConfig.enabled || g_dKyExternalVisualConfig.style != 2 ||
-        modelData == NULL || tevstr == NULL)
-    {
-        return;
-    }
-
-    for (u16 i = 0; i < modelData->getMaterialNum(); ++i) {
-        J3DMaterial* material = modelData->getMaterialNodePointer(i);
-        if (material == NULL || material->getFog() == NULL) {
-            continue;
-        }
-
-        J3DFogInfo* fog = material->getFog()->getFogInfo();
-        if (fog == NULL || fog->mType != 0) {
-            continue;
-        }
-
-        // Some far-scenery materials opt out of authored fog entirely. Enable it only
-        // for this Astral background display-list build so mountains blend into the
-        // distance haze, then restore the original material state after submission.
-        fog->mType = 2;
-        fog->mStartZ = tevstr->mFogStartZ;
-        fog->mEndZ = tevstr->mFogEndZ;
-        fog->mColor.r = tevstr->FogCol.r;
-        fog->mColor.g = tevstr->FogCol.g;
-        fog->mColor.b = tevstr->FogCol.b;
-        fog->mColor.a = 255;
-        if (dComIfGd_getView() != NULL) {
-            fog->mNearZ = dComIfGd_getView()->near_;
-            fog->mFarZ = dComIfGd_getView()->far_;
-        }
-        temporarilyEnabledFog.push_back(fog);
-    }
-}
-#endif
-
 const char* daBg_c::setArcName() {
     static char arcName[32];
 
@@ -377,8 +338,8 @@ int daBg_c::draw() {
             g_env_light.settingTevStruct(l_tevStrType[i], NULL, bgPart->tevstr);
             g_env_light.setLightTevColorType_MAJI(bg_model, bgPart->tevstr);
 #if TARGET_PC
-            std::vector<J3DFogInfo*> astralFarFogMaterials;
-            daBg_applyAstralFarFog(modelData, bgPart->tevstr, astralFarFogMaterials);
+            const auto hooks = dKy_geometry_hooks();
+            void* drawToken = hooks.beforeModel ? hooks.beforeModel(modelData, bgPart->tevstr) : nullptr;
 #endif
             dKy_bg_MAxx_proc(bg_model);
 
@@ -495,9 +456,7 @@ int daBg_c::draw() {
 
             mDoExt_modelEntryDL(bg_model);
 #if TARGET_PC
-            for (J3DFogInfo* fog : astralFarFogMaterials) {
-                fog->mType = 0;
-            }
+            if (hooks.afterModel) hooks.afterModel(drawToken);
 #endif
             dComIfGd_setListBG();
         }

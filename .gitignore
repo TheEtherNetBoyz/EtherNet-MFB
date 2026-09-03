@@ -59,3 +59,9 @@ extract
 # User-supplied custom music; generated locally, not distributed in Git.
 /res/music/astral-plane.ast
 /res/music/astral-plane-combat.ast
+
+# Local standalone Twilight Visuals mod project; not part of the MFB repository.
+/mods/twilight_visuals_mod/
+
+# Local migration backups and working assets.
+/computer-migration-bundle/

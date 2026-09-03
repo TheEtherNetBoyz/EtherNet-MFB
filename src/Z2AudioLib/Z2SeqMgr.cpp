@@ -8,6 +8,7 @@
 #include "Z2AudioLib/Z2Calc.h"
 #include "JSystem/JAudio2/JAISoundChild.h"
 #include "JSystem/JAudio2/JAISeq.h"
+#include "JSystem/JAudio2/JASCriticalSection.h"
 #include "Z2AudioLib/SpotName.h"
 #include "os_report.h"
 
@@ -27,7 +28,8 @@ static bool useTwilightBattleMusic() {
         return true;
     }
 #if TARGET_PC
-    return g_dKyExternalVisualConfig.enabled;
+    auto callback = dKy_sequence_hooks().query;
+    return callback && callback(3);
 #else
     return false;
 #endif
@@ -1585,38 +1587,10 @@ void Z2SeqMgr::processBgmFramework() {
     }
 #endif
 #if TARGET_PC
-    // Keep the Palace sequence alive underneath the local track, so switching
-    // back never reloads wave banks or loses sequence channels. Only mute this
-    // known replacement sequence, never sound effects, battles or story music.
-    const u8 demoStatus = Z2GetStatusMgr()->getDemoStatus();
-    const u32 subMusic = getSubBgmID();
-    const bool ordinaryBattle = subMusic == Z2BGM_BATTLE_NORMAL || subMusic == Z2BGM_BATTLE_TWILIGHT;
-    // Next-stage is also used by seamless room/load-zone handoffs. Keep the
-    // selected loop audible there; scene selection still protects true area
-    // changes, while reset/demo/stream music remain excluded.
-    const bool safeMusicEvent = (demoStatus == 0 || demoStatus == 1) &&
-        getStreamBgmID() == 0xffffffff && !mDoRst::isReset();
-    const bool battleScope = g_dKyExternalVisualConfig.enabled && safeMusicEvent &&
-        (ordinaryBattle || !mFlags.mBattleBgmOff) &&
-        (subMusic == 0xffffffff || ordinaryBattle);
-    const bool replacementMusicScene = g_dKyExternalVisualConfig.enabled &&
-        Z2IsTwilightVisualMusicScene();
-    const bool customMusicEligible = replacementMusicScene &&
-        mMainBgmHandle &&
-        getMainBgmID() == Z2BGM_DUNGEON_LV8 &&
-        mSceneBgm.get() > 0.0f &&
-        (subMusic == 0xffffffff || ordinaryBattle) &&
-        // Status 1 is an ordinary named event (chests/dialogue), whereas
-        // scripted demos and special story-music statuses remain protected.
-        safeMusicEvent;
-    const int derivedMusicMode = g_dKyExternalVisualConfig.style == 2 ? 1 :
-        g_dKyExternalVisualConfig.style == 3 ? 2 : 0;
-    dusk::audio::UpdateTwilightMusic(replacementMusicScene, customMusicEligible,
-        derivedMusicMode,
-        base_vol * (ordinaryBattle && battleScope ? 1.0f : mMainBgmMaster.get()) * mSceneBgm.get() *
-        mStreamBgmMaster.get() * field_0x84.get() * field_0xa4.get(),
-        battleScope, ordinaryBattle,
-        base_vol * mStreamBgmMaster.get());
+    if (auto callback = dKy_sequence_hooks().update) {
+        JASCriticalSection lock;
+        callback(this, base_vol);
+    }
 #endif
     if (mMainBgmHandle) {
         f32 volume = 1.0f;

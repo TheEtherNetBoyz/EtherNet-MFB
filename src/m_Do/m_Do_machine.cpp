@@ -878,15 +878,9 @@ int mDoMch_Create() {
     JFWSystem::setFifoBufSize(0xA0000);
     #if DEBUG
     JFWSystem::setAramAudioBufSize(0xB00000
-    #if TARGET_PC
-        + dusk::audio::AstralStreamAramReserve
-    #endif
     );
     #else
     JFWSystem::setAramAudioBufSize(0xA00000
-    #if TARGET_PC
-        + dusk::audio::AstralStreamAramReserve
-    #endif
     );
     #endif
     JFWSystem::setAramGraphBufSize(-1);

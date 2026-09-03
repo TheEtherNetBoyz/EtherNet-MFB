@@ -1048,27 +1048,6 @@ int dRes_control_c::setStageRes(char const* i_arcName, JKRHeap* i_heap) {
     return setRes(i_arcName, mStageInfo, ARRAY_SIZEU(mStageInfo), path, mDoDvd_MOUNT_DIRECTION_TAIL, i_heap);
 }
 
-int dRes_control_c::setStageResForStage(char const* i_arcName, char const* i_stageName,
-                                        char const* i_fileName, JKRHeap* i_heap) {
-    char path[64];
-
-    snprintf(path, sizeof(path), "/res/Stage/%s/%s.arc", i_stageName, i_fileName);
-    dRes_info_c* resInfo = getResInfo(i_arcName, mStageInfo, ARRAY_SIZEU(mStageInfo));
-    if (resInfo == NULL) {
-        resInfo = newResInfo(mStageInfo, ARRAY_SIZEU(mStageInfo));
-        if (resInfo == NULL ||
-            resInfo->setFile(i_arcName, path, mDoDvd_MOUNT_DIRECTION_TAIL, i_heap) == 0) {
-            if (resInfo != NULL) {
-                resInfo->~dRes_info_c();
-            }
-            return 0;
-        }
-    }
-
-    resInfo->incCount();
-    return 1;
-}
-
 void dRes_control_c::dump() {
     JUTReportConsole_f("\ndRes_control_c::dump mObjectInfo\n");
     dRes_info_c::dump(mObjectInfo, ARRAY_SIZEU(mObjectInfo));

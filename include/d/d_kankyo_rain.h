@@ -5,18 +5,6 @@
 
 struct cXyz;
 
-struct dKy_external_moon_override_c {
-    bool enabled;
-    bool forceVisible;
-    bool hideSun;
-    bool fullMoon;
-    f32 scale;
-    cXyz* position;
-};
-extern dKy_external_moon_override_c g_dKyExternalMoonOverride;
-void dKy_set_external_moon_override(bool enabled, bool forceVisible, bool hideSun,
-                                    bool fullMoon, f32 scale, cXyz* position);
-
 void dKyr_drawSun(Mtx param_0, cXyz* param_1, GXColor& param_2, u8** param_3);
 void dKyr_drawLenzflare(Mtx param_0, cXyz* param_1, GXColor& param_2, u8** param_3);
 void dKyr_drawSibuki(Mtx param_0, u8** param_1);
@@ -26,9 +14,6 @@ void dKyr_drawStar(Mtx param_0, u8** param_1);
 void drawCloudShadow(Mtx param_0, u8** param_1);
 void dKyr_drawHousi(Mtx param_0, u8** param_1);
 class dKankyo_housi_Packet;
-void dKyr_drawHousiVisual(Mtx param_0, u8** param_1, dKankyo_housi_Packet* packet);
-void dKyr_drawHousiExternal(Mtx param_0, u8** param_1, dKankyo_housi_Packet* packet,
-                            f32 timeScale);
 void drawVrkumo(Mtx param_0, GXColor& param_1, u8** param_2);
 void dKyr_odour_draw(Mtx param_0, u8** param_1);
 void dKyr_mud_draw(Mtx param_0, u8** param_1);
@@ -48,7 +33,6 @@ void dKyr_odour_init();
 void dKyr_odour_move();
 void dKyr_housi_init();
 void dKyr_housi_move();
-void dKyr_housi_move_external(f32 timeScale);
 void dKyr_sun_move();
 void dKyr_lenzflare_move();
 void dKyr_star_init();

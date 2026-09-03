@@ -225,8 +225,7 @@ void JAISeq::mixOut_(const JASSoundParams& params, JAISoundActivity activity) {
 #if TARGET_PC
     // Tag ownership only. The channel callback applies the gate without
     // changing sequence parameters or stopping/pausing sustained notes.
-    inner_.outputTrack.mDuskPalaceMusic = getID() == Z2BGM_DUNGEON_LV8;
-    inner_.outputTrack.mDuskBattleMusic = getID() == Z2BGM_BATTLE_NORMAL || getID() == Z2BGM_BATTLE_TWILIGHT;
+    inner_.outputTrack.mDuskSequenceId = static_cast<u32>(getID());
 #endif
 
     if (audible_) {

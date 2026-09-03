@@ -7,6 +7,7 @@
 #include "d/d_kankyo_data.h"
 #include "d/d_kankyo_tev_str.h"
 #include "d/d_kankyo_wether.h"
+#include "dusk/TwilightHostApi.h"
 #include "f_pc/f_pc_base.h"
 #include "m_Do/m_Do_ext.h"
 
@@ -1032,19 +1033,14 @@ BOOL dKy_TeachWind_existence_chk();
 u8 dKy_darkworld_stage_check(char const* stageName, int roomNo);
 BOOL dKy_withwarp_capture_check();
 void dKy_visual_enemy_form_context_set(u8 enabled);
-struct dKy_external_visual_config_c {
-    bool enabled;
-    u8 style;
-    f32 brightness;
-    s32 chromaticAberration;
-    u8 skyVariant;
-    u8 weather;
-    bool alternateRun;
-};
-extern dKy_external_visual_config_c g_dKyExternalVisualConfig;
-void dKy_set_external_visual_config(u8 enabled, u8 style, f32 brightness,
-                                    s32 chromaticAberration, u8 skyVariant,
-                                    u8 weather, u8 alternateRun);
+void dKy_set_external_visual_bloom_provider(DuskTwilightBloomProviderV1 provider);
+const DuskGeometryHooksV1& dKy_geometry_hooks();
+void dKy_set_environment_hooks(const DuskEnvironmentHooksV1* hooks);
+void dKy_set_player_hooks(const DuskPlayerHooksV1* hooks);
+const DuskPlayerHooksV1& dKy_player_hooks();
+void dKy_set_sequence_hooks(const DuskSequenceHooksV1* hooks);
+const DuskSequenceHooksV1& dKy_sequence_hooks();
+void dKy_set_geometry_hooks(const DuskGeometryHooksV1* hooks);
 u8 dKy_darkworld_check();
 u8 dKy_darkworld_visual_check();
 u8 dKy_darkworld_visual_effect_check();

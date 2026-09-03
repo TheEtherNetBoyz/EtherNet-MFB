@@ -1465,62 +1465,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .helpText = kResamplerHelpText,
             });
 
-        leftPane.add_section("Twilight Visuals");
-        config_bool_select(leftPane, rightPane, getSettings().game.enableTwilightVisuals,
-            {
-                .key = "Enable Twilight Visuals",
-                .helpText = "Master toggle for all Twilight Visuals code, including styles, particles, weather, music, and movement options.",
-                .isDisabled = [] { return getSettings().game.speedrunMode.getValue(); },
-            });
-        graphics_tuner_control(*this, leftPane, rightPane,
-            getSettings().game.twilightVisualStyle,
-            GraphicsTunerProps{
-                .option = GraphicsOption::TwilightVisualStyle,
-                .title = "Twilight Visual Style",
-                .helpText = "Choose Normal Twilight, Black and White like the E3 2005 demo, Astral Plane, or The Dark Hour.",
-            }, [] { return getSettings().game.speedrunMode.getValue(); });
-        config_bool_select(leftPane, rightPane, getSettings().game.enableTwilightVisualMusic,
-            {
-                .key = "Use Palace Music",
-                .helpText = "Replace normal map music with Palace of Twilight music while Twilight Visuals is active. "
-                            "Twilight enemy music remains active during encounters when this is disabled.",
-                .isDisabled = [] { return getSettings().game.speedrunMode.getValue(); },
-            });
-        config_int_select(leftPane, rightPane, getSettings().game.twilightMusicVolume,
-            "Custom Music Volume", "Adjust streamed Twilight Visuals music volume.",
-            0, 100, 5, [] { return getSettings().game.speedrunMode.getValue(); }, {}, "%");
-        config_int_select(leftPane, rightPane, getSettings().game.twilightChromaticAberration,
-            "Astral Chromatic Aberration", "Adjust Astral Plane chromatic aberration strength.",
-            0, 200, 5, [] { return getSettings().game.speedrunMode.getValue(); }, {}, "%");
-        config_bool_select(leftPane, rightPane, getSettings().game.skywardSwordRunning,
-            {
-                .key = "Skyward Sword Running",
-                .helpText = "Hold A to use the Skyward Sword-style running animation and movement.",
-                .isDisabled = [] { return getSettings().game.speedrunMode.getValue(); },
-            });
-        graphics_tuner_control(*this, leftPane, rightPane,
-            getSettings().game.twilightVisualBrightness,
-            GraphicsTunerProps{
-                .option = GraphicsOption::TwilightVisualBrightness,
-                .title = "Twilight Visual Brightness",
-                .helpText = "Adjust Twilight map lighting, actors, fog, sky, and bloom."},
-            [] { return dusk::speedrun::isActive(); });
-        graphics_tuner_control(*this, leftPane, rightPane,
-            getSettings().game.twilightSkyboxMode,
-            GraphicsTunerProps{
-                .option = GraphicsOption::TwilightSkybox,
-                .title = "Twilight Skybox",
-                .helpText = "Choose an authored Twilight skybox while previewing it in game."},
-            [] { return dusk::speedrun::isActive(); });
-
         leftPane.add_section("Post-Processing");
-        graphics_tuner_control(*this, leftPane, rightPane,
-            getSettings().game.twilightWeather,
-            GraphicsTunerProps{
-                .option = GraphicsOption::Weather,
-                .title = "Weather",
-                .helpText = "Override the current map weather."},
-            [] { return dusk::speedrun::isActive(); });
         graphics_tuner_control(*this, leftPane, rightPane,
             getSettings().game.bloomMode,
             GraphicsTunerProps{

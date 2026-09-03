@@ -18,8 +18,6 @@ public:
                      bool);
     void framework();
     void load1stDynamicWave();
-    void load1stDynamicWaveForBgmRefresh();
-    void restoreBgmStatusAfterRefresh(s32 status);
     void _load1stWaveInner_1();
     void _load1stWaveInner_2();
     bool check1stDynamicWave();
