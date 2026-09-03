@@ -29,7 +29,7 @@ static bool useTwilightBattleMusic() {
     }
 #if TARGET_PC
     auto callback = dKy_sequence_hooks().query;
-    return callback && callback(3);
+    return callback && callback(DuskSequence_UseTwilightBattleMusic);
 #else
     return false;
 #endif

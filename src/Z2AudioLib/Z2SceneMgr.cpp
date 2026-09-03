@@ -51,15 +51,27 @@ static u32 z2FastLoadAudioFadeFrames(u32 frames) {
 #if TARGET_PC
 bool Z2IsTwilightVisualMusicRefreshPending() {
     auto callback = dKy_sequence_hooks().query;
-    return callback && callback(1);
+    return callback && callback(DuskSequence_IsRefreshPending);
 }
 bool Z2IsTwilightVisualMusicScene() {
     auto callback = dKy_sequence_hooks().query;
-    return callback && callback(0);
+    return callback && callback(DuskSequence_IsReplacementScene);
 }
 static DuskTwilightSceneMusicProviderV1 s_external_scene_music_provider = nullptr;
+static s32 s_selected_music_status = -1;
 void Z2SetTwilightSceneMusicProvider(DuskTwilightSceneMusicProviderV1 provider) {
     s_external_scene_music_provider = provider;
+    s_selected_music_status = -1;
+}
+
+static void apply_external_music_status() {
+    s32 status = s_selected_music_status;
+    s_selected_music_status = -1;
+    if (status < 0) {
+        const auto callback = dKy_sequence_hooks().query;
+        if (callback) status = callback(DuskSequence_MusicStatusOverride);
+    }
+    if (status >= 0) Z2GetSeqMgr()->changeBgmStatus(status);
 }
 
 #endif
@@ -154,6 +166,9 @@ void Z2SceneMgr::setFadeInStart(u8 fadeType) {
 }
 
 void Z2SceneMgr::setSceneName(char* spot, s32 room, s32 layer) {
+#if TARGET_PC
+    s_selected_music_status = -1;
+#endif
     OS_REPORT("[Z2SceneMgr::setSceneName] spot = %s, room = %d, layer = %d\n", spot, room, layer);
     JAISoundID bgm_id = -1;
     JAISound* sound;
@@ -1686,11 +1701,22 @@ void Z2SceneMgr::setSceneName(char* spot, s32 room, s32 layer) {
 
 #if TARGET_PC
     if (s_external_scene_music_provider != nullptr) {
-        u32 selected = static_cast<u32>(bgm_id);
-        s32 musicStatus = 0;
+        u32 selectedBgm = static_cast<u32>(bgm_id);
+        u8 selectedWave1 = bgm_wave1;
+        u8 selectedWave2 = bgm_wave2;
+        bool selectedPreserveStreams = bVar2;
+        bool selectedFieldBgmPlay = field_bgm_play;
+        s32 selectedMusicStatus = -1;
         if (s_external_scene_music_provider(spot, room, layer, spotNo, inDarkness_,
-                demo_wave, &selected, &bgm_wave1, &bgm_wave2, &bVar2, &field_bgm_play, &musicStatus))
-            bgm_id = static_cast<JAISoundID>(selected);
+                demo_wave, &selectedBgm, &selectedWave1, &selectedWave2,
+                &selectedPreserveStreams, &selectedFieldBgmPlay, &selectedMusicStatus)) {
+            bgm_id = static_cast<JAISoundID>(selectedBgm);
+            bgm_wave1 = selectedWave1;
+            bgm_wave2 = selectedWave2;
+            bVar2 = selectedPreserveStreams;
+            field_bgm_play = selectedFieldBgmPlay;
+            s_selected_music_status = selectedMusicStatus;
+        }
     }
 #endif
 
@@ -1798,7 +1824,7 @@ void Z2SceneMgr::_load1stWaveInner_1() {
     OS_REPORT("[Z2SceneMgr::_load1stWaveInner_1] requestSe:%d loadedSe:%d\n", requestSeWave_1, loadedSeWave_1);
 
 #if TARGET_PC
-    if (!dKy_sequence_hooks().query || !dKy_sequence_hooks().query(4))
+    if (!dKy_sequence_hooks().query || !dKy_sequence_hooks().query(DuskSequence_IsBgmOnlyRefresh))
 #endif
     {
         Z2GetSeMgr()->seStopAll(0);
@@ -1875,7 +1901,7 @@ void Z2SceneMgr::_load1stWaveInner_2() {
         }
     }
 #if TARGET_PC
-    if (dKy_sequence_hooks().query) dKy_sequence_hooks().query(5);
+    if (dKy_sequence_hooks().query) dKy_sequence_hooks().query(DuskSequence_OnWaveRefreshFinished);
 #endif
 }
 
@@ -1933,6 +1959,9 @@ void Z2SceneMgr::sceneBgmStart() {
     Z2GetStatusMgr()->setPauseFlag(0);
 
     if (!field_0x1a && Z2GetSeqMgr()->checkBgmIDPlaying(BGM_ID)) {
+#if TARGET_PC
+        if (s_selected_music_status >= 0) apply_external_music_status();
+#endif
         return;
     }
 
@@ -1960,11 +1989,6 @@ void Z2SceneMgr::sceneBgmStart() {
             case Z2BGM_DUNGEON_LV8:
             case Z2BGM_DUNGEON_LV9_02:
             case Z2BGM_SNOW_MOUNTAIN:
-#if TARGET_PC
-                if (dKy_sequence_hooks().query && dKy_sequence_hooks().query(2) >= 0) {
-                    Z2GetSeqMgr()->changeBgmStatus(dKy_sequence_hooks().query(2));
-                } else
-#endif
                 if (sceneNum == Z2SCENE_CASTLE_TOWN_SHOPS) {
                     Z2GetSeqMgr()->changeBgmStatus(5);
                 } else {
@@ -2006,6 +2030,9 @@ void Z2SceneMgr::sceneBgmStart() {
                 }
                 break;
             }
+#if TARGET_PC
+            apply_external_music_status();
+#endif
             break;
 
         case 2:
@@ -2018,7 +2045,7 @@ void Z2SceneMgr::sceneBgmStart() {
     }
 
 #if TARGET_PC
-    if (dKy_sequence_hooks().query) dKy_sequence_hooks().query(6);
+    if (dKy_sequence_hooks().query) dKy_sequence_hooks().query(DuskSequence_OnSceneBgmStarted);
 #endif
     Z2GetSeqMgr()->bgmAllUnMute(0);
     field_0x1a = false;

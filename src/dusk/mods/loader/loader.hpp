@@ -38,9 +38,7 @@ private:
     std::vector<uint8_t> zip_data;
     mz_zip_archive res_zip{};
     bool res_zip_open = false;
-    // Bundle discovery can re-enter the ZIP reader through loader/resource callbacks.
-    // Keep the archive serialized while allowing that same-thread re-entry.
-    std::recursive_mutex m_mutex;
+    std::mutex m_mutex;
 };
 
 class ModBundleDisk final : public ModBundle {

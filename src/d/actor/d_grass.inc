@@ -935,7 +935,10 @@ void dGrass_packet_c::draw() {
         // draw them with the original immediate path
         if (hasRegrowing) {
             GXSetVtxDescv(l_vtxDescList);
-            grass_lighting();
+            if (grass_lighting()) {
+                GXSetChanCtrl(GX_COLOR0, GX_FALSE, GX_SRC_REG, GX_SRC_VTX, 0,
+                              GX_DF_NONE, GX_AF_NONE);
+            }
             for (dGrass_data_c* blade = first; blade != NULL; blade = blade->mp_next) {
                 if (blade->field_0x02 >= -1 || cLib_checkBit<u8>(blade->field_0x01, 2)) {
                     continue;

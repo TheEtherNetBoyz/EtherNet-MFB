@@ -430,10 +430,6 @@ if (DUSK_ENABLE_CODE_MODS)
         # Game ABI exports & import library for mod linking
         include(cmake/WindowsExports.cmake)
         setup_windows_exports(dusklight)
-        # symgen records the executable's PDB identity in the embedded manifest.
-        # Ensure the linker emits the matching CodeView debug directory so Dusk can
-        # validate that manifest at runtime in RelWithDebInfo builds.
-        target_link_options(dusklight PRIVATE "/DEBUG")
     endif ()
     # Post-link symbol manifest: hookable-surface name->address map keyed to the build.
     setup_symbol_manifest(dusklight)
@@ -588,9 +584,6 @@ if (DUSK_ENABLE_CODE_MODS AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR
     add_subdirectory(mods/window_demo)
     add_subdirectory(mods/flow_demo)
     add_subdirectory(mods/basic_cosmetics_mod)
-    if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mods/twilight_visuals_mod/CMakeLists.txt")
-        add_subdirectory(mods/twilight_visuals_mod)
-    endif ()
     add_subdirectory(mods/randomizer)
 endif ()
 

@@ -239,58 +239,6 @@ void SteppedCarousel::apply(int value) {
     }
 }
 
-Rml::String format_graphics_setting_value(GraphicsOption option, int value) {
-    switch (option) {
-    case GraphicsOption::InternalResolution: {
-        u32 width = 0;
-        u32 height = 0;
-        AuroraGetRenderSize(&width, &height);
-        if (value <= 0) {
-            return fmt::format("Auto ({}×{})", width, height);
-        } else {
-            return fmt::format("{}× ({}×{})", value, width, height);
-        }
-    }
-    case GraphicsOption::ShadowResolution:
-        return fmt::format("{}×", value);
-    case GraphicsOption::Resampler:
-        switch (static_cast<Resampler>(value)) {
-        case Resampler::Bilinear:
-            return "Bilinear";
-        case Resampler::Area:
-            return "Area";
-        }
-        break;
-    case GraphicsOption::BloomMode:
-        switch (static_cast<BloomMode>(value)) {
-        case BloomMode::Off:
-            return "Off";
-        case BloomMode::Classic:
-            return "Classic";
-        case BloomMode::Dusk:
-            return "Dusklight";
-        case BloomMode::Legacy:
-            return "Legacy";
-        }
-        break;
-    case GraphicsOption::DepthOfFieldMode:
-        switch (static_cast<DepthOfFieldMode>(value)) {
-        case DepthOfFieldMode::Off:
-            return "Off";
-        case DepthOfFieldMode::Classic:
-            return "Classic";
-        case DepthOfFieldMode::Dusk:
-            return "Dusklight";
-        }
-        break;
-    case GraphicsOption::BloomMultiplier:
-        return fmt::format("{}%", value);
-    case GraphicsOption::TextureReplacements:
-        return static_cast<bool>(value) ? "On" : "Off";
-    }
-    return "";
-}
-
 GraphicsTuner::GraphicsTuner(GraphicsTunerProps props)
     : Document(kDocumentSource, false, DocumentScope::GraphicsTuner),
       mSetting(GraphicsSetting::of(props.option)) {

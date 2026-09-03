@@ -59,7 +59,6 @@
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/logging.h"
 #include "dusk/settings.h"
-#include <vector>
 #include "dusk/speedrun.h"
 #endif
 

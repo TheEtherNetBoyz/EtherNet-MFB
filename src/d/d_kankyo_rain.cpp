@@ -9,8 +9,10 @@
 #include "d/d_kankyo.h"
 #include "d/d_kankyo_rain.h"
 #include "d/d_stage.h"
+#if TARGET_PC
 #include "dusk/TwilightHostApi.h"
 #include "dusk/frame_interpolation.h"
+#endif
 #include "f_op/f_op_camera_mng.h"
 #include "f_op/f_op_kankyo_mng.h"
 #include "m_Do/m_Do_graphic.h"
@@ -18,6 +20,7 @@
 #include "m_Do/m_Do_audio.h"
 #include <cstring>
 
+#if TARGET_PC
 extern "C" void DuskSetAudioHooksV1(const DuskAudioHooksV1*);
 extern "C" float DuskGetMasterVolume();
 extern void dStage_set_external_twilight_enemy_proc_provider(
@@ -28,44 +31,34 @@ extern void Z2SetTwilightSceneMusicProvider(DuskTwilightSceneMusicProviderV1 pro
 
 extern "C" const DuskTwilightHostApiV1* DuskGetTwilightHostApiV1() {
     static const DuskTwilightHostApiV1 api = {
-        DUSK_TWILIGHT_HOST_ABI_V1,
-        sizeof(DuskTwilightHostApiV1),
-        DUSK_TWILIGHT_HOST_CAP_MASTER_VOLUME |
+        .abiVersion = DUSK_TWILIGHT_HOST_ABI_V1,
+        .structSize = sizeof(DuskTwilightHostApiV1),
+        .capabilities = DUSK_TWILIGHT_HOST_CAP_MASTER_VOLUME |
             DUSK_TWILIGHT_HOST_CAP_ENEMY_PROC_PROVIDER |
             DUSK_TWILIGHT_HOST_CAP_BLOOM_PROVIDER |
             DUSK_TWILIGHT_HOST_CAP_SCENE_MUSIC_PROVIDER |
             DUSK_TWILIGHT_HOST_CAP_GEOMETRY_HOOKS |
-            DUSK_TWILIGHT_HOST_CAP_AUDIO_HOOKS,
-        nullptr,
-        nullptr, // Reserved: celestial policy is supplied by render hooks.
-        nullptr, // Reserved: custom particle simulation is mod-owned.
-        nullptr, // Reserved: custom particle rendering is mod-owned.
-        nullptr,
-        nullptr,
-        &DuskGetMasterVolume,
-        nullptr, // Reserved: sky loading is owned by the mod.
-        nullptr,
-        &dStage_set_external_twilight_enemy_proc_provider,
-        nullptr,
-        &dKy_set_external_visual_bloom_provider,
-        &Z2SetTwilightSceneMusicProvider,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        &dKy_set_geometry_hooks,
-        &DuskSetAudioHooksV1,
-        &dKy_set_environment_hooks,
-        nullptr, // Reserved: environment selection is owned by the mod.
-        &dKy_set_player_hooks,
-        &dKy_set_sequence_hooks,
-        nullptr, // Reserved: scene refresh sequencing is owned by the mod.
-        &dusk::frame_interp::get_interpolation_step,
-        &dusk::frame_interp::is_enabled,
-        &dusk::frame_interp::is_sim_frame,
-        static_cast<void(*)(Mtx, const void*)>(&dusk::frame_interp::record_final_mtx),
-        &dusk::frame_interp::lookup_replacement,
-        [](u32 kind) -> void* {
+            DUSK_TWILIGHT_HOST_CAP_AUDIO_HOOKS |
+            DUSK_TWILIGHT_HOST_CAP_ENVIRONMENT_HOOKS |
+            DUSK_TWILIGHT_HOST_CAP_PLAYER_HOOKS |
+            DUSK_TWILIGHT_HOST_CAP_SEQUENCE_HOOKS |
+            DUSK_TWILIGHT_HOST_CAP_INTERPOLATION |
+            DUSK_TWILIGHT_HOST_CAP_AUDIO_MANAGER,
+        .getMasterVolume = &DuskGetMasterVolume,
+        .setEnemyProcProvider = &dStage_set_external_twilight_enemy_proc_provider,
+        .setBloomProvider = &dKy_set_external_visual_bloom_provider,
+        .setSceneMusicProvider = &Z2SetTwilightSceneMusicProvider,
+        .setGeometryHooks = &dKy_set_geometry_hooks,
+        .setAudioHooks = &DuskSetAudioHooksV1,
+        .setEnvironmentHooks = &dKy_set_environment_hooks,
+        .setPlayerHooks = &dKy_set_player_hooks,
+        .setSequenceHooks = &dKy_set_sequence_hooks,
+        .interpolationStep = &dusk::frame_interp::get_interpolation_step,
+        .interpolationEnabled = &dusk::frame_interp::is_enabled,
+        .simulationFrame = &dusk::frame_interp::is_sim_frame,
+        .recordMatrix = static_cast<void(*)(Mtx, const void*)>(&dusk::frame_interp::record_final_mtx),
+        .lookupMatrix = &dusk::frame_interp::lookup_replacement,
+        .audioManager = [](u32 kind) -> void* {
             switch (kind) {
             case 0: return Z2GetSceneMgr();
             case 1: return Z2GetSeqMgr();
@@ -76,6 +69,7 @@ extern "C" const DuskTwilightHostApiV1* DuskGetTwilightHostApiV1() {
     };
     return &api;
 }
+#endif
 
 #include "dusk/version.hpp"
 #if TARGET_PC
@@ -984,11 +978,17 @@ void dKyr_rain_move() {
 }
 
 static bool celestial_visibility(u32 point, bool nativeValue) {
+#if TARGET_PC
     const auto callback = dKy_geometry_hooks().celestialVisibility;
     return callback ? callback(point, nativeValue) : nativeValue;
+#else
+    return nativeValue;
+#endif
 }
 static void celestial_parameter(u32 point, void* value) {
+#if TARGET_PC
     if (dKy_geometry_hooks().celestialParameter) dKy_geometry_hooks().celestialParameter(point, value);
+#endif
 }
 
 static BOOL d_krain_cut_turn_check() {
@@ -2579,8 +2579,10 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
             moon_pos.z = spB4.z - camera->view.lookat.eye.z;
         }
 
+#if TARGET_PC
         DuskCelestialPositionV1 position{&moon_pos, &spB4, &camera->view.lookat.eye};
         celestial_parameter(1, &position);
+#endif
 
         int weekday = date % 8;
         if (g_env_light.getDaytime() < 180.0f) {

@@ -22,13 +22,14 @@
 
 static void dKyw_pntlight_set(WIND_INFLUENCE* pntwind);
 
-#if TARGET_PC
 static bool external_moon_visible() {
+#if TARGET_PC
     const auto callback = dKy_geometry_hooks().celestialVisibility;
     return callback && callback(0, false);
-}
-
+#else
+    return false;
 #endif
+}
 
 static J3DPacket* dKyw_setDrawPacketList(J3DPacket* i_packet, int i_type) {
     if (i_packet == NULL) {
@@ -422,8 +423,6 @@ static void wether_move_thunder() {
 
 void dKyw_wether_move() {
     wether_move_thunder();
-#if TARGET_PC
-#endif
 }
 
 static void wether_move_sun() {
@@ -1114,9 +1113,6 @@ void dKyw_wether_draw() {
         }
 
         dKy_undwater_filter_draw();
-
-#if TARGET_PC
-#endif
     }
 }
 
