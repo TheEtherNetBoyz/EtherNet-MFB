@@ -316,6 +316,7 @@ function(add_mod target_name)
     set(_package_inputs "${_mod_json}")
     set(_extra_cmds "")
     set(_lib_copy_cmd "")
+    set(_lib_strip_cmd "")
     set(_target_depend "")
     if (_has_lib)
         list(APPEND _zip_args lib)
@@ -323,6 +324,10 @@ function(add_mod target_name)
                 COMMAND ${CMAKE_COMMAND} -E make_directory "${_stage}/lib/${_lib_platform}"
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_FILE:${target_name}>" "${_stage}/lib/${_lib_platform}/${_lib_name}")
+        if (UNIX AND NOT APPLE)
+            set(_lib_strip_cmd COMMAND "${CMAKE_STRIP}" --strip-unneeded
+                    "${_stage}/lib/${_lib_platform}/${_lib_name}")
+        endif ()
         set(_target_depend ${target_name})
     endif ()
     string(TOLOWER "${_lib_name}" _lib_name_key)
@@ -399,6 +404,7 @@ function(add_mod target_name)
             COMMAND ${CMAKE_COMMAND} -E rm -rf "${_stage}"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_stage}" "${_output_dir}"
             ${_lib_copy_cmd}
+            ${_lib_strip_cmd}
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_mod_json}" "${_stage}/mod.json"
             ${_extra_cmds}
             COMMAND ${CMAKE_COMMAND} -E chdir "${_stage}" ${CMAKE_COMMAND} -E tar cvf "${_out}" --format=zip ${_zip_args}

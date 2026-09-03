@@ -82,7 +82,6 @@ public:
     void duskFinishBlizzetaDeathDemo();
     bool duskProcessBlizzetaDeathDemoLocalSkip();
 
-private:
     /* 0x05AC */ request_of_phase_process_class mPhase1;
     /* 0x05B4 */ request_of_phase_process_class mPhase2;
     /* 0x05BC */ request_of_phase_process_class mPhase3;
