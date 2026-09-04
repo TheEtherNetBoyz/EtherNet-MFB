@@ -75,12 +75,12 @@ static fopAc_ac_c* daAlink_searchTagKandelaar(fopAc_ac_c* i_actor, void* i_data)
 static bool s_duskForceHumanFormWaitInit;
 #if TARGET_PC
 bool daAlink_c::sDuskHumanWarpRequest = false;
-static s32 playerHook(const daAlink_c* player, u32 point, f32 value = 0) {
+static s32 playerHook(const daAlink_c* player, DuskPlayerEvent point, f32 value = 0) {
     auto callback = dKy_player_hooks().invoke;
     return callback ? callback(const_cast<daAlink_c*>(player), point, value) : 0;
 }
 template <typename T>
-static void playerAnimationHook(daAlink_c* player, u32 point, T& value, f32* rate = nullptr) {
+static void playerAnimationHook(daAlink_c* player, DuskPlayerAnimationEvent point, T& value, f32* rate = nullptr) {
     if (auto callback = dKy_player_hooks().animation) {
         s32 converted = static_cast<s32>(value);
         callback(player, point, &converted, rate);
@@ -7752,7 +7752,7 @@ void daAlink_c::setBlendMoveAnime(f32 i_morf) {
     BOOL sp24 = checkEventRun();
     BOOL sp20 = checkBootsMoveAnime(1) IF_DUSK(&& !dusk::getSettings().game.enableFastIronBoots);
 #if TARGET_PC
-    playerAnimationHook(this, 0, sp20);
+    playerAnimationHook(this, DuskPlayerAnimation_HeavyMovement, sp20);
 #endif
 
     f32 var_f29;
@@ -7798,7 +7798,7 @@ void daAlink_c::setBlendMoveAnime(f32 i_morf) {
     }
 
 #if TARGET_PC
-    playerAnimationHook(this, 1, sp18);
+    playerAnimationHook(this, DuskPlayerAnimation_Run, sp18);
 #endif
     f32 var_f27 = 15.0f;
     f32 var_f26 = 3.0f;
@@ -7840,7 +7840,7 @@ void daAlink_c::setBlendMoveAnime(f32 i_morf) {
         sp2C = var_f29;
     }
 #if TARGET_PC
-    playerAnimationHook(this, 2, var_r28, &sp2C);
+    playerAnimationHook(this, DuskPlayerAnimation_HeavyRun, var_r28, &sp2C);
 #endif
 
     int sp10;
@@ -9762,7 +9762,7 @@ void daAlink_c::setStickData() {
             mHeavySpeedMultiplier = mpHIO->mWolf.m.mUnderwaterInputRate;
         }
 #if TARGET_PC
-        playerHook(this, 11, duskUnscaledStickValue);
+        playerHook(this, DuskPlayer_UpdateSnowSpeed, duskUnscaledStickValue);
 #endif
     }
 
@@ -10313,7 +10313,7 @@ void daAlink_c::setSpeedAndAngleNormal() {
 
     setNormalSpeedF(speed, mpHIO->mMove.m.mDeceleration);
 #if TARGET_PC
-    playerHook(this, 10);
+    playerHook(this, DuskPlayer_UpdateRunSpeed);
 #endif
 }
 
@@ -10936,7 +10936,7 @@ BOOL daAlink_c::checkLandAction(int param_0) {
     BOOL isRollLand = mStickValue > 0.8f && move_direction != DIR_BACKWARD && !checkGrabAnime() &&
                    mProcID != PROC_CUT_HEAD && face_direction == DIR_FORWARD;
 #if TARGET_PC
-    if (playerHook(this, 0)) isRollLand = false;
+    if (playerHook(this, DuskPlayer_RunEnabled)) isRollLand = false;
 #endif
 
     if ((param_0 || temp_f31 >= mpHIO->mDamage.mDamFall.m.mMinRollHeight) &&
@@ -11010,7 +11010,7 @@ BOOL daAlink_c::checkSlideAction() {
 
 BOOL daAlink_c::checkAutoJumpAction() {
 #if TARGET_PC
-    if (playerHook(this, 4)) return 0;
+    if (playerHook(this, DuskPlayer_WaterRunning)) return 0;
 #endif
 
     if (checkMagneBootsFly()) {
@@ -11149,7 +11149,7 @@ BOOL daAlink_c::checkAutoJumpAction() {
 
                                 int autoJumpParam = 0;
 #if TARGET_PC
-                                autoJumpParam = playerHook(this, 6);
+                                autoJumpParam = playerHook(this, DuskPlayer_JumpMode);
 #endif
                                 return procAutoJumpInit(autoJumpParam);
                             }
@@ -11244,7 +11244,7 @@ BOOL daAlink_c::checkFrontWallTypeAction() {
 
     if (!checkInputOnR() && !checkModeFlg(2)
 #if TARGET_PC
-        && !playerHook(this, 5)
+        && !playerHook(this, DuskPlayer_CanStepUp)
 #endif
     ) {
         return 0;
@@ -11327,7 +11327,7 @@ BOOL daAlink_c::checkFrontWallTypeAction() {
         field_0x3078 = var_r27 + 1;
 
 #if TARGET_PC
-        if (const s32 result = playerHook(this, 15)) return result;
+        if (const s32 result = playerHook(this, DuskPlayer_TryStepUp)) return result;
 #endif
         if (field_0x2f91 == 6) {
             if (field_0x3078 > mpHIO->mWallHang.m.small_jump_input_time) {
@@ -11784,7 +11784,7 @@ int daAlink_c::orderZTalk() {
 
 int daAlink_c::checkNormalAction() {
 #if TARGET_PC
-    if (const s32 result = playerHook(this, 12)) return result;
+    if (const s32 result = playerHook(this, DuskPlayer_HandleRunAction)) return result;
 #endif
     int wall_grab_status = getWallGrabStatus();
 
@@ -12155,7 +12155,7 @@ BOOL daAlink_c::checkMoveDoAction() {
 
         if (dComIfGp_getDoStatus() == BUTTON_STATUS_UNK_121) {
 #if TARGET_PC
-            if (playerHook(this, 0)) return false;
+            if (playerHook(this, DuskPlayer_RunEnabled)) return false;
 #endif
             if (!checkAttentionLock() && checkInputOnR()) {
                 shape_angle.y = mMoveAngle;
@@ -12174,7 +12174,7 @@ BOOL daAlink_c::checkMoveDoAction() {
 
 BOOL daAlink_c::checkSideRollAction(int param_0) {
 #if TARGET_PC
-    if (playerHook(this, 0)) return false;
+    if (playerHook(this, DuskPlayer_RunEnabled)) return false;
 #endif
     if (checkNotJumpSinkLimit()
         || checkHeavyStateOn(TRUE, TRUE)
@@ -13381,7 +13381,7 @@ void daAlink_c::posMove() {
         }
     }
 #if TARGET_PC
-    else if (playerHook(this, 16)) {}
+    else if (playerHook(this, DuskPlayer_SuppressWaterFall)) {}
 #endif
     else if (!checkModeFlg(0x400)) {
         if (checkHeavyStateOn(TRUE, TRUE) && mProcID != PROC_SPINNER_READY &&
@@ -13627,7 +13627,7 @@ void daAlink_c::posMove() {
         }
     }
 #if TARGET_PC
-    playerHook(this, 13);
+    playerHook(this, DuskPlayer_UpdateWaterHeight);
 #endif
 }
 
@@ -14554,7 +14554,7 @@ BOOL daAlink_c::checkMagicArmorWearAbility() const {
 
 #if TARGET_PC
 bool daAlink_c::checkDuskMagicArmorWaterRun() const {
-    return playerHook(this, 4) != 0;
+    return playerHook(this, DuskPlayer_WaterRunning) != 0;
 }
 #endif
 
@@ -17078,7 +17078,7 @@ int daAlink_c::procAutoJumpInit(int param_0) {
     }
 
 #if TARGET_PC
-    playerHook(this, 14, param_0);
+    playerHook(this, DuskPlayer_ApplyLedgeBoost, param_0);
 #endif
 
     field_0x3588 = l_waitBaseAnime;

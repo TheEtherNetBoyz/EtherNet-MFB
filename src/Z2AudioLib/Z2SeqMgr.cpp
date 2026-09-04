@@ -1578,12 +1578,11 @@ void Z2SeqMgr::processBgmFramework() {
     mWindStone.calc();
     field_0xa4.calc();
     
-    f32 base_without_fanfare = mAllBgmMaster.get() * mBgmPause.get() * mWindStone.get() * mTwilightGateVol;
-    f32 base_vol = base_without_fanfare * mFanfareMute.get();
+    f32 base_vol = mAllBgmMaster.get() * mBgmPause.get() * mFanfareMute.get()
+        * mWindStone.get() * mTwilightGateVol;
 #if DEBUG
     if (field_0x04_debug) {
         base_vol *= field_0x00_debug;
-        base_without_fanfare *= field_0x00_debug;
     }
 #endif
 #if TARGET_PC

@@ -1960,7 +1960,9 @@ void Z2SceneMgr::sceneBgmStart() {
 
     if (!field_0x1a && Z2GetSeqMgr()->checkBgmIDPlaying(BGM_ID)) {
 #if TARGET_PC
-        if (s_selected_music_status >= 0) apply_external_music_status();
+        if (BGM_ID.id_.info.type.parts.sectionID == 1 && s_selected_music_status >= 0)
+            apply_external_music_status();
+        s_selected_music_status = -1;
 #endif
         return;
     }
@@ -2045,6 +2047,9 @@ void Z2SceneMgr::sceneBgmStart() {
     }
 
 #if TARGET_PC
+    // Stream, anonymous and suppressed BGM paths must not carry an override
+    // into the next scene. Sequence BGM has already consumed it above.
+    s_selected_music_status = -1;
     if (dKy_sequence_hooks().query) dKy_sequence_hooks().query(DuskSequence_OnSceneBgmStarted);
 #endif
     Z2GetSeqMgr()->bgmAllUnMute(0);

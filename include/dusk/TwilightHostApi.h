@@ -22,14 +22,62 @@ struct DuskSequenceHooksV1 {
     // The last two events are notifications; their return values are ignored.
     s32 (*query)(DuskSequenceEvent event);
 };
+// Explicit values preserve the revision-4 wire contract. Query events return
+// booleans except JumpMode (native jump mode); action events return handled/result.
+enum DuskPlayerEvent : u32 {
+    DuskPlayer_RunEnabled = 0,
+    DuskPlayer_IsRunning = 1,
+    DuskPlayer_HeavyBootsRunning = 2,
+    DuskPlayer_SnowRunning = 3,
+    DuskPlayer_WaterRunning = 4,
+    DuskPlayer_CanStepUp = 5,
+    DuskPlayer_JumpMode = 6,
+    DuskPlayer_UpdateRunSpeed = 10,
+    DuskPlayer_UpdateSnowSpeed = 11, // value: unscaled stick input
+    DuskPlayer_HandleRunAction = 12,
+    DuskPlayer_UpdateWaterHeight = 13,
+    DuskPlayer_ApplyLedgeBoost = 14, // value: jump mode
+    DuskPlayer_TryStepUp = 15,
+    DuskPlayer_SuppressWaterFall = 16,
+};
+enum DuskPlayerAnimationEvent : u32 {
+    DuskPlayerAnimation_HeavyMovement = 0, // value: heavy movement flag
+    DuskPlayerAnimation_Run = 1, // value: animation ID
+    DuskPlayerAnimation_HeavyRun = 2, // value: animation ID, rate: playback rate
+};
+enum DuskEnvironmentQuery : u32 {
+    DuskEnvironment_VisualTwilight = 0,
+    DuskEnvironment_TwilightEffects = 1,
+    DuskEnvironment_SnowStorm = 2,
+    DuskEnvironment_ActorTwilight = 3,
+};
+enum DuskCelestialVisibility : u32 {
+    DuskCelestial_ForceMoon = 0,
+    DuskCelestial_HideSky = 1,
+    DuskCelestial_DrawSun = 2,
+    DuskCelestial_DrawMoon = 3,
+    DuskCelestial_HideMoonForTime = 4,
+    DuskCelestial_DrawSunLens = 5,
+};
+enum DuskCelestialParameter : u32 {
+    DuskCelestial_MoonAlpha = 0, // f32*
+    DuskCelestial_MoonPosition = 1, // DuskCelestialPositionV1*
+    DuskCelestial_MoonPhase = 2, // int*
+    DuskCelestial_MoonSize = 3, // f32*
+};
+enum DuskAudioManagerKind : u32 {
+    DuskAudioManager_Scene = 0,
+    DuskAudioManager_Sequence = 1,
+    DuskAudioManager_Status = 2,
+};
 struct DuskPlayerHooksV1 {
-    s32 (*invoke)(void* player, u32 point, f32 value);
-    void (*animation)(void* player, u32 point, s32* value, f32* rate);
+    s32 (*invoke)(void* player, DuskPlayerEvent point, f32 value);
+    void (*animation)(void* player, DuskPlayerAnimationEvent point, s32* value, f32* rate);
 };
 struct DuskEnvironmentHooksV1 {
     void (*commitArea)();
     void (*update)();
-    u8 (*query)(u32 kind, u8 nativeValue);
+    u8 (*query)(DuskEnvironmentQuery kind, u8 nativeValue);
     void (*actorContext)(u8 enabled);
 };
 // Audio callbacks execute under the host audio lock. Clearing them waits for
@@ -52,8 +100,8 @@ struct DuskGeometryHooksV1 {
     void (*afterModel)(void* token);
     f32 (*bloomGain)();
     void (*afterBackground)(void* view, void* viewport);
-    bool (*celestialVisibility)(u32 point, bool nativeValue);
-    void (*celestialParameter)(u32 point, void* value);
+    bool (*celestialVisibility)(DuskCelestialVisibility point, bool nativeValue);
+    void (*celestialParameter)(DuskCelestialParameter point, void* value);
 };
 using DuskTwilightEnemyProcProviderV1 = s16 (*)(s16 procName);
 using DuskTwilightBloomProviderV1 = u8 (*)(u8 defaultProfile);
@@ -81,7 +129,7 @@ struct DuskTwilightHostApiV1 {
     bool (*simulationFrame)();
     void (*recordMatrix)(Mtx, const void*);
     bool (*lookupMatrix)(const void*, Mtx);
-    void* (*audioManager)(u32 kind);
+    void* (*audioManager)(DuskAudioManagerKind kind);
 };
 
 

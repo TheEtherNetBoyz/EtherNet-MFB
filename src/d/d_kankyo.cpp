@@ -11197,7 +11197,7 @@ u8 dKy_darkworld_check() {
     }
 
 #if TARGET_PC
-    if (s_environment_hooks.query) check = s_environment_hooks.query(3, check);
+    if (s_environment_hooks.query) check = s_environment_hooks.query(DuskEnvironment_ActorTwilight, check);
 #endif
 
     return check;
@@ -11205,7 +11205,7 @@ u8 dKy_darkworld_check() {
 
 u8 dKy_darkworld_visual_check() {
 #if TARGET_PC
-    if (s_environment_hooks.query) return s_environment_hooks.query(0, dKy_darkworld_check());
+    if (s_environment_hooks.query) return s_environment_hooks.query(DuskEnvironment_VisualTwilight, dKy_darkworld_check());
 #endif
     return dKy_darkworld_check();
 }
@@ -11213,14 +11213,14 @@ u8 dKy_darkworld_visual_check() {
 
 u8 dKy_darkworld_visual_effect_check() {
 #if TARGET_PC
-    if (s_environment_hooks.query) return s_environment_hooks.query(1, dKy_darkworld_check());
+    if (s_environment_hooks.query) return s_environment_hooks.query(DuskEnvironment_TwilightEffects, dKy_darkworld_check());
 #endif
     return dKy_darkworld_check();
 }
 
 u8 dKy_visual_snow_storm_check() {
 #if TARGET_PC
-    if (s_environment_hooks.query) return s_environment_hooks.query(2, 0);
+    if (s_environment_hooks.query) return s_environment_hooks.query(DuskEnvironment_SnowStorm, 0);
 #endif
     return 0;
 }

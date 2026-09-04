@@ -58,11 +58,11 @@ extern "C" const DuskTwilightHostApiV1* DuskGetTwilightHostApiV1() {
         .simulationFrame = &dusk::frame_interp::is_sim_frame,
         .recordMatrix = static_cast<void(*)(Mtx, const void*)>(&dusk::frame_interp::record_final_mtx),
         .lookupMatrix = &dusk::frame_interp::lookup_replacement,
-        .audioManager = [](u32 kind) -> void* {
+        .audioManager = [](DuskAudioManagerKind kind) -> void* {
             switch (kind) {
-            case 0: return Z2GetSceneMgr();
-            case 1: return Z2GetSeqMgr();
-            case 2: return Z2GetStatusMgr();
+            case DuskAudioManager_Scene: return Z2GetSceneMgr();
+            case DuskAudioManager_Sequence: return Z2GetSeqMgr();
+            case DuskAudioManager_Status: return Z2GetStatusMgr();
             default: return nullptr;
             }
         },
@@ -980,14 +980,15 @@ void dKyr_rain_move() {
 static bool celestial_visibility(u32 point, bool nativeValue) {
 #if TARGET_PC
     const auto callback = dKy_geometry_hooks().celestialVisibility;
-    return callback ? callback(point, nativeValue) : nativeValue;
+    return callback ? callback(static_cast<DuskCelestialVisibility>(point), nativeValue) : nativeValue;
 #else
     return nativeValue;
 #endif
 }
 static void celestial_parameter(u32 point, void* value) {
 #if TARGET_PC
-    if (dKy_geometry_hooks().celestialParameter) dKy_geometry_hooks().celestialParameter(point, value);
+    if (dKy_geometry_hooks().celestialParameter)
+        dKy_geometry_hooks().celestialParameter(static_cast<DuskCelestialParameter>(point), value);
 #endif
 }
 
@@ -2518,11 +2519,13 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
     u8 draw_sun = false;
     u16 date = dComIfGs_getDate();
     f32 moonAlpha = sun_packet->mMoonAlpha;
-    celestial_parameter(0, &moonAlpha);
+    IF_DUSK(celestial_parameter(DuskCelestial_MoonAlpha, &moonAlpha));
 
 #if TARGET_PC || VERSION == VERSION_GCN_JPN
     IF_DUSK_BLOCK(dusk::version::isRegionJpn())
-    if (celestial_visibility(1, g_env_light.hide_vrbox)) {
+    bool hideSky = g_env_light.hide_vrbox;
+    IF_DUSK(hideSky = celestial_visibility(DuskCelestial_HideSky, hideSky));
+    if (hideSky) {
         return;
     }
     IF_DUSK_BLOCK_END
@@ -2540,8 +2543,8 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
     if (sun_packet->mMoonAlpha > 0.0f) {
         draw_moon = true;
     }
-    draw_sun = celestial_visibility(2, draw_sun);
-    draw_moon = celestial_visibility(3, draw_moon);
+    IF_DUSK(draw_sun = celestial_visibility(DuskCelestial_DrawSun, draw_sun));
+    IF_DUSK(draw_moon = celestial_visibility(DuskCelestial_DrawMoon, draw_moon));
 
     if ((draw_sun | draw_moon) != 0) {
         sunpos.x = ppos->x;
@@ -2550,7 +2553,9 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
 
         u32 stage_type = dStage_stagInfo_GetSTType(dComIfGp_getStage()->getStagInfo());
         if (g_env_light.base_light.mColor.r == 0 && stage_type != ST_ROOM) {
-            if (celestial_visibility(4, g_env_light.daytime > 285.0f || g_env_light.daytime < 105.0f)) {
+            bool hideMoonForTime = g_env_light.daytime > 285.0f || g_env_light.daytime < 105.0f;
+            IF_DUSK(hideMoonForTime = celestial_visibility(DuskCelestial_HideMoonForTime, hideMoonForTime));
+            if (hideMoonForTime) {
                 draw_moon = false;
             }
 
@@ -2581,7 +2586,7 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
 
 #if TARGET_PC
         DuskCelestialPositionV1 position{&moon_pos, &spB4, &camera->view.lookat.eye};
-        celestial_parameter(1, &position);
+        celestial_parameter(DuskCelestial_MoonPosition, &position);
 #endif
 
         int weekday = date % 8;
@@ -2606,7 +2611,7 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
             }
         }
 
-        celestial_parameter(2, &weekday);
+        IF_DUSK(celestial_parameter(DuskCelestial_MoonPhase, &weekday));
 
         if (weekday != 4) {
             int texidx;
@@ -2769,7 +2774,7 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
                     }
                 }
 
-                celestial_parameter(3, &size);
+                IF_DUSK(celestial_parameter(DuskCelestial_MoonSize, &size));
 
                 color_reg0.a = 255.0f * moonAlpha;
                 GXSetTevColor(GX_TEVREG0, color_reg0);
@@ -2895,7 +2900,7 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
 void dKyr_drawLenzflare(Mtx drawMtx, cXyz* ppos, GXColor& param_2, u8** tex) {
     ZoneScoped;
 #if TARGET_PC
-    if (!celestial_visibility(5, true)) return;
+    if (!celestial_visibility(DuskCelestial_DrawSunLens, true)) return;
 #endif
     dKankyo_sunlenz_Packet* lenz_packet = g_env_light.mpSunLenzPacket;
     dKankyo_sun_Packet* sun_packet = g_env_light.mpSunPacket;

@@ -25,7 +25,7 @@ static void dKyw_pntlight_set(WIND_INFLUENCE* pntwind);
 static bool external_moon_visible() {
 #if TARGET_PC
     const auto callback = dKy_geometry_hooks().celestialVisibility;
-    return callback && callback(0, false);
+    return callback && callback(DuskCelestial_ForceMoon, false);
 #else
     return false;
 #endif
