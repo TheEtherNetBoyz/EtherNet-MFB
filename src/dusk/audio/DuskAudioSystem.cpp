@@ -4,6 +4,7 @@
 #include <array>
 #include <cassert>
 #include <span>
+#include "dusk/TwilightHostApi.h"
 
 #include "JSystem/JAudio2/JASAiCtrl.h"
 #include "JSystem/JAudio2/JASChannel.h"
@@ -23,6 +24,20 @@ static OutputSubframe OutBuffer;
 static std::array<f32, DSP_SUBFRAME_SIZE * OutputSubframe::NUM_CHANNELS> OutInterleaveBuffer;
 
 static SDL_AudioStream* PlaybackStream;
+
+// Callbacks execute under the audio lock; unregistering waits for in-flight work.
+static DuskAudioHooksV1 s_audioHooks{};
+extern "C" void DuskSetAudioHooksV1(const DuskAudioHooksV1* hooks) {
+    JASCriticalSection section;
+    s_audioHooks = hooks ? *hooks : DuskAudioHooksV1{};
+}
+extern "C" float DuskGetMasterVolume() {
+    JASCriticalSection section;
+    return MasterVolume;
+}
+float dusk::audio::ExternalSequenceGain(u32 soundId) {
+    return s_audioHooks.channelGain ? s_audioHooks.channelGain(soundId) : 1.0f;
+}
 
 /**
  * SDL audiostream callback to trigger rendering of new audio data.
@@ -152,6 +167,7 @@ void RenderAudioSubframe() {
     DspRender(OutBuffer);
 
     InterleaveOutputData(OutBuffer, OutInterleaveBuffer);
+    if (s_audioHooks.mix) s_audioHooks.mix(OutInterleaveBuffer.data(), DSP_SUBFRAME_SIZE, SampleRate);
 
     if (JASDriver::extMixCallback != nullptr && JASDriver::sMixMode == MIX_MODE_INTERLEAVE) {
         static_assert(OutputSubframe::NUM_CHANNELS == 2); // This code only works with Stereo so far.

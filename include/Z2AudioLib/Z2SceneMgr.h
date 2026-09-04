@@ -18,8 +18,6 @@ public:
                      bool);
     void framework();
     void load1stDynamicWave();
-    void load1stDynamicWaveForBgmRefresh();
-    void restoreBgmStatusAfterRefresh(s32 status);
     void _load1stWaveInner_1();
     void _load1stWaveInner_2();
     bool check1stDynamicWave();
@@ -160,5 +158,10 @@ enum Z2Scene {
     /* 0x4F */ Z2SCENE_GROTTO_POND,
     /* 0x50 */ Z2SCENE_FARON_WOODS_CAVE,
 };
+
+#if TARGET_PC
+bool Z2IsTwilightVisualMusicScene();
+bool Z2IsTwilightVisualMusicRefreshPending();
+#endif
 
 #endif /* Z2SCENEMGR_H */

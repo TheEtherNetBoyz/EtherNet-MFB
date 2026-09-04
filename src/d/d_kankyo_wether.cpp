@@ -9,6 +9,7 @@
 #include "JSystem/J3DGraphBase/J3DDrawBuffer.h"
 #include "SSystem/SComponent/c_math.h"
 #include "d/d_com_inf_game.h"
+#include "d/d_bg_s_gnd_chk.h"
 #include "d/d_kankyo.h"
 #include "d/d_kankyo_rain.h"
 #include "f_op/f_op_camera_mng.h"
@@ -20,7 +21,15 @@
 #endif
 
 static void dKyw_pntlight_set(WIND_INFLUENCE* pntwind);
-static dKankyo_housi_Packet* s_twilightVisualHousiPacket = NULL;
+
+static bool external_moon_visible() {
+#if TARGET_PC
+    const auto callback = dKy_geometry_hooks().celestialVisibility;
+    return callback && callback(DuskCelestial_ForceMoon, false);
+#else
+    return false;
+#endif
+}
 
 static J3DPacket* dKyw_setDrawPacketList(J3DPacket* i_packet, int i_type) {
     if (i_packet == NULL) {
@@ -108,16 +117,6 @@ HOUSI_EFF::~HOUSI_EFF() {}
 HOUSI_EFF::HOUSI_EFF() {}
 
 void dKankyo_housi_Packet::draw() {
-    if (this == s_twilightVisualHousiPacket) {
-        Mtx drawMtx;
-        MTXCopy(j3dSys.getViewMtx(), drawMtx);
-        if (g_env_light.camera_water_in_status != 0) {
-            MTXCopy(dComIfGd_getView()->viewMtx, drawMtx);
-        }
-        dKyr_drawHousiVisual(drawMtx, &mpResTex, this);
-        return;
-    }
-
     GX_DEBUG_GROUP(dKyr_drawHousi, j3dSys.getViewMtx(), &mpResTex);
 }
 
@@ -428,7 +427,12 @@ void dKyw_wether_move() {
 
 static void wether_move_sun() {
     s32 sunVisible = false;
-    if (dComIfGp_checkStatus(1) && !g_env_light.hide_vrbox) {
+#if TARGET_PC
+    const bool externalMoonVisible = external_moon_visible();
+#else
+    const bool externalMoonVisible = false;
+#endif
+    if (externalMoonVisible || (dComIfGp_checkStatus(1) && !g_env_light.hide_vrbox)) {
         roomRead_class* room = dComIfGp_getStageRoom();
         if (room != NULL && room->num > dComIfGp_roomControl_getStayNo()) {
             sunVisible = dStage_roomRead_dt_c_GetVrboxswitch(
@@ -445,9 +449,15 @@ static void wether_move_sun() {
             sunVisible = false;
         }
 
+        // An explicit moon override may bypass a room's VR-box
+        // switch (or a stage's normal sun suppression) prevent its packet.
+        if (externalMoonVisible) {
+            sunVisible = true;
+        }
+
         switch (g_env_light.mSunInitialized) {
         case FALSE:
-            if (sunVisible && dKy_darkworld_visual_effect_check() != true) {
+            if (sunVisible && (dKy_darkworld_visual_effect_check() != true || externalMoonVisible)) {
                 g_env_light.mpSunPacket = JKR_NEW_ARGS (0x20) dKankyo_sun_Packet;
                 g_env_light.mpSunLenzPacket = JKR_NEW_ARGS (0x20) dKankyo_sunlenz_Packet;
                 if (g_env_light.mpSunPacket != NULL && g_env_light.mpSunLenzPacket != NULL) {
@@ -507,6 +517,9 @@ static void wether_move_sun() {
                     g_env_light.mpSunLenzPacket->mDrawLenzInSky = false;
                     dKyr_sun_move();
                     dKyr_lenzflare_move();
+                    if (externalMoonVisible) {
+                        g_env_light.mpSunPacket->mSunAlpha = 0.0f;
+                    }
                     g_env_light.mSunInitialized = true;
                 }
             }
@@ -521,6 +534,11 @@ static void wether_move_sun() {
             } else {
                 dKyr_sun_move();
                 dKyr_lenzflare_move();
+                if (externalMoonVisible) {
+                    // Keep the shared sun/moon packet for the forced moon, but
+                    // never allow daytime updates to restore the sun disc.
+                    g_env_light.mpSunPacket->mSunAlpha = 0.0f;
+                }
             }
             break;
         }
@@ -774,59 +792,6 @@ static void wether_move_housi() {
         break;
     }
 }
-
-#if TARGET_PC
-static bool twilight_visual_housi_enabled() {
-    return !dusk::speedrun::isActive() &&
-           dusk::getSettings().game.enableTwilightVisuals.getValue();
-}
-
-static void wether_move_twilight_housi() {
-    const bool enabled = twilight_visual_housi_enabled();
-    u8* const twilightTexture = (u8*)dComIfG_getObjectRes("Always", 0x5E);
-
-    if (!enabled || twilightTexture == NULL) {
-        if (s_twilightVisualHousiPacket != NULL) {
-            JKR_DELETE(s_twilightVisualHousiPacket);
-            s_twilightVisualHousiPacket = NULL;
-        }
-        return;
-    }
-
-    if (s_twilightVisualHousiPacket == NULL) {
-        s_twilightVisualHousiPacket = JKR_NEW_ARGS (32) dKankyo_housi_Packet;
-        if (s_twilightVisualHousiPacket == NULL) {
-            return;
-        }
-
-        s_twilightVisualHousiPacket->mpResTex = twilightTexture;
-        s_twilightVisualHousiPacket->field_0x5de8 = 0.0f;
-        s_twilightVisualHousiPacket->field_0x10.set(0.0f, 0.0f, 0.0f);
-        for (int i = 0; i < 300; i++) {
-            s_twilightVisualHousiPacket->mHousiEff[i].mStatus = 0;
-        }
-    }
-
-    // Keep this bound to the authored Twilight-square texture across every
-    // stage/resource transition. A missing or stale texture must never fall
-    // through to the white generic housi appearance.
-    s_twilightVisualHousiPacket->mpResTex = twilightTexture;
-
-    dKankyo_housi_Packet* nativePacket = g_env_light.mpHousiPacket;
-    const int nativeHousiCount = g_env_light.mHousiCount;
-    const u8 nativeEffectType = g_env_light.field_0xea9;
-
-    g_env_light.mpHousiPacket = s_twilightVisualHousiPacket;
-    g_env_light.mHousiCount = 200;
-    g_env_light.field_0xea9 = 0;
-    dKyr_housi_move_visual();
-
-    g_env_light.mpHousiPacket = nativePacket;
-    g_env_light.mHousiCount = nativeHousiCount;
-    g_env_light.field_0xea9 = nativeEffectType;
-}
-
-#endif
 
 static void wether_move_odour() {
     switch (g_env_light.mOdourData.mOdourPacketStatus) {
@@ -1097,10 +1062,6 @@ void dKyw_wether_move_draw() {
         wether_move_evil();
         wether_move_odour();
     }
-
-#if TARGET_PC
-    wether_move_twilight_housi();
-#endif
 }
 
 void dKyw_wether_move_draw2() {
@@ -1115,7 +1076,7 @@ void dKyw_wether_draw() {
     if (strcmp(dComIfGp_getStartStageName(), "Name") && g_env_light.mSunInitialized) {
         stage_stag_info_class* stag_info = dComIfGp_getStageStagInfo();
 
-        if (dStage_stagInfo_GetArg0(stag_info) != 0) {
+        if (external_moon_visible() || dStage_stagInfo_GetArg0(stag_info) != 0) {
             dKyw_Sun_Draw();
             dKyw_Sunlenz_Draw();
         }
@@ -1135,11 +1096,7 @@ void dKyw_wether_draw() {
             dKyw_Snow_Draw();
         }
 
-        if (g_env_light.mHousiInitialized
-#if TARGET_PC
-            && !twilight_visual_housi_enabled()
-#endif
-        ) {
+        if (g_env_light.mHousiInitialized) {
             dKyw_Housi_Draw();
         }
 
@@ -1156,23 +1113,6 @@ void dKyw_wether_draw() {
         }
 
         dKy_undwater_filter_draw();
-
-#if TARGET_PC
-        if (s_twilightVisualHousiPacket != NULL &&
-            s_twilightVisualHousiPacket->mpResTex != NULL) {
-            if (g_env_light.camera_water_in_status != 0) {
-                dComIfGd_setXluList2DScreen();
-                j3dSys.getDrawBuffer(J3DSysDrawBuf_Xlu)->entryImm(
-                    s_twilightVisualHousiPacket, 0);
-                dComIfGd_setList();
-            } else if (dComIfGp_getStartStageName() != NULL &&
-                       strncmp(dComIfGp_getStartStageName(), "D_MN05", 6) == 0) {
-                dComIfGd_getOpaListIndScreen()->entryImm(s_twilightVisualHousiPacket, 0);
-            } else {
-                dKyw_setDrawPacketList(s_twilightVisualHousiPacket, J3DSysDrawBuf_Xlu);
-            }
-        }
-#endif
     }
 }
 

@@ -243,65 +243,6 @@ namespace dusk {
             }
         }
 
-        void TwilightVisualsMenu() {
-            auto& s = getSettings();
-            const bool speedrunRestricted = dusk::speedrun::isActive();
-            ImGui::BeginDisabled(speedrunRestricted);
-            MenuCheckbox("Enable Twilight Visuals", s.game.enableTwilightVisuals);
-            int visualStyle = static_cast<int>(s.game.twilightVisualStyle.getValue());
-            const char* visualStyles[] = {"Normal Twilight", "Black and White"};
-            ImGui::TextUnformatted("Visual Style");
-            ImGui::SameLine(170.0f);
-            ImGui::SetNextItemWidth(160.0f);
-            if (ImGui::Combo("##TwilightVisualStyle", &visualStyle, visualStyles,
-                             IM_ARRAYSIZE(visualStyles))) {
-                s.game.twilightVisualStyle.setValue(
-                    static_cast<TwilightVisualStyle>(visualStyle));
-                config::save();
-            }
-            MenuCheckbox("Use Palace Music", s.game.enableTwilightVisualMusic);
-            ImGui::TextUnformatted("Twilight Brightness");
-            ImGui::SameLine(170.0f);
-            ImGui::SetNextItemWidth(160.0f);
-            float twilightBrightnessPercent = s.game.twilightVisualBrightness.getValue() * 100.0f;
-            if (ImGui::SliderFloat("##TwilightBrightness", &twilightBrightnessPercent, 0.0f,
-                                   120.0f, "%.0f%%")) {
-                s.game.twilightVisualBrightness.setValue(twilightBrightnessPercent / 100.0f);
-                config::save();
-            }
-
-            int skyboxMode = static_cast<int>(s.game.twilightSkyboxMode.getValue());
-            const char* skyboxModes[] = {
-                "Day", "Night", "Sunrise", "Sunset", "Overcast / Storm",
-                "Faron Twilight", "Eldin Twilight", "Lanayru Twilight", "Palace of Twilight",
-                "Sacred Grove", "Snowpeak", "Gerudo Desert", "Lake Hylia", "Fishing Hole",
-                "Ordon", "Hyrule Field", "Castle Town"};
-            ImGui::TextUnformatted("Skybox");
-            ImGui::SameLine(170.0f);
-            ImGui::SetNextItemWidth(150.0f);
-            if (ImGui::Combo("##TwilightSkybox", &skyboxMode, skyboxModes,
-                             IM_ARRAYSIZE(skyboxModes))) {
-                s.game.twilightSkyboxMode.setValue(static_cast<TwilightSkyboxMode>(skyboxMode));
-                config::save();
-            }
-
-            int weather = static_cast<int>(s.game.twilightWeather.getValue());
-            const char* weatherModes[] = {"Current", "Clear", "Rain", "Snow", "Lightning",
-                                          "Wind Storm", "Snow Storm", "Heavy Fog"};
-            ImGui::TextUnformatted("Weather");
-            ImGui::SameLine(170.0f);
-            ImGui::SetNextItemWidth(150.0f);
-            if (ImGui::Combo("##TwilightWeather", &weather, weatherModes,
-                             IM_ARRAYSIZE(weatherModes))) {
-                s.game.twilightWeather.setValue(static_cast<TwilightWeather>(weather));
-                config::save();
-            }
-            ImGui::EndDisabled();
-            if (speedrunRestricted) {
-                ImGui::TextDisabled("Unavailable in Speedrun Mode");
-            }
-        }
-
         constexpr int kFrameRateLimitValues[] = {30, 60, 120, 240, 360, 480, 0};
         constexpr const char* kFrameRateLimitNames[] = {
             "30 FPS", "60 FPS", "120 FPS", "240 FPS", "360 FPS", "480 FPS", "Unlocked",
@@ -462,10 +403,6 @@ namespace dusk {
             MenuCheckbox("Disable Water Refraction", s.game.disableWaterRefraction);
             MenuCheckbox("Disable Cutscene Pillarboxing", s.game.disableCutscenePillarboxing);
             ImGui::Separator();
-            if (ImGui::BeginMenu("Twilight Visuals")) {
-                TwilightVisualsMenu();
-                ImGui::EndMenu();
-            }
             InternalResolutionSlider();
             ShadowResolutionSlider();
             ForcedAspectRatioControl();

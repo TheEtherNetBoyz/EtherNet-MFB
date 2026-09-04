@@ -23,42 +23,6 @@ enum class DepthOfFieldMode : int {
     Dusk = 2,
 };
 
-enum class TwilightSkyboxMode : u8 {
-    TwilightDay = 0,
-    TwilightNight,
-    Sunrise,
-    Sunset,
-    Overcast,
-    FaronTwilight,
-    EldinTwilight,
-    LanayruTwilight,
-    PalaceOfTwilight,
-    SacredGrove,
-    Snowpeak,
-    GerudoDesert,
-    LakeHylia,
-    FishingHole,
-    Ordon,
-    HyruleField,
-    CastleTown,
-};
-
-enum class TwilightWeather : u8 {
-    Current = 0,
-    Clear = 1,
-    Rain = 2,
-    Snow = 3,
-    Lightning = 4,
-    WindStorm = 5,
-    SnowStorm = 6,
-    HeavyFog = 7,
-};
-
-enum class TwilightVisualStyle : u8 {
-    Normal = 0,
-    BlackAndWhiteEnvironment = 1,
-};
-
 enum class Resampler : int {
     Bilinear = 0,
     Area = 1,
@@ -141,24 +105,6 @@ template <>
 struct ConfigEnumRange<DepthOfFieldMode> {
     static constexpr auto min = DepthOfFieldMode::Off;
     static constexpr auto max = DepthOfFieldMode::Dusk;
-};
-
-template <>
-struct ConfigEnumRange<TwilightSkyboxMode> {
-    static constexpr auto min = TwilightSkyboxMode::TwilightDay;
-    static constexpr auto max = TwilightSkyboxMode::CastleTown;
-};
-
-template <>
-struct ConfigEnumRange<TwilightWeather> {
-    static constexpr auto min = TwilightWeather::Current;
-    static constexpr auto max = TwilightWeather::HeavyFog;
-};
-
-template <>
-struct ConfigEnumRange<TwilightVisualStyle> {
-    static constexpr auto min = TwilightVisualStyle::Normal;
-    static constexpr auto max = TwilightVisualStyle::BlackAndWhiteEnvironment;
 };
 
 template <>
@@ -330,12 +276,6 @@ struct UserSettings {
         ConfigVar<int> internalResolutionScale;
         ConfigVar<int> shadowResolutionMultiplier;
         ConfigVar<Resampler> resampler;
-        ConfigVar<bool> enableTwilightVisuals;
-        ConfigVar<bool> enableTwilightVisualMusic;
-        ConfigVar<TwilightVisualStyle> twilightVisualStyle;
-        ConfigVar<float> twilightVisualBrightness;
-        ConfigVar<TwilightSkyboxMode> twilightSkyboxMode;
-        ConfigVar<TwilightWeather> twilightWeather;
         ConfigVar<bool> enableMapBackground;
         ConfigVar<bool> disableCutscenePillarboxing;
         ConfigVar<bool> enableHighQualityMinimapTextures;

@@ -1412,8 +1412,6 @@ void dStage_restartRoom(u32 roomParam, u32 mode, int param_2);
 int dStage_RoomCheck(cBgS_GndChk* gndChk);
 void dStage_dt_c_roomReLoader(void* i_data, dStage_dt_c* stageDt, int param_2);
 void dStage_dt_c_roomLoader(void* i_data, dStage_dt_c* stageDt, int param_2);
-bool dStage_setEnvironmentLayer(int layerNo);
-bool dStage_getVisualTwilightSky(stage_vrboxcol_info_class* outSky, u8 variant);
 dStage_KeepDoorInfo* dStage_GetKeepDoorInfo();
 dStage_KeepDoorInfo* dStage_GetRoomKeepDoorInfo();
 void dStage_dt_c_fieldMapLoader(void* i_data, dStage_dt_c* i_stage);

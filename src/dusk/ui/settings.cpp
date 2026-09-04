@@ -1465,45 +1465,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .helpText = kResamplerHelpText,
             });
 
-        leftPane.add_section("Twilight Visuals");
-        graphics_tuner_control(*this, leftPane, rightPane,
-            getSettings().game.enableTwilightVisuals,
-            {.option = GraphicsOption::TwilightVisualsEnabled,
-                .title = "Enable Twilight Visuals",
-                .helpText = "Apply the Faron, Eldin, and Lanayru Twilight environment layers anywhere."},
-            [] { return dusk::speedrun::isActive(); });
-        graphics_tuner_control(*this, leftPane, rightPane,
-            getSettings().game.twilightVisualStyle,
-            {.option = GraphicsOption::TwilightVisualStyle,
-                .title = "Twilight Visual Style",
-                .helpText = "Choose normal Twilight or Black and White like the E3 2005 demo."},
-            [] { return dusk::speedrun::isActive(); });
-        config_bool_select(leftPane, rightPane, getSettings().game.enableTwilightVisualMusic,
-            {.key = "Use Palace Music",
-                .helpText = "Replace normal map music with Palace of Twilight music while Twilight "
-                            "Visuals is active. Twilight enemy music remains active during encounters "
-                            "when this is disabled.",
-                .isDisabled = [] { return dusk::speedrun::isActive(); }});
-        graphics_tuner_control(*this, leftPane, rightPane,
-            getSettings().game.twilightVisualBrightness,
-            {.option = GraphicsOption::TwilightVisualBrightness,
-                .title = "Twilight Visual Brightness",
-                .helpText = "Adjust Twilight map lighting, actors, fog, sky, and bloom."},
-            [] { return dusk::speedrun::isActive(); });
-        graphics_tuner_control(*this, leftPane, rightPane,
-            getSettings().game.twilightSkyboxMode,
-            {.option = GraphicsOption::TwilightSkybox,
-                .title = "Twilight Skybox",
-                .helpText = "Choose an authored Twilight skybox while previewing it in game."},
-            [] { return dusk::speedrun::isActive(); });
-
         leftPane.add_section("Post-Processing");
-        graphics_tuner_control(*this, leftPane, rightPane,
-            getSettings().game.twilightWeather,
-            {.option = GraphicsOption::Weather,
-                .title = "Weather",
-                .helpText = "Override the current map weather."},
-            [] { return dusk::speedrun::isActive(); });
         graphics_tuner_control(*this, leftPane, rightPane,
             getSettings().game.bloomMode,
             GraphicsTunerProps{

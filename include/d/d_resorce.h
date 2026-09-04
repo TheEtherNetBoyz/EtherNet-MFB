@@ -76,8 +76,6 @@ public:
     int getObjectAllSize();
     int setObjectRes(char const* i_arcName, void* i_archiveRes, u32 i_bufferSize, JKRHeap* i_heap);
     int setStageRes(char const* i_arcName, JKRHeap* i_heap);
-    int setStageResForStage(char const* i_arcName, char const* i_stageName,
-                            char const* i_fileName, JKRHeap* i_heap);
     void dump();
     void dumpTag();
     void dump(char*);

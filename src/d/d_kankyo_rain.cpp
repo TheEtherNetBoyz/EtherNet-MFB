@@ -8,11 +8,68 @@
 #include "d/d_demo.h"
 #include "d/d_kankyo.h"
 #include "d/d_kankyo_rain.h"
+#include "d/d_stage.h"
+#if TARGET_PC
+#include "dusk/TwilightHostApi.h"
+#include "dusk/frame_interpolation.h"
+#endif
 #include "f_op/f_op_camera_mng.h"
 #include "f_op/f_op_kankyo_mng.h"
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_lib.h"
+#include "m_Do/m_Do_audio.h"
 #include <cstring>
+
+#if TARGET_PC
+extern "C" void DuskSetAudioHooksV1(const DuskAudioHooksV1*);
+extern "C" float DuskGetMasterVolume();
+extern void dStage_set_external_twilight_enemy_proc_provider(
+    DuskTwilightEnemyProcProviderV1 provider);
+extern void dKy_set_external_visual_bloom_provider(DuskTwilightBloomProviderV1 provider);
+extern void Z2SetTwilightSceneMusicProvider(DuskTwilightSceneMusicProviderV1 provider);
+
+
+extern "C" const DuskTwilightHostApiV1* DuskGetTwilightHostApiV1() {
+    static const DuskTwilightHostApiV1 api = {
+        .abiVersion = DUSK_TWILIGHT_HOST_ABI_V1,
+        .structSize = sizeof(DuskTwilightHostApiV1),
+        .capabilities = DUSK_TWILIGHT_HOST_CAP_MASTER_VOLUME |
+            DUSK_TWILIGHT_HOST_CAP_ENEMY_PROC_PROVIDER |
+            DUSK_TWILIGHT_HOST_CAP_BLOOM_PROVIDER |
+            DUSK_TWILIGHT_HOST_CAP_SCENE_MUSIC_PROVIDER |
+            DUSK_TWILIGHT_HOST_CAP_GEOMETRY_HOOKS |
+            DUSK_TWILIGHT_HOST_CAP_AUDIO_HOOKS |
+            DUSK_TWILIGHT_HOST_CAP_ENVIRONMENT_HOOKS |
+            DUSK_TWILIGHT_HOST_CAP_PLAYER_HOOKS |
+            DUSK_TWILIGHT_HOST_CAP_SEQUENCE_HOOKS |
+            DUSK_TWILIGHT_HOST_CAP_INTERPOLATION |
+            DUSK_TWILIGHT_HOST_CAP_AUDIO_MANAGER,
+        .getMasterVolume = &DuskGetMasterVolume,
+        .setEnemyProcProvider = &dStage_set_external_twilight_enemy_proc_provider,
+        .setBloomProvider = &dKy_set_external_visual_bloom_provider,
+        .setSceneMusicProvider = &Z2SetTwilightSceneMusicProvider,
+        .setGeometryHooks = &dKy_set_geometry_hooks,
+        .setAudioHooks = &DuskSetAudioHooksV1,
+        .setEnvironmentHooks = &dKy_set_environment_hooks,
+        .setPlayerHooks = &dKy_set_player_hooks,
+        .setSequenceHooks = &dKy_set_sequence_hooks,
+        .interpolationStep = &dusk::frame_interp::get_interpolation_step,
+        .interpolationEnabled = &dusk::frame_interp::is_enabled,
+        .simulationFrame = &dusk::frame_interp::is_sim_frame,
+        .recordMatrix = static_cast<void(*)(Mtx, const void*)>(&dusk::frame_interp::record_final_mtx),
+        .lookupMatrix = &dusk::frame_interp::lookup_replacement,
+        .audioManager = [](DuskAudioManagerKind kind) -> void* {
+            switch (kind) {
+            case DuskAudioManager_Scene: return Z2GetSceneMgr();
+            case DuskAudioManager_Sequence: return Z2GetSeqMgr();
+            case DuskAudioManager_Status: return Z2GetStatusMgr();
+            default: return nullptr;
+            }
+        },
+    };
+    return &api;
+}
+#endif
 
 #include "dusk/version.hpp"
 #if TARGET_PC
@@ -920,7 +977,20 @@ void dKyr_rain_move() {
     }
 }
 
-static bool s_forceTwilightHousiMove = false;
+static bool celestial_visibility(u32 point, bool nativeValue) {
+#if TARGET_PC
+    const auto callback = dKy_geometry_hooks().celestialVisibility;
+    return callback ? callback(static_cast<DuskCelestialVisibility>(point), nativeValue) : nativeValue;
+#else
+    return nativeValue;
+#endif
+}
+static void celestial_parameter(u32 point, void* value) {
+#if TARGET_PC
+    if (dKy_geometry_hooks().celestialParameter)
+        dKy_geometry_hooks().celestialParameter(static_cast<DuskCelestialParameter>(point), value);
+#endif
+}
 
 static BOOL d_krain_cut_turn_check() {
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
@@ -968,7 +1038,7 @@ void dKyr_housi_move() {
         var_f30 = dComIfG_Bgsp().GroundCross(&cam_gndchk);
     }
 
-    if (dKy_darkworld_check() == true || var_r24 == 1 || s_forceTwilightHousiMove) {
+    if (dKy_darkworld_check() == true || var_r24 == 1) {
         sp78.x = 0.0f;
         sp78.y = 2.8f;
         sp78.z = 0.0f;
@@ -1267,7 +1337,7 @@ void dKyr_housi_move() {
             effect->mAlpha = 0.0f;
         }
 
-        if (dKy_darkworld_check() == true || var_r24 == 1 || s_forceTwilightHousiMove) {
+        if (dKy_darkworld_check() == true || var_r24 == 1) {
             f32 var_f1_6 = sp6C.abs(camera->view.lookat.eye);
             effect->field_0x48 = var_f1_6;
 
@@ -1297,11 +1367,6 @@ void dKyr_housi_move() {
     }
 }
 
-void dKyr_housi_move_visual() {
-    s_forceTwilightHousiMove = true;
-    dKyr_housi_move();
-    s_forceTwilightHousiMove = false;
-}
 
 void dKyr_snow_init() {
     camera_class* camera = (camera_class*)dComIfGp_getCamera(0);
@@ -2453,10 +2518,14 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
     u8 draw_moon = false;
     u8 draw_sun = false;
     u16 date = dComIfGs_getDate();
+    f32 moonAlpha = sun_packet->mMoonAlpha;
+    IF_DUSK(celestial_parameter(DuskCelestial_MoonAlpha, &moonAlpha));
 
 #if TARGET_PC || VERSION == VERSION_GCN_JPN
     IF_DUSK_BLOCK(dusk::version::isRegionJpn())
-    if (g_env_light.hide_vrbox) {
+    bool hideSky = g_env_light.hide_vrbox;
+    IF_DUSK(hideSky = celestial_visibility(DuskCelestial_HideSky, hideSky));
+    if (hideSky) {
         return;
     }
     IF_DUSK_BLOCK_END
@@ -2474,6 +2543,8 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
     if (sun_packet->mMoonAlpha > 0.0f) {
         draw_moon = true;
     }
+    IF_DUSK(draw_sun = celestial_visibility(DuskCelestial_DrawSun, draw_sun));
+    IF_DUSK(draw_moon = celestial_visibility(DuskCelestial_DrawMoon, draw_moon));
 
     if ((draw_sun | draw_moon) != 0) {
         sunpos.x = ppos->x;
@@ -2482,7 +2553,9 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
 
         u32 stage_type = dStage_stagInfo_GetSTType(dComIfGp_getStage()->getStagInfo());
         if (g_env_light.base_light.mColor.r == 0 && stage_type != ST_ROOM) {
-            if (g_env_light.daytime > 285.0f || g_env_light.daytime < 105.0f) {
+            bool hideMoonForTime = g_env_light.daytime > 285.0f || g_env_light.daytime < 105.0f;
+            IF_DUSK(hideMoonForTime = celestial_visibility(DuskCelestial_HideMoonForTime, hideMoonForTime));
+            if (hideMoonForTime) {
                 draw_moon = false;
             }
 
@@ -2511,6 +2584,11 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
             moon_pos.z = spB4.z - camera->view.lookat.eye.z;
         }
 
+#if TARGET_PC
+        DuskCelestialPositionV1 position{&moon_pos, &spB4, &camera->view.lookat.eye};
+        celestial_parameter(DuskCelestial_MoonPosition, &position);
+#endif
+
         int weekday = date % 8;
         if (g_env_light.getDaytime() < 180.0f) {
             if (weekday != 0) {
@@ -2532,6 +2610,8 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
                 weekday = 3;
             }
         }
+
+        IF_DUSK(celestial_parameter(DuskCelestial_MoonPhase, &weekday));
 
         if (weekday != 4) {
             int texidx;
@@ -2694,7 +2774,9 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
                     }
                 }
 
-                color_reg0.a = 255.0f * sun_packet->mMoonAlpha;
+                IF_DUSK(celestial_parameter(DuskCelestial_MoonSize, &size));
+
+                color_reg0.a = 255.0f * moonAlpha;
                 GXSetTevColor(GX_TEVREG0, color_reg0);
 
                 for (int i = 0; i < 2; i++) {
@@ -2716,7 +2798,7 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
                         GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_ONE, GX_LO_COPY);
 
                         size *= 2.3f;
-                        color_reg0.a = 40.0f * sun_packet->mMoonAlpha;
+                        color_reg0.a = 40.0f * moonAlpha;
 
                         color_reg0.r = 0xFF;
                         color_reg0.g = 0xFF;
@@ -2817,6 +2899,9 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
 
 void dKyr_drawLenzflare(Mtx drawMtx, cXyz* ppos, GXColor& param_2, u8** tex) {
     ZoneScoped;
+#if TARGET_PC
+    if (!celestial_visibility(DuskCelestial_DrawSunLens, true)) return;
+#endif
     dKankyo_sunlenz_Packet* lenz_packet = g_env_light.mpSunLenzPacket;
     dKankyo_sun_Packet* sun_packet = g_env_light.mpSunPacket;
     camera_class* camera = (camera_class*)dComIfGp_getCamera(0);
@@ -3592,8 +3677,8 @@ void dKyr_drawSibuki(Mtx drawMtx, u8** tex) {
     J3DShape::resetVcdVatCache();
 }
 
-static void dKyr_drawHousiImpl(Mtx drawMtx, u8** tex,
-                               dKankyo_housi_Packet* housi_packet, bool forceTwilight) {
+void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
+    auto* housi_packet = g_env_light.mpHousiPacket;
     ZoneScoped;
     static f32 rot = 0.0f;
 
@@ -3622,15 +3707,14 @@ static void dKyr_drawHousiImpl(Mtx drawMtx, u8** tex,
         }
 
         if (strcmp(dComIfGp_getStartStageName(), "D_MN08") != 0 ||
-            dComIfGp_roomControl_getStayNo() == 0 || dComIfGp_roomControl_getStayNo() == 11 ||
-            forceTwilight)
+            dComIfGp_roomControl_getStayNo() == 0 || dComIfGp_roomControl_getStayNo() == 11)
         {
             j3dSys.reinitGX();
             f32 var_f25 = 120.0f;
 
             if (g_env_light.field_0xea9 == 1) {
                 var_f25 = 140.0f;
-            } else if (g_env_light.camera_water_in_status != 0 && !forceTwilight) {
+            } else if (g_env_light.camera_water_in_status != 0) {
                 return;
             }
 
@@ -3646,7 +3730,7 @@ static void dKyr_drawHousiImpl(Mtx drawMtx, u8** tex,
             color_reg1.b = 0xCA;
             color_reg1.a = 0xFF;
 
-            if (dKy_darkworld_check() == 1 || isPalaceOfTwilight == 1 || forceTwilight) {
+            if (dKy_darkworld_check() == 1 || isPalaceOfTwilight == 1) {
                 color_reg0.r = 0;
                 color_reg0.g = 0;
                 color_reg0.b = 0;
@@ -3735,8 +3819,6 @@ static void dKyr_drawHousiImpl(Mtx drawMtx, u8** tex,
 
                 if (i == 1) {
                     GXSetZMode(GX_TRUE, GX_GEQUAL, GX_FALSE);
-                } else if (forceTwilight && g_env_light.camera_water_in_status != 0) {
-                    GXSetZMode(GX_FALSE, GX_LEQUAL, GX_FALSE);
                 } else {
                     GXSetZMode(GX_TRUE, GX_LEQUAL, GX_FALSE);
                 }
@@ -3825,13 +3907,15 @@ static void dKyr_drawHousiImpl(Mtx drawMtx, u8** tex,
                         f32 temp_f30 =
                             (var_f27 * 0.2f) * cM_fcos(housi_packet->mHousiEff[j].mScale.y * 6.0f);
 
-                        if (dKy_darkworld_check() == 1 || isPalaceOfTwilight == 1 || forceTwilight) {
+                        if (dKy_darkworld_check() == 1 || isPalaceOfTwilight == 1) {
                             cXyz sp7C[] = {
                                 cXyz(-1.0f, -0.5f, 0.0f),
                                 cXyz(-1.0f, 1.5f, 0.0f),
                                 cXyz(1.0f, 1.5f, 0.0f),
                                 cXyz(1.0f, -0.5f, 0.0f),
                             };
+
+
 
                             for (int k = 0; k < 4; k++) {
                                 cXyz spAC;
@@ -3979,7 +4063,7 @@ static void dKyr_drawHousiImpl(Mtx drawMtx, u8** tex,
                         IF_NOT_DUSK(GXBegin(GX_QUADS, GX_VTXFMT0, 4));
 
                         s16 var_r17 = 0x1FF;
-                        if (dKy_darkworld_check() == true || isPalaceOfTwilight == 1 || forceTwilight) {
+                        if (dKy_darkworld_check() == true || isPalaceOfTwilight == 1) {
                             var_r17 = 0xFA;
                         }
 
@@ -4012,15 +4096,6 @@ static void dKyr_drawHousiImpl(Mtx drawMtx, u8** tex,
     }
 }
 
-void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
-    dKyr_drawHousiImpl(drawMtx, tex, g_env_light.mpHousiPacket, false);
-}
-
-void dKyr_drawHousiVisual(Mtx drawMtx, u8** tex, dKankyo_housi_Packet* packet) {
-    if (packet != NULL) {
-        dKyr_drawHousiImpl(drawMtx, tex, packet, true);
-    }
-}
 
 void dKyr_drawSnow(Mtx drawMtx, u8** tex) {
     ZoneScoped;

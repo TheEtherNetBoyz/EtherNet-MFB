@@ -23,6 +23,9 @@
 #include <cstring>
 
 #include "dusk/logging.h"
+#if TARGET_PC
+#include "dusk/TwilightHostApi.h"
+#endif
 #include "helpers/string.hpp"
 #if TARGET_PC
 #include "dusk/mods/svc/actor.hpp"
@@ -1635,6 +1638,13 @@ u8 dStage_roomControl_c::mNoArcBank;
 #endif
 
 #if TARGET_PC
+static DuskTwilightEnemyProcProviderV1 s_external_twilight_enemy_proc_provider = nullptr;
+
+void dStage_set_external_twilight_enemy_proc_provider(
+    DuskTwilightEnemyProcProviderV1 provider) {
+    s_external_twilight_enemy_proc_provider = provider;
+}
+
 static s16 dStage_getVisualTwilightEnemyProcName(s16 procName);
 #endif
 
@@ -1736,7 +1746,7 @@ static int dStage_playerInit(dStage_dt_c* i_stage, void* i_data, int num, void* 
 
         int i;
         for (i = 0; i < num; i++) {
-#ifdef TARGET_PC
+#if TARGET_PC
             // If, for whatever reason, we want to patch the point ID, we need to do it here.
             if (!dusk::mods::svc::stage_apply_actor_edits(player_data, nullptr, sizeof(*player_data), i_stage->getRoomNo())) {
                 player_data++;
@@ -1763,7 +1773,7 @@ static int dStage_playerInit(dStage_dt_c* i_stage, void* i_data, int num, void* 
         [](void* user, const void* record, size_t size) {
                 const stage_actor_data_class* i_record =  static_cast<const stage_actor_data_class*>(record);
                 auto* params = static_cast<newActors_userData*>(user);
-                
+
                 // We don't cast i_record->base.angle.z to a u8 here so we can register any spawn point within the s16 range
                 if (i_record->base.angle.z == params->pointNo && size == sizeof(stage_actor_data_class) && strncmp(i_record->name,"Link",7) == 0) {
                     std::memcpy(params->out_point, i_record, size);
@@ -1775,7 +1785,7 @@ static int dStage_playerInit(dStage_dt_c* i_stage, void* i_data, int num, void* 
             if (params.out_pointSet) {
                 player_data = &newPoint;
             } else {
-                // If the requested spawn point isn't found, print all valid points within the log 
+                // If the requested spawn point isn't found, print all valid points within the log
                 std::vector<s16> valid_points;
                 valid_points.reserve(num);
                 player_data = player->m_entries;
@@ -2767,247 +2777,20 @@ static void layerTableLoader(void* i_data, dStage_dt_c* i_stage, int roomNo) {
 
 dStage_Elst_c* dStage_stageDt_c::getElst(void) { return mElst; }
 
-bool dStage_setEnvironmentLayer(int layerNo) {
-    if (layerNo < 0 || layerNo >= 15) {
-        return false;
-    }
-
-    dStage_stageDt_c* stage = dComIfGp_getStage();
-    if (stage == NULL) {
-        return false;
-    }
-    dStage_Elst_c* elst = stage->getElst();
-    void* stageData = dComIfG_getStageRes("stage.dzs");
-    int roomNo = dComIfGp_roomControl_getStayNo();
-
-    if (elst == NULL || elst->m_entries == NULL || stageData == NULL ||
-        roomNo < 0 || roomNo >= elst->m_entryNum) {
-        return false;
-    }
-
-    static FuncTable envLayerFuncTable[] = {
-        {"LGT0", dStage_lgtvInfoInit},     {"Env0", dStage_envrInfoInit},
-        {"Col0", dStage_pselectInfoInit},  {"PAL0", dStage_paletteInfoInit},
-        {"VRB0", dStage_vrboxcolInfoInit},
-    };
-
-    int envLayer = elst->m_entries[roomNo].m_layerTable[layerNo];
-    // Layer 14 can fall back to a normal environment index on stages that do
-    // not define a twilight environment. Twilight stage data lives in the
-    // extended environment layers (10-14); do not treat Env0-Env9 as a valid
-    // twilight payload, but keep normal layer decoding unchanged.
-    if (envLayer >= 15 || (layerNo == 14 && envLayer < 10)) {
-        return false;
-    }
-
-    char layerTag = envLayer + (envLayer < 10 ? '0' : 'W');
-    char envTag[4] = {'E', 'n', 'v', layerTag};
-    char colTag[4] = {'C', 'o', 'l', layerTag};
-    char palTag[4] = {'P', 'A', 'L', layerTag};
-    char vrbTag[4] = {'V', 'R', 'B', layerTag};
-    dStage_fileHeader* file = (dStage_fileHeader*)stageData;
-    bool hasEnv = false;
-    bool hasCol = false;
-    bool hasPal = false;
-    bool hasVrb = false;
-
-    for (int i = 0; i < file->m_chunkCount; i++) {
-        dStage_nodeHeader* node = &file->m_nodes[i];
-        hasEnv |= std::memcmp(&node->m_tag, envTag, sizeof(envTag)) == 0;
-        hasCol |= std::memcmp(&node->m_tag, colTag, sizeof(colTag)) == 0;
-        if (std::memcmp(&node->m_tag, palTag, sizeof(palTag)) == 0) {
-            hasPal = true;
-        }
-        hasVrb |= std::memcmp(&node->m_tag, vrbTag, sizeof(vrbTag)) == 0;
-    }
-
-    // An ordinary map may have an EVLY entry for layer 14 without carrying the
-    // complete twilight environment payload. Treat that as a missing layer so
-    // the renderer can use its visual-only fallback instead of mixing data.
-    if (!hasEnv || !hasCol || !hasPal || !hasVrb) {
-        return false;
-    }
-
-    dStage_setLayerTagName(envLayerFuncTable, ARRAY_SIZEU(envLayerFuncTable), envLayer);
-    dStage_dt_c_decode(stageData, stage, envLayerFuncTable, ARRAY_SIZEU(envLayerFuncTable));
-    return true;
-}
 
 #if TARGET_PC
 static bool dStage_visualTwilightEnemyLayerEnabled() {
-    // Enemy replacement belongs exclusively to the optional Twilight Visuals
-    // feature. Native Twilight state must never enable it on its own.
-    if (dusk::speedrun::isActive() ||
-        !dusk::getSettings().game.enableTwilightVisuals.getValue()) {
-        return false;
-    }
-
-    const char* stageName = dComIfGp_getStartStageName();
-    return stageName != NULL &&
-           dComIfG_play_c::getLayerNo(0) != 14 &&
-           dKy_darkworld_visual_check() != 0;
+    return s_external_twilight_enemy_proc_provider != nullptr;
 }
 
 static s16 dStage_getVisualTwilightEnemyProcName(s16 procName) {
     if (!dStage_visualTwilightEnemyLayerEnabled()) {
         return procName;
     }
-
-    // These are the vanilla normal/Twilight actor pairs. Apply the fallback
-    // to every normal-layer stage actor load while Twilight Visuals is active;
-    // native layer-14 actor loading remains unchanged.
-    switch (procName) {
-    case fpcNm_E_RD_e:  // Bulblin, including bow/archer variants -> Shadow Bulblin
-        return fpcNm_E_RDY_e;
-    case fpcNm_E_BA_e:  // Keese -> Shadow Keese
-        return fpcNm_E_YK_e;
-    case fpcNm_E_DB_e:  // Deku Baba -> Twilight Deku Baba
-        return fpcNm_E_YD_e;
-    case fpcNm_E_HB_e:  // Hebi Baba -> Twilight Hebi Baba
-        return fpcNm_E_YH_e;
-    case fpcNm_E_KR_e:  // Kargorok -> Dark Kargarok
-        return fpcNm_E_YR_e;
-    case fpcNm_E_MS_e:  // Rat -> Twilight Vermin
-        return fpcNm_E_YG_e;
-    default:
-        return procName;
-    }
+    return s_external_twilight_enemy_proc_provider(procName);
 }
 #endif
 
-bool dStage_getVisualTwilightSky(stage_vrboxcol_info_class* outSky, u8 variant) {
-#if TARGET_PC
-    struct SkyVariantSource {
-        const char* stageName;
-        u8 layer;
-        u8 paletteSlot;
-    };
-    static constexpr SkyVariantSource kSources[] = {
-        {"F_SP108", 14, 0}, // Twilight day
-        {"F_SP108", 0, 5},  // Twilight night
-        {"F_SP121", 0, 1},  // Hyrule Field sunrise
-        {"F_SP121", 0, 4},  // Hyrule Field sunset
-        {"F_SP114", 0, 0},  // Snowpeak overcast/storm
-        {"F_SP108", 14, 0}, // Faron Twilight
-        {"F_SP109", 14, 0}, // Eldin Twilight
-        {"F_SP115", 14, 0}, // Lanayru Twilight
-        {"D_MN08", 0, 0},   // Palace of Twilight
-        {"F_SP117", 0, 0},  // Sacred Grove
-        {"F_SP114", 0, 0},  // Snowpeak
-        {"F_SP124", 0, 0},  // Gerudo Desert
-        {"F_SP115", 0, 0},  // Lake Hylia
-        {"F_SP127", 0, 0},  // Fishing Hole
-        {"F_SP103", 0, 0},  // Ordon
-        {"F_SP121", 0, 0},  // Hyrule Field
-        {"F_SP116", 0, 0},  // Castle Town
-    };
-    static constexpr char kArchiveName[] = "TwSkyVar";
-    static constexpr char kStageArchive[] = "Stg_00";
-    static dStage_stageDt_c sourceStage;
-    static void* sourceStageData = NULL;
-    static int loadState = 0;
-    static int loadedVariant = -1;
-    static stage_vrboxcol_info_class loadedSky;
-
-    if (outSky == NULL || variant >= ARRAY_SIZEU(kSources)) {
-        return false;
-    }
-
-    if (loadedVariant != variant) {
-        if (loadState != 0) {
-            dComIfG_deleteStageRes(kArchiveName);
-        }
-        loadedVariant = variant;
-        loadState = 0;
-        sourceStageData = NULL;
-    }
-
-    if (loadState == 3) {
-        *outSky = loadedSky;
-        return true;
-    }
-
-    if (loadState == 0) {
-        if (!dComIfG_setStageResForStage(kArchiveName, kSources[variant].stageName,
-                                         kStageArchive, NULL)) {
-            loadState = -1;
-        } else {
-            loadState = 1;
-        }
-    }
-
-    if (loadState == 1) {
-        const int syncResult = dComIfG_syncStageRes(kArchiveName);
-        if (syncResult < 0) {
-            loadState = -1;
-        } else if (syncResult == 0) {
-            sourceStageData = dComIfG_getStageRes(kArchiveName, "stage.dzs");
-            if (sourceStageData == NULL) {
-                loadState = -1;
-            } else {
-                static FuncTable stageEnvironmentTable[] = {
-                    {"EVLY", dStage_elstInfoInit},
-                };
-
-                dStage_dt_c_offsetToPtr(sourceStageData);
-                sourceStage.init();
-                dStage_dt_c_decode(sourceStageData, &sourceStage, stageEnvironmentTable,
-                                   ARRAY_SIZEU(stageEnvironmentTable));
-                loadState = sourceStage.getElst() != NULL ? 2 : -1;
-            }
-        }
-    }
-
-    if (loadState != 2) {
-        return false;
-    }
-
-    dStage_Elst_c* elst = sourceStage.getElst();
-    const int layerNo = kSources[variant].layer;
-    const int minimumLayer = layerNo == 14 ? 10 : 0;
-    int envLayer = -1;
-    for (int i = 0; i < elst->m_entryNum; i++) {
-        const int candidate = elst->m_entries[i].m_layerTable[layerNo];
-        if (candidate >= minimumLayer && candidate < 15) {
-            envLayer = candidate;
-            break;
-        }
-    }
-
-    if (envLayer < minimumLayer || envLayer >= 15) {
-        return false;
-    }
-
-    static FuncTable envLayerFuncTable[] = {
-        {"LGT0", dStage_lgtvInfoInit},     {"Env0", dStage_envrInfoInit},
-        {"Col0", dStage_pselectInfoInit},  {"PAL0", dStage_paletteInfoInit},
-        {"VRB0", dStage_vrboxcolInfoInit},
-    };
-    dStage_setLayerTagName(envLayerFuncTable, ARRAY_SIZEU(envLayerFuncTable), envLayer);
-    dStage_dt_c_decode(sourceStageData, &sourceStage, envLayerFuncTable,
-                       ARRAY_SIZEU(envLayerFuncTable));
-
-    stage_envr_info_class* envr = sourceStage.getEnvrInfo();
-    stage_pselect_info_class* pselect = sourceStage.getPselectInfo();
-    stage_palette_info_class* palette = sourceStage.getPaletteInfo();
-    stage_vrboxcol_info_class* vrbox = sourceStage.getVrboxcolInfo();
-    if (envr == NULL || pselect == NULL || palette == NULL || vrbox == NULL) {
-        return false;
-    }
-
-    const u8 pselectId = envr->pselect_id[0];
-    const u8 paletteId = pselect[pselectId].palette_id[kSources[variant].paletteSlot];
-    const u8 vrboxId = palette[paletteId].vrboxcol_id;
-    loadedSky = vrbox[vrboxId];
-    loadState = 3;
-    *outSky = loadedSky;
-    return true;
-#else
-    UNUSED(outSky);
-    UNUSED(night);
-    return false;
-#endif
-}
 
 static void layerActorLoader(void* i_data, dStage_dt_c* i_stage, int param_2) {
     UNUSED(param_2);

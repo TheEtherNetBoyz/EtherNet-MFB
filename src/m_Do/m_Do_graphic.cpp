@@ -91,11 +91,8 @@ static void drawQuad(f32 param_0, f32 param_1, f32 param_2, f32 param_3) {
 
 #if TARGET_PC
 static f32 twilight_bloom_brightness() {
-    if (!dKy_darkworld_visual_check()) {
-        return 1.0f;
-    }
-
-    return std::clamp(dusk::getSettings().game.twilightVisualBrightness.getValue(), 0.0f, 1.2f);
+    const auto callback = dKy_geometry_hooks().bloomGain;
+    return callback ? callback() : 1.0f;
 }
 #endif
 
@@ -319,7 +316,7 @@ static void captureFullFrameBuffer() {
     GXInvalidateTexAll();
 }
 
-static void drawFullFrameBuffer(bool mirror, bool monochrome = false) {
+static void drawFullFrameBuffer(bool mirror) {
 #if TARGET_PC
     mDoGph_gInf_c::m_fullFrameBufferTexObj.reset();
 #endif
@@ -331,35 +328,6 @@ static void drawFullFrameBuffer(bool mirror, bool monochrome = false) {
     GXSetNumIndStages(0);
     GXSetNumTexGens(1);
     GXSetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, 0x3C);
-    if (monochrome) {
-        // Build approximate luminance (R/4 + G/2 + B/4) from the captured
-        // environment so its textures, rather than only its lighting, lose color.
-        GXSetNumTevStages(3);
-        GXSetTevSwapModeTable(GX_TEV_SWAP1, GX_CH_RED, GX_CH_RED, GX_CH_RED, GX_CH_ALPHA);
-        GXSetTevSwapModeTable(GX_TEV_SWAP2, GX_CH_GREEN, GX_CH_GREEN, GX_CH_GREEN, GX_CH_ALPHA);
-        GXSetTevSwapModeTable(GX_TEV_SWAP3, GX_CH_BLUE, GX_CH_BLUE, GX_CH_BLUE, GX_CH_ALPHA);
-        GXColorS10 quarter = {64, 64, 64, 0};
-        GXSetTevColorS10(GX_TEVREG2, quarter);
-
-        for (int stage = 0; stage < 3; ++stage) {
-            GXTevStageID stageId = static_cast<GXTevStageID>(GX_TEVSTAGE0 + stage);
-            GXSetTevOrder(stageId, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
-            GXSetTevSwapMode(stageId, GX_TEV_SWAP0,
-                             static_cast<GXTevSwapSel>(GX_TEV_SWAP1 + stage));
-            GXSetTevAlphaIn(stageId, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO);
-            GXSetTevAlphaOp(stageId, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_ENABLE,
-                            GX_TEVPREV);
-        }
-        GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_TEXC, GX_CC_C2, GX_CC_ZERO);
-        GXSetTevColorIn(GX_TEVSTAGE1, GX_CC_ZERO, GX_CC_TEXC, GX_CC_HALF, GX_CC_CPREV);
-        GXSetTevColorIn(GX_TEVSTAGE2, GX_CC_ZERO, GX_CC_TEXC, GX_CC_C2, GX_CC_CPREV);
-        GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_ENABLE,
-                        GX_TEVPREV);
-        GXSetTevColorOp(GX_TEVSTAGE1, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_ENABLE,
-                        GX_TEVPREV);
-        GXSetTevColorOp(GX_TEVSTAGE2, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_ENABLE,
-                        GX_TEVPREV);
-    } else {
         GXSetNumTevStages(1);
         GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
         GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_TEXC);
@@ -368,7 +336,6 @@ static void drawFullFrameBuffer(bool mirror, bool monochrome = false) {
         GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO);
         GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_ENABLE,
                         GX_TEVPREV);
-    }
     GXSetZCompLoc(GX_ENABLE);
     GXSetZMode(GX_DISABLE, GX_ALWAYS, GX_DISABLE);
     GXSetBlendMode(GX_BM_NONE, GX_BL_SRCALPHA, GX_BL_ONE, GX_LO_CLEAR);
@@ -2290,6 +2257,7 @@ void mDoGph_gInf_c::bloom_c::draw() {
     }
 }
 
+
 static void retry_captue_frame(view_class* param_0, view_port_class* param_1, int param_2) {
     UNUSED(param_0);
     UNUSED(param_2);
@@ -2711,22 +2679,8 @@ int mDoGph_Painter() {
             GX_DEBUG_GROUP(dComIfGd_drawOpaListDarkBG);
 
 #if TARGET_PC
-            const auto& visualSettings = dusk::getSettings().game;
-            if (!dusk::speedrun::isActive() &&
-                visualSettings.twilightVisualStyle.getValue() ==
-                    dusk::TwilightVisualStyle::BlackAndWhiteEnvironment &&
-                strcmp(dComIfGp_getStartStageName(), "D_MN08") != 0) {
-                // Filter sky and world geometry before actor models are submitted.
-                captureFullFrameBuffer();
-                drawFullFrameBuffer(false, true);
-                j3dSys.reinitGX();
-                j3dSys.setViewMtx(camera_p->view.viewMtx);
-                GXSetProjection(camera_p->view.projMtx, GX_PERSPECTIVE);
-                GXSetViewport(view_port->x_orig, view_port->y_orig, view_port->width,
-                              view_port->height, view_port->near_z, view_port->far_z);
-                GXSetScissor(view_port->x_orig, view_port->y_orig, view_port->width,
-                             view_port->height);
-            }
+            if (const auto callback = dKy_geometry_hooks().afterBackground)
+                callback(&camera_p->view, view_port);
 #endif
 
             GX_DEBUG_GROUP(dComIfGd_drawOpaListMiddle);

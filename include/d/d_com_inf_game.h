@@ -2091,8 +2091,6 @@ DUSK_NOINLINE int dComIfG_setObjectRes(
  * @return TRUE if successful, FALSE otherwise
  */
 DUSK_NOINLINE int dComIfG_setStageRes(const char* i_arcName, JKRHeap* i_heap);
-DUSK_NOINLINE int dComIfG_setStageResForStage(const char* i_arcName, const char* i_stageName,
-    const char* i_fileName, JKRHeap* i_heap);
 DUSK_NOINLINE int dComIfG_syncObjectRes(const char* i_arcName);
 DUSK_NOINLINE int dComIfG_syncStageRes(const char* i_arcName);
 DUSK_NOINLINE int dComIfG_deleteObjectResMain(const char* i_arcName);
@@ -5374,11 +5372,6 @@ inline int dComIfG_setObjectRes(const char* i_arcName, void* i_archiveRes, u32 i
  */
 inline int dComIfG_setStageRes(const char* i_arcName, JKRHeap* i_heap) {
     return g_dComIfG_gameInfo.mResControl.setStageRes(i_arcName, i_heap);
-}
-
-inline int dComIfG_setStageResForStage(const char* i_arcName, const char* i_stageName,
-                                       const char* i_fileName, JKRHeap* i_heap) {
-    return g_dComIfG_gameInfo.mResControl.setStageResForStage(i_arcName, i_stageName, i_fileName, i_heap);
 }
 
 inline int dComIfG_syncObjectRes(const char* i_arcName) {

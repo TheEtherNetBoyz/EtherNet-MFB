@@ -21,6 +21,9 @@ namespace dusk::audio {
 
     void ApplySettings();
 
+    // Forward optional audio callbacks supplied by a mod.
+    float ExternalSequenceGain(u32 soundId);
+
     void SetEnableReverb(bool value);
 
     void SetMasterVolume(f32 value);
@@ -31,3 +34,5 @@ namespace dusk::audio {
 
     f32 VolumeFromU16(u16 value);
 }
+
+extern "C" float DuskGetMasterVolume();

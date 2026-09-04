@@ -11,6 +11,7 @@
 #include "Z2AudioLib/Z2SoundObjMgr.h"
 #include "Z2AudioLib/Z2StatusMgr.h"
 #include "d/d_com_inf_game.h"
+#include "d/d_kankyo.h"
 #if TARGET_PC
 #include "dusk/settings.h"
 #include "dusk/speedrun.h"
@@ -48,40 +49,31 @@ static u32 z2FastLoadAudioFadeFrames(u32 frames) {
 }
 
 #if TARGET_PC
-static bool s_twilightVisualsPalaceMusicForced = false;
-static s32 s_twilightVisualsPalaceMusicStatus = 0;
-static bool s_bgmOnlyDynamicWaveRefresh = false;
-static s32 s_bgmStatusAfterRefresh = -1;
-
-static bool z2TwilightVisualsPreserveSceneMusic(int sceneNum) {
-    switch (sceneNum) {
-    case Z2SCENE_HYLIA_BRIDGE_BATTLE:
-    case Z2SCENE_ELDIN_BRIDGE_BATTLE:
-    case Z2SCENE_FOREST_TEMPLE_MINIBOSS:
-    case Z2SCENE_FOREST_TEMPLE_BOSS:
-    case Z2SCENE_GORON_MINES_MINIBOSS:
-    case Z2SCENE_GORON_MINES_BOSS:
-    case Z2SCENE_LAKEBED_TEMPLE_MINIBOSS:
-    case Z2SCENE_LAKEBED_TEMPLE_BOSS:
-    case Z2SCENE_ARBITERS_GROUNDS_MINIBOSS:
-    case Z2SCENE_ARBITERS_GROUNDS_BOSS:
-    case Z2SCENE_SNOWPEAK_RUINS_MINIBOSS:
-    case Z2SCENE_SNOWPEAK_RUINS_BOSS:
-    case Z2SCENE_TEMPLE_OF_TIME_MINIBOSS:
-    case Z2SCENE_TEMPLE_OF_TIME_BOSS:
-    case Z2SCENE_CITY_IN_THE_SKY_MINIBOSS:
-    case Z2SCENE_CITY_IN_THE_SKY_BOSS:
-    case Z2SCENE_PALACE_OF_TWILIGHT_MINIBOSS_A:
-    case Z2SCENE_PALACE_OF_TWILIGHT_MINIBOSS_B:
-    case Z2SCENE_PALACE_OF_TWILIGHT_BOSS:
-    case Z2SCENE_FINAL_BATTLE_THRONE_ROOM:
-    case Z2SCENE_FINAL_BATTLE_FIELD:
-    case Z2SCENE_FINAL_BATTLE_CUTSCENE:
-        return true;
-    default:
-        return false;
-    }
+bool Z2IsTwilightVisualMusicRefreshPending() {
+    auto callback = dKy_sequence_hooks().query;
+    return callback && callback(DuskSequence_IsRefreshPending);
 }
+bool Z2IsTwilightVisualMusicScene() {
+    auto callback = dKy_sequence_hooks().query;
+    return callback && callback(DuskSequence_IsReplacementScene);
+}
+static DuskTwilightSceneMusicProviderV1 s_external_scene_music_provider = nullptr;
+static s32 s_selected_music_status = -1;
+void Z2SetTwilightSceneMusicProvider(DuskTwilightSceneMusicProviderV1 provider) {
+    s_external_scene_music_provider = provider;
+    s_selected_music_status = -1;
+}
+
+static void apply_external_music_status() {
+    s32 status = s_selected_music_status;
+    s_selected_music_status = -1;
+    if (status < 0) {
+        const auto callback = dKy_sequence_hooks().query;
+        if (callback) status = callback(DuskSequence_MusicStatusOverride);
+    }
+    if (status >= 0) Z2GetSeqMgr()->changeBgmStatus(status);
+}
+
 #endif
 
 Z2SceneMgr::Z2SceneMgr() : JASGlobalInstance<Z2SceneMgr>(true) {
@@ -174,6 +166,9 @@ void Z2SceneMgr::setFadeInStart(u8 fadeType) {
 }
 
 void Z2SceneMgr::setSceneName(char* spot, s32 room, s32 layer) {
+#if TARGET_PC
+    s_selected_music_status = -1;
+#endif
     OS_REPORT("[Z2SceneMgr::setSceneName] spot = %s, room = %d, layer = %d\n", spot, room, layer);
     JAISoundID bgm_id = -1;
     JAISound* sound;
@@ -1705,32 +1700,23 @@ void Z2SceneMgr::setSceneName(char* spot, s32 room, s32 layer) {
     }
 
 #if TARGET_PC
-    // Preserve native music in dungeons. Exterior field loads use the Palace
-    // outdoor mix, while interior loads use its indoor mix. Kakariko Village
-    // is a narrow exception because its normal scene keeps an auxiliary demo
-    // wave loaded and can remain flagged as being in darkness.
-    s_twilightVisualsPalaceMusicForced = false;
-    const bool isPalaceScene = spotNo >= Z2SCENE_PALACE_OF_TWILIGHT &&
-                               spotNo <= Z2SCENE_PALACE_OF_TWILIGHT_BOSS;
-    const bool isKakarikoVillage = spotNo == Z2SCENE_KAKARIKO_VILLAGE;
-    const bool preserveSceneMusic = z2TwilightVisualsPreserveSceneMusic(spotNo) ||
-                                    Z2GetStatusMgr()->getDemoStatus() != 0;
-    const bool isExteriorLoad = spot != NULL && strncmp(spot, "F_", 2) == 0;
-    const bool isInteriorLoad = spot != NULL && strncmp(spot, "R_", 2) == 0;
-    if (!dusk::speedrun::isActive() &&
-        dusk::getSettings().game.enableTwilightVisuals.getValue() &&
-        dusk::getSettings().game.enableTwilightVisualMusic.getValue() &&
-        !isPalaceScene && !preserveSceneMusic &&
-        (!inDarkness_ && (demo_wave == 0 || isKakarikoVillage)) &&
-        (isExteriorLoad || isInteriorLoad)) {
-        bgm_id = Z2BGM_DUNGEON_LV8;
-        bgm_wave1 = 0x28;
-        bgm_wave2 = 0;
-        bVar2 = true;
-        field_bgm_play = false;
-        s_twilightVisualsPalaceMusicForced = true;
-        s_twilightVisualsPalaceMusicStatus = isInteriorLoad ? 1 : 0;
-        Z2GetSeqMgr()->changeBgmStatus(s_twilightVisualsPalaceMusicStatus);
+    if (s_external_scene_music_provider != nullptr) {
+        u32 selectedBgm = static_cast<u32>(bgm_id);
+        u8 selectedWave1 = bgm_wave1;
+        u8 selectedWave2 = bgm_wave2;
+        bool selectedPreserveStreams = bVar2;
+        bool selectedFieldBgmPlay = field_bgm_play;
+        s32 selectedMusicStatus = -1;
+        if (s_external_scene_music_provider(spot, room, layer, spotNo, inDarkness_,
+                demo_wave, &selectedBgm, &selectedWave1, &selectedWave2,
+                &selectedPreserveStreams, &selectedFieldBgmPlay, &selectedMusicStatus)) {
+            bgm_id = static_cast<JAISoundID>(selectedBgm);
+            bgm_wave1 = selectedWave1;
+            bgm_wave2 = selectedWave2;
+            bVar2 = selectedPreserveStreams;
+            field_bgm_play = selectedFieldBgmPlay;
+            s_selected_music_status = selectedMusicStatus;
+        }
     }
 #endif
 
@@ -1834,30 +1820,11 @@ void Z2SceneMgr::load1stDynamicWave() {
     }
 }
 
-void Z2SceneMgr::load1stDynamicWaveForBgmRefresh() {
-#if TARGET_PC
-    s_bgmOnlyDynamicWaveRefresh = true;
-#endif
-    timer = 0;
-    setSceneExist(false);
-    if (load1stWait == 0) {
-        _load1stWaveInner_1();
-    }
-}
-
-void Z2SceneMgr::restoreBgmStatusAfterRefresh(s32 status) {
-#if TARGET_PC
-    s_bgmStatusAfterRefresh = status;
-#else
-    UNUSED(status);
-#endif
-}
-
 void Z2SceneMgr::_load1stWaveInner_1() {
     OS_REPORT("[Z2SceneMgr::_load1stWaveInner_1] requestSe:%d loadedSe:%d\n", requestSeWave_1, loadedSeWave_1);
 
 #if TARGET_PC
-    if (!s_bgmOnlyDynamicWaveRefresh)
+    if (!dKy_sequence_hooks().query || !dKy_sequence_hooks().query(DuskSequence_IsBgmOnlyRefresh))
 #endif
     {
         Z2GetSeMgr()->seStopAll(0);
@@ -1934,7 +1901,7 @@ void Z2SceneMgr::_load1stWaveInner_2() {
         }
     }
 #if TARGET_PC
-    s_bgmOnlyDynamicWaveRefresh = false;
+    if (dKy_sequence_hooks().query) dKy_sequence_hooks().query(DuskSequence_OnWaveRefreshFinished);
 #endif
 }
 
@@ -1992,6 +1959,11 @@ void Z2SceneMgr::sceneBgmStart() {
     Z2GetStatusMgr()->setPauseFlag(0);
 
     if (!field_0x1a && Z2GetSeqMgr()->checkBgmIDPlaying(BGM_ID)) {
+#if TARGET_PC
+        if (BGM_ID.id_.info.type.parts.sectionID == 1 && s_selected_music_status >= 0)
+            apply_external_music_status();
+        s_selected_music_status = -1;
+#endif
         return;
     }
 
@@ -2019,11 +1991,6 @@ void Z2SceneMgr::sceneBgmStart() {
             case Z2BGM_DUNGEON_LV8:
             case Z2BGM_DUNGEON_LV9_02:
             case Z2BGM_SNOW_MOUNTAIN:
-#if TARGET_PC
-                if (s_twilightVisualsPalaceMusicForced) {
-                    Z2GetSeqMgr()->changeBgmStatus(s_twilightVisualsPalaceMusicStatus);
-                } else
-#endif
                 if (sceneNum == Z2SCENE_CASTLE_TOWN_SHOPS) {
                     Z2GetSeqMgr()->changeBgmStatus(5);
                 } else {
@@ -2065,6 +2032,9 @@ void Z2SceneMgr::sceneBgmStart() {
                 }
                 break;
             }
+#if TARGET_PC
+            apply_external_music_status();
+#endif
             break;
 
         case 2:
@@ -2077,10 +2047,10 @@ void Z2SceneMgr::sceneBgmStart() {
     }
 
 #if TARGET_PC
-    if (s_bgmStatusAfterRefresh >= 0) {
-        Z2GetSeqMgr()->changeBgmStatus(s_bgmStatusAfterRefresh);
-        s_bgmStatusAfterRefresh = -1;
-    }
+    // Stream, anonymous and suppressed BGM paths must not carry an override
+    // into the next scene. Sequence BGM has already consumed it above.
+    s_selected_music_status = -1;
+    if (dKy_sequence_hooks().query) dKy_sequence_hooks().query(DuskSequence_OnSceneBgmStarted);
 #endif
     Z2GetSeqMgr()->bgmAllUnMute(0);
     field_0x1a = false;

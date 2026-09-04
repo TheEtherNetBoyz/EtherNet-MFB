@@ -1677,6 +1677,9 @@ public:
     void setBodyAngleXReadyAnime(int);
     void setMagicArmorBrk(int i_status);
     BOOL checkMagicArmorHeavy() const;
+#if TARGET_PC
+    bool checkDuskMagicArmorWaterRun() const;
+#endif
     BOOL checkHeavyStateOn(BOOL, BOOL);
     void initGravity();
     void setSpecialGravity(f32 i_gravity, f32 i_speed, BOOL i_isOffFlag);

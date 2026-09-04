@@ -8,11 +8,16 @@
 #include "Z2AudioLib/Z2Calc.h"
 #include "JSystem/JAudio2/JAISoundChild.h"
 #include "JSystem/JAudio2/JAISeq.h"
+#include "JSystem/JAudio2/JASCriticalSection.h"
 #include "Z2AudioLib/SpotName.h"
 #include "os_report.h"
 
 #if TARGET_PC
 #include "dusk/audio.h"
+#include "dusk/audio/DuskAudioSystem.h"
+#include "d/d_com_inf_game.h"
+#include "d/d_kankyo.h"
+#include "m_Do/m_Do_Reset.h"
 #include "dusk/settings.h"
 #include "dusk/speedrun.h"
 #include "dusk/version.hpp"
@@ -23,8 +28,8 @@ static bool useTwilightBattleMusic() {
         return true;
     }
 #if TARGET_PC
-    return !dusk::speedrun::isActive() &&
-           dusk::getSettings().game.enableTwilightVisuals.getValue();
+    auto callback = dKy_sequence_hooks().query;
+    return callback && callback(DuskSequence_UseTwilightBattleMusic);
 #else
     return false;
 #endif
@@ -1573,10 +1578,17 @@ void Z2SeqMgr::processBgmFramework() {
     mWindStone.calc();
     field_0xa4.calc();
     
-    f32 base_vol = mAllBgmMaster.get() * mBgmPause.get() * mFanfareMute.get() * mWindStone.get() * mTwilightGateVol;
+    f32 base_vol = mAllBgmMaster.get() * mBgmPause.get() * mFanfareMute.get()
+        * mWindStone.get() * mTwilightGateVol;
 #if DEBUG
     if (field_0x04_debug) {
         base_vol *= field_0x00_debug;
+    }
+#endif
+#if TARGET_PC
+    if (auto callback = dKy_sequence_hooks().update) {
+        JASCriticalSection lock;
+        callback(this, base_vol);
     }
 #endif
     if (mMainBgmHandle) {

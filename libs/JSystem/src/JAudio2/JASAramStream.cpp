@@ -109,6 +109,9 @@ JASAramStream::JASAramStream() {
 }
 
 void JASAramStream::init(u32 aramAddress, u32 aramSize, StreamCallback i_callback, void* i_callbackData) {
+#if TARGET_PC
+    mMemorySource = nullptr;
+#endif
     JUT_ASSERT(153, sReadBuffer != NULL);
     mAramAddress = aramAddress;
     mAramSize = aramSize;
@@ -134,6 +137,9 @@ void JASAramStream::init(u32 aramAddress, u32 aramSize, StreamCallback i_callbac
 }
 
 bool JASAramStream::prepare(s32 param_0, int param_1) {
+#if TARGET_PC
+    if (mMemorySource == nullptr)
+#endif
     if (!DVDFastOpen(param_0, &mDvdFileInfo)) {
         JUT_WARN(240, "%s", "DVDFastOpen Failed");
         return false;
@@ -153,6 +159,41 @@ bool JASAramStream::prepare(s32 param_0, int param_1) {
     }
     return true;
 }
+
+#if TARGET_PC
+bool JASAramStream::prepareMemory(const void* data, u32 size, int preload) {
+    if (data == nullptr || size < sizeof(Header) || sBlockSize == 0) return false;
+    const Header* header = static_cast<const Header*>(data);
+    // This host-asset path accepts the converter's fully padded stereo PCM AST.
+    // Validate it before scheduling tasks: malformed custom assets must not set
+    // the native player's global error flag and break unrelated game streams.
+    if (header->tag != 'STRM' || header->format != STREAM_FORMAT_PCM16 ||
+        header->bits != 16 || header->channels != 2 || header->block_size != sBlockSize ||
+        header->mSampleRate <= 0 || header->mSampleRate > 192000 ||
+        header->loop_start != 0 || header->loop_end <= 0 || header->loop == 0 ||
+        header->mSampleCount != static_cast<u32>(header->loop_end) ||
+        header->soundBlockSize != size - sizeof(Header)) return false;
+    const u64 framesPerBlock = sBlockSize / 2;
+    const u64 blocks = (static_cast<u32>(header->loop_end) + framesPerBlock - 1) / framesPerBlock;
+    const u64 stride = sizeof(BlockHeader) + u64(sBlockSize) * 2;
+    if (sizeof(Header) + blocks * stride != size || blocks <= mAramSize / sBlockSize / 2) return false;
+    const u8* bytes = static_cast<const u8*>(data);
+    for (u64 i = 0; i < blocks; ++i) {
+        const BlockHeader* block = reinterpret_cast<const BlockHeader*>(bytes + sizeof(Header) + i * stride);
+        if (block->tag != 'BLCK' || block->mSize != sBlockSize) return false;
+    }
+    mMemorySource = bytes;
+    mDvdFileInfo.length = size;
+    return prepare(-1, preload);
+}
+
+s32 JASAramStream::readSource(void* destination, u32 size, u32 offset) {
+    if (mMemorySource == nullptr) return DVDReadPrio(&mDvdFileInfo, destination, size, offset, 1);
+    if (offset > mDvdFileInfo.length || size > mDvdFileInfo.length - offset) return -1;
+    memcpy(destination, mMemorySource + offset, size);
+    return static_cast<s32>(size);
+}
+#endif
 
 bool JASAramStream::start() {
     if (!OSSendMessage(&mMainCommandQueue, (OSMessage)CMD_START, OS_MESSAGE_NOBLOCK)) {
@@ -234,8 +275,9 @@ void JASAramStream::finishTask(void* i_this) {
         JUT_WARN(392, "%s", "rejectSubFrameCallback Failed");
     }
     if (_this->mCallback != NULL) {
-        _this->mCallback(CB_START, _this, _this->mCallbackData);
+        const auto callback = _this->mCallback;
         _this->mCallback = NULL;
+        callback(CB_START, _this, _this->mCallbackData);
     }
 }
 
@@ -254,7 +296,11 @@ bool JASAramStream::headerLoad(u32 aramSize, int param_1) {
     if (mIsCancelled != 0) {
         return false;
     }
+#if TARGET_PC
+    if (readSource(sReadBuffer, sizeof(Header), 0) < 0) {
+#else
     if (DVDReadPrio(&mDvdFileInfo, sReadBuffer, sizeof(Header), 0, 1) < 0) {
+#endif
         JUT_WARN(420, "%s", "DVDReadPrio Failed");
         hasErrored = true;
         return false;
@@ -329,7 +375,11 @@ bool JASAramStream::load() {
     if (mBlock == loop_end_block) {
         size = mDvdFileInfo.length - offset;
     }
+#if TARGET_PC
+    if (readSource(sReadBuffer, size, offset) < 0) {
+#else
     if (DVDReadPrio(&mDvdFileInfo, sReadBuffer, size, offset, 1) < 0) {
+#endif
         JUT_WARN(507, "%s", "DVDReadPrio Failed");
         hasErrored = true;
         return false;
