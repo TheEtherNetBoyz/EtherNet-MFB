@@ -72,6 +72,12 @@ MenuBar::MenuBar()
 
 void MenuBar::build_tabs() {
     mTabBar->add_tab("Settings", [this] { push(std::make_unique<SettingsWindow>()); });
+    auto modTabs = mods::svc::ui_mod_menu_tabs();
+    for (auto& tab : modTabs) {
+        if (tab.label == "Twilight Visuals") {
+            mTabBar->add_tab(tab.label, std::move(tab.onSelected));
+        }
+    }
 
     if (getSettings().backend.enableAdvancedSettings) {
         mTabBar->add_tab("Warp", [this] { push(std::make_unique<WarpWindow>()); });
@@ -84,8 +90,10 @@ void MenuBar::build_tabs() {
         mTabBar->add_tab("Achievements", [this] { push(std::make_unique<AchievementsWindow>()); });
     }
     mTabBar->add_tab("Mods", [this] { push(std::make_unique<ModsWindow>()); });
-    for (auto& tab : mods::svc::ui_mod_menu_tabs()) {
-        mTabBar->add_tab(tab.label, std::move(tab.onSelected));
+    for (auto& tab : modTabs) {
+        if (tab.label != "Twilight Visuals") {
+            mTabBar->add_tab(tab.label, std::move(tab.onSelected));
+        }
     }
 
     mTabBar->add_tab("Reset", [this] {
