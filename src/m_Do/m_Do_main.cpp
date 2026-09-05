@@ -37,6 +37,7 @@
 #include <cstring>
 
 #include "dusk/app_info.hpp"
+#include "dusk/android_uri.hpp"
 #include "dusk/audio/DuskAudioSystem.h"
 #include "dusk/audio/DuskDsp.hpp"
 #include "dusk/commands.hpp"
@@ -813,7 +814,18 @@ int game_main(int argc, char* argv[]) {
         return dvdPathAccess ? borealis::io::fs_path_to_string(dvdPathAccess.path()) : location;
     };
 
-    const std::string savedLocation = dusk::getSettings().backend.isoPath;
+    std::string savedLocation = dusk::getSettings().backend.isoPath;
+    if (savedLocation.starts_with("content://")) {
+        const std::string cachedLocation = dusk::android::materialize_content_uri(savedLocation);
+        if (!cachedLocation.empty()) {
+            DuskLog.info("Using cached Android game image: {}", cachedLocation);
+            savedLocation = cachedLocation;
+            dusk::getSettings().backend.isoPath.setValue(savedLocation);
+            dusk::config::save();
+        } else {
+            DuskLog.warn("Unable to cache Android game image: {}", savedLocation);
+        }
+    }
     dusk::iso::DiscInfo discInfo{};
     if (!savedLocation.empty() &&
         dusk::iso::inspect(savedLocation.c_str(), discInfo) != dusk::iso::ValidationError::Success)
@@ -833,6 +845,10 @@ int game_main(int argc, char* argv[]) {
     bool dvd_opened = false;
     if (parsed_arg_options.count("dvd")) {
         dvdLocation = parsed_arg_options["dvd"].as<std::string>();
+        const std::string cachedLocation = dusk::android::materialize_content_uri(dvdLocation);
+        if (!cachedLocation.empty()) {
+            dvdLocation = cachedLocation;
+        }
         dvdPath = resolveDvdLocation(dvdLocation);
         if (dusk::iso::inspect(dvdLocation.c_str(), discInfo) ==
             dusk::iso::ValidationError::Success)
@@ -921,6 +937,13 @@ int game_main(int argc, char* argv[]) {
         }
 
         dvdLocation = dusk::getSettings().backend.isoPath;
+        const std::string cachedLocation = dusk::android::materialize_content_uri(dvdLocation);
+        if (!cachedLocation.empty() && cachedLocation != dvdLocation) {
+            DuskLog.info("Using cached Android game image: {}", cachedLocation);
+            dvdLocation = cachedLocation;
+            dusk::getSettings().backend.isoPath.setValue(dvdLocation);
+            dusk::config::save();
+        }
         dvdPath = resolveDvdLocation(dvdLocation);
         if (dvdPath.empty()) {
             DuskLog.fatal("No DVD image specified, unable to boot!");

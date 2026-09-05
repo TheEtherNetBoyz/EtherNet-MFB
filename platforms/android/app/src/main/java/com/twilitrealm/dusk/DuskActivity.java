@@ -1,6 +1,7 @@
 package dev.twilitrealm.dusk;
 
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 
@@ -14,6 +15,51 @@ import java.io.OutputStream;
 
 public class DuskActivity extends BorealisActivity {
     private static final String TAG = "DuskActivity";
+
+    /** Materialize a Storage Access Framework URI for native code that needs a path. */
+    public String copyContentUriToCache(String uriString) {
+        if (uriString == null || !uriString.startsWith("content://")) {
+            return uriString;
+        }
+
+        File cacheDir = new File(getCacheDir(), "disc-images");
+        if (!cacheDir.exists() && !cacheDir.mkdirs()) {
+            Log.w(TAG, "Unable to create " + cacheDir);
+            return null;
+        }
+
+        String name = "disc-" + Integer.toHexString(uriString.hashCode()) + ".img";
+        File output = new File(cacheDir, name);
+        if (output.isFile() && output.length() > 0) {
+            return output.getAbsolutePath();
+        }
+
+        File partial = new File(cacheDir, name + ".partial");
+        try (InputStream in = getContentResolver().openInputStream(Uri.parse(uriString));
+             OutputStream out = new FileOutputStream(partial)) {
+            if (in == null) {
+                partial.delete();
+                Log.w(TAG, "Unable to open content URI " + uriString);
+                return null;
+            }
+            byte[] buffer = new byte[1024 * 1024];
+            int count;
+            while ((count = in.read(buffer)) != -1) {
+                out.write(buffer, 0, count);
+            }
+        } catch (IOException | SecurityException e) {
+            partial.delete();
+            Log.w(TAG, "Failed to cache content URI " + uriString, e);
+            return null;
+        }
+
+        if (!partial.renameTo(output)) {
+            partial.delete();
+            Log.w(TAG, "Unable to finalize cached disc image " + output);
+            return null;
+        }
+        return output.getAbsolutePath();
+    }
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         extractBundledMods();

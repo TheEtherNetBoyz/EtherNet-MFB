@@ -1,6 +1,7 @@
 #include "prelaunch.hpp"
 
 #include "dusk/app_info.hpp"
+#include "dusk/android_uri.hpp"
 #include "dusk/config.hpp"
 #include "dusk/data.hpp"
 #include "dusk/game_mode.hpp"
@@ -495,7 +496,13 @@ void file_dialog_callback(borealis::file_select::Result result) {
         return;
     }
 
-    begin_disc_verification(result.locations.front());
+    const std::string selectedPath = result.locations.front();
+    const std::string cachedPath = dusk::android::materialize_content_uri(selectedPath);
+    if (cachedPath.empty()) {
+        PrelaunchLog.warn("Unable to access selected Android game file: {}", selectedPath);
+        return;
+    }
+    begin_disc_verification(cachedPath);
 }
 
 std::vector<const gamemode::GameMode*> carousel_game_modes() {
