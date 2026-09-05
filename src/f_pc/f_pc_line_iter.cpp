@@ -19,8 +19,16 @@ static int fpcLnIt_MethodCall(create_tag_class* i_createTag, method_filter* i_fi
     base_process_class* process = static_cast<base_process_class*>(i_createTag->mpTagData);
 #if TARGET_PC
     const std::uintptr_t processAddress = reinterpret_cast<std::uintptr_t>(process);
-    if (processAddress < 0x10000 ||
-        (sizeof(std::uintptr_t) == 8 && processAddress > 0x00007FFFFFFFFFFFULL))
+    // Android AArch64 may use top-byte pointer tags (for example, 0xb4...).
+    // Remove the tag before applying the desktop canonical-address sanity check.
+    const std::uintptr_t addressForValidation =
+#if defined(__ANDROID__) && defined(__aarch64__)
+        processAddress & 0x00FFFFFFFFFFFFFFULL;
+#else
+        processAddress;
+#endif
+    if (addressForValidation < 0x10000 ||
+        (sizeof(std::uintptr_t) == 8 && addressForValidation > 0x00007FFFFFFFFFFFULL))
     {
         DuskLog.error(
             "fpcLnIt_MethodCall: rejecting invalid process pointer {} from line tag {}",
