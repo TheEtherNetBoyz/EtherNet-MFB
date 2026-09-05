@@ -189,7 +189,7 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install Android SDK packages
-        run: sdkmanager --channel=3 "platforms;android-37" "build-tools;36.1.0" "ndk;${ANDROID_NDK_VERSION}"
+        run: sdkmanager "platforms;android-36" "build-tools;36.1.0" "ndk;${ANDROID_NDK_VERSION}"
 
       - name: Install Rust Android target
         run: |
