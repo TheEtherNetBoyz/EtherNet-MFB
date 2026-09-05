@@ -208,15 +208,18 @@ jobs:
       - name: Build bundled mods
         run: cmake --build --preset ${{matrix.preset}} --target dusklight_mods
 
-      - name: Build APK
+      - name: Build installable APK
         working-directory: platforms/android
-        run: ./gradlew :app:assembleRelease --rerun-tasks
+        # The release variant is intentionally unsigned unless a release
+        # keystore is configured. Publish the debug-signed variant so the
+        # downloaded artifact can be installed directly on a device.
+        run: ./gradlew :app:assembleDebug --rerun-tasks
 
       - name: Stage artifacts
         run: |
           mkdir -p upload/sdk
           cp build/*/stub-android-*.so upload/sdk/
-          cp platforms/android/app/build/outputs/apk/release/app-${{matrix.abi}}-release-unsigned.apk upload/
+          cp platforms/android/app/build/outputs/apk/debug/app-${{matrix.abi}}-debug.apk upload/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7

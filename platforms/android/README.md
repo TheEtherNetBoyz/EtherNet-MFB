@@ -36,6 +36,11 @@ Output APK:
 
 - `app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`
 
+The debug APK is signed with the standard debug key and can be installed
+directly on an Android device. The release output is unsigned unless a
+release keystore is configured, so do not distribute the `*-unsigned.apk`
+file as an installable download.
+
 Aurora needs a hardware-backed graphics adapter. If an AVD has GPU
 acceleration disabled, launch it with `-gpu host`.
 
