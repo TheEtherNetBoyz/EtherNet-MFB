@@ -1,19 +1,11 @@
 #include <algorithm>
-#include <array>
-#include <aurora/aurora.h>
-#include <chrono>
 #include <cstring>
 #include <numeric>
 #include <string>
-#include <string_view>
-
 #define IMGUI_DEFINE_MATH_OPERATORS
-#include "imgui.h"
-#include <imgui_internal.h>
-
 #include "ImGuiConsole.hpp"
+
 #include "ImGuiEngine.hpp"
-#include "JSystem/JUtility/JUTGamePad.h"
 #include "SDL3/SDL_keyboard.h"
 #include "SDL3/SDL_mouse.h"
 #include "SDL3/SDL_events.h"
@@ -22,11 +14,11 @@
 #include "d/actor/d_a_player.h"
 #include "d/d_com_inf_game.h"
 #include "dusk/action_bindings.h"
-#include "dusk/audio/DuskAudioSystem.h"
 #include "dusk/config.hpp"
 #include "dusk/data.hpp"
 #include "dusk/dusk.h"
 #include "dusk/input_macro.h"
+#include "dusk/frame_interpolation.h"
 #include "dusk/game_mode.hpp"
 #include "dusk/livesplit.h"
 #include "dusk/main.h"
@@ -34,15 +26,27 @@
 #include "dusk/settings.h"
 #include "dusk/speedrun.h"
 #include "dusk/ui/ui.hpp"
+
 #include "f_pc/f_pc_manager.h"
 #include "f_pc/f_pc_name.h"
-#include "fmt/format.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_main.h"
-#include "tracy/Tracy.hpp"
 #include <aurora/gfx.h>
 #include <aurora/lib/input.hpp>
 #include <dolphin/vi.h>
+
+
+#include "JSystem/JUtility/JUTGamePad.h"
+
+#include <aurora/aurora.h>
+#include <fmt/format.h>
+#include <imgui.h>
+#include <imgui_internal.h>
+#include <tracy/Tracy.hpp>
+
+#include <array>
+#include <chrono>
+#include <string_view>
 
 #if _WIN32
 #define NOMINMAX

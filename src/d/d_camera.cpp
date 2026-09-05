@@ -30,16 +30,17 @@
 #endif
 
 #if TARGET_PC
+#include "dusk/action_bindings.h"
 #include "dusk/camera_operators.hpp"
 #include "dusk/commands.hpp"
 #include "dusk/frame_interpolation.h"
 #include "dusk/logging.h"
-#include "dusk/action_bindings.h"
 #include "dusk/mouse.h"
 #include "dusk/settings.h"
 #include "dusk/tas_movie.h"
 #include "dusk/touch_camera.h"
-#include "imgui.h"
+
+#include <imgui.h>
 #include <SDL3/SDL_keyboard.h>
 #endif
 

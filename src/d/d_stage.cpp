@@ -22,12 +22,10 @@
 #include <cstdio>
 #include <cstring>
 
+#if TARGET_PC
 #include "dusk/logging.h"
-#if TARGET_PC
 #include "dusk/TwilightHostApi.h"
-#endif
 #include "helpers/string.hpp"
-#if TARGET_PC
 #include "dusk/mods/svc/actor.hpp"
 #include "dusk/mods/svc/stage.hpp"
 #include "dusk/settings.h"
