@@ -17,12 +17,11 @@
 #include "d/d_msg_scrn_explain.h"
 #include "m_Do/m_Do_graphic.h"
 #include "d/actor/d_a_midna.h"
+#include <cstring>
+
 #if TARGET_PC
 #include "dusk/frame_interpolation.h"
 #include "dusk/ui/touch_controls.hpp"
-#endif
-#include <cstring>
-#if TARGET_PC
 #include <unordered_map>
 
 namespace {
@@ -374,11 +373,9 @@ static void primeFmapControlInterp(const dMenu_Fmap2DBack_c* map, f32 x, f32 y, 
 }
 
 }  // namespace
-#endif
 
 #include "dusk/version.hpp"
 
-#if TARGET_PC
 void dMenu_Fmap2DBack_c::fMapBackWide() {
     mpBaseScreen->scale(mDoGph_gInf_c::hudAspectScaleUp, 1.0f);
     mpBaseScreen->translate(mDoGph_gInf_c::getSafeMinXF(), 0.0f);

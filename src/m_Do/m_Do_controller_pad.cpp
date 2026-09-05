@@ -13,7 +13,6 @@
 #include "f_ap/f_ap_game.h"
 #include "m_Do/m_Do_Reset.h"
 #include "m_Do/m_Do_main.h"
-#include "tracy/Tracy.hpp"
 
 #if TARGET_PC
 #include <SDL3/SDL_keyboard.h>
@@ -23,6 +22,8 @@
 #include "dusk/settings.h"
 #include "dusk/speedrun.h"
 #include "dusk/ui/touch_controls.hpp"
+
+#include <tracy/Tracy.hpp>
 #endif
 
 DUSK_GAME_DATA JUTGamePad* mDoCPd_c::m_gamePad[4];

@@ -37,7 +37,6 @@
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_machine.h"
 #include "m_Do/m_Do_main.h"
-#include "tracy/Tracy.hpp"
 
 #if PLATFORM_WII || PLATFORM_SHIELD
 #include <revolution/sc.h>
@@ -48,18 +47,21 @@
 #endif
 
 #if TARGET_PC
-#include <SDL3/SDL_video.h>
-#include "aurora/lib/window.hpp"
-#include "d/actor/d_a_horse.h"
 #include "dusk/dusk.h"
-#include "helpers/endian.h"
 #include "dusk/frame_interpolation.h"
 #include "dusk/gfx.hpp"
-#include "helpers/gx_helper.h"
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/logging.h"
 #include "dusk/settings.h"
 #include "dusk/speedrun.h"
+#include "helpers/endian.h"
+#include "helpers/gx_helper.h"
+
+#include "d/actor/d_a_horse.h"
+
+#include <aurora/lib/window.hpp>
+#include <SDL3/SDL_video.h>
+#include <tracy/Tracy.hpp>
 #endif
 
 class mDoGph_HIO_c : public JORReflexible {

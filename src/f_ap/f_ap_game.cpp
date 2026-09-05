@@ -1,25 +1,7 @@
 #include "f_ap/f_ap_game.h"
-#include <cstring>
-#include "DynamicLink.h"
-#include "JSystem/J3DGraphLoader/J3DModelLoader.h"
-#include "JSystem/J3DGraphLoader/J3DModelSaver.h"
-#include "JSystem/JHostIO/JORFile.h"
-#include "JSystem/JKernel/JKRAram.h"
-#include "JSystem/JKernel/JKRAramArchive.h"
-#include "JSystem/JKernel/JKRSolidHeap.h"
-#include "JSystem/JUtility/JUTDbPrint.h"
 #include "SSystem/SComponent/c_counter.h"
 #include "SSystem/SComponent/c_API_graphic.h"
-#include "d/actor/d_a_alink.h"
-#include "d/actor/d_a_grass.h"
-#include "d/actor/d_a_midna.h"
-#include "d/d_model.h"
-#include "d/d_tresure.h"
-#include "dusk/achievements.h"
-#include "dusk/frame_interpolation.h"
 #include "dusk/livesplit.h"
-#include "dusk/logging.h"
-#include "dusk/mod_loader.hpp"
 #include "f_op/f_op_camera_mng.h"
 #include "f_op/f_op_draw_tag.h"
 #include "f_op/f_op_overlap_mng.h"
@@ -32,16 +14,35 @@
 #include "f_pc/f_pc_name.h"
 #include "f_pc/f_pc_priority.h"
 #include "m_Do/m_Do_audio.h"
-#include "m_Do/m_Do_graphic.h"
-#include "m_Do/m_Do_main.h"
 #include "m_Do/m_Do_Reset.h"
+#include "m_Do/m_Do_main.h"
+#include "m_Do/m_Do_graphic.h"
+#include "DynamicLink.h"
+#include "JSystem/JKernel/JKRSolidHeap.h"
+#include "JSystem/JKernel/JKRAram.h"
+#include "JSystem/JKernel/JKRAramArchive.h"
+#include "JSystem/JUtility/JUTDbPrint.h"
+#include "JSystem/JHostIO/JORFile.h"
+#include "JSystem/J3DGraphLoader/J3DModelLoader.h"
+#include "JSystem/J3DGraphLoader/J3DModelSaver.h"
+#include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_midna.h"
+#include "d/d_model.h"
+#include "d/actor/d_a_grass.h"
+#include "d/d_tresure.h"
+#include <cstring>
 
 #if TARGET_PC
-#include <dusk/autosave.h>
-#include <dusk/gamepad_color.h>
+#include "dusk/achievements.h"
+#include "dusk/autosave.h"
+#include "dusk/frame_interpolation.h"
 #include "dusk/game_mode.hpp"
+#include "dusk/gamepad_color.h"
+#include "dusk/logging.h"
 #include "dusk/menu_pointer.h"
-#include "tracy/Tracy.hpp"
+#include "dusk/mod_loader.hpp"
+
+#include <tracy/Tracy.hpp>
 #endif
 
 fapGm_HIO_c::fapGm_HIO_c() {

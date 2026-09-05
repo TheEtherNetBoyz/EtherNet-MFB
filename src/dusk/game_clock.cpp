@@ -5,8 +5,11 @@
 #include "dusk/settings.h"
 #include "dusk/time.h"
 
-#include <algorithm>
+#include "dusk/frame_interpolation.h"
+
 #include <aurora/time.hpp>
+
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <unordered_map>
