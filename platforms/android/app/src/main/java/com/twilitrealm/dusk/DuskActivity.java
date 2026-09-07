@@ -73,10 +73,32 @@ public class DuskActivity extends BorealisActivity {
         File outDir = new File(getFilesDir(), "res/gz");
         try {
             deleteRecursively(outDir);
-            extractAssetTree("res/gz", outDir);
+            String assetRoot = findPracticeAssetRoot();
+            if (assetRoot == null) {
+                throw new IOException("Practice-save metadata is missing from APK assets");
+            }
+            extractAssetTree(assetRoot, outDir);
+            File metadata = new File(outDir, "any_saves/any.bin");
+            if (!metadata.isFile() || metadata.length() < 32) {
+                throw new IOException("Practice-save extraction did not produce any_saves/any.bin");
+            }
+            Log.i(TAG, "Extracted practice saves from " + assetRoot + " to " + outDir +
+                    " (" + metadata.length() + "-byte metadata)");
         } catch (IOException e) {
             Log.w(TAG, "Failed to extract practice saves", e);
         }
+    }
+
+    private String findPracticeAssetRoot() {
+        String[] roots = {"res/gz", "res/res/gz", "gz"};
+        for (String root : roots) {
+            try (InputStream in = getAssets().open(root + "/any_saves/any.bin")) {
+                return root;
+            } catch (IOException ignored) {
+                // Try the next layout. This keeps older/generated APK asset layouts usable.
+            }
+        }
+        return null;
     }
 
     private void extractAssetTree(String assetPath, File output) throws IOException {
