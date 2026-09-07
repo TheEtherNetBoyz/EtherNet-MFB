@@ -453,7 +453,13 @@ std::string read_fixed_string(const u8* data, size_t maxLen) {
 }
 
 std::filesystem::path save_root_path() {
+#if defined(__ANDROID__) || defined(ANDROID)
+    // DuskActivity extracts APK assets into the app data directory. CachePath is
+    // the same Android filesystem root used by the bundled-mod loader.
+    return dusk::CachePath / "res/gz";
+#else
     return dusk::data::base_path_relative("res/gz");
+#endif
 }
 
 std::filesystem::path save_path(ImGuiPracticeSaves::SaveCategory category, const std::string& filename) {
