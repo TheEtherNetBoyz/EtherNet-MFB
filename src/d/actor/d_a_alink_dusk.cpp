@@ -4,6 +4,24 @@
 #include "d/d_meter2_draw.h"
 #include "d/d_meter2_info.h"
 
+namespace {
+bool sFixedQuickTransformActive = false;
+}
+
+bool daAlink_fixedQuickTransformFreezeActive() {
+    if (!sFixedQuickTransformActive) {
+        return false;
+    }
+
+    daAlink_c* player = daAlink_getAlinkActorClass();
+    if (player == NULL || !player->checkMetamorphose()) {
+        sFixedQuickTransformActive = false;
+        return false;
+    }
+
+    return true;
+}
+
 void daAlink_c::handleWolfHowl() {
     if (checkWolf()) {
         if (!dusk::getSettings().game.sunsSong) {
@@ -147,6 +165,17 @@ void daAlink_c::handleQuickTransform() {
     }
 
     OSReport("Running quick transform!");
+
+    if (dusk::getSettings().game.fixedQuickTransform) {
+        // Keep Dusk's proven immediate transform path. Actor execution is suspended separately
+        // while this specific quick transformation is active, avoiding incompatible event state.
+        sFixedQuickTransformActive = true;
+        if (!procCoMetamorphoseInit() || !checkMetamorphose()) {
+            sFixedQuickTransformActive = false;
+        }
+        return;
+    }
+
     procCoMetamorphoseInit();
 }
 

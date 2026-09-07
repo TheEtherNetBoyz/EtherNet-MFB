@@ -337,9 +337,21 @@ static int fopAc_Execute(void* i_this) {
     #endif
 
     if (!dComIfGp_isPauseFlag() && !dScnPly_c::isPause() && !dComIfA_PauseCheck()) {
+#if TARGET_PC
+        const s16 actorName = fopAcM_GetName(actor);
+        const bool fixedQuickTransformFreeze =
+            daAlink_fixedQuickTransformFreezeActive() && actorName != fpcNm_ALINK_e &&
+            actorName != fpcNm_MIDNA_e;
+#endif
+
         daSus_c::check(actor);
         actor->eventInfo.beforeProc();
         s32 move = dComIfGp_event_moveApproval(actor);
+#if TARGET_PC
+        if (fixedQuickTransformFreeze) {
+            move = 0;
+        }
+#endif
         fopAcM_OffStatus(actor, fopAcStts_UNK_0x40000000_e);
 
         if (!fopAcM_CheckStatus(actor, fopAcStts_UNK_0x20000000_e) &&

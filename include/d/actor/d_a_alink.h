@@ -4608,6 +4608,11 @@ public:
 #endif
 };
 
+#if TARGET_PC
+// True only while a Fixed Quick Transform initiated by Dusk is actively morphing Link.
+bool daAlink_fixedQuickTransformFreezeActive();
+#endif
+
 struct daAlinkHIO_basic_c1 {
     /* 0x00 */ bool mOneHitKill;
     /* 0x02 */ s16 mHeadMaxTurnHorizontal;
