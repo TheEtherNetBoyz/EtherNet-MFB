@@ -1907,6 +1907,15 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Allows Wolf Link to howl and change the time of day.");
         addOption("Quick Transform (R+Y)", getSettings().game.enableQuickTransform,
             "Transform instantly by pressing R and Y simultaneously.");
+        config_bool_select(leftPane, rightPane, getSettings().game.fixedQuickTransform,
+            {
+                .key = "Fixed Quick Transform",
+                .helpText =
+                    "Dusk does not implement Quick Transform correctly how HD does it. This fix "
+                    "will make sure all enemies and actors will time freeze when quick "
+                    "transforming.",
+                .isDisabled = [] { return !getSettings().game.enableQuickTransform; },
+            });
         addOption("Warp as Human", getSettings().game.humanMidnaWarp,
             "Map and Midna warps no longer force Wolf Link transformation.");
         addOption("Aiming Reticle", getSettings().game.aimingReticle,

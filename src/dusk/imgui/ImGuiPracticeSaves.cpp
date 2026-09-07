@@ -24,8 +24,10 @@
 #include "d/actor/d_a_kago.h"
 #include "d/actor/d_a_player.h"
 #include "dusk/config.hpp"
+#include "dusk/data.hpp"
 #include "dusk/interp/frame_interpolation.h"
 #include "dusk/io.hpp"
+#include "dusk/logging.h"
 #include "dusk/main.h"
 #include "dusk/map_loader_definitions.h"
 #include "dusk/settings.h"
@@ -452,7 +454,27 @@ std::string read_fixed_string(const u8* data, size_t maxLen) {
 }
 
 std::filesystem::path save_root_path() {
-    return std::filesystem::path("res/gz");
+#if defined(__ANDROID__) || defined(ANDROID)
+    // DuskActivity extracts APK assets into the app data directory. Prefer the
+    // same Android filesystem root used by the bundled-mod loader, but tolerate
+    // a custom data path and the legacy relative path if an older APK populated
+    // one of those locations.
+    const std::array candidates = {
+        dusk::CachePath / "res/gz",
+        dusk::ConfigPath / "res/gz",
+        dusk::data::base_path_relative("res/gz"),
+        std::filesystem::path("res/gz"),
+    };
+    for (const auto& candidate : candidates) {
+        std::error_code ec;
+        if (std::filesystem::is_regular_file(candidate / "any_saves/any.bin", ec)) {
+            return candidate;
+        }
+    }
+    return candidates.front();
+#else
+    return dusk::data::base_path_relative("res/gz");
+#endif
 }
 
 std::filesystem::path save_path(ImGuiPracticeSaves::SaveCategory category, const std::string& filename) {
@@ -953,14 +975,19 @@ void ImGuiPracticeSaves::loadCategoryMetadata(SaveCategory category) {
     auto& saves = m_saves[category_index(category)];
     saves.clear();
     try {
-        const auto data = io::FileStream::ReadAllBytes(metadata_path(category));
+        const auto path = metadata_path(category);
+        const auto data = io::FileStream::ReadAllBytes(path);
         if (data.size() < kMetadataHeaderSize) {
+            DuskLog.warn("Practice save metadata '{}' is too small ({} bytes)",
+                         dusk::data::abbreviated_path_string(path), data.size());
             return;
         }
 
         const uint32_t count = read_be32(data.data());
         const size_t requiredSize = kMetadataHeaderSize + (static_cast<size_t>(count) * kMetadataEntrySize);
         if (data.size() < requiredSize) {
+            DuskLog.warn("Practice save metadata '{}' is truncated ({} of {} bytes)",
+                         dusk::data::abbreviated_path_string(path), data.size(), requiredSize);
             return;
         }
 
@@ -987,9 +1014,15 @@ void ImGuiPracticeSaves::loadCategoryMetadata(SaveCategory category) {
                 saves.push_back(std::move(save));
             }
         }
+        DuskLog.info("Loaded {} {} practice saves from '{}'", saves.size(),
+                     kSaveCategories[category_index(category)].label,
+                     dusk::data::abbreviated_path_string(path));
     } catch (const std::exception& e) {
         m_statusMsg = fmt::format("Failed to load {} practice metadata: {}",
                                   kSaveCategories[category_index(category)].label, e.what());
+        DuskLog.warn("Failed to load {} practice metadata '{}': {}",
+                     kSaveCategories[category_index(category)].label,
+                     dusk::data::abbreviated_path_string(metadata_path(category)), e.what());
     }
 }
 

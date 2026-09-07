@@ -52,6 +52,7 @@ UserSettings g_userSettings = {
 
         // Quality of Life
         .enableQuickTransform {"game.enableQuickTransform", false},
+        .fixedQuickTransform {"game.fixedQuickTransform", false},
         .humanMidnaWarp {"game.humanMidnaWarp", false},
         .hideTvSettingsScreen {"game.hideTvSettingsScreen", true},
         .biggerWallets {"game.biggerWallets", false},
@@ -414,6 +415,7 @@ void registerSettings() {
     // Game
     Register(g_userSettings.game.language);
     Register(g_userSettings.game.enableQuickTransform);
+    Register(g_userSettings.game.fixedQuickTransform);
     Register(g_userSettings.game.humanMidnaWarp);
     Register(g_userSettings.game.transformWithoutShadowCrystal);
     Register(g_userSettings.game.hideTvSettingsScreen);

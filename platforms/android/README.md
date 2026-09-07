@@ -4,7 +4,7 @@ This directory contains Dusklight's Android shell built on top of Borealis.
 
 ## Prerequisites
 
-- Android SDK with Platform 37 installed (`ANDROID_HOME`)
+- Android SDK with Platform 36 installed (`ANDROID_HOME`)
 - Android NDK version used by CMake presets (`ANDROID_NDK_VERSION`)
 - JDK 17+
 
@@ -35,6 +35,11 @@ cd platforms/android
 Output APK:
 
 - `app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`
+
+The debug APK is signed with the standard debug key and can be installed
+directly on an Android device. The release output is unsigned unless a
+release keystore is configured, so do not distribute the `*-unsigned.apk`
+file as an installable download.
 
 Aurora needs a hardware-backed graphics adapter. If an AVD has GPU
 acceleration disabled, launch it with `-gpu host`.
