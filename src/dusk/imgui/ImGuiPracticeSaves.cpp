@@ -24,6 +24,7 @@
 #include "d/actor/d_a_kago.h"
 #include "d/actor/d_a_player.h"
 #include "dusk/config.hpp"
+#include "dusk/data.hpp"
 #include "dusk/frame_interpolation.h"
 #include "dusk/io.hpp"
 #include "dusk/main.h"
@@ -452,7 +453,7 @@ std::string read_fixed_string(const u8* data, size_t maxLen) {
 }
 
 std::filesystem::path save_root_path() {
-    return std::filesystem::path("res/gz");
+    return dusk::data::base_path_relative("res/gz");
 }
 
 std::filesystem::path save_path(ImGuiPracticeSaves::SaveCategory category, const std::string& filename) {

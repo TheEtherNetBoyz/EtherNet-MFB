@@ -63,7 +63,46 @@ public class DuskActivity extends BorealisActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         extractBundledMods();
+        extractPracticeSaves();
         super.onCreate(savedInstanceState);
+    }
+
+    // Practice-save metadata and binaries are packaged as APK assets, but the native
+    // practice menu reads them through ordinary filesystem I/O.
+    private void extractPracticeSaves() {
+        File outDir = new File(getFilesDir(), "res/gz");
+        try {
+            deleteRecursively(outDir);
+            extractAssetTree("res/gz", outDir);
+        } catch (IOException e) {
+            Log.w(TAG, "Failed to extract practice saves", e);
+        }
+    }
+
+    private void extractAssetTree(String assetPath, File output) throws IOException {
+        String[] children = getAssets().list(assetPath);
+        if (children == null || children.length == 0) {
+            File parent = output.getParentFile();
+            if (parent != null && !parent.exists() && !parent.mkdirs()) {
+                throw new IOException("Unable to create " + parent);
+            }
+            byte[] buffer = new byte[65536];
+            try (InputStream in = getAssets().open(assetPath);
+                 OutputStream out = new FileOutputStream(output)) {
+                int count;
+                while ((count = in.read(buffer)) > 0) {
+                    out.write(buffer, 0, count);
+                }
+            }
+            return;
+        }
+
+        if (!output.exists() && !output.mkdirs()) {
+            throw new IOException("Unable to create " + output);
+        }
+        for (String child : children) {
+            extractAssetTree(assetPath + "/" + child, new File(output, child));
+        }
     }
 
     // Bundled mod packages ship as APK assets, which the native loader cannot read directly;
