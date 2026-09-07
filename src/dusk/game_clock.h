@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 namespace dusk::game_clock {
 
 // Default amount of time advanced by a simulation tick.
@@ -12,6 +14,8 @@ struct FrameTiming {
     bool interpolating;
     bool separatePresentation;
     int numSimTicks;
+    // Changes whenever presentation history must be discarded and re-anchored.
+    uint64_t presentationEpoch;
 };
 extern FrameTiming g_frameTiming;
 
@@ -31,6 +35,7 @@ void finish_main_loop();
 void begin_sim_tick();
 void commit_sim_tick();
 float sample_interpolation_step();
+bool is_sim_frame();
 float consume_interval(const void* consumer);
 
 } // namespace dusk::game_clock

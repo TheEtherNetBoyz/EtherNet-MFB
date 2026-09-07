@@ -14,7 +14,7 @@
 
 #if TARGET_PC
 #include "dusk/dusk.h"
-#include "dusk/frame_interpolation.h"
+#include "dusk/interp/frame_interpolation.h"
 #include "dusk/latency.h"
 #include "dusk/logging.h"
 #include "dusk/settings.h"
@@ -219,8 +219,8 @@ void JFWDisplay::endGX() {
 
     if (mFader != NULL) {
         ortho.setPort();
-#ifdef TARGET_PC
-        if (dusk::frame_interp::get_ui_tick_pending()) {
+#if TARGET_PC
+        if (dusk::interp::get_ui_tick_pending()) {
             mFader->advance();
         }
         if (mFader->getStatus() != JUTFader::Wait) {
@@ -383,7 +383,7 @@ static void waitForTick(u32 p1, u16 p2) {
 #if TARGET_PC
     static Limiter limiter;
 
-    if (dusk::frame_interp::is_enabled() || dusk::low_latency_presentation_enabled() ||
+    if (dusk::interp::is_enabled() || dusk::low_latency_presentation_enabled() ||
         dusk::getTransientSettings().turboMode)
     {
         limiter.Reset();

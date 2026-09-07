@@ -45,13 +45,13 @@
 #include "dusk/data.hpp"
 #include "dusk/discord_presence.hpp"
 #include "dusk/dusk.h"
-#include "dusk/frame_interpolation.h"
 #include "dusk/game_clock.h"
 #include "dusk/game_combos.h"
 #include "dusk/gyro.h"
 #include "dusk/hq_minimap.hpp"
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/imgui/ImGuiEngine.hpp"
+#include "dusk/interp/frame_interpolation.h"
 #include "dusk/iso_validate.hpp"
 #include "dusk/logging.h"
 #include "dusk/main.h"
@@ -294,16 +294,15 @@ void main01(void) {
         dusk::ui::update();
 
         const auto timing = dusk::game_clock::advance();
-        const auto interpolationMode = dusk::getSettings().game.enableFrameInterpolation.getValue();
         if (timing.separatePresentation) {
             const int tasSimTicks = dusk::tas_movie::simulationTicksForHostFrame(timing.numSimTicks);
             const bool tasBatchActive = dusk::tas_movie::active();
             if (tasSimTicks > 0) {
-                dusk::frame_interp::begin_frame(interpolationMode, true, 0.0f);
-                dusk::frame_interp::set_ui_tick_pending(true);
+                dusk::interp::begin_simulation_frame();
+                dusk::interp::set_ui_tick_pending(true);
                 for (int i = 0; i < tasSimTicks; ++i) {
                     if (timing.interpolating) {
-                        dusk::frame_interp::begin_sim_tick();
+                        dusk::interp::begin_sim_tick();
                     }
                     dusk::game_clock::begin_sim_tick();
                     mDoCPd_c::read();
@@ -324,7 +323,7 @@ void main01(void) {
 
             const float interpolationStep =
                 timing.interpolating ? dusk::game_clock::sample_interpolation_step() : 1.0f;
-            dusk::frame_interp::begin_frame(interpolationMode, false, interpolationStep);
+            dusk::interp::begin_frame(interpolationStep);
             static int sLastWindowStatus = -1;
             const int windowStatus = dMeter2Info_getWindowStatus();
             const auto isCaptureMenuStatus = [](int status) {
@@ -332,26 +331,21 @@ void main01(void) {
             };
             if (windowStatus != sLastWindowStatus &&
                 (isCaptureMenuStatus(windowStatus) || isCaptureMenuStatus(sLastWindowStatus))) {
-                dusk::frame_interp::request_presentation_sync();
+                dusk::interp::request_presentation_sync();
             }
             sLastWindowStatus = windowStatus;
-            if (!dusk::frame_interp::presentation_skip_active()) {
-                if (timing.interpolating) {
-                    dusk::frame_interp::interpolate();
-                    dusk::frame_interp::begin_presentation_camera();
-                }
+            if (!dusk::interp::presentation_skip_active()) {
+                dusk::interp::begin_presentation(interpolationStep);
                 dusk::tas_movie::applyPresentationCamera(dComIfGd_getView());
                 fpcM_DrawIterater((fpcM_DrawIteraterFunc)fpcM_Draw);
                 cAPIGph_Painter();
                 dusk::tas_movie::restorePresentationCamera();
-                if (timing.interpolating) {
-                    dusk::frame_interp::end_presentation_camera();
-                }
+                dusk::interp::end_presentation();
             }
-            dusk::frame_interp::set_ui_tick_pending(false);
+            dusk::interp::set_ui_tick_pending(false);
         } else {
-            dusk::frame_interp::begin_frame(dusk::FrameInterpMode::Off, true, 0.0f);
-            dusk::frame_interp::set_ui_tick_pending(true);
+            dusk::interp::begin_simulation_frame();
+            dusk::interp::set_ui_tick_pending(true);
             const int tasSimTicks = dusk::tas_movie::simulationTicksForHostFrame(1);
             const bool tasBatchActive = dusk::tas_movie::active();
             for (int simTick = 0; simTick < tasSimTicks; ++simTick) {

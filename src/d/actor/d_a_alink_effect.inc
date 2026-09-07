@@ -1211,18 +1211,18 @@ void daAlink_c::prepareSwordEffectInterpolation() {
 
     JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(field_0x321c);
     if (emitter != NULL) {
-        dusk::frame_interp::record_final_mtx(mSwordModel->getBaseTRMtx(), emitter);
+        dusk::interp::record_final_mtx(mSwordModel->getBaseTRMtx(), emitter);
     }
 
     emitter = dComIfGp_particle_getEmitter(field_0x3294);
     if (emitter != NULL) {
-        dusk::frame_interp::record_final_mtx(mSwordModel->getBaseTRMtx(), emitter);
+        dusk::interp::record_final_mtx(mSwordModel->getBaseTRMtx(), emitter);
     }
 
     for (int i = 0; i < 3; ++i) {
         emitter = dComIfGp_particle_getEmitter(field_0x327c[i]);
         if (emitter != NULL) {
-            dusk::frame_interp::record_final_mtx(mSwordModel->getBaseTRMtx(), emitter);
+            dusk::interp::record_final_mtx(mSwordModel->getBaseTRMtx(), emitter);
         }
     }
 }
@@ -2289,8 +2289,8 @@ void daAlink_lockCursor_c::draw() {
     f32 lockCursorAngle = mLockCursorAngle;
     f32 lockCursorFrame = field_0x30;
 #if TARGET_PC
-    if (dusk::frame_interp::is_enabled() && !dusk::frame_interp::is_sim_frame()) {
-        const f32 step = dusk::frame_interp::get_interpolation_step();
+    if (dusk::interp::is_enabled() && !dusk::game_clock::is_sim_frame()) {
+        const f32 step = dusk::interp::get_interpolation_step();
 
         lockCursorAngle += 0.9f * step;
         if (lockCursorAngle >= 50.0f) {
@@ -2349,10 +2349,10 @@ void daAlink_sight_c::draw() {
     f32 drawX = mProjMtx[0][3];
     f32 drawY = mProjMtx[1][3];
 #if TARGET_PC
-    if (dusk::frame_interp::is_sim_frame()) {
+    if (dusk::game_clock::is_sim_frame()) {
         recordAlinkSightSample(drawX, drawY);
-    } else if (dusk::frame_interp::is_enabled() && s_alinkSightInterp.initialized) {
-        const f32 step = dusk::frame_interp::get_interpolation_step();
+    } else if (dusk::interp::is_enabled() && s_alinkSightInterp.initialized) {
+        const f32 step = dusk::interp::get_interpolation_step();
         drawX = s_alinkSightInterp.prevX + (s_alinkSightInterp.currX - s_alinkSightInterp.prevX) * step;
         drawY = s_alinkSightInterp.prevY + (s_alinkSightInterp.currY - s_alinkSightInterp.prevY) * step;
     }

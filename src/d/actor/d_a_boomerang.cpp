@@ -1,3 +1,6 @@
+#if TARGET_PC
+#include "dusk/game_clock.h"
+#endif
 /**
  * @file d_a_boomerang.cpp
  * 
@@ -14,7 +17,7 @@
 #include "Z2AudioLib/Z2Instances.h"
 #include "SSystem/SComponent/c_math.h"
 #if TARGET_PC
-#include "dusk/frame_interpolation.h"
+#include "dusk/interp/frame_interpolation.h"
 #endif
 
 int daBoomerang_sight_c::createHeap() {
@@ -381,7 +384,7 @@ void daBoomerang_sight_c::setSight(const cXyz* i_pos, int i_no) {
         m_proj_posX[i_no] = proj.x;
         m_proj_posY[i_no] = proj.y;
 #if TARGET_PC
-        if (dusk::frame_interp::is_sim_frame()) {
+        if (dusk::game_clock::is_sim_frame()) {
             recordBoomerangSightSample(i_no, m_proj_posX[i_no], m_proj_posY[i_no]);
         }
 #endif
@@ -405,8 +408,8 @@ void daBoomerang_sight_c::draw() {
             f32 frame98 = field_0x98[i];
             f32 frameB0 = field_0xb0[i];
 #if TARGET_PC
-            if (dusk::frame_interp::is_enabled() && !dusk::frame_interp::is_sim_frame()) {
-                const f32 step = dusk::frame_interp::get_interpolation_step();
+            if (dusk::interp::is_enabled() && !dusk::game_clock::is_sim_frame()) {
+                const f32 step = dusk::interp::get_interpolation_step();
                 const f32 frameRate = i == 5 ? 0.9f : 1.1f;
                 frame98 += frameRate * step;
                 frameB0 += frameRate * step;
@@ -448,10 +451,10 @@ void daBoomerang_sight_c::draw() {
             f32 drawX = m_proj_posX[i];
             f32 drawY = m_proj_posY[i];
 #if TARGET_PC
-            if (dusk::frame_interp::is_enabled() && !dusk::frame_interp::is_sim_frame() &&
+            if (dusk::interp::is_enabled() && !dusk::game_clock::is_sim_frame() &&
                 s_boomerangSightInterp.initialized[i])
             {
-                const f32 step = dusk::frame_interp::get_interpolation_step();
+                const f32 step = dusk::interp::get_interpolation_step();
                 drawX = s_boomerangSightInterp.prevX[i] +
                         (s_boomerangSightInterp.currX[i] - s_boomerangSightInterp.prevX[i]) * step;
                 drawY = s_boomerangSightInterp.prevY[i] +
@@ -546,7 +549,7 @@ int daBoomerang_c::draw() {
 
 #if TARGET_PC
     Mtx interpMtx;
-    if (dusk::frame_interp::lookup_replacement(mp_boomModel, interpMtx)) {
+    if (dusk::interp::lookup_replacement(mp_boomModel, interpMtx)) {
         mp_boomModel->setBaseTRMtx(interpMtx);
     }
 #endif
@@ -558,7 +561,7 @@ int daBoomerang_c::draw() {
 
     if (fopAcM_GetParam(this) != 0) {
 #if TARGET_PC
-        if (dusk::frame_interp::lookup_replacement(mp_shippuModel, interpMtx)) {
+        if (dusk::interp::lookup_replacement(mp_shippuModel, interpMtx)) {
             mp_shippuModel->setBaseTRMtx(interpMtx);
         }
 #endif
@@ -568,7 +571,7 @@ int daBoomerang_c::draw() {
         daMirror_c::entry(mp_shippuModel);
     } else if (dComIfGp_checkPlayerStatus0(0, 0x80000)) {
 #if TARGET_PC
-        if (dusk::frame_interp::lookup_replacement(mp_setboomEfModel, interpMtx)) {
+        if (dusk::interp::lookup_replacement(mp_setboomEfModel, interpMtx)) {
             mp_setboomEfModel->setBaseTRMtx(interpMtx);
         }
 #endif
@@ -732,8 +735,8 @@ void daBoomerang_c::setKeepMatrix() {
     mp_boomModel->setBaseTRMtx(mDoMtx_stack_c::get());
     mp_shippuModel->setBaseTRMtx(player->getLeftItemMatrix());
 #if TARGET_PC
-    dusk::frame_interp::record_final_mtx(mp_boomModel->getBaseTRMtx(), mp_boomModel);
-    dusk::frame_interp::record_final_mtx(mp_shippuModel->getBaseTRMtx(), mp_shippuModel);
+    dusk::interp::record_final_mtx(mp_boomModel->getBaseTRMtx(), mp_boomModel);
+    dusk::interp::record_final_mtx(mp_shippuModel->getBaseTRMtx(), mp_shippuModel);
 #endif
 
     mDoMtx_stack_c::multVecZero(&current.pos);
@@ -741,7 +744,7 @@ void daBoomerang_c::setKeepMatrix() {
 
     mp_setboomEfModel->setBaseTRMtx(player->getLeftItemMatrix());
 #if TARGET_PC
-    dusk::frame_interp::record_final_mtx(mp_setboomEfModel->getBaseTRMtx(), mp_setboomEfModel);
+    dusk::interp::record_final_mtx(mp_setboomEfModel->getBaseTRMtx(), mp_setboomEfModel);
 #endif
 }
 
@@ -750,7 +753,7 @@ void daBoomerang_c::setMoveMatrix() {
     mDoMtx_stack_c::ZXYrotM(shape_angle);
     mp_shippuModel->setBaseTRMtx(mDoMtx_stack_c::get());
 #if TARGET_PC
-    dusk::frame_interp::record_final_mtx(mp_shippuModel->getBaseTRMtx(), mp_shippuModel);
+    dusk::interp::record_final_mtx(mp_shippuModel->getBaseTRMtx(), mp_shippuModel);
 #endif
 
     daAlink_c::simpleAnmPlay(m_windBtk);
@@ -771,7 +774,7 @@ void daBoomerang_c::setMoveMatrix() {
 
     mp_boomModel->setBaseTRMtx(mDoMtx_stack_c::get());
 #if TARGET_PC
-    dusk::frame_interp::record_final_mtx(mp_boomModel->getBaseTRMtx(), mp_boomModel);
+    dusk::interp::record_final_mtx(mp_boomModel->getBaseTRMtx(), mp_boomModel);
 #endif
 }
 

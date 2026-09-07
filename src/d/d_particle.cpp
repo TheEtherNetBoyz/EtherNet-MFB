@@ -1,3 +1,6 @@
+#if TARGET_PC
+#include "dusk/interp/frame_interpolation.h"
+#endif
 // d_particle is odd in that it doesn't appear to include dolzel.pch.
 // It uses ...data pooling, but weak data from the PCH (e.g. Z2Calc::cNullVec)
 // isn't present like would be expected for a TU using pooling.
@@ -26,7 +29,7 @@
 #include "SSystem/SComponent/c_math.h"
 
 #if TARGET_PC
-#include "dusk/frame_interpolation.h"
+#include "dusk/game_clock.h"
 
 #include <tracy/Tracy.hpp>
 #endif
@@ -488,7 +491,7 @@ static void dPa_getModelParticleMtx(JPABaseEmitter* i_emitter, JPABaseParticle* 
 void dPa_modelPcallBack::interp(JPABaseEmitter* i_emitter, JPABaseParticle* i_particle) {
     Mtx particleMtx;
     dPa_getModelParticleMtx(i_emitter, i_particle, particleMtx);
-    dusk::frame_interp::record_final_mtx(particleMtx, i_particle);
+    dusk::interp::record_final_mtx(particleMtx, i_particle);
 }
 #endif
 
@@ -534,7 +537,7 @@ void dPa_modelPcallBack::draw(JPABaseEmitter* i_emitter, JPABaseParticle* param_
     MTXConcat(local_74, auStack_c0, local_74);
 #if TARGET_PC
     Mtx presentationMtx;
-    if (dusk::frame_interp::lookup_replacement(param_1, presentationMtx)) {
+    if (dusk::interp::lookup_replacement(param_1, presentationMtx)) {
         MTXCopy(presentationMtx, local_74);
     }
 #endif
@@ -2033,7 +2036,7 @@ void dPa_light8PcallBack::draw(JPABaseEmitter* param_1, JPABaseParticle* param_2
     JGeometry::TVec3<f32> local_160;
     JGeometry::TVec3<f32> local_16c;
 #if TARGET_PC
-    if (dusk::frame_interp::is_sim_frame())
+    if (dusk::game_clock::is_sim_frame())
 #endif
     {
         dPa_setWindPower(param_2);

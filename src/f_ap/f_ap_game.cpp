@@ -35,9 +35,9 @@
 #if TARGET_PC
 #include "dusk/achievements.h"
 #include "dusk/autosave.h"
-#include "dusk/frame_interpolation.h"
 #include "dusk/game_mode.hpp"
 #include "dusk/gamepad_color.h"
+#include "dusk/interp/frame_interpolation.h"
 #include "dusk/logging.h"
 #include "dusk/menu_pointer.h"
 #include "dusk/mod_loader.hpp"
@@ -774,7 +774,7 @@ void fapGm_After() {
         BOOL visualReady = FALSE;
         BOOL audioReady = FALSE;
         BOOL drawReady = FALSE;
-        const bool frameInterpolationEnabled = dusk::frame_interp::is_enabled();
+        const bool frameInterpolationEnabled = dusk::interp::is_enabled();
 
         for (int i = 0; i < 4096; i++) {
             fpcDt_Handler();
@@ -806,7 +806,7 @@ void fapGm_After() {
 
         if (!fapGm_HIO_c::isCaptureScreen()) {
             if (frameInterpolationEnabled) {
-                dusk::frame_interp::request_presentation_skip();
+                dusk::interp::request_presentation_skip();
             } else if (drawReady) {
                 fpcDw_Handler((fpcDw_HandlerFuncFunc)fpcM_DrawIterater, (fpcDw_HandlerFunc)fpcM_Draw);
                 dComIfGp_drawSimpleModel();
@@ -822,11 +822,11 @@ void fapGm_After() {
 
 #ifdef TARGET_PC
 static void fapGm_Before() {
-    dusk::frame_interp::begin_record();
+    dusk::interp::begin_record();
 }
 
 static void fapGm_AfterRecord() {
-    dusk::frame_interp::end_record();
+    dusk::interp::end_record();
     fapGm_After();
 }
 
@@ -916,7 +916,8 @@ void fapGm_Execute() {
 #endif
 
     cCt_Counter(0);
-#ifdef TARGET_PC
+#if TARGET_PC
+    dComIfGp_particle_calcMenu();
     const dusk::gamemode::GameMode* gameMode =
         dusk::gamemode::getGameModeManager().getCurrentGameMode();
     if (gameMode) {

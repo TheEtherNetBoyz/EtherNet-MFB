@@ -1,7 +1,7 @@
 #include "dusk/tas_movie.h"
 
 #include "dusk/game_clock.h"
-#include "dusk/frame_interpolation.h"
+#include "dusk/interp/frame_interpolation.h"
 #include "d/d_camera.h"
 #include "f_op/f_op_view.h"
 #include "m_Do/m_Do_controller_pad.h"
@@ -161,10 +161,10 @@ void restorePlaybackRumble() {
 
 float timelineFrame() {
     if (sState == State::Playing) {
-        if (frame_interp::is_enabled() && !frame_interp::is_sim_frame()) {
+        if (interp::is_enabled() && !game_clock::is_sim_frame()) {
             return std::max(
                 0.0f, static_cast<float>(sPlaybackFrame) - 1.0f +
-                          frame_interp::get_interpolation_step());
+                          interp::get_interpolation_step());
         }
         return static_cast<float>(sPlaybackFrame);
     }

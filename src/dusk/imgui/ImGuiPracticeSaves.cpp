@@ -25,7 +25,7 @@
 #include "d/actor/d_a_player.h"
 #include "dusk/config.hpp"
 #include "dusk/data.hpp"
-#include "dusk/frame_interpolation.h"
+#include "dusk/interp/frame_interpolation.h"
 #include "dusk/io.hpp"
 #include "dusk/main.h"
 #include "dusk/map_loader_definitions.h"
@@ -1649,7 +1649,7 @@ void ImGuiPracticeSaves::executeGorgeVoidChecker() {
         state.afterCsVal = state.counterDifference - kWarpCutsceneFrames;
     }
 
-    const int perfectFrame = kWarpCutsceneFrames + (frame_interp::is_enabled() ? 0 : 1);
+    const int perfectFrame = kWarpCutsceneFrames + (interp::is_enabled() ? 0 : 1);
     if (state.counterDifference <= kEarliestRelevantFrame ||
         state.counterDifference - perfectFrame >= kLatestRelevantLateFrame)
     {

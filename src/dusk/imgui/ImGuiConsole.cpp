@@ -18,7 +18,6 @@
 #include "dusk/data.hpp"
 #include "dusk/dusk.h"
 #include "dusk/input_macro.h"
-#include "dusk/frame_interpolation.h"
 #include "dusk/game_mode.hpp"
 #include "dusk/livesplit.h"
 #include "dusk/main.h"

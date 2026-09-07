@@ -1,3 +1,6 @@
+#if TARGET_PC
+#include "dusk/game_clock.h"
+#endif
 #include "d/dolzel.h" // IWYU pragma: keep
 
 #include "d/d_menu_fmap2D.h"
@@ -20,7 +23,7 @@
 #include <cstring>
 
 #if TARGET_PC
-#include "dusk/frame_interpolation.h"
+#include "dusk/interp/frame_interpolation.h"
 #include "dusk/ui/touch_controls.hpp"
 #include <unordered_map>
 
@@ -194,13 +197,13 @@ static bool getFmapSwipeInterp(void* key, f32* x, f32* y, f32* alpha) {
         return false;
     }
 
-    if (!dusk::frame_interp::is_enabled() || dusk::frame_interp::is_sim_frame() ||
+    if (!dusk::interp::is_enabled() || dusk::game_clock::is_sim_frame() ||
         it->second.frameMax <= 0.0f)
     {
         return false;
     }
 
-    const f32 step = dusk::frame_interp::get_interpolation_step();
+    const f32 step = dusk::interp::get_interpolation_step();
     const f32 frame = it->second.opening ? it->second.frame - 1.0f + step
                                          : it->second.frame + 1.0f - step;
     const f32 rate = clampFmapSwipeRate(frame / it->second.frameMax);
@@ -304,12 +307,12 @@ static void recordFmapControlSample(const dMenu_Fmap2DBack_c* map, f32 x, f32 y,
 static bool getFmapControlInterp(const dMenu_Fmap2DBack_c* map, FmapControlInterp* out) {
     auto it = s_fmapControlInterp.find(map);
     if (it == s_fmapControlInterp.end() || !it->second.initialized ||
-        !dusk::frame_interp::is_enabled() || dusk::frame_interp::is_sim_frame())
+        !dusk::interp::is_enabled() || dusk::game_clock::is_sim_frame())
     {
         return false;
     }
 
-    const f32 step = dusk::frame_interp::get_interpolation_step();
+    const f32 step = dusk::interp::get_interpolation_step();
     out->currX = it->second.prevX + (it->second.currX - it->second.prevX) * step;
     out->currY = it->second.prevY + (it->second.currY - it->second.prevY) * step;
     out->currZoom = it->second.prevZoom + (it->second.currZoom - it->second.prevZoom) * step;
@@ -872,13 +875,10 @@ void dMenu_Fmap2DBack_c::draw() {
         scrollAreaDraw();
     }
 
-#ifdef TARGET_PC
-    if (dusk::frame_interp::get_ui_tick_pending())
-#endif
-    {
-        blinkMove(30);
-        moveLightDropAnime();
-    }
+    IF_DUSK_BLOCK(dusk::interp::get_ui_tick_pending())
+    blinkMove(30);
+    moveLightDropAnime();
+    IF_DUSK_BLOCK_END
     setCenterPosX(field_0x11dc, 1);
 
 #if TARGET_PC
@@ -950,22 +950,19 @@ void dMenu_Fmap2DBack_c::draw() {
                         (mArrowPos3DZ + control_ypos + fVar3) - fVar5, &mArrowPos2DX,
                         &mArrowPos2DY);
 
-#ifdef TARGET_PC
-        if (dusk::frame_interp::get_ui_tick_pending())
-#endif
-        {
-            field_0x11e0 -= g_fmapHIO.mCursorSpeed;
+        IF_DUSK_BLOCK(dusk::interp::get_ui_tick_pending())
+        field_0x11e0 -= g_fmapHIO.mCursorSpeed;
 
-            if (field_0x11e0 < 0.0f) {
-                field_0x11e0 += 360.0f;
-            }
+        if (field_0x11e0 < 0.0f) {
+            field_0x11e0 += 360.0f;
         }
+        IF_DUSK_BLOCK_END
 
         f32 cursorAngle = field_0x11e0;
 #ifdef TARGET_PC
-        if (dusk::frame_interp::is_enabled() && !dusk::frame_interp::is_sim_frame()) {
+        if (dusk::interp::is_enabled() && !dusk::game_clock::is_sim_frame()) {
             cursorAngle += g_fmapHIO.mCursorSpeed *
-                           (1.0f - dusk::frame_interp::get_interpolation_step());
+                           (1.0f - dusk::interp::get_interpolation_step());
             if (cursorAngle >= 360.0f) {
                 cursorAngle -= 360.0f;
             } else if (cursorAngle < 0.0f) {
@@ -1012,7 +1009,7 @@ void dMenu_Fmap2DBack_c::draw() {
     if (field_0x122d) {
         mpMeterHaihai->drawHaihai(field_0x122d);
 #if TARGET_PC
-        if (!dusk::frame_interp::is_enabled()) {
+        if (!dusk::interp::is_enabled()) {
             field_0x122d = 0;
         }
 #else
@@ -2520,20 +2517,17 @@ void dMenu_Fmap2DBack_c::calcBlink() {
                                  t * (g_fmapHIO.mMapBlink[i + 1].mUnselectedRegion.mBlinkSpeed -
                                       g_fmapHIO.mMapBlink[i].mUnselectedRegion.mBlinkSpeed);
 
-#if TARGET_PC
-    if (dusk::frame_interp::get_ui_tick_pending())
-#endif
-    {
-        field_0x1218++;
-        if (field_0x1218 >= selected_blink_speed) {
-            field_0x1218 = 0;
-        }
-
-        field_0x121a++;
-        if (field_0x121a >= unselected_blink_speed) {
-            field_0x121a = 0;
-        }
+    IF_DUSK_BLOCK(dusk::interp::get_ui_tick_pending())
+    field_0x1218++;
+    if (field_0x1218 >= selected_blink_speed) {
+        field_0x1218 = 0;
     }
+
+    field_0x121a++;
+    if (field_0x121a >= unselected_blink_speed) {
+        field_0x121a = 0;
+    }
+    IF_DUSK_BLOCK_END
 
     f32 t_selected = 0.0f;
     f32 t_unselected = 0.0f;

@@ -1,3 +1,6 @@
+#if TARGET_PC
+#include "dusk/game_clock.h"
+#endif
 #include "JSystem/JSystem.h" // IWYU pragma: keep
 
 #include "JSystem/JParticle/JPABaseShape.h"
@@ -10,7 +13,7 @@
 #include <gx.h>
 
 #if TARGET_PC
-#include "dusk/frame_interpolation.h"
+#include "dusk/interp/frame_interpolation.h"
 
 #include <tracy/Tracy.hpp>
 #endif
@@ -558,7 +561,7 @@ static bool JPAGetPresentationParticlePos(JPAEmitterWorkData* work, JPABaseParti
     }
 
     Mtx particleMtx;
-    if (dusk::frame_interp::lookup_replacement(ptcl, particleMtx)) {
+    if (dusk::interp::lookup_replacement(ptcl, particleMtx)) {
         pos->set(particleMtx[0][3], particleMtx[1][3], particleMtx[2][3]);
         return true;
     }
@@ -578,13 +581,13 @@ static s16 JPAGetPresentationRotateAngle(JPAEmitterWorkData* work, JPABasePartic
         return ptcl->mRotateAngle;
     }
 
-    if (!dusk::frame_interp::is_enabled() || dusk::frame_interp::is_sim_frame() ||
+    if (!dusk::interp::is_enabled() || dusk::game_clock::is_sim_frame() ||
         ptcl->mAge == 0)
     {
         return ptcl->mRotateAngle;
     }
 
-    return ptcl->mRotateAngle + (s16)(ptcl->mRotateSpeed * dusk::frame_interp::get_interpolation_step());
+    return ptcl->mRotateAngle + (s16)(ptcl->mRotateSpeed * dusk::interp::get_interpolation_step());
 #else
     return ptcl->mRotateAngle;
 #endif
@@ -639,13 +642,13 @@ void JPAInterpTranslation(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
 
     Mtx ptclPosMtx;
     MTXTrans(ptclPosMtx, ptcl->mPosition.x, ptcl->mPosition.y, ptcl->mPosition.z);
-    dusk::frame_interp::record_final_mtx(ptclPosMtx, ptcl);
+    dusk::interp::record_final_mtx(ptclPosMtx, ptcl);
 }
 
 void JPAInterpBillboard(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
     Mtx ptclPosMtx;
     MTXTrans(ptclPosMtx, ptcl->mPosition.x, ptcl->mPosition.y, ptcl->mPosition.z);
-    dusk::frame_interp::record_final_mtx(ptclPosMtx, ptcl);
+    dusk::interp::record_final_mtx(ptclPosMtx, ptcl);
 }
 
 void JPAInterpRotBillboard(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
@@ -657,7 +660,7 @@ void JPAInterpRotBillboard(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
     ptclPosMtx[0][1] = -sinRot;
     ptclPosMtx[1][0] = sinRot;
     ptclPosMtx[1][1] = cosRot;
-    dusk::frame_interp::record_final_mtx(ptclPosMtx, ptcl);
+    dusk::interp::record_final_mtx(ptclPosMtx, ptcl);
 }
 #endif
 
@@ -676,7 +679,7 @@ void JPADrawBillboard(JPAEmitterWorkData* work, JPABaseParticle* ptcl JPA_DRAW_C
     {
         pos.set(correctedPos);
         MTXMultVec(work->mPosCamMtx, &pos, &pos);
-    } else if (dusk::frame_interp::lookup_replacement(ptcl, ptclPosMtx)) {
+    } else if (dusk::interp::lookup_replacement(ptcl, ptclPosMtx)) {
         pos.set(ptclPosMtx[0][3], ptclPosMtx[1][3], ptclPosMtx[2][3]);
         MTXMultVec(work->mPosCamMtx, &pos, &pos);
     } else
@@ -728,7 +731,7 @@ void JPADrawRotBillboard(JPAEmitterWorkData* work, JPABaseParticle* ptcl JPA_DRA
         sinRot = JMASSin(angle);
         cosRot = JMASCos(angle);
         MTXMultVec(work->mPosCamMtx, &pos, &pos);
-    } else if (dusk::frame_interp::lookup_replacement(ptcl, ptclPosMtx)) {
+    } else if (dusk::interp::lookup_replacement(ptcl, ptclPosMtx)) {
         pos.set(ptclPosMtx[0][3], ptclPosMtx[1][3], ptclPosMtx[2][3]);
         sinRot = ptclPosMtx[1][0];
         cosRot = ptclPosMtx[0][0];
@@ -1029,7 +1032,7 @@ static bool make_direction_mtx(JPAEmitterWorkData* work, JPABaseParticle* ptcl, 
     axisZ.normalize();
     baseAxis.cross(axisY, axisZ);
     baseAxis.normalize();
-    if (dusk::frame_interp::is_sim_frame()) {
+    if (dusk::game_clock::is_sim_frame()) {
         ptcl->mBaseAxis.set(baseAxis);
     }
 
@@ -1071,7 +1074,7 @@ static bool make_rot_direction_mtx(JPAEmitterWorkData* work, JPABaseParticle* pt
     axisZ.normalize();
     baseAxis.cross(axisY, axisZ);
     baseAxis.normalize();
-    if (dusk::frame_interp::is_sim_frame()) {
+    if (dusk::game_clock::is_sim_frame()) {
         ptcl->mBaseAxis.set(baseAxis);
     }
 
@@ -1132,7 +1135,7 @@ void JPAInterpDirection(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
     posMtx[2][2] = axisZ.z;
     posMtx[2][3] = ptcl->mPosition.z;
     p_plane[work->mPlaneType](posMtx, scaleX, scaleY);
-    dusk::frame_interp::record_final_mtx(posMtx, ptcl);
+    dusk::interp::record_final_mtx(posMtx, ptcl);
 }
 
 void JPAInterpRotDirection(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
@@ -1175,7 +1178,7 @@ void JPAInterpRotDirection(JPAEmitterWorkData* work, JPABaseParticle* ptcl) {
     mtx2[2][2] = axisZ.z;
     mtx2[2][3] = ptcl->mPosition.z;
     MTXConcat(mtx2, mtx1, mtx1);
-    dusk::frame_interp::record_final_mtx(mtx1, ptcl);
+    dusk::interp::record_final_mtx(mtx1, ptcl);
 }
 #endif
 
@@ -1198,7 +1201,7 @@ void JPADrawDirection(JPAEmitterWorkData* work, JPABaseParticle* ptcl JPA_DRAW_C
             posMtx[1][3] = correctedPos.y;
             posMtx[2][3] = correctedPos.z;
         }
-    } else if (!dusk::frame_interp::lookup_replacement(ptcl, posMtx) &&
+    } else if (!dusk::interp::lookup_replacement(ptcl, posMtx) &&
                !make_direction_mtx(work, ptcl, posMtx))
     {
         return;
@@ -1279,7 +1282,7 @@ void JPADrawRotDirection(JPAEmitterWorkData* work, JPABaseParticle* ptcl JPA_DRA
             mtx1[1][3] = correctedPos.y;
             mtx1[2][3] = correctedPos.z;
         }
-    } else if (!dusk::frame_interp::lookup_replacement(ptcl, mtx1) &&
+    } else if (!dusk::interp::lookup_replacement(ptcl, mtx1) &&
                !make_rot_direction_mtx(work, ptcl, mtx1))
     {
         return;
@@ -1559,7 +1562,7 @@ void JPADrawStripe(JPAEmitterWorkData* param_0) {
         baseAxis.cross(local_f8, local_104);
         baseAxis.normalize();
 #if TARGET_PC
-        if (dusk::frame_interp::is_sim_frame()) {
+        if (dusk::game_clock::is_sim_frame()) {
             particle->mBaseAxis.set(baseAxis);
         }
 #else
@@ -1661,7 +1664,7 @@ void JPADrawStripeX(JPAEmitterWorkData* param_0) {
         baseAxis.cross(local_c0, local_cc);
         baseAxis.normalize();
 #if TARGET_PC
-        if (dusk::frame_interp::is_sim_frame()) {
+        if (dusk::game_clock::is_sim_frame()) {
             particle->mBaseAxis.set(baseAxis);
         }
 #else
@@ -1722,7 +1725,7 @@ void JPADrawStripeX(JPAEmitterWorkData* param_0) {
         baseAxis.cross(local_c0, local_cc);
         baseAxis.normalize();
 #if TARGET_PC
-        if (dusk::frame_interp::is_sim_frame()) {
+        if (dusk::game_clock::is_sim_frame()) {
             particle->mBaseAxis.set(baseAxis);
         }
 #else

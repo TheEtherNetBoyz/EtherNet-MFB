@@ -37,13 +37,13 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+
 #if TARGET_PC
-#include "dusk/imgui/ImGuiBloomWindow.hpp"
 #include "dusk/settings.h"
 #include "dusk/audio/DuskAudioSystem.h"
 #include "dusk/speedrun.h"
-#include "dusk/frame_interpolation.h"
 #include "dusk/game_clock.h"
+#include "dusk/imgui/ImGuiBloomWindow.hpp"
 static f32 timeScale = 1.0f;
 #endif
 

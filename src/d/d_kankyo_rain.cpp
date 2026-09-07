@@ -1,3 +1,6 @@
+#if TARGET_PC
+#include "dusk/game_clock.h"
+#endif
 #include "d/dolzel.h" // IWYU pragma: keep
 
 #include "JSystem/JUtility/JUTTexture.h"
@@ -11,7 +14,7 @@
 #include "d/d_stage.h"
 #if TARGET_PC
 #include "dusk/TwilightHostApi.h"
-#include "dusk/frame_interpolation.h"
+#include "dusk/interp/frame_interpolation.h"
 #endif
 #include "f_op/f_op_camera_mng.h"
 #include "f_op/f_op_kankyo_mng.h"
@@ -53,11 +56,11 @@ extern "C" const DuskTwilightHostApiV1* DuskGetTwilightHostApiV1() {
         .setEnvironmentHooks = &dKy_set_environment_hooks,
         .setPlayerHooks = &dKy_set_player_hooks,
         .setSequenceHooks = &dKy_set_sequence_hooks,
-        .interpolationStep = &dusk::frame_interp::get_interpolation_step,
-        .interpolationEnabled = &dusk::frame_interp::is_enabled,
-        .simulationFrame = &dusk::frame_interp::is_sim_frame,
-        .recordMatrix = static_cast<void(*)(Mtx, const void*)>(&dusk::frame_interp::record_final_mtx),
-        .lookupMatrix = &dusk::frame_interp::lookup_replacement,
+        .interpolationStep = &dusk::interp::get_interpolation_step,
+        .interpolationEnabled = &dusk::interp::is_enabled,
+        .simulationFrame = &dusk::game_clock::is_sim_frame,
+        .recordMatrix = static_cast<void(*)(Mtx, const void*)>(&dusk::interp::record_final_mtx),
+        .lookupMatrix = &dusk::interp::lookup_replacement,
         .audioManager = [](DuskAudioManagerKind kind) -> void* {
             switch (kind) {
             case DuskAudioManager_Scene: return Z2GetSceneMgr();
@@ -71,9 +74,10 @@ extern "C" const DuskTwilightHostApiV1* DuskGetTwilightHostApiV1() {
 }
 #endif
 
-#include "dusk/version.hpp"
+
 #if TARGET_PC
-#include "dusk/frame_interpolation.h"
+#include "dusk/interp/frame_interpolation.h"
+#include "dusk/version.hpp"
 #endif
 
 static void vectle_calc(DOUBLE_POS* i_pos, cXyz* o_out) {
@@ -187,24 +191,73 @@ static GXTexObj* load_cached_tex(CachedTexObjs<N>& cache, ResTIMG* img, GXTexMap
 }
 #endif
 
+#if TARGET_PC
+static void dKyr_place_sun(camera_class* camera, cXyz* o_sunpos) {
+    cXyz lightDir;
+    u32 stage_type = dStage_stagInfo_GetSTType(dComIfGp_getStage()->getStagInfo());
+    if (g_env_light.base_light.mColor.r == 0 && stage_type != ST_ROOM) {
+        dKyr_get_vectle_calc(&camera->view.lookat.eye, &g_env_light.base_light.mPosition,
+                             &lightDir);
+    } else {
+        dKyr_get_vectle_calc(&camera->view.lookat.eye, &g_env_light.sun_light_pos, &lightDir);
+    }
+    o_sunpos->x = camera->view.lookat.eye.x + 8000.0f * lightDir.x;
+    o_sunpos->y = camera->view.lookat.eye.y + 8000.0f * lightDir.y;
+    o_sunpos->z = camera->view.lookat.eye.z + 8000.0f * lightDir.z;
+}
+
+static void dKyr_place_lenzflare(camera_class* camera, cXyz* sunpos, cXyz* o_positions) {
+    cXyz eyeVect;
+    cXyz sunDirSmth;
+    cXyz camFwd;
+
+    dKy_set_eyevect_calc(camera, &eyeVect, 4000.0f, 4000.0f);
+    dKyr_get_vectle_calc(&eyeVect, sunpos, &sunDirSmth);
+    o_positions[0] = *sunpos;
+    o_positions[1] = *sunpos;
+
+    dKyr_get_vectle_calc(&camera->view.lookat.eye, &camera->view.lookat.center, &camFwd);
+
+    for (int i = 2; i < 8; i++) {
+        if (i == 2) {
+            f32 size = 250.0f + 600.0f * sunDirSmth.abs(camFwd);
+            o_positions[i].x = sunpos->x - sunDirSmth.x * size * i;
+            o_positions[i].y = sunpos->y - sunDirSmth.y * size * i;
+            o_positions[i].z = sunpos->z - sunDirSmth.z * size * i;
+        } else {
+            f32 size = 250.0f + 110.0f * sunDirSmth.abs(camFwd);
+            o_positions[i].x = sunpos->x - (4100.0f * sunDirSmth.x + sunDirSmth.x * size * i);
+            o_positions[i].y = sunpos->y - (4100.0f * sunDirSmth.y + sunDirSmth.y * size * i);
+            o_positions[i].z = sunpos->z - (4100.0f * sunDirSmth.z + sunDirSmth.z * size * i);
+        }
+    }
+}
+#endif
+
 void dKyr_lenzflare_move() {
     dKankyo_sun_Packet* sun_packet = g_env_light.mpSunPacket;
     dKankyo_sunlenz_Packet* lenz_packet = g_env_light.mpSunLenzPacket;
     camera_process_class* camera = dComIfGp_getCamera(0);
 
+#if !TARGET_PC
     cXyz eyeVect;
     cXyz field_0x3c;
     cXyz sunDirSmth;
     cXyz camFwd;
+#endif
 
     if (sun_packet->mVisibility < 0.0001f) {
         return;
     }
 
+#if TARGET_PC
+    dKyr_place_lenzflare(camera, sun_packet->mPos, lenz_packet->mPositions);
+#else
     dKy_set_eyevect_calc(camera, &eyeVect, 4000.0f, 4000.0f);
     dKyr_get_vectle_calc(&eyeVect, sun_packet->mPos, &sunDirSmth);
     lenz_packet->mPositions[0] = sun_packet->mPos[0];
     lenz_packet->mPositions[1] = sun_packet->mPos[0];
+#endif
 
     cXyz vect;
     cXyz proj;
@@ -220,6 +273,7 @@ void dKyr_lenzflare_move() {
     lenz_packet->field_0x94 *= S2DEG_CONSTANT;  // convert from short angle to degrees
     lenz_packet->field_0x94 += 180.0f;
 
+#if !TARGET_PC
     dKyr_get_vectle_calc(&camera->view.lookat.eye, &camera->view.lookat.center, &camFwd);
 
     for (int i = 2; i < 8; i++) {
@@ -235,6 +289,7 @@ void dKyr_lenzflare_move() {
             lenz_packet->mPositions[i].z = sun_packet->mPos[0].z - (4100.0f * sunDirSmth.z + sunDirSmth.z * size * i);
         }
     }
+#endif
 }
 
 static BOOL dKyr_moon_arrival_check() {
@@ -263,6 +318,10 @@ void dKyr_sun_move() {
 
     u32 stage_type = dStage_stagInfo_GetSTType(dComIfGp_getStage()->getStagInfo());
 
+#if TARGET_PC
+    dKyr_place_sun(camera_p2, &sun_packet->mPos[0]);
+    dKyr_get_vectle_calc(&camera_p2->view.lookat.eye, &sun_packet->mPos[0], &lightDir);
+#else
     if (g_env_light.base_light.mColor.r == 0 && stage_type != ST_ROOM) {
         dKyr_get_vectle_calc(&camera_p2->view.lookat.eye, &g_env_light.base_light.mPosition,
                              &lightDir);
@@ -273,6 +332,7 @@ void dKyr_sun_move() {
     sun_packet->mPos[0].x = camera_p2->view.lookat.eye.x + 8000.0f * lightDir.x;
     sun_packet->mPos[0].y = camera_p2->view.lookat.eye.y + 8000.0f * lightDir.y;
     sun_packet->mPos[0].z = camera_p2->view.lookat.eye.z + 8000.0f * lightDir.z;
+#endif
 
     f32 horizon_y = (sun_packet->mPos[0].y - camera_p2->view.lookat.eye.y) / 8000.0f;
     if (horizon_y < 0.0f) {
@@ -970,7 +1030,7 @@ void dKyr_rain_move() {
             if (!skipInterpolation) {
                 Mtx effectMtx;
                 MTXTrans(effectMtx, spC0.x, spC0.y, spC0.z);
-                dusk::frame_interp::record_final_mtx(effectMtx, &rain_packet->mRainEff[i]);
+                dusk::interp::record_final_mtx(effectMtx, &rain_packet->mRainEff[i]);
             }
 #endif
         }
@@ -1361,7 +1421,7 @@ void dKyr_housi_move() {
         if (!skipInterpolation) {
             Mtx effectMtx;
             MTXTrans(effectMtx, sp6C.x, sp6C.y, sp6C.z);
-            dusk::frame_interp::record_final_mtx(effectMtx, effect);
+            dusk::interp::record_final_mtx(effectMtx, effect);
         }
 #endif
     }
@@ -1675,7 +1735,7 @@ void dKyr_snow_move() {
             MTXTrans(effectMtx, snow_packet->mSnowEff[i].mPosition.x,
                      snow_packet->mSnowEff[i].mPosition.y,
                      snow_packet->mSnowEff[i].mPosition.z);
-            dusk::frame_interp::record_final_mtx(effectMtx,
+            dusk::interp::record_final_mtx(effectMtx,
                                                   &snow_packet->mSnowEff[i].mPosition);
         }
         if (!skipBaseInterpolation) {
@@ -1683,7 +1743,7 @@ void dKyr_snow_move() {
             MTXTrans(effectMtx, snow_packet->mSnowEff[i].mBasePos.x,
                      snow_packet->mSnowEff[i].mBasePos.y,
                      snow_packet->mSnowEff[i].mBasePos.z);
-            dusk::frame_interp::record_final_mtx(effectMtx,
+            dusk::interp::record_final_mtx(effectMtx,
                                                   &snow_packet->mSnowEff[i].mBasePos);
         }
 #endif
@@ -2551,6 +2611,8 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
         sunpos.y = ppos->y;
         sunpos.z = ppos->z;
 
+        IF_DUSK(dKyr_place_sun(camera, &sunpos));
+
         u32 stage_type = dStage_stagInfo_GetSTType(dComIfGp_getStage()->getStagInfo());
         if (g_env_light.base_light.mColor.r == 0 && stage_type != ST_ROOM) {
             bool hideMoonForTime = g_env_light.daytime > 285.0f || g_env_light.daytime < 105.0f;
@@ -2559,9 +2621,9 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
                 draw_moon = false;
             }
 
-            spB4.x = ppos->x;
-            spB4.y = ppos->y;
-            spB4.z = ppos->z;
+            spB4.x = DUSK_IF_ELSE(sunpos.x, ppos->x);
+            spB4.y = DUSK_IF_ELSE(sunpos.y, ppos->y);
+            spB4.z = DUSK_IF_ELSE(sunpos.z, ppos->z);
         } else {
             if (strcmp(dComIfGp_getStartStageName(), "F_SP200") == 0 && dComIfG_play_c::getLayerNo(0) == 0) {
                 spB4 = envlight->moon_pos;
@@ -2734,7 +2796,8 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
                 };
 
                 if (strcmp(dComIfGp_getStartStageName(), "F_SP200") != 0) {
-                    dKyr_get_vectle_calc(&camera->view.lookat.eye, &camera->view.lookat.center, &camfwd);
+                    dKyr_get_vectle_calc(&camera->view.lookat.eye,
+                                         &camera->view.lookat.center, &camfwd);
                     f32 cam_distXZ = JMAFastSqrt((camfwd.x * camfwd.x) + (camfwd.z * camfwd.z));
                     f32 cam_theta = atan2f(camfwd.x, camfwd.z);
                     f32 cam_phi = atan2f(camfwd.y, cam_distXZ);
@@ -2934,6 +2997,13 @@ void dKyr_drawLenzflare(Mtx drawMtx, cXyz* ppos, GXColor& param_2, u8** tex) {
     f32 spA8 = sun_packet->mVisibility * sun_packet->mVisibility;
 
     if (!(sun_visibility < 0.1f)) {
+#if TARGET_PC
+        cXyz sunpos;
+        cXyz positions[8];
+        dKyr_place_sun(camera, &sunpos);
+        dKyr_place_lenzflare(camera, &sunpos, positions);
+        ppos = positions;
+#endif
         dKy_set_eyevect_calc2(camera, &spFC, 8000.0f, 8000.0f);
 
         GXColor color_reg0;
@@ -3113,25 +3183,25 @@ void dKyr_drawLenzflare(Mtx drawMtx, cXyz* ppos, GXColor& param_2, u8** tex) {
                 spE4.y = sp9C;
                 spE4.z = 0.0f;
                 cMtx_multVec(camMtx, &spE4, &spD8);
-                pos[0].x = sun_packet->mPos[0].x + spD8.x;
-                pos[0].y = sun_packet->mPos[0].y + spD8.y;
-                pos[0].z = sun_packet->mPos[0].z + spD8.z;
+                pos[0].x = DUSK_IF_ELSE(sunpos, sun_packet->mPos[0]).x + spD8.x;
+                pos[0].y = DUSK_IF_ELSE(sunpos, sun_packet->mPos[0]).y + spD8.y;
+                pos[0].z = DUSK_IF_ELSE(sunpos, sun_packet->mPos[0]).z + spD8.z;
 
                 spE4.x = sp98;
                 spE4.y = sp94;
                 spE4.z = 0.0f;
                 cMtx_multVec(camMtx, &spE4, &spD8);
-                pos[1].x = sun_packet->mPos[0].x + spD8.x;
-                pos[1].y = sun_packet->mPos[0].y + spD8.y;
-                pos[1].z = sun_packet->mPos[0].z + spD8.z;
+                pos[1].x = DUSK_IF_ELSE(sunpos, sun_packet->mPos[0]).x + spD8.x;
+                pos[1].y = DUSK_IF_ELSE(sunpos, sun_packet->mPos[0]).y + spD8.y;
+                pos[1].z = DUSK_IF_ELSE(sunpos, sun_packet->mPos[0]).z + spD8.z;
 
                 spE4.x = sp90;
                 spE4.y = sp8C;
                 spE4.z = 0.0f;
                 cMtx_multVec(camMtx, &spE4, &spD8);
-                pos[2].x = sun_packet->mPos[0].x + spD8.x;
-                pos[2].y = sun_packet->mPos[0].y + spD8.y;
-                pos[2].z = sun_packet->mPos[0].z + spD8.z;
+                pos[2].x = DUSK_IF_ELSE(sunpos, sun_packet->mPos[0]).x + spD8.x;
+                pos[2].y = DUSK_IF_ELSE(sunpos, sun_packet->mPos[0]).y + spD8.y;
+                pos[2].z = DUSK_IF_ELSE(sunpos, sun_packet->mPos[0]).z + spD8.z;
 
                 GXBegin(GX_TRIANGLES, GX_VTXFMT0, 3);
                 GXPosition3f32(pos[0].x, pos[0].y, pos[0].z);
@@ -3420,7 +3490,7 @@ void dKyr_drawRain(Mtx drawMtx, u8** tex) {
                     sp3C.z = rain_packet->mRainEff[i].mBasePos.z + rain_packet->mRainEff[i].mPosition.z;
 #if TARGET_PC
                     Mtx presentationMtx;
-                    if (dusk::frame_interp::lookup_replacement(&rain_packet->mRainEff[i],
+                    if (dusk::interp::lookup_replacement(&rain_packet->mRainEff[i],
                                                                 presentationMtx))
                     {
                         sp3C.set(presentationMtx[0][3], presentationMtx[1][3],
@@ -3697,8 +3767,8 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
     bool isPalaceOfTwilight = 0;
 #if TARGET_PC
     f32 presentationCounter = g_Counter.mCounter0;
-    if (dusk::frame_interp::is_enabled() && !dusk::frame_interp::is_sim_frame()) {
-        presentationCounter -= 1.0f - dusk::frame_interp::get_interpolation_step();
+    if (dusk::interp::is_enabled() && !dusk::game_clock::is_sim_frame()) {
+        presentationCounter -= 1.0f - dusk::interp::get_interpolation_step();
     }
 #endif
     if (housi_packet->mHousiCount != 0) {
@@ -3851,7 +3921,7 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
                         housi_packet->mHousiEff[j].mBasePos.z + housi_packet->mHousiEff[j].mPosition.z;
 #if TARGET_PC
                     Mtx presentationMtx;
-                    if (dusk::frame_interp::lookup_replacement(&housi_packet->mHousiEff[j],
+                    if (dusk::interp::lookup_replacement(&housi_packet->mHousiEff[j],
                                                                 presentationMtx))
                     {
                         spD0.set(presentationMtx[0][3], presentationMtx[1][3],
@@ -4132,8 +4202,8 @@ void dKyr_drawSnow(Mtx drawMtx, u8** tex) {
     const bool visualSnowStorm = dKy_visual_snow_storm_check() != 0;
 #if TARGET_PC
     f32 presentationCounter = g_Counter.mCounter0;
-    if (dusk::frame_interp::is_enabled() && !dusk::frame_interp::is_sim_frame()) {
-        presentationCounter -= 1.0f - dusk::frame_interp::get_interpolation_step();
+    if (dusk::interp::is_enabled() && !dusk::game_clock::is_sim_frame()) {
+        presentationCounter -= 1.0f - dusk::interp::get_interpolation_step();
     }
 #endif
 
@@ -4274,7 +4344,7 @@ void dKyr_drawSnow(Mtx drawMtx, u8** tex) {
                                 const void* interpolationKey =
                                     j == 0 ? (const void*)&snow_packet->mSnowEff[i].mPosition :
                                              (const void*)&snow_packet->mSnowEff[i].mBasePos;
-                                if (dusk::frame_interp::lookup_replacement(interpolationKey,
+                                if (dusk::interp::lookup_replacement(interpolationKey,
                                                                             presentationMtx))
                                 {
                                     sp7C.set(presentationMtx[0][3], presentationMtx[1][3],
@@ -6460,12 +6530,9 @@ static void dKyr_evil_draw2(Mtx drawMtx, u8** tex) {
         dKyr_set_btitex(&texobj, (ResTIMG*)tex[1]);
 #endif
 
-#if TARGET_PC
-        if (dusk::frame_interp::get_ui_tick_pending())
-#endif
-        {
-            rot += 0.7f;
-        }
+        IF_DUSK_BLOCK(dusk::interp::get_ui_tick_pending())
+        rot += 0.7f;
+        IF_DUSK_BLOCK_END
         MTXRotRad(rotMtx, 'Z', DEG_TO_RAD(rot));
         MTXConcat(camMtx, rotMtx, camMtx);
 
@@ -6704,12 +6771,9 @@ void dKyr_evil_draw(Mtx drawMtx, u8** tex) {
         dKyr_set_btitex(&texobj, (ResTIMG*)tex[0]);
 #endif
 
-#if TARGET_PC
-        if (dusk::frame_interp::get_ui_tick_pending())
-#endif
-        {
-            rot += 1.0f;
-        }
+        IF_DUSK_BLOCK(dusk::interp::get_ui_tick_pending())
+        rot += 1.0f;
+        IF_DUSK_BLOCK_END
         MTXRotRad(rotMtx, 'Z', DEG_TO_RAD(rot));
         MTXConcat(camMtx, rotMtx, camMtx);
 

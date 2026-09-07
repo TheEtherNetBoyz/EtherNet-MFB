@@ -22,7 +22,7 @@
 #include "m_Do/m_Do_controller_pad.h"
 #include "dusk/latency.h"
 #if TARGET_PC
-#include "dusk/frame_interpolation.h"
+#include "dusk/interp/frame_interpolation.h"
 #include "dusk/tas_movie.h"
 #include "dusk/game_clock.h"
 
@@ -114,7 +114,7 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
 #endif
                 fpcDw_Handler((fpcDw_HandlerFuncFunc)fpcM_DrawIterater, (fpcDw_HandlerFunc)fpcM_Draw);
 #ifdef TARGET_PC
-                if (!dusk::frame_interp::is_enabled() &&
+                if (!dusk::interp::is_enabled() &&
                     !dusk::low_latency_presentation_enabled())
                 {
                     dusk::tas_movie::restorePresentationCamera();
@@ -122,14 +122,16 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
 #endif
             }
 
+            IF_DUSK(dComIfGp_drawSimpleModel());
+
             if (i_postExecuteFn != NULL) {
                 i_postExecuteFn();
             }
 
-            dComIfGp_drawSimpleModel();
+            IF_NOT_DUSK(dComIfGp_drawSimpleModel());
 
 #ifdef TARGET_PC
-            if (!dusk::frame_interp::is_enabled() && dusk::low_latency_presentation_enabled()) {
+            if (!dusk::interp::is_enabled() && dusk::low_latency_presentation_enabled()) {
                 cAPIGph_Painter();
                 dusk::tas_movie::restorePresentationCamera();
             } else {
