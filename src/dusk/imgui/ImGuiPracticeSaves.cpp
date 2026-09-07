@@ -27,6 +27,7 @@
 #include "dusk/data.hpp"
 #include "dusk/interp/frame_interpolation.h"
 #include "dusk/io.hpp"
+#include "dusk/logging.h"
 #include "dusk/main.h"
 #include "dusk/map_loader_definitions.h"
 #include "dusk/settings.h"
