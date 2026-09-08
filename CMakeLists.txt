@@ -387,6 +387,7 @@ if (DUSK_ENABLE_CODE_MODS)
 
     if (DUSK_GAME_ABI_INLINE_OPTIONS)
         target_compile_options(dusklight PRIVATE ${DUSK_GAME_ABI_INLINE_OPTIONS})
+        target_compile_options(dusk_internal PRIVATE ${DUSK_GAME_ABI_INLINE_OPTIONS})
 
         foreach(jsystem_lib IN LISTS JSYSTEM_LIBRARIES)
             target_compile_options(${jsystem_lib} PRIVATE ${DUSK_GAME_ABI_INLINE_OPTIONS})
@@ -421,6 +422,7 @@ if (DUSK_ENABLE_CODE_MODS)
 
     if (DEFINED DUSK_PATCHABLE_ENTRY_FLAG)
         target_compile_options(dusklight PRIVATE ${DUSK_PATCHABLE_ENTRY_FLAG})
+        target_compile_options(dusk_internal PRIVATE ${DUSK_PATCHABLE_ENTRY_FLAG})
         foreach(jsystem_lib IN LISTS JSYSTEM_LIBRARIES)
             target_compile_options(${jsystem_lib} PRIVATE ${DUSK_PATCHABLE_ENTRY_FLAG})
         endforeach()
