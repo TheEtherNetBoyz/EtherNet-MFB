@@ -70,6 +70,9 @@ jobs:
       - name: Build
         run: cmake --build --preset x-linux-ci-${{matrix.preset}}
 
+      - name: Verify bundled GZ
+        run: python3 ci/verify-gz-bundle.py build/install/mods/dev.dusk.gz
+
       - name: Generate AppImage
         run: ci/build-appimage.sh
 
@@ -141,6 +144,14 @@ jobs:
 
       - name: Build
         run: cmake --build --preset ${{matrix.preset}}
+
+      - name: Verify bundled GZ on macOS
+        if: matrix.platform == 'macos'
+        run: python3 ci/verify-gz-bundle.py build/install/Dusklight.app/Contents/Resources/mods/dev.dusk.gz
+
+      - name: Verify bundled GZ on iOS
+        if: matrix.platform == 'ios'
+        run: python3 ci/verify-gz-bundle.py build/install/Dusklight.app/mods/dev.dusk.gz --native-library build/install/Dusklight.app/Frameworks/dev.dusk.gz.so
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -215,6 +226,9 @@ jobs:
         # downloaded artifact can be installed directly on a device.
         run: ./gradlew :app:assembleDebug --rerun-tasks
 
+      - name: Verify bundled GZ in APK
+        run: python3 ci/verify-gz-bundle.py platforms/android/app/build/outputs/apk/debug/app-${{matrix.abi}}-debug.apk
+
       - name: Stage artifacts
         run: |
           mkdir -p upload/sdk
@@ -282,6 +296,9 @@ jobs:
 
       - name: Build
         run: cmake --build --preset x-windows-ci-${{matrix.preset}}
+
+      - name: Verify bundled GZ
+        run: python ci/verify-gz-bundle.py build/install/mods/dusk_gz.dusk
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
