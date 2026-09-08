@@ -317,6 +317,7 @@ template class ConfigImpl<GameLanguage>;
 template class ConfigImpl<GyroMode>;
 template class ConfigImpl<AspectRatioMode>;
 template class ConfigImpl<DiscLoadingDelayMode>;
+template class ConfigImpl<AudioOutputMode>;
 
 template <>
 void ConfigImpl<FrameInterpMode>::loadFromJson(

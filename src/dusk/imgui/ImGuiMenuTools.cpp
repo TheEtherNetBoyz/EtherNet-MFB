@@ -414,6 +414,22 @@ namespace dusk {
 
         void DrawAudioMenu() {
             auto& s = getSettings();
+            static constexpr const char* outputModeNames[] = {
+                "Stereo (Speakers)",
+                "Stereo (Headphones)",
+                "5.1 Surround",
+                "7.1 Surround",
+            };
+            int outputMode = static_cast<int>(s.audio.outputMode.getValue());
+            ImGui::TextUnformatted("Output Mode");
+            ImGui::SameLine(170.0f);
+            ImGui::SetNextItemWidth(150.0f);
+            if (ImGui::Combo("##OutputMode", &outputMode, outputModeNames, IM_ARRAYSIZE(outputModeNames))) {
+                s.audio.outputMode.setValue(static_cast<AudioOutputMode>(outputMode));
+                audio::Reinitialize();
+                config::save();
+            }
+            ImGui::Separator();
             int masterVolume = s.audio.masterVolume.getValue();
             ImGui::TextUnformatted("Master Volume");
             ImGui::SameLine(170.0f);
@@ -426,9 +442,6 @@ namespace dusk {
             ImGui::Separator();
             if (MenuCheckbox("Enable Reverb", s.audio.enableReverb)) {
                 audio::SetEnableReverb(s.audio.enableReverb.getValue());
-            }
-            if (MenuCheckbox("Enable Spatial Sound", s.audio.enableHrtf)) {
-                audio::EnableHrtf = s.audio.enableHrtf.getValue();
             }
             MenuCheckbox("Menu Sounds", s.audio.menuSounds);
             MenuCheckbox("No Low HP Sound", s.game.noLowHpSound);

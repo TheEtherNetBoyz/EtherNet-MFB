@@ -16,15 +16,17 @@
 #include <tracy/Tracy.hpp>
 
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <span>
 
 using namespace dusk::audio;
 
 static OutputSubframe OutBuffer;
-static std::array<f32, DSP_SUBFRAME_SIZE * OutputSubframe::NUM_CHANNELS> OutInterleaveBuffer;
+static std::array<f32, DSP_SUBFRAME_SIZE * OutputSubframe::NUM_CHANNELS> OutInterleaveBufferFull;
 
 static SDL_AudioStream* PlaybackStream;
+static std::atomic_bool AudioReady{false};
 
 // Callbacks execute under the audio lock; unregistering waits for in-flight work.
 static DuskAudioHooksV1 s_audioHooks{};
@@ -59,33 +61,72 @@ static int RenderNewAudioFrame();
 /**
  * Render an audio subframe and output it to SDL3.
  */
-static void RenderAudioSubframe();
+static int RenderAudioSubframe();
 
-static void InitSDL3Output() {
-    SDL_Init(SDL_INIT_AUDIO);
+static size_t GetChannelCountForOutputMode(dusk::AudioOutputMode config) {
+    switch (config) {
+        default:
+        case dusk::AudioOutputMode::StereoSpeakers:
+        case dusk::AudioOutputMode::StereoHeadphones:
+            return 2;
+        case dusk::AudioOutputMode::Surround6ch:
+            return 6;
+        case dusk::AudioOutputMode::Surround8ch:
+            return 8;
+    }
+}
 
-    constexpr SDL_AudioSpec spec = {
+static bool InitSDL3Output() {
+    const auto speakerConfig = dusk::getSettings().audio.outputMode.getValue();
+    const auto desiredChannelCount = GetChannelCountForOutputMode(speakerConfig);
+    const bool hrtf = speakerConfig == dusk::AudioOutputMode::StereoHeadphones;
+
+    if (PlaybackStream && desiredChannelCount == OutChannelCount) {
+        JASCriticalSection section;
+        EnableHrtf = hrtf;
+        return false;
+    }
+
+    if (PlaybackStream) {
+        SDL_PauseAudioStreamDevice(PlaybackStream);
+        SDL_DestroyAudioStream(PlaybackStream);
+    } else {
+        SDL_Init(SDL_INIT_AUDIO);
+    }
+
+    const SDL_AudioSpec spec = {
         SDL_AUDIO_F32,
-        2,
+        static_cast<int>(desiredChannelCount),
         SampleRate,
     };
-    PlaybackStream = SDL_OpenAudioDeviceStream(
-        SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
-        &spec,
-        &GetNewAudio,
-        nullptr);
+    SDL_AudioStream* newStream =
+        SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, &GetNewAudio, nullptr);
+
+    {
+        JASCriticalSection section;
+        EnableHrtf = hrtf;
+        OutChannelCount = desiredChannelCount;
+        PlaybackStream = newStream;
+    }
+
+    return true;
 }
 
 void dusk::audio::Initialize() {
-    InitSDL3Output();
     DspInit();
-    ApplySettings();
 
     JASDsp::initBuffer();
     JASDSPChannel::initAll();
 
     JASPoolAllocObject_MultiThreaded<JASChannel>::newMemPool(0x48);
 
+    // SDL may request audio as soon as the stream is opened, even before it is
+    // explicitly resumed. Make every structure used by the callback available
+    // before opening the output device.
+    InitSDL3Output();
+    ApplySettings();
+
+    AudioReady.store(true, std::memory_order_release);
     SDL_ResumeAudioStreamDevice(PlaybackStream);
 }
 
@@ -93,7 +134,13 @@ void dusk::audio::ApplySettings() {
     const auto& settings = dusk::getSettings().audio;
     SetMasterVolume(MasterVolumeToLinear(settings.masterVolume.getValue() / 100.0f));
     SetEnableReverb(settings.enableReverb.getValue());
-    EnableHrtf = settings.enableHrtf.getValue();
+    Reinitialize();
+}
+
+void dusk::audio::Reinitialize() {
+    if (InitSDL3Output()) {
+        SDL_ResumeAudioStreamDevice(PlaybackStream);
+    }
 }
 
 void dusk::audio::SetMasterVolume(const f32 value) {
@@ -125,6 +172,10 @@ void SDLCALL GetNewAudio(
     SDL_AudioStream*,
     int needed,
     int) {
+    if (!AudioReady.load(std::memory_order_acquire) || JASDSPChannel::sDspChannels == nullptr) {
+        return;
+    }
+
     FrameMarkStart(FrameName);
     while (needed > 0) {
         const int rendered = RenderNewAudioFrame();
@@ -137,54 +188,59 @@ int RenderNewAudioFrame() {
     ZoneScoped;
     JASCriticalSection section;
     const u32 countSubframes = JASDriver::getSubFrames();
+    int bytesWritten = 0;
 
     JASAudioThread::setDSPSyncCount(countSubframes);
 
     for (u32 i = 0; i < countSubframes; i++) {
-        RenderAudioSubframe();
+        bytesWritten += RenderAudioSubframe();
 
         JASAudioThread::snIntCount -= 1;
     }
 
-    return static_cast<u16>(countSubframes) * sizeof(OutputSubframe);
+    return bytesWritten;
 }
 
 static void InterleaveOutputData(const OutputSubframe& data, std::span<f32> target) {
-    assert(target.size() >= data.channels[0].size() * OutputSubframe::NUM_CHANNELS);
+    assert(target.size() >= data.channels[0].size() * OutChannelCount);
 
     size_t outPos = 0;
     for (size_t inPos = 0; inPos < data.channels[0].size(); inPos++) {
-        for (size_t channelIdx = 0; channelIdx < OutputSubframe::NUM_CHANNELS; channelIdx++) {
+        for (size_t channelIdx = 0; channelIdx < OutChannelCount; channelIdx++) {
             target[outPos++] = data.channels[channelIdx][inPos];
         }
     }
 }
 
-void RenderAudioSubframe() {
+int RenderAudioSubframe() {
     ZoneScoped;
     OutBuffer = {};
 
     JASDriver::updateDSP();
     DspRender(OutBuffer);
 
+    std::span<f32> OutInterleaveBuffer{OutInterleaveBufferFull.data(), static_cast<size_t>(DSP_SUBFRAME_SIZE * OutChannelCount)};
     InterleaveOutputData(OutBuffer, OutInterleaveBuffer);
     if (s_audioHooks.mix) s_audioHooks.mix(OutInterleaveBuffer.data(), DSP_SUBFRAME_SIZE, SampleRate);
 
     if (JASDriver::extMixCallback != nullptr && JASDriver::sMixMode == MIX_MODE_INTERLEAVE) {
-        static_assert(OutputSubframe::NUM_CHANNELS == 2); // This code only works with Stereo so far.
         // NOTE: In the real game, this gets called on the entire audio frame, rather than the subframe.
         // That's probably more efficient, but I didn't wanna change the code to calculate the
         // entire audio buffers at once.
         // This is only used for the movie player, and it seems to work fine with the smaller calls.
         const auto mixData = JASDriver::extMixCallback(DSP_SUBFRAME_SIZE);
         if (mixData) {
-            for (int i = 0; i < OutInterleaveBuffer.size(); i++) {
-                OutInterleaveBuffer[i] += static_cast<f32>(mixData[i]) / static_cast<f32>(0x7FFF);
+            for (int i = 0; i < DSP_SUBFRAME_SIZE; i++) {
+                const auto oi = i * OutChannelCount;
+                OutInterleaveBuffer[oi] += static_cast<f32>(mixData[i * 2]) / 32767.0f;
+                OutInterleaveBuffer[oi + 1] += static_cast<f32>(mixData[i * 2 + 1]) / 32767.0f;
             }
         }
     }
 
-    SDL_PutAudioStreamData(PlaybackStream, &OutInterleaveBuffer, sizeof(OutInterleaveBuffer));
+    auto bytesToWrite = OutInterleaveBuffer.size_bytes();
+    SDL_PutAudioStreamData(PlaybackStream, OutInterleaveBuffer.data(), bytesToWrite);
+    return bytesToWrite;
 }
 
 u32 dusk::audio::GetResetCount(int channelIdx) {
