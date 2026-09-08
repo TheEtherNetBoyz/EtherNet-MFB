@@ -1,3 +1,4 @@
+#include "dusk/legacy_practice.h"
 #include "dusk/speedrun.h"
 #include <aurora/aurora.h>
 #include "dusk/config.hpp"
@@ -91,11 +92,13 @@ void resetForSpeedrunMode() {
     getSettings().game.debugFlyCam.setSpeedrunValue(false);
     getSettings().game.enableMoveLinkCombo.setSpeedrunValue(false);
     getSettings().game.enableTeleportCombo.setSpeedrunValue(false);
+#if DUSK_LEGACY_PRACTICE_TOOLS
     getSettings().game.areaReload.setSpeedrunValue(false);
     getSettings().game.gorgeVoidChecker.setSpeedrunValue(false);
     getSettings().game.nativePracticeMenu.setSpeedrunValue(false);
     getSettings().game.nativeInputViewer.setSpeedrunValue(false);
     getSettings().game.nativeLinkDebugInfo.setSpeedrunValue(false);
+#endif
 }
 
 static void clearSpeedrunOverrides() {

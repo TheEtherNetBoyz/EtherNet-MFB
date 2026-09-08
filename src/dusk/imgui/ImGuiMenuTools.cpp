@@ -1,3 +1,4 @@
+#include "dusk/legacy_practice.h"
 #include "dusk/audio/DuskAudioSystem.h"
 #include "dusk/audio/DuskDsp.hpp"
 #include "ImGuiMenuTools.hpp"
@@ -436,10 +437,13 @@ namespace dusk {
     }
 
     void ImGuiMenuTools::togglePracticeSaves() {
+#if DUSK_LEGACY_PRACTICE_TOOLS
         m_showPracticeSaves = !m_showPracticeSaves;
+#endif
     }
 
     void ImGuiMenuTools::drawPracticeSavesNative() {
+#if DUSK_LEGACY_PRACTICE_TOOLS
         if (dusk::speedrun::isActive()) {
             m_showPracticeSaves = false;
             getTransientSettings().practiceMenuInputCapture = false;
@@ -448,6 +452,7 @@ namespace dusk {
         if (getSettings().game.nativePracticeMenu) {
             m_practiceSaves.drawNative(m_showPracticeSaves);
         }
+#endif
     }
 
     void ImGuiMenuTools::draw() {
@@ -474,7 +479,9 @@ namespace dusk {
             ImGui::BeginDisabled(dusk::speedrun::isActive());
 
             ImGui::MenuItem("Save Editor", hotkeys::SHOW_SAVE_EDITOR, &m_showSaveEditor);
+#if DUSK_LEGACY_PRACTICE_TOOLS
             ImGui::MenuItem("Practice Saves", nullptr, &m_showPracticeSaves);
+#endif
             ImGui::MenuItem("Input Macro", nullptr, &m_showInputMacro);
             ImGui::MenuItem("TAS Movie", nullptr, &m_showTasMovie);
             ImGui::MenuItem("State Share", hotkeys::SHOW_STATE_SHARE, &m_showStateShare);
@@ -483,10 +490,12 @@ namespace dusk {
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("D-pad Up + R: set point\nD-pad Down + R: teleport");
             }
+#if DUSK_LEGACY_PRACTICE_TOOLS
             MenuCheckbox("Area Reload", getSettings().game.areaReload);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("L+R+Start+A: reload the current area at its last entrance");
             }
+#endif
 
             ImGui::EndDisabled();
 

@@ -1,3 +1,4 @@
+#include "dusk/legacy_practice.h"
 #include "ImGuiConsole.hpp"
 
 #include "dusk/settings.h"
@@ -256,6 +257,7 @@ namespace dusk {
                 dl->AddRectFilled(rStart, p2, darkGray);
             }
 
+#if DUSK_LEGACY_PRACTICE_TOOLS
             // Draw raw stick value readouts. Matches decompgz's gz_manager_tools.cpp
             // drawInputViewer(), which prints the raw s8 X/Y of mMainStick (white) and
             // mSubStick (yellow) with a "%d  %d" format. JUTGamePad::CStick has the same
@@ -285,6 +287,9 @@ namespace dusk {
             ImVec2 size;
             size.x = 270 * scale;
             size.y = std::max(130 * scale, readoutBottom - cursor0.y);
+#else
+            ImVec2 size(270 * scale, 130 * scale);
+#endif
             ImGui::Dummy(size);
 
             if (getSettings().game.showInputViewerGyro)

@@ -3135,13 +3135,6 @@ int mDoGph_Painter() {
 
     mDoGph_gInf_c::endRender();
 
-#if TARGET_PC
-    // decompGZ submits its persistent overlay after the game's painter has
-    // completely finished. In particular, keep this after endRender(): load
-    // transitions may apply their final scene/fader output there.
-    dusk::g_imguiConsole.DrawPracticeSavesNative();
-#endif
-
     #if WIDESCREEN_SUPPORT
     mDoGph_gInf_c::offWideZoom();
     #endif

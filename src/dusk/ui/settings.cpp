@@ -1,3 +1,4 @@
+#include "dusk/legacy_practice.h"
 #include "settings.hpp"
 
 #include "bool_button.hpp"
@@ -2058,9 +2059,11 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             });
         addCheat("Invincible Enemies", getSettings().game.invincibleEnemies,
             "Prevents enemies from taking damage.");
+#if DUSK_LEGACY_PRACTICE_TOOLS
         addCheat("Transform without Shadow Crystal",
             getSettings().game.transformWithoutShadowCrystal,
             "Allow Quick Transform before obtaining the Shadow Crystal.");
+#endif
     });
 
     add_tab("Interface", [this](Rml::Element* content) {
@@ -2303,6 +2306,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Teleport (R+D-pad Up/Down)",
             "R+D-pad Up stores Link's current position.<br/>"
             "R+D-pad Down teleports Link back to it.");
+#if DUSK_LEGACY_PRACTICE_TOOLS
         add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.areaReload,
             "Area Reload (L+R+Start+A)",
             "Reloads the current area at its last entrance while preserving temporary area state.");
@@ -2319,6 +2323,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.nativeLinkDebugInfo,
             "Native Link Debug Info",
             "Shows native Link position and movement debugging information.");
+#endif
     });
 
     // Favorite entries are registered while their tabs are built. Build every tab once so the

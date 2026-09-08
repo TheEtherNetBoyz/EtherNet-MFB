@@ -1,3 +1,5 @@
+#include "dusk/legacy_practice.h"
+#if DUSK_LEGACY_PRACTICE_TOOLS
 #include "area_reload.hpp"
 
 #include "d/d_camera.h"
@@ -77,3 +79,8 @@ void reload_area() {
 }
 
 }  // namespace dusk
+
+#else
+#include "area_reload.hpp"
+namespace dusk { void reload_area() {} }
+#endif

@@ -1,3 +1,4 @@
+#include "dusk/legacy_practice.h"
 #include "dusk/game_combos.h"
 
 #include "SSystem/SComponent/c_API_controller_pad.h"
@@ -27,6 +28,7 @@ static void consumeButtons(u16 mask) {
 
 // Table: holdMask, trigMask, strict, condition, action, consumeMask, exclusive
 static const GameCombo kCombos[] = {
+#if DUSK_LEGACY_PRACTICE_TOOLS
     // Area Reload (L+R+Start+A), exclusive
     {
         PAD_TRIGGER_L | PAD_TRIGGER_R | PAD_BUTTON_START,
@@ -40,6 +42,7 @@ static const GameCombo kCombos[] = {
         0,
         true,
     },
+#endif
     // Move Link (L+R+Y), pass-through, non-exclusive
     {
         PAD_TRIGGER_R | PAD_TRIGGER_L,

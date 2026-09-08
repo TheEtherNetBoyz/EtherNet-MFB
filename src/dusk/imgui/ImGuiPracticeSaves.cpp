@@ -1,3 +1,5 @@
+#include "dusk/legacy_practice.h"
+#if DUSK_LEGACY_PRACTICE_TOOLS
 #include "ImGuiPracticeSaves.hpp"
 #include "ImGuiMenuTools.hpp"
 
@@ -2569,3 +2571,14 @@ void ImGuiMenuTools::ShowPracticeSaves() {
 }
 
 }
+
+#else
+#include "ImGuiPracticeSaves.hpp"
+#include "ImGuiMenuTools.hpp"
+namespace dusk {
+void ImGuiPracticeSaves::draw(bool& open) { open = false; }
+void ImGuiPracticeSaves::drawNative(bool) {}
+void ImGuiPracticeSaves::suppressControllerInput() {}
+void ImGuiMenuTools::ShowPracticeSaves() {}
+}
+#endif

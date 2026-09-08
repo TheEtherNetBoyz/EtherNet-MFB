@@ -1,3 +1,4 @@
+#include "dusk/legacy_practice.h"
 #include "dusk/settings.h"
 #include "dusk/config.hpp"
 #include "dusk/game_mode.hpp"
@@ -417,7 +418,9 @@ void registerSettings() {
     Register(g_userSettings.game.enableQuickTransform);
     Register(g_userSettings.game.fixedQuickTransform);
     Register(g_userSettings.game.humanMidnaWarp);
+#if DUSK_LEGACY_PRACTICE_TOOLS
     Register(g_userSettings.game.transformWithoutShadowCrystal);
+#endif
     Register(g_userSettings.game.hideTvSettingsScreen);
     Register(g_userSettings.game.biggerWallets);
     Register(g_userSettings.game.noReturnRupees);
@@ -497,16 +500,26 @@ void registerSettings() {
     Register(g_userSettings.game.showSpeedrunRTATimer);
     Register(g_userSettings.game.enableMoveLinkCombo);
     Register(g_userSettings.game.enableTeleportCombo);
+#if DUSK_LEGACY_PRACTICE_TOOLS
     Register(g_userSettings.game.areaReload);
+#endif
+#if DUSK_LEGACY_PRACTICE_TOOLS
     Register(g_userSettings.game.gorgeVoidChecker);
+#endif
     Register(g_userSettings.game.recordingMode);
     Register(g_userSettings.game.menuScalingMode);
     Register(g_userSettings.game.removeQuestMapMarkers);
     Register(g_userSettings.game.showInputViewer);
     Register(g_userSettings.game.showInputViewerGyro);
+#if DUSK_LEGACY_PRACTICE_TOOLS
     Register(g_userSettings.game.nativeInputViewer);
+#endif
+#if DUSK_LEGACY_PRACTICE_TOOLS
     Register(g_userSettings.game.nativeLinkDebugInfo);
+#endif
+#if DUSK_LEGACY_PRACTICE_TOOLS
     Register(g_userSettings.game.nativePracticeMenu);
+#endif
     Register(g_userSettings.game.lastSelectedGameModeId);
     Register(g_userSettings.game.fastSpinner);
     Register(g_userSettings.game.infiniteHearts);

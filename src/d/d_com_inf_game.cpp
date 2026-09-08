@@ -1,3 +1,4 @@
+#include "dusk/legacy_practice.h"
 /**
  * d_com_inf_game.cpp
  * Game Information
@@ -2895,7 +2896,7 @@ BOOL dComIfGs_Wolf_Change_Check() {
 
     // Transforming Unlocked
     if (dComIfGs_isEventBit(0x0D04)
-#if TARGET_PC
+#if TARGET_PC && DUSK_LEGACY_PRACTICE_TOOLS
     || dusk::getSettings().game.transformWithoutShadowCrystal
 #endif
     ) {

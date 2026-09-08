@@ -1,3 +1,4 @@
+#include "dusk/legacy_practice.h"
 #include "input.hpp"
 
 #include "ui.hpp"
@@ -159,12 +160,16 @@ bool any_menu_chord() noexcept {
 }
 
 bool area_reload_menu_blocked(u32 port) noexcept {
+#if DUSK_LEGACY_PRACTICE_TOOLS
     if (speedrun::isActive() || !getSettings().game.areaReload.getValue() ||
         port >= sPadHoldMasks.size()) {
         return false;
     }
 
     return (sPadHoldMasks[port] & kAreaReloadMenuBlockCombo) == kAreaReloadMenuBlockCombo;
+#else
+    return false;
+#endif
 }
 
 Rml::Input::KeyIdentifier map_pad_button(PADButton button) noexcept {

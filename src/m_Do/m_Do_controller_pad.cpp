@@ -1,3 +1,4 @@
+#include "dusk/legacy_practice.h"
 /**
  * m_Do_controller_pad.cpp
  * JUTGamePad Wrapper and Conversion
@@ -217,7 +218,8 @@ void mDoCPd_c::read() {
 #endif
             LRlockCheck(interface);
 #if TARGET_PC
-            if (i == PAD_1 && dusk::getTransientSettings().practiceMenuInputCapture) {
+            if (DUSK_LEGACY_PRACTICE_TOOLS && i == PAD_1 &&
+                dusk::getTransientSettings().practiceMenuInputCapture) {
                 clearPracticeMenuInput(interface);
             }
 #endif
