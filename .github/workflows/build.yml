@@ -70,8 +70,10 @@ jobs:
       - name: Build
         run: cmake --build --preset x-linux-ci-${{matrix.preset}}
 
-      - name: Verify bundled GZ
-        run: python3 ci/verify-gz-bundle.py build/install/mods/dev.dusk.gz
+      - name: Verify bundled mods
+        run: |
+          python3 ci/verify-gz-bundle.py build/install/mods/dev.dusk.gz
+          python3 ci/verify-online-bundle.py build/install/mods/io.github.mdra5000.dusklight_online
 
       - name: Generate AppImage
         run: ci/build-appimage.sh
@@ -145,9 +147,11 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{matrix.preset}}
 
-      - name: Verify bundled GZ on macOS
+      - name: Verify bundled mods on macOS
         if: matrix.platform == 'macos'
-        run: python3 ci/verify-gz-bundle.py build/install/Dusklight.app/Contents/Resources/mods/dev.dusk.gz
+        run: |
+          python3 ci/verify-gz-bundle.py build/install/Dusklight.app/Contents/Resources/mods/dev.dusk.gz
+          python3 ci/verify-online-bundle.py build/install/Dusklight.app/Contents/Resources/mods/io.github.mdra5000.dusklight_online
 
       - name: Upload hook patch diagnostics
         if: failure()
@@ -157,9 +161,11 @@ jobs:
           path: build/**/prepatch-report-*.json
           if-no-files-found: ignore
 
-      - name: Verify bundled GZ on iOS
+      - name: Verify bundled mods on iOS
         if: matrix.platform == 'ios'
-        run: python3 ci/verify-gz-bundle.py build/install/Dusklight.app/mods/dev.dusk.gz --native-library build/install/Dusklight.app/Frameworks/dev.dusk.gz.so
+        run: |
+          python3 ci/verify-gz-bundle.py build/install/Dusklight.app/mods/dev.dusk.gz --native-library build/install/Dusklight.app/Frameworks/dev.dusk.gz.so
+          python3 ci/verify-online-bundle.py build/install/Dusklight.app/mods/io.github.mdra5000.dusklight_online --native-library build/install/Dusklight.app/Frameworks/io.github.mdra5000.dusklight_online.so
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -234,8 +240,10 @@ jobs:
         # downloaded artifact can be installed directly on a device.
         run: ./gradlew :app:assembleDebug --rerun-tasks
 
-      - name: Verify bundled GZ in APK
-        run: python3 ci/verify-gz-bundle.py platforms/android/app/build/outputs/apk/debug/app-${{matrix.abi}}-debug.apk
+      - name: Verify bundled mods in APK
+        run: |
+          python3 ci/verify-gz-bundle.py platforms/android/app/build/outputs/apk/debug/app-${{matrix.abi}}-debug.apk
+          python3 ci/verify-online-bundle.py platforms/android/app/build/outputs/apk/debug/app-${{matrix.abi}}-debug.apk
 
       - name: Stage artifacts
         run: |
@@ -305,8 +313,10 @@ jobs:
       - name: Build
         run: cmake --build --preset x-windows-ci-${{matrix.preset}}
 
-      - name: Verify bundled GZ
-        run: python ci/verify-gz-bundle.py build/install/mods/dusk_gz.dusk
+      - name: Verify bundled mods
+        run: |
+          python ci/verify-gz-bundle.py build/install/mods/dusk_gz.dusk
+          python ci/verify-online-bundle.py build/install/mods/dusklight_online.dusk
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7

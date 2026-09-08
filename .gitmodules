@@ -13,3 +13,6 @@
 [submodule "mods/gz"]
 	path = mods/gz
 	url = https://github.com/matthewdavidrichardanderson/dusklight-gz-mod.git
+[submodule "mods/online"]
+	path = mods/online
+	url = https://github.com/matthewdavidrichardanderson/dusklight-online-mod.git
