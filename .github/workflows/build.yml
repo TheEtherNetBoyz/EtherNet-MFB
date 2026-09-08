@@ -149,6 +149,14 @@ jobs:
         if: matrix.platform == 'macos'
         run: python3 ci/verify-gz-bundle.py build/install/Dusklight.app/Contents/Resources/mods/dev.dusk.gz
 
+      - name: Upload hook patch diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hook-patch-diagnostics-${{matrix.artifact_name}}
+          path: build/**/prepatch-report-*.json
+          if-no-files-found: ignore
+
       - name: Verify bundled GZ on iOS
         if: matrix.platform == 'ios'
         run: python3 ci/verify-gz-bundle.py build/install/Dusklight.app/mods/dev.dusk.gz --native-library build/install/Dusklight.app/Frameworks/dev.dusk.gz.so
