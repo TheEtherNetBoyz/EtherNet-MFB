@@ -153,14 +153,6 @@ jobs:
           python3 ci/verify-gz-bundle.py build/install/Dusklight.app/Contents/Resources/mods/dev.dusk.gz
           python3 ci/verify-online-bundle.py build/install/Dusklight.app/Contents/Resources/mods/io.github.mdra5000.dusklight_online
 
-      - name: Upload hook patch diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: hook-patch-diagnostics-${{matrix.artifact_name}}
-          path: build/**/prepatch-report-*.json
-          if-no-files-found: ignore
-
       - name: Verify bundled mods on iOS
         if: matrix.platform == 'ios'
         run: |
