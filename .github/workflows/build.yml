@@ -147,6 +147,27 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{matrix.preset}}
 
+      - name: Explain Apple hook failures
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          def failures(value):
+              if isinstance(value, dict):
+                  if value.get("failure"):
+                      print(json.dumps(value, indent=2))
+                  else:
+                      for child in value.values():
+                          failures(child)
+              elif isinstance(value, list):
+                  for child in value:
+                      failures(child)
+          for report in Path("build").rglob("prepatch-report-*.json"):
+              print(f"Hook report: {report}")
+              failures(json.loads(report.read_text()))
+          PY
+
       - name: Verify bundled mods on macOS
         if: matrix.platform == 'macos'
         run: |
