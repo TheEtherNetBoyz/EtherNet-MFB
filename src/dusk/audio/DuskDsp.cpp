@@ -302,7 +302,8 @@ static int ReadChannelSamplesChunk(
 
     assert(desiredSamples >= 0);
 
-    auto aramBase = static_cast<u8*>(ARGetStorageAddress()) + channel.mWaveAramAddress;
+    auto aramBase = static_cast<u8 const*>(channel.mAramBaseAddress ? channel.mAramBaseAddress : ARGetStorageAddress());
+    aramBase += channel.mWaveAramAddress;
 
     auto curSamplePosition = channel.mSamplePosition;
     u32 skipSamples = curSamplePosition % channel.mSamplesPerBlock;
@@ -439,7 +440,7 @@ static void RenderChannel(
             f32 out = std::clamp(
                 (sample - channelAux.prev_lp_in) * ((f32)coeff / 128.0f) + channelAux.prev_lp_out, -1.0f, 1.0f
             );
-            
+
             channelAux.prev_lp_in = sample;        // in[n-1]  = in[n]
             sample = channelAux.prev_lp_out = out; // out[n-1] = out[n]
         }
@@ -778,7 +779,7 @@ void dusk::audio::DspRender(OutputSubframe& subframe) {
         }
 
         DspSubframe monoBuf = {};
-        if (voice.mWaveAramAddress == 0) {
+        if (voice.mWaveAramAddress == 0 && !voice.mAramBaseAddress) {
             RenderOscChannel(voice, aux, monoBuf);
         } else {
             ValidateChannel(voice);
