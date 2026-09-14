@@ -24,7 +24,10 @@
 #include "d/actor/d_a_midna.h"
 
 #if TARGET_PC
+#include "dusk/game_clock.h"
 #include "dusk/interp/frame_interpolation.h"
+#include "dusk/interp/menus.h"
+#include "dusk/interp/user_interface.h"
 #include "dusk/memory.h"
 #include "dusk/version.hpp"
 #include "helpers/string.hpp"
@@ -276,6 +279,7 @@ dMenu_Fmap_c::dMenu_Fmap_c(JKRExpHeap* i_heap, STControl* i_stick, CSTControl* i
 }
 
 dMenu_Fmap_c::~dMenu_Fmap_c() {
+    IF_DUSK(dusk::interp::erase_owned_samples(this));
     mpHeap->getTotalFreeSize();
     if (mpFieldDat != NULL) {
         mpHeap->free(mpFieldDat);
@@ -500,22 +504,25 @@ void dMenu_Fmap_c::_move() {
     mpDraw2DBack->clearIconInfo();
 
     (this->*move_process[mProcess])();
-    
-    mpDraw2DTop->_execute();
+
+    IF_NOT_DUSK(mpDraw2DTop->_execute());
     mpDraw2DBack->setBaseBackAlpha(g_fmHIO.mBaseBackAlpha);
-    mpDraw2DBack->btkAnimeLoop(g_fmHIO.mBackAnimeStep);
+    IF_NOT_DUSK(mpDraw2DBack->btkAnimeLoop(g_fmHIO.mBackAnimeStep));
     mpDraw2DTop->setMoyaAlpha(g_fmHIO.mMoyaAlpha);
-    mpDraw2DTop->btkAnimeLoop(g_fmHIO.mTopAnimeStep);
+    IF_NOT_DUSK(mpDraw2DTop->btkAnimeLoop(g_fmHIO.mTopAnimeStep));
 
     if (mProcess != process) {
         (this->*init_process[mProcess])();
+        IF_DUSK(dusk::interp::erase_owned_samples(this));
     }
 
+#if !TARGET_PC
     if (mProcess == PROC_PORTAL_WARP_FORBID) {
         mpDraw2DBack->calcBackAlpha(true);
     } else {
         mpDraw2DBack->calcBackAlpha(false);
     }
+#endif
 
     mpDraw2DBack->setAllTrans(mTransX, mTransY);
     mpDraw2DTop->setAllTrans(mTransX, mTransY);
@@ -524,6 +531,7 @@ void dMenu_Fmap_c::_move() {
         drawDebugStage();
     }
 
+#if !TARGET_PC
     if (mSpotTextureFadeAlpha != 1.0f) {
         cLib_addCalc2(&mSpotTextureFadeAlpha, 1.0f, 0.4f, 0.5f);
         if (fabsf(mSpotTextureFadeAlpha - 1.0f) < 0.1f) {
@@ -531,6 +539,7 @@ void dMenu_Fmap_c::_move() {
         }
         mpDraw2DBack->setSpotTextureFadeAlpha(mSpotTextureFadeAlpha);
     }
+#endif
 
 #if TARGET_PC
     u8 region = mpDraw2DBack->getSelectRegion();
@@ -540,21 +549,41 @@ void dMenu_Fmap_c::_move() {
         mpDraw2DTop->mSelectRegionNo = 0xFF;
     }
 
+    dusk::interp::capture_menu_values(this, mTransX, mTransY, mAlphaRatio, field_0x1ec, mZoomLevel);
 #endif
 }
 
 void dMenu_Fmap_c::_draw() {
+    IF_DUSK(dusk::interp::ScopedMenuValues pose(this, mTransX, mTransY, mAlphaRatio, field_0x1ec));
     if (mpDraw2DBack != NULL && mpDraw2DTop != NULL) {
-        if (field_0x305) {
 #if TARGET_PC
-            mpDraw2DBack->applyPresentationInterpolation();
+        if (dusk::game_clock::is_presentation_frame()) {
+            presentAnims();
+            presentZoomView();
+            mpDraw2DBack->setAllTrans(mTransX, mTransY);
+            mpDraw2DTop->setAllTrans(mTransX, mTransY);
+            mpDraw2DBack->setAllAlphaRate(mAlphaRatio, false);
+            mpDraw2DTop->setAllAlphaRate(mAlphaRatio, false);
+            mpDraw2DTop->setMoyaAlpha(g_fmHIO.mMoyaAlpha);
+            if (field_0x305) {
+                mpMenuFmapMap->presentRendering(mpWorldData, mStartStageNo,
+                                                mpDraw2DBack->getRenderingPosX(),
+                                                mpDraw2DBack->getRenderingPosZ(),
+                                                mpDraw2DBack->getRenderingScale(),
+                                                mpDraw2DBack->getMapZoomRate());
+            }
+            mpDraw2DBack->clearIconInfo();
+        }
 #endif
+        if (field_0x305) {
+            IF_DUSK_BLOCK(dusk::game_clock::is_sim_frame())
             mpMenuFmapMap->setRendering(mpWorldData, mStartStageNo,
                                         mpDraw2DBack->getRenderingPosX(),
                                         mpDraw2DBack->getRenderingPosZ(),
                                         mpDraw2DBack->getRenderingScale(),
                                         mpDraw2DBack->getMapZoomRate());
             mpDraw2DBack->setStageInfo(mSpotNum, mpMenuFmapMap);
+            IF_DUSK_BLOCK_END
             drawIcon(field_0x1ec, false);
             if (mProcess == PROC_ZOOM_REGION_TO_SPOT || mProcess == PROC_ZOOM_SPOT_TO_REGION
                 || mProcess == PROC_YAMIBOSS_DEMO4 || mProcess == PROC_LIGHT_DEMO1
@@ -566,7 +595,7 @@ void dMenu_Fmap_c::_draw() {
         } else {
             drawPortalIcon();
             if (mProcess == PROC_ZOOM_ALL_TO_REGION || mProcess == PROC_ZOOM_REGION_TO_ALL) {
-                f32 scale = 1.0f - (f32)mZoomLevel / 10.0f;
+                f32 scale = 1.0f - DUSK_IF_ELSE(getRenderZoomLevel(), (f32)mZoomLevel) / 10.0f;
                 mpDraw2DBack->iconScale(0, scale, scale, 1.0f - scale);
             }
         }
@@ -576,6 +605,66 @@ void dMenu_Fmap_c::_draw() {
         dComIfGd_set2DOpaTop(mpDraw2DTop);
     }
 }
+
+#if TARGET_PC
+void dMenu_Fmap_c::presentAnims() {
+    if (mAlphaRatio == 1.0f) {
+        if (mProcess == PROC_ALL_MAP) {
+            mpDraw2DBack->allmap_move2(mpStick);
+        } else if (mProcess == PROC_REGION_MAP) {
+            mpDraw2DBack->regionMapMove(mpStick);
+        } else if (mProcess == PROC_SPOT_MAP) {
+            mpDraw2DBack->stageMapMove(mpStick, 1, true);
+        } else if (mProcess == PROC_PORTAL_WARP_MAP || mProcess == PROC_PORTAL_DEMO5) {
+            mpDraw2DBack->regionMapMove(mpStick);
+        }
+
+        mpDraw2DTop->_execute();
+        mpDraw2DBack->calcBackAlpha(mProcess == PROC_PORTAL_WARP_FORBID);
+        if (mSpotTextureFadeAlpha != 1.0f) {
+            dusk::vdt::present_addCalc2(&mSpotTextureFadeAlpha, 1.0f, 0.4f, 0.5f, 0.1f);
+            mpDraw2DBack->setSpotTextureFadeAlpha(mSpotTextureFadeAlpha);
+        }
+    }
+    if (mpDraw2DBack != NULL && mpDraw2DTop != NULL) {
+        mpDraw2DBack->btkAnimeLoop(g_fmHIO.mBackAnimeStep);
+        mpDraw2DTop->btkAnimeLoop(g_fmHIO.mTopAnimeStep);
+        mpDraw2DTop->setMoyaAlpha(g_fmHIO.mMoyaAlpha);
+    }
+}
+
+void dMenu_Fmap_c::presentZoomView() {
+    const f32 zoomLevel = getRenderZoomLevel();
+    switch (mProcess) {
+    case PROC_ZOOM_ALL_TO_REGION:
+    case PROC_ZOOM_REGION_TO_ALL:
+    case PROC_PORTAL_DEMO1:
+    case PROC_PORTAL_DEMO3:
+        mpDraw2DBack->zoomMapCalc(std::clamp(zoomLevel / 10.0f, 0.0f, 1.0f));
+        break;
+    case PROC_TABLE_DEMO1:
+        if (zoomLevel > 0) {
+            mpDraw2DBack->zoomMapCalc(zoomLevel / 10.0f);
+        }
+        break;
+    case PROC_ZOOM_REGION_TO_SPOT:
+    case PROC_ZOOM_SPOT_TO_REGION:
+    case PROC_YAMIBOSS_DEMO4:
+        mpDraw2DBack->zoomMapCalc2(field_0x1ec);
+        break;
+    case PROC_TABLE_DEMO2:
+    case PROC_HOWL_DEMO1:
+        if (zoomLevel > 0) {
+            mpDraw2DBack->zoomMapCalc2(field_0x1ec);
+        }
+        break;
+    }
+}
+
+f32 dMenu_Fmap_c::getRenderZoomLevel() const {
+    return dusk::interp::get<dusk::interp::MenuValues>(this).values.read(4, (f32)mZoomLevel);
+}
+#endif
 
 u8 dMenu_Fmap_c::getNextStatus(u8* param_0) {
     u8 ret = 8;
@@ -777,9 +866,9 @@ void dMenu_Fmap_c::all_map_proc() {
         }
     } else {
         u8 region1 = mpDraw2DBack->getSelectRegion();
-        mpDraw2DBack->allmap_move2(mpStick);
+        IF_NOT_DUSK(mpDraw2DBack->allmap_move2(mpStick));
         u8 region2 = mpDraw2DBack->getSelectRegion();
-        if (region1 != region2 || mResetAreaName) {
+        if (DUSK_IF_ELSE(region_change, region1 != region2) || mResetAreaName) {
             mResetAreaName = false;
             if (mpDraw2DBack->getSelectRegion() != 0xff
                 && mpDraw2DBack->isShowRegion(mpDraw2DBack->getSelectRegion()))
@@ -935,7 +1024,7 @@ void dMenu_Fmap_c::region_map_proc() {
         if (g_fmapHIO.mDisplayReferenceArea) {
             mpDraw2DBack->zoomMapCalc(1.0f);
         }
-        mpDraw2DBack->regionMapMove(mpStick);
+        IF_NOT_DUSK(mpDraw2DBack->regionMapMove(mpStick));
         int stage_no, room_no;
 
         f32 pos_x = mpDraw2DBack->getArrowPos2DX() - mDoGph_gInf_c::getMinXF()
@@ -1154,9 +1243,8 @@ void dMenu_Fmap_c::zoom_spot_to_region_init() {
     mZoomLevel = 10;
     field_0x1ec = 1.0f;
 #if TARGET_PC
-    // Frame interp note: field_0x122d used to be set every draw, causing flickering. Do it here instead.
     if (dusk::interp::is_enabled()) {
-        mpDraw2DBack->resetScrollArrowMask();
+        mpDraw2DBack->field_0x122d = 0;
     }
 #endif
     Z2GetAudioMgr()->seStart(Z2SE_SY_MAP_ZOOMOUT, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
@@ -1166,16 +1254,6 @@ void dMenu_Fmap_c::zoom_spot_to_region_proc() {
     mZoomLevel--;
     field_0x1ec = (f32)mZoomLevel / 10.0f;
     mpDraw2DBack->zoomMapCalc2(field_0x1ec);
-#if TARGET_PC
-    if (mZoomLevel == 9 || mZoomLevel == 0) {
-        // The spot and region modes use different ownership for cursor motion: spot mode
-        // clamps control coordinates and moves the map, while region mode moves the cursor.
-        // At either handoff zoomMapCalc2() updates the clamp correction, control position,
-        // and stage translation together. Interpolating those fields independently creates
-        // a short invalid cursor position, so present the coherent post-handoff snapshot.
-        mpDraw2DBack->primePresentationInterpolation();
-    }
-#endif
     mpDraw2DTop->setArrowAlphaRatio(dMenu_Fmap2DTop_c::ARROW_UP, 0.0f);
 
     if (mZoomLevel <= 0) {
@@ -1228,7 +1306,7 @@ void dMenu_Fmap_c::spot_map_proc() {
     } else if (dMw_A_TRIGGER() && !dMeter2Info_isTouchKeyCheck(0xc)
         && dMeter2Info_getMeterClass()->getMeterDrawPtr()->getInsideObjCheck() != 1)
     {
-        mpDraw2DBack->stageMapMove(mpStick, 1, true);
+        IF_NOT_DUSK(mpDraw2DBack->stageMapMove(mpStick, 1, true));
     } else if (dMw_Z_TRIGGER() && mpDraw2DTop->isWarpAccept()) {
 #if TARGET_PC || VERSION >= VERSION_GCN_JPN
         IF_DUSK_BLOCK(dusk::version::isRegionJpn())
@@ -1277,7 +1355,7 @@ void dMenu_Fmap_c::spot_map_proc() {
             mpDraw2DBack->zoomMapCalc2(field_0x1ec);
         }
 
-        mpDraw2DBack->stageMapMove(mpStick, 1, true);
+        IF_NOT_DUSK(mpDraw2DBack->stageMapMove(mpStick, 1, true));
 
         int stage_no, room_no;
         f32 pos_x = mpDraw2DBack->getMapAreaGlobalCenterPosX() - mDoGph_gInf_c::getMinXF()
@@ -1737,15 +1815,6 @@ bool dMenu_Fmap_c::isOpen() {
     s16 undisplay_frame_num = (s16)g_fmapHIO.mUndisplayFrameNum;
     if (mDisplayFrame == 0) {
         init = true;
-#if TARGET_PC
-        if (mpDraw2DBack != NULL) {
-            mpDraw2DBack->resetPresentationInterpolation();
-        }
-        if (mpDraw2DTop != NULL) {
-            mpDraw2DTop->clearPresentationSwipe();
-        }
-        dusk::interp::request_presentation_sync();
-#endif
     }
     mDisplayFrame++;
     f32 ratio = (f32)mDisplayFrame / (f32)display_frame_num;
@@ -1778,16 +1847,12 @@ bool dMenu_Fmap_c::isOpen() {
     mpDraw2DBack->setAllAlphaRate(mAlphaRatio, init);
     mpDraw2DTop->setAllTrans(mTransX, mTransY);
     mpDraw2DTop->setAllAlphaRate(mAlphaRatio, init);
-#if TARGET_PC
-    mpDraw2DBack->setPresentationSwipe(mPanDirection, mDisplayFrame, display_frame_num, !ret, false);
-    mpDraw2DTop->setPresentationSwipe(mPanDirection, mDisplayFrame, display_frame_num, !ret, false);
-    if (ret) {
-        mpDraw2DBack->clearPresentationSwipe();
-        mpDraw2DTop->clearPresentationSwipe();
-    }
-#endif
     mpDraw2DBack->setSpotTextureFadeAlpha(mSpotTextureFadeAlpha);
 
+#if TARGET_PC
+    mpDraw2DTop->setMoyaAlpha(g_fmHIO.mMoyaAlpha);
+    dusk::interp::capture_menu_values(this, mTransX, mTransY, mAlphaRatio, field_0x1ec, mZoomLevel);
+#endif
     return ret;
 }
 
@@ -1828,15 +1893,11 @@ bool dMenu_Fmap_c::isClose() {
     mpDraw2DBack->setAllAlphaRate(mAlphaRatio, bVar2);
     mpDraw2DTop->setAllTrans(mTransX, mTransY);
     mpDraw2DTop->setAllAlphaRate(mAlphaRatio, bVar2);
-#if TARGET_PC
-    mpDraw2DBack->setPresentationSwipe(mPanDirection, mDisplayFrame, undisplay_frame_num, false, !ret);
-    mpDraw2DTop->setPresentationSwipe(mPanDirection, mDisplayFrame, undisplay_frame_num, false, !ret);
-    if (ret) {
-        mpDraw2DBack->clearPresentationSwipe();
-        mpDraw2DTop->clearPresentationSwipe();
-    }
-#endif
 
+#if TARGET_PC
+    mpDraw2DTop->setMoyaAlpha(g_fmHIO.mMoyaAlpha);
+    dusk::interp::capture_menu_values(this, mTransX, mTransY, mAlphaRatio, field_0x1ec, mZoomLevel);
+#endif
     return ret;
 }
 
@@ -2007,16 +2068,8 @@ void dMenu_Fmap_c::talkButton() {
 }
 
 void dMenu_Fmap_c::setProcess(u8 i_process) {
-    const bool processChanged = mProcess != i_process;
     mPrevProcess = mProcess;
     mProcess = i_process;
-#if TARGET_PC
-    if (processChanged) {
-        if (mpDraw2DBack != NULL) {
-            mpDraw2DBack->primePresentationInterpolation();
-        }
-    }
-#endif
 }
 
 void dMenu_Fmap_c::setFlash(u8 i_stageNo, bool param_1) {
@@ -2521,7 +2574,7 @@ void dMenu_Fmap_c::setAreaNameZero() {
 }
 
 void dMenu_Fmap_c::portalWarpMapMove(STControl* i_stick) {
-    mpDraw2DBack->regionMapMove(i_stick);
+    IF_NOT_DUSK(mpDraw2DBack->regionMapMove(i_stick));
     dMenu_Fmap_portal_data_c* portal_dat = mpPortalDat;
     dMenu_Fmap_portal_data_c::data* portals = portal_dat->mData;
     f32 arrow_x = mpDraw2DBack->getArrowPos2DX();

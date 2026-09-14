@@ -112,12 +112,17 @@ public:
 class dMenu_Fmap_c {
 public:
     typedef void (dMenu_Fmap_c::*process)();
- 
+
     dMenu_Fmap_c(JKRExpHeap*, STControl*, CSTControl*, u8, u8, u8, f32, f32, u8);
     void _create();
     void _delete();
     void _move();
     void _draw();
+#if TARGET_PC
+    void presentAnims();
+    void presentZoomView();
+    f32 getRenderZoomLevel() const;
+#endif
     u8 getNextStatus(u8*);
     bool isSync();
     void all_map_init();
@@ -266,7 +271,7 @@ public:
         /* 0x1B */ PROC_HOWL_DEMO1,
         /* 0x1C */ PROC_HOWL_DEMO2,
         /* 0x1D */ PROC_HOWL_DEMO3,
-     };
+    };
 
     static DUSK_GAME_DATA dMenu_Fmap_c* MyClass;
 

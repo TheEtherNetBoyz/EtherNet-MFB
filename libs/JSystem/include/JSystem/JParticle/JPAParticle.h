@@ -24,9 +24,6 @@ public:
     void init_c(JPAEmitterWorkData*, JPABaseParticle*);
     bool calc_p(JPAEmitterWorkData*);
     bool calc_c(JPAEmitterWorkData*);
-#if TARGET_PC
-    void interp(JPAEmitterWorkData*, void const* drawFunc);
-#endif
     bool canCreateChild(JPAEmitterWorkData*);
     f32 getWidth(JPABaseEmitter const*) const;
     f32 getHeight(JPABaseEmitter const*) const;
@@ -87,9 +84,6 @@ public:
     virtual ~JPAParticleCallBack() = 0;
     virtual void execute(JPABaseEmitter*, JPABaseParticle*) {}
     virtual void draw(JPABaseEmitter*, JPABaseParticle*) {}
-#if TARGET_PC
-    virtual void interp(JPABaseEmitter*, JPABaseParticle*) {}
-#endif
 };
 
 // not sure where this belongs

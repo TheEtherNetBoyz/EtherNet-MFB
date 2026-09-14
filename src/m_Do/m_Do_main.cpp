@@ -296,9 +296,9 @@ void main01(void) {
         if (timing.separatePresentation) {
             const int tasSimTicks = dusk::tas_movie::simulationTicksForHostFrame(timing.numSimTicks);
             const bool tasBatchActive = dusk::tas_movie::active();
+            int completedSimTicks = 0;
             if (tasSimTicks > 0) {
                 dusk::interp::begin_simulation_frame();
-                dusk::interp::set_ui_tick_pending(true);
                 for (int i = 0; i < tasSimTicks; ++i) {
                     if (timing.interpolating) {
                         dusk::interp::begin_sim_tick();
@@ -313,11 +313,17 @@ void main01(void) {
                     dusk::tas_movie::restorePresentationCamera();
                     mDoAud_Execute();
                     dusk::game_clock::commit_sim_tick();
+                    ++completedSimTicks;
                     if (tasBatchActive &&
                         (!dusk::tas_movie::active() || dusk::tas_movie::paused())) {
                         break;
                     }
                 }
+            }
+
+            if (tasBatchActive && !dusk::tas_movie::waitingForAnchor() &&
+                (dusk::tas_movie::paused() || dusk::tas_movie::turbo())) {
+                dusk::game_clock::set_presentation_tick_override(completedSimTicks);
             }
 
             const float interpolationStep =
@@ -341,10 +347,8 @@ void main01(void) {
                 dusk::tas_movie::restorePresentationCamera();
                 dusk::interp::end_presentation();
             }
-            dusk::interp::set_ui_tick_pending(false);
         } else {
             dusk::interp::begin_simulation_frame();
-            dusk::interp::set_ui_tick_pending(true);
             const int tasSimTicks = dusk::tas_movie::simulationTicksForHostFrame(1);
             const bool tasBatchActive = dusk::tas_movie::active();
             for (int simTick = 0; simTick < tasSimTicks; ++simTick) {

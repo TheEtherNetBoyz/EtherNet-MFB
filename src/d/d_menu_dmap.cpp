@@ -26,7 +26,10 @@
 #include <cstring>
 
 #if TARGET_PC
+#include "dusk/game_clock.h"
 #include "dusk/interp/frame_interpolation.h"
+#include "dusk/interp/menus.h"
+#include "dusk/interp/user_interface.h"
 #include "dusk/settings.h"
 #include "dusk/version.hpp"
 #include "helpers/string.hpp"
@@ -240,12 +243,14 @@ void dMenu_DmapBg_c::mapScreenInit() {
 void dMenu_DmapBg_c::mapScreenAnime() {
     if (0.0f == field_0xd94 && 0.0f == field_0xd98) {
         for (int i = 0; i < 1; i++) {
+#if !TARGET_PC
             field_0xdc8[i] += 0.4f;
             if (field_0xdc8[i] >= field_0xd28[i]->getFrameMax()) {
                 field_0xdc8[i] -= field_0xd28[i]->getFrameMax();
             }
             field_0xd28[i]->setFrame(field_0xdc8[i]);
             mMapScreen[i]->animation();
+#endif
         }
     }
 }
@@ -277,7 +282,9 @@ bool dMenu_DmapBg_c::iconScaleAnm() {
         return true;
     } 
 
-    f32 dVar7 = fopMsgM_valueIncrease(field_0xdd1, field_0xdd2, 4);
+    IF_DUSK(dusk::vdt::advance_toward_frame(field_0xdd2, field_0xdd1, 1.0f));
+    f32 dVar7 = DUSK_IF_ELSE(dusk::vdt::present_sine_ease(field_0xdd1, field_0xdd2),
+                             fopMsgM_valueIncrease(field_0xdd1, field_0xdd2, 4));
     f32 dVar8;
     f32 dVar1;
     if (field_0xdac > field_0xdb0) {
@@ -291,7 +298,7 @@ bool dMenu_DmapBg_c::iconScaleAnm() {
 
     iconScale(1, dVar7, dVar8, dVar1);
 
-    field_0xdd2++;
+    IF_NOT_DUSK(field_0xdd2++);
     if (field_0xdd2 >= field_0xdd1) {
         rv = true;
     }
@@ -923,8 +930,8 @@ void dMenu_DmapBg_c::addGoldFrameAlphaRate() {
         rate = 1.0f;
         setGoldAnimation(true);
     } else {
-        field_0xdd7++;
-        if (field_0xdd7 == g_fmapHIO.mDisplayFrameNum) {
+        DUSK_IF_ELSE(field_0xdd7 += dusk::game_clock::original_frames(), field_0xdd7++);
+        if (field_0xdd7 DUSK_IF_ELSE(>=, ==) g_fmapHIO.mDisplayFrameNum) {
             setGoldAnimation(true);
         }
         rate = (f32)(field_0xdd7 * field_0xdd7) / (f32)(g_fmapHIO.mDisplayFrameNum * g_fmapHIO.mDisplayFrameNum);
@@ -1217,7 +1224,7 @@ void dMenu_DmapBg_c::update() {
     }
 
     if (mpBackTexture != NULL && field_0xdbc < 255.0f) {
-        field_0xdbc += 25.5f;
+        field_0xdbc += 25.5f IF_DUSK(* dusk::game_clock::original_frames());
         if (field_0xdbc > 255.0f) {
             field_0xdbc = 255.0f;
         }
@@ -1647,6 +1654,7 @@ void dMenu_Dmap_c::getIconPos(s8 i_floorNo, f32 param_2) {
 }
 
 dMenu_Dmap_c::~dMenu_Dmap_c() {
+    IF_DUSK(dusk::interp::erase_owned_samples(this));
     s32 iVar2 = field_0xe8->getTotalFreeSize();
     s32 iVar4 = field_0xe8->getTotalFreeSize();
 
@@ -2008,7 +2016,7 @@ void dMenu_Dmap_c::_move() {
                 var_f31 = 0.70588237f;
             }
 
-            cLib_addCalc2(&field_0x110, var_f31, 0.4f, 0.5f);
+            DUSK_IF_ELSE(dusk::vdt::present_addCalc2, cLib_addCalc2)(&field_0x110, var_f31, 0.4f, 0.5f IF_DUSK_ARG(0.1f));
             mpDrawBg->mpBlack->setAlphaRate(field_0x110);
         }
 
@@ -2024,9 +2032,10 @@ void dMenu_Dmap_c::_move() {
     setMapTexture();
     mapBgAnime();
     mpDrawBg->calcCursor();
-    mpDrawBg->addGoldFrameAlphaRate();
+    IF_NOT_DUSK(mpDrawBg->addGoldFrameAlphaRate());
 
     mDoExt_setCurrentHeap(prev_heap);
+    IF_DUSK(dusk::interp::capture_menu_values(this, field_0x104, field_0x108, field_0x10c));
 }
 
 void dMenu_Dmap_c::setMapTexture() {
@@ -2035,13 +2044,13 @@ void dMenu_Dmap_c::setMapTexture() {
 }
 
 void dMenu_Dmap_c::mapBgAnime() {
-    mpDrawBg->mapScreenAnime();
+    IF_NOT_DUSK(mpDrawBg->mapScreenAnime());
 }
 
 void dMenu_Dmap_c::mapControl() {
     u8 temp_r27 = field_0x17e;
     if (m_process == 0 || field_0x183 == 0) {
-        mMapCtrl->move();
+        IF_NOT_DUSK(mMapCtrl->move());
 
         getIconPos(mMapCtrl->getDispFloorNo(), mMapCtrl->getMapBlendPer());
         getIconPos(mMapCtrl->getDispFloor2No(), 1.0f - mMapCtrl->getMapBlendPer());
@@ -2067,6 +2076,7 @@ void dMenu_Dmap_c::mapControl() {
     if (stick_value >= sp28 && field_0x181 != 2) {
         var_r28 = true;
         
+#if !TARGET_PC
         f32 var_f31 = mMapCtrl->getStageMapSizeX();
         if (var_f31 < mMapCtrl->getStageMapSizeZ()) {
             var_f31 = mMapCtrl->getStageMapSizeZ();
@@ -2084,9 +2094,10 @@ void dMenu_Dmap_c::mapControl() {
         f32 sp14 = temp_f28 * cM_scos(stick_angle);
         mMapCtrl->setPlusZoomCenterX(IF_DUSK(dusk::getSettings().game.enableMirrorMode ? -sp18 :) sp18);
         mMapCtrl->setPlusZoomCenterZ(sp14);
+#endif
     }
 
-    mMapCtrl->move();
+    IF_NOT_DUSK(mMapCtrl->move());
 
     getIconPos(mMapCtrl->getDispFloorNo(), mMapCtrl->getMapBlendPer());
     getIconPos(mMapCtrl->getDispFloor2No(), 1.0f - mMapCtrl->getMapBlendPer());
@@ -2186,6 +2197,7 @@ bool dMenu_Dmap_c::isOpen() {
 
     mpDrawBg->setAllAlphaRate(field_0x10c, var_r27);
     mpDrawBg->setGoldFrameAlphaRate(0.0f);
+    IF_DUSK(dusk::interp::capture_menu_values(this, field_0x104, field_0x108, field_0x10c));
     return var_r28;
 }
 
@@ -2225,14 +2237,159 @@ bool dMenu_Dmap_c::isClose() {
     field_0x10c = temp_f31;
     mpDrawBg->setAllAlphaRate(field_0x10c, var_r29);
     mpDrawBg->decGoldFrameAlphaRate();
+    IF_DUSK(dusk::interp::capture_menu_values(this, field_0x104, field_0x108, field_0x10c));
     return var_r30;
 }
 
-void dMenu_Dmap_c::_draw() {
-    if (mMapCtrl != NULL) {
-        mMapCtrl->draw();
+#if TARGET_PC
+void dMenu_Dmap_c::presentAnims() {
+    if (mMapCtrl == NULL || mpDrawBg == NULL) {
+        return;
+    }
 
+    for (int i = 0; i < 8; ++i) {
+        mSelFloor[i]->presentAnime();
+    }
+    for (int i = 0; i < 3; ++i) {
+        field_0x88[i]->presentAnime();
+    }
+
+    if (field_0x10c == 1.0f) {
+        mpDrawBg->addGoldFrameAlphaRate();
+
+        if (0.0f == mpDrawBg->field_0xd94 && 0.0f == mpDrawBg->field_0xd98) {
+            for (int i = 0; i < 1; i++) {
+                dusk::vdt::present_looping(mpDrawBg->field_0xdc8[i], mpDrawBg->field_0xd28[i],
+                                                  0.4f);
+                mpDrawBg->mMapScreen[i]->animation();
+            }
+        }
+        mpDrawBg->clearIconInfo();
+        presentMapView();
+        if (field_0x17e == 1 || field_0x17e == 2) {
+            mpDrawBg->iconScaleAnm();
+        }
+    }
+
+    presentLayoutAnims();
+}
+
+void dMenu_Dmap_c::presentLayoutAnims() {
+    mpDrawBg->setAllTrans(field_0x104, field_0x108);
+
+    if (mpDrawBg->mpBackTexture != NULL) {
+        f32 var_f31 = 100.0f * mpDrawBg->field_0xd88;
+        f32 sp24 = mpDrawBg->field_0xd80 / var_f31;
+        f32 sp20 = mpDrawBg->field_0xd84 / var_f31;
+
+        const ResTIMG* back_timg = mpDrawBg->mpBackTexture->getTexture(0)->getTexInfo();
+        field_0x13c = mMapCtrl->getPixelStageSizeX();
+        field_0x140 = mMapCtrl->getPixelStageSizeZ();
+        field_0x134 = mMapCtrl->getPixelCenterX();
+        field_0x138 = mMapCtrl->getPixelCenterZ();
+
+        f32 temp_f30;
+        f32 var_f29;
+        f32 var_f27;
+        if (field_0x13c > field_0x140) {
+            temp_f30 = back_timg->width * var_f31;
+            var_f29 = mMapCtrl->getStageMapSizeX();
+            var_f27 = field_0x13c * (temp_f30 / var_f29);
+        } else {
+            temp_f30 = back_timg->height * var_f31;
+            var_f29 = mMapCtrl->getStageMapSizeZ();
+            var_f27 = field_0x140 * (temp_f30 / var_f29);
+        }
+
+        f32 sp1C[2];
+        sp1C[0] = var_f27;
+        sp1C[1] = var_f27;
+
+        f32 sp14[2];
+        sp14[0] = -(field_0x134 + (100.0f * (sp24 * mMapCtrl->getPixelPerCm())));
+        sp14[1] = -(field_0x138 + 100.0f * (sp20 * mMapCtrl->getPixelPerCm()));
+
+        CPaneMgr sp70;
+        //!@bug It's unclear what this is supposed to be, but a stack pointer being converted to a bool is probably not intended.
+        u8 sp40[0x30];
+        Vec sp34 = sp70.getGlobalVtxCenter(mpDrawBg->getMapPane(), (bool)sp40, 0);
+        mpDrawBg->mpBackTexture->move(sp14[0] + (sp34.x - (sp1C[0] / 2)),
+                                      sp14[1] + (sp34.y - (sp1C[1] / 2)));
+        mpDrawBg->mpBackTexture->resize(sp1C[0], sp1C[1]);
+    }
+}
+
+void dMenu_Dmap_c::presentMapView() {
+    const bool can_stick_scroll = m_process != 0 && field_0x183 != 0 && mMapCtrl->isEndZoomIn();
+    f32 disp_center_x = mMapCtrl->getDispCenterX();
+    f32 disp_center_z = mMapCtrl->getDispCenterZ();
+    bool scrolled = false;
+    if (can_stick_scroll) {
+        f32 sp28 = g_fmapHIO.mScrollSpeedSlowBound < g_fmapHIO.mScrollSpeedFastBound ?
+                       g_fmapHIO.mScrollSpeedSlowBound :
+                       g_fmapHIO.mScrollSpeedFastBound;
+        f32 sp24 = g_fmapHIO.mScrollSpeedSlowBound > g_fmapHIO.mScrollSpeedFastBound ?
+                       g_fmapHIO.mScrollSpeedSlowBound :
+                       g_fmapHIO.mScrollSpeedFastBound;
+        f32 stick_value = mpCStick->getValueStick();
+        s16 stick_angle = mpCStick->getAngleStick();
+        if (stick_value >= sp28 && field_0x181 != 2) {
+            scrolled = true;
+            f32 var_f31 = mMapCtrl->getStageMapSizeX();
+            if (var_f31 < mMapCtrl->getStageMapSizeZ()) {
+                var_f31 = mMapCtrl->getStageMapSizeZ();
+            }
+            f32 var_f29 = stick_value < sp24 ? g_fmapHIO.mScrollSpeedDungeonMapSlow :
+                                               g_fmapHIO.mScrollSpeedDungeonMapFast;
+            f32 temp_f28 = (var_f29 / 100.0f) * var_f31 * dusk::game_clock::original_frames();
+            f32 sp18 = temp_f28 * cM_ssin(stick_angle);
+            f32 sp14 = temp_f28 * cM_scos(stick_angle);
+            mMapCtrl->setPlusZoomCenterX(dusk::getSettings().game.enableMirrorMode ? -sp18 : sp18);
+            mMapCtrl->setPlusZoomCenterZ(sp14);
+        }
+    }
+    mMapCtrl->move();
+    if (can_stick_scroll) {
+        if (scrolled && (disp_center_x != mMapCtrl->getDispCenterX() ||
+                         disp_center_z != mMapCtrl->getDispCenterZ()))
+        {
+            Z2GetAudioMgr()->seStartLevel(Z2SE_SY_MAP_SCROLL, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        }
+        if (mpDrawBg->mpMeterHaihai != NULL && isMapMoveState() &&
+            (getCMessageNum() == 0x37B || getCMessageNum() == 0x569))
+        {
+            mpDrawBg->field_0xdda = 0;
+            if (mMapCtrl->getDispCenterX() > mMapCtrl->getZoomCenterMinX()) {
+                mpDrawBg->field_0xdda |= 1;
+            }
+            if (mMapCtrl->getDispCenterX() < mMapCtrl->getZoomCenterMaxX()) {
+                mpDrawBg->field_0xdda |= 4;
+            }
+            if (mMapCtrl->getDispCenterZ() > mMapCtrl->getZoomCenterMinZ()) {
+                mpDrawBg->field_0xdda |= 8;
+            }
+            if (mMapCtrl->getDispCenterZ() < mMapCtrl->getZoomCenterMaxZ()) {
+                mpDrawBg->field_0xdda |= 2;
+            }
+            mpDrawBg->mpMeterHaihai->_execute(0);
+        }
+    }
+    getIconPos(mMapCtrl->getDispFloorNo(), mMapCtrl->getMapBlendPer());
+    getIconPos(mMapCtrl->getDispFloor2No(), 1.0f - mMapCtrl->getMapBlendPer());
+}
+#endif
+
+void dMenu_Dmap_c::_draw() {
+    IF_DUSK(dusk::interp::ScopedMenuValues pose(this, field_0x104, field_0x108, field_0x10c));
+    if (mMapCtrl != NULL) {
+        IF_NOT_DUSK(mMapCtrl->draw());
         if (mpDrawBg != NULL) {
+#if TARGET_PC
+            if (dusk::game_clock::is_presentation_frame()) {
+                presentAnims();
+                mpDrawBg->setAllAlphaRate(field_0x10c, false);
+            }
+#else
             mpDrawBg->setAllTrans(field_0x104, field_0x108);
 
             if (mpDrawBg->mpBackTexture != NULL) {
@@ -2284,7 +2441,13 @@ void dMenu_Dmap_c::_draw() {
             }
 
             dComIfGd_set2DOpa(mpDrawBg);
+#endif
         }
+
+#if TARGET_PC
+        mMapCtrl->draw();
+        dComIfGd_set2DOpa(mpDrawBg);
+#endif
     }
 }
 
@@ -2759,7 +2922,7 @@ void dMenu_Dmap_c::zoomIn_init_proc() {
 
 void dMenu_Dmap_c::zoomIn_proc() {
     bool temp_r30 = mMapCtrl->isEndZoomIn();
-    bool temp_r29 = mpDrawBg->iconScaleAnm();
+    bool temp_r29 = DUSK_IF_ELSE(mpDrawBg->field_0xdd2 >= mpDrawBg->field_0xdd1, mpDrawBg->iconScaleAnm());
     bool temp_r28 = true;
 
     if (temp_r30 == true && temp_r29 == true && temp_r28 == true) {
@@ -2775,7 +2938,7 @@ void dMenu_Dmap_c::zoomIn_proc() {
 void dMenu_Dmap_c::zoomOut_init_proc() {
 #if TARGET_PC
     if (dusk::interp::is_enabled()) {
-        mpDrawBg->resetScrollArrowMask();
+        mpDrawBg->field_0xdda = 0;
     }
 #endif
     Z2GetAudioMgr()->seStart(Z2SE_SY_MAP_ZOOMOUT, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
@@ -2793,7 +2956,7 @@ void dMenu_Dmap_c::zoomOut_init_proc() {
 
 void dMenu_Dmap_c::zoomOut_proc() {
     bool temp_r30 = mMapCtrl->isEndZoomOut();
-    bool temp_r29 = mpDrawBg->iconScaleAnm();
+    bool temp_r29 = DUSK_IF_ELSE(mpDrawBg->field_0xdd2 >= mpDrawBg->field_0xdd1, mpDrawBg->iconScaleAnm());
     bool temp_r28 = true;
 
     if (temp_r30 == true && temp_r29 == true && temp_r28 == true) {

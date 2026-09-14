@@ -39,6 +39,8 @@ bool s_timingModeInitialized = false;
 bool s_previousSeparatePresentation = false;
 bool s_previousInterpolating = false;
 bool s_previousTimeStopped = false;
+float s_presentationDtSeconds = kUiInitialDt;
+int s_presentationTickOverride = -1;
 
 constexpr native_clock::duration kAbnormalGapResetThreshold = std::chrono::milliseconds(250);
 constexpr int kMaxSimTicksPerFrame = static_cast<int>(aurora::time::kMaximumTimeScale) * 4;
@@ -69,7 +71,16 @@ void apply_frame_rate_limit() {
     const auto sleepTime = s_frameLimiter.Sleep(target);
     frameUsagePct = 100.0f * (1.0f - static_cast<float>(sleepTime) / static_cast<float>(target));
 }
-} // namespace
+
+float ui_dt() {
+    if (s_simTickActive) {
+        return sim_pace();
+    }
+
+    const float maximumDt = kUiMaximumDt * aurora::time::scale();
+    return std::clamp(s_presentationDtSeconds, 0.0f, maximumDt);
+}
+}  // namespace
 
 void initialize() {
     if (s_initialized) {
@@ -139,6 +150,8 @@ const FrameTiming& advance() {
         .dt = std::chrono::duration<float>(gameFrameGap).count(),
         .presentationEpoch = s_presentationEpoch,
     };
+    s_presentationDtSeconds = out.dt;
+    s_presentationTickOverride = -1;
 
     const float timeScale = aurora::time::scale();
     const bool interpolating = interpolation_enabled();
@@ -213,9 +226,26 @@ bool is_sim_frame() {
     return !g_frameTiming.separatePresentation || s_simTickActive;
 }
 
+bool is_presentation_frame() {
+    return !g_frameTiming.separatePresentation || !s_simTickActive;
+}
+
 float sample_interpolation_step() {
     const float step = std::chrono::duration<float>(game_clock::now() - s_currentSnapshotTime).count() / sim_pace();
     return std::clamp(step, 0.0f, 1.0f);
+}
+
+void set_presentation_tick_override(int ticks) {
+    s_presentationTickOverride = std::max(ticks, -1);
+}
+
+float original_frames() {
+    // TAS pause/frame advance and turbo use completed simulation ticks rather than
+    // elapsed wall time. Normal presentation retains upstream's clamped delta time.
+    if (!s_simTickActive && s_presentationTickOverride >= 0) {
+        return static_cast<float>(s_presentationTickOverride);
+    }
+    return ui_dt() / sim_pace();
 }
 
 float consume_interval(const void* consumer) {

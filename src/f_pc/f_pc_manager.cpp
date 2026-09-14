@@ -26,6 +26,8 @@
 #include "dusk/tas_movie.h"
 #include "dusk/game_clock.h"
 
+#include "m_Do/m_Do_graphic.h"
+
 #include <tracy/Tracy.hpp>
 #endif
 
@@ -69,19 +71,24 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
                 l_dvdError = false;
             }
 
-#ifdef TARGET_PC
-            // The main loop manages painting for separate presentation and low-latency modes.
+#if TARGET_PC
+            if (dusk::game_clock::g_frameTiming.separatePresentation) {
+                if (JUTFader* fader = mDoGph_gInf_c::getFader()) {
+                    fader->advance();
+                }
+            }
+#endif
+
+            // Normal mode paints the previous draw list. Low latency paints after execution;
+            // separate presentation is painted by the main loop.
+#if TARGET_PC
             if (!dusk::game_clock::g_frameTiming.separatePresentation &&
                 !dusk::low_latency_presentation_enabled())
 #endif
             {
-#ifdef TARGET_PC
-                dusk::tas_movie::applyPresentationCamera(dComIfGd_getView());
-#endif
+                IF_DUSK(dusk::tas_movie::applyPresentationCamera(dComIfGd_getView()));
                 cAPIGph_Painter();
-#ifdef TARGET_PC
-                dusk::tas_movie::restorePresentationCamera();
-#endif
+                IF_DUSK(dusk::tas_movie::restorePresentationCamera());
             }
 
             if (!dPa_control_c::isStatus(1)) {
@@ -131,7 +138,8 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
             IF_NOT_DUSK(dComIfGp_drawSimpleModel());
 
 #ifdef TARGET_PC
-            if (!dusk::interp::is_enabled() && dusk::low_latency_presentation_enabled()) {
+            if (!dusk::game_clock::g_frameTiming.separatePresentation &&
+                dusk::low_latency_presentation_enabled()) {
                 cAPIGph_Painter();
                 dusk::tas_movie::restorePresentationCamera();
             } else {

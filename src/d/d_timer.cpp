@@ -24,7 +24,7 @@
 #include <cstring>
 
 #if TARGET_PC
-#include "dusk/interp/frame_interpolation.h"
+#include "dusk/interp/user_interface.h"
 #include "dusk/version.hpp"
 #endif
 
@@ -215,6 +215,9 @@ int dTimer_c::_execute() {
             }
 
             if (m_timer_mode == 3 || m_timer_mode == 4 || m_timer_mode == 6 || m_timer_mode == 5) {
+#if TARGET_PC
+                mp_tm_scrn->mPresentTimerSlide = true;
+#else
                 f32 pos_y = mp_tm_scrn->getTimerTransY();
                 if (pos_y < 145.0f) {
                     pos_y += 25.0f;
@@ -224,6 +227,7 @@ int dTimer_c::_execute() {
 
                     mp_tm_scrn->setTimerTrans(0.0f, pos_y);
                 }
+#endif
             }
             break;
         default:
@@ -883,6 +887,7 @@ void dDlst_TimerScrnDraw_c::setTimer(int i_time) {
         }
     }
 
+#if !TARGET_PC
     if (mpTimeParent != NULL) {
         if ((dComIfGp_event_getMode() == 1 && field_0x3DF != 0) || !isVisible()) {
             s16 alpha_time = mpTimeParent->getAlphaTimer();
@@ -902,6 +907,7 @@ void dDlst_TimerScrnDraw_c::setTimer(int i_time) {
             }
         }
     }
+#endif
 }
 
 void dDlst_TimerScrnDraw_c::setCounter(u8 i_count, u8 i_max) {
@@ -1006,6 +1012,7 @@ void dDlst_TimerScrnDraw_c::setCounter(u8 i_count, u8 i_max) {
         }
     }
 
+#if !TARGET_PC
     if ((dComIfGp_event_getMode() == 1 && field_0x3E0 != 0) || !isVisible()) {
         if (mpCowParent != NULL) {
             s16 alpha_time = mpCowParent->getAlphaTimer();
@@ -1055,6 +1062,7 @@ void dDlst_TimerScrnDraw_c::setCounter(u8 i_count, u8 i_max) {
             }
         }
     }
+#endif
 }
 
 void dDlst_TimerScrnDraw_c::setParentPos(f32 i_posX, f32 i_posY) {
@@ -1112,17 +1120,24 @@ void dDlst_TimerScrnDraw_c::setShowType(u8 i_type) {
 }
 
 void dDlst_TimerScrnDraw_c::anime() {
+#if TARGET_PC
+    if (!mPresentStep) {
+        mPresentOpening = true;
+        return;
+    }
+    const f32 previousFrame = field_0x3D8;
+#endif
     static const s16 animeFrame[] = {7, 15, 22};
 
     if (field_0x3DE == 0) {
         if (field_0x3D8 <= animeFrame[2]) {
-            field_0x3D8++;
+            DUSK_IF_ELSE(dusk::vdt::advance_toward_frame(field_0x3D8, 23.0f, 1.0f), field_0x3D8++);
         } else {
             field_0x3DE = 1;
         }
 
-        if (field_0x3D8 <= animeFrame[1]) {
-            f32 temp_f31 = acc(animeFrame[1], field_0x3D8, 0);
+        if (DUSK_IF_ELSE(previousFrame, field_0x3D8) <= animeFrame[1]) {
+            f32 temp_f31 = acc(animeFrame[1], DUSK_IF_ELSE(std::min(field_0x3D8, (f32)animeFrame[1]), field_0x3D8), 0);
             f32 temp_f1 = (1.0f - temp_f31) * -50.0f;
 
             if (mpTimeParent != NULL) {
@@ -1146,13 +1161,13 @@ void dDlst_TimerScrnDraw_c::anime() {
                 }
             }
 
-            if (field_0x3D8 == animeFrame[1]) {
+            if (field_0x3D8 DUSK_IF_ELSE(>=, ==) animeFrame[1]) {
                 field_0x3DF = 1;
             }
         }
 
-        if (field_0x3D8 > animeFrame[0] && field_0x3D8 <= animeFrame[2]) {
-            f32 temp_f31 = acc(animeFrame[1], field_0x3D8 - animeFrame[0], 0);
+        if (field_0x3D8 > animeFrame[0] && DUSK_IF_ELSE(previousFrame, field_0x3D8) <= animeFrame[2]) {
+            f32 temp_f31 = acc(animeFrame[1], DUSK_IF_ELSE(std::min(field_0x3D8, (f32)animeFrame[2]), field_0x3D8) - animeFrame[0], 0);
             f32 temp_f1 = (1.0f - temp_f31) * -50.0f;
 
             if (mpCowParent != NULL) {
@@ -1173,7 +1188,7 @@ void dDlst_TimerScrnDraw_c::anime() {
                                      g_drawHIO.mMiniGame.mIconSizeY[mHIOType]);
             }
 
-            if (field_0x3D8 == animeFrame[2]) {
+            if (field_0x3D8 DUSK_IF_ELSE(>=, ==) animeFrame[2]) {
                 field_0x3E0 = 1;
             }
         }
@@ -1181,8 +1196,14 @@ void dDlst_TimerScrnDraw_c::anime() {
 }
 
 BOOL dDlst_TimerScrnDraw_c::closeAnime() {
+#if TARGET_PC
+    if (!mPresentStep) {
+        mPresentClosing = true;
+        return field_0x3D8 >= 7.0f;
+    }
+#endif
     BOOL var_r31 = false;
-    field_0x3D8++;
+    DUSK_IF_ELSE(dusk::vdt::advance_toward_frame(field_0x3D8, 7.0f, 1.0f), field_0x3D8++);
 
     if (field_0x3D8 <= 7) {
         f32 temp_f31 = acc(7, field_0x3D8, 0);
@@ -1332,7 +1353,54 @@ s32 dDlst_TimerScrnDraw_c::createStart(u16 i_messageID) {
     return 0;
 }
 
+#if TARGET_PC
+void dDlst_TimerScrnDraw_c::presentAnims() {
+    mPresentStep = true;
+    if (mPresentTimerSlide) {
+        dusk::vdt::advance_toward_frame(mTimerTransY, 145.0f, 25.0f);
+        if (field_0x3e2 != 0 && mHIOType == 0) {
+            setTimerPos(g_drawHIO.mMiniGame.mTimerPosX_4x3,
+                        g_drawHIO.mMiniGame.mTimerPosY_4x3);
+        } else {
+            setTimerPos(g_drawHIO.mMiniGame.mTimerPosX[mHIOType],
+                        g_drawHIO.mMiniGame.mTimerPosY[mHIOType]);
+        }
+    }
+    if (mPresentClosing) {
+        closeAnime();
+    } else {
+        if (mPresentOpening) {
+            anime();
+        }
+        const bool event = dComIfGp_event_getMode() == 1;
+        auto fade = [&](CPaneMgr* pane, bool hidden, bool ready, f32 alpha, bool timer) {
+            if (pane == NULL) {
+                return;
+            }
+            f32 frame = pane->getAlphaTimer();
+            const f32 previous = frame;
+            dusk::vdt::advance_toward_frame(frame, hidden ? 5.0f : 0.0f, 1.0f);
+            if (ready || frame != previous) {
+                const f32 rate = timer ? acc(5.0f, 5.0f - frame, 0.0f) :
+                                        1.0f - acc(5.0f, frame, 0.0f);
+                pane->setAlphaRate(mParentAlpha * alpha * rate);
+            }
+            pane->alphaAnimeStart(frame);
+        };
+        fade(mpTimeParent, (event && field_0x3DF != 0) || !isVisible(), field_0x3DF != 0,
+             g_drawHIO.mMiniGame.mTimerAlpha[mHIOType], true);
+        const bool hideCounter = (event && field_0x3E0 != 0) || !isVisible();
+        fade(mpCowParent, hideCounter, field_0x3E0 != 0,
+             g_drawHIO.mMiniGame.mCounterAlpha[mHIOType], false);
+        fade(mpImageParent, hideCounter, field_0x3E0 != 0,
+             g_drawHIO.mMiniGame.mIconAlpha[mHIOType], false);
+    }
+    mPresentStep = false;
+}
+#endif
+
 void dDlst_TimerScrnDraw_c::draw() {
+    IF_DUSK(presentAnims());
     J2DGrafContext* graf_ctx = dComIfGp_getCurrentGrafPort();
     graf_ctx->setup2D();
 
@@ -1342,20 +1410,22 @@ void dDlst_TimerScrnDraw_c::draw() {
                ((f32)g_drawHIO.mMiniGame.mGetInTextWaitFrames + 60.0f);
 
     for (int i = 0; i < 51; i++) {
-        IF_DUSK_BLOCK(dusk::interp::get_ui_tick_pending())
         if (m_getin_info[i].bck_frame > 0.0f && m_getin_info[i].bck_frame < temp) {
             if (m_getin_info[i].bck_frame < 60.0f) {
+#if TARGET_PC
+                dusk::vdt::advance_toward_frame(m_getin_info[i].bck_frame, 60.0f, g_drawHIO.mMiniGame.mGetInTextAnimSpeed);
+#else
                 m_getin_info[i].bck_frame += g_drawHIO.mMiniGame.mGetInTextAnimSpeed;
                 if (m_getin_info[i].bck_frame > 60.0f) {
                     m_getin_info[i].bck_frame = 60.0f;
                 }
+#endif
             } else if (m_getin_info[i].bck_frame < g_drawHIO.mMiniGame.mGetInTextWaitFrames + 60.0f) {
-                m_getin_info[i].bck_frame++;
+                DUSK_IF_ELSE(dusk::vdt::advance_toward_frame(m_getin_info[i].bck_frame, (f32)g_drawHIO.mMiniGame.mGetInTextWaitFrames + 60.0f, 1.0f), m_getin_info[i].bck_frame++);
             } else if (m_getin_info[i].bck_frame < temp) {
-                m_getin_info[i].bck_frame++;
+                DUSK_IF_ELSE(dusk::vdt::advance_toward_frame(m_getin_info[i].bck_frame, temp, 1.0f), m_getin_info[i].bck_frame++);
             }
         }
-        IF_DUSK_BLOCK_END
 
         if (m_getin_info[i].bck_frame > 0.0f && m_getin_info[i].bck_frame < temp) {
             f32 var_f29 = 1.0f;
@@ -1395,7 +1465,6 @@ void dDlst_TimerScrnDraw_c::draw() {
             if (m_getin_info[i].pikari_frame > 0.0f) {
                 drawPikari(i);
             } else if (m_getin_info[i].pikari_frame == -1.0f) {
-                IF_DUSK_BLOCK(dusk::interp::get_ui_tick_pending())
                 if (m_getin_info[i].field_0xc == 0) {
                     if (m_getin_info[i].bck_frame > g_drawHIO.mMiniGame.mGetInPikariAppearFrames) {
                         m_getin_info[i].pikari_frame =
@@ -1405,7 +1474,6 @@ void dDlst_TimerScrnDraw_c::draw() {
                     m_getin_info[i].pikari_frame =
                         18.0f - g_drawHIO.mMiniGame.mStartPikariAnimSpeed;
                 }
-                IF_DUSK_BLOCK_END
             }
         }
     }

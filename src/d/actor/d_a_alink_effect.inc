@@ -1203,31 +1203,6 @@ void daAlink_c::setLightningSwordEffect() {
     }
 }
 
-#if TARGET_PC
-void daAlink_c::prepareSwordEffectInterpolation() {
-    if (mSwordModel == NULL) {
-        return;
-    }
-
-    JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(field_0x321c);
-    if (emitter != NULL) {
-        dusk::interp::record_final_mtx(mSwordModel->getBaseTRMtx(), emitter);
-    }
-
-    emitter = dComIfGp_particle_getEmitter(field_0x3294);
-    if (emitter != NULL) {
-        dusk::interp::record_final_mtx(mSwordModel->getBaseTRMtx(), emitter);
-    }
-
-    for (int i = 0; i < 3; ++i) {
-        emitter = dComIfGp_particle_getEmitter(field_0x327c[i]);
-        if (emitter != NULL) {
-            dusk::interp::record_final_mtx(mSwordModel->getBaseTRMtx(), emitter);
-        }
-    }
-}
-#endif
-
 void daAlink_c::setWolfRollAttackEffect() {
     cXyz pos(current.pos.x, current.pos.y + 80.0f, current.pos.z);
     csXyz rot(shape_angle.x, shape_angle.y, 0);
@@ -2135,6 +2110,12 @@ void daAlink_blur_c::draw() {
     J3DShape::resetVcdVatCache();
 }
 
+#if TARGET_PC
+daAlink_lockCursor_c::~daAlink_lockCursor_c() {
+    dusk::interp::erase_owned_samples(this);
+}
+#endif
+
 BOOL daAlink_lockCursor_c::create() {
     JKRArchive* arc = dComIfG_getObjectResInfo(l_arcName)->getArchive();
 
@@ -2224,43 +2205,6 @@ extern "C" void setAnimation__7J2DPaneFP11J2DAnmColor() {
     /* empty function */
 }
 
-#if TARGET_PC
-namespace {
-struct AlinkSightInterp {
-    f32 prevX = 0.0f;
-    f32 prevY = 0.0f;
-    f32 currX = 0.0f;
-    f32 currY = 0.0f;
-    bool initialized = false;
-};
-
-static AlinkSightInterp s_alinkSightInterp;
-
-static void recordAlinkSightSample(f32 x, f32 y) {
-    AlinkSightInterp& interp = s_alinkSightInterp;
-    if (!interp.initialized) {
-        interp.prevX = interp.currX = x;
-        interp.prevY = interp.currY = y;
-        interp.initialized = true;
-        return;
-    }
-
-    const f32 dx = x - interp.currX;
-    const f32 dy = y - interp.currY;
-    if (dx * dx + dy * dy > 2500.0f) {
-        interp.prevX = interp.currX = x;
-        interp.prevY = interp.currY = y;
-        return;
-    }
-
-    interp.prevX = interp.currX;
-    interp.prevY = interp.currY;
-    interp.currX = x;
-    interp.currY = y;
-}
-}  // namespace
-#endif
-
 void daAlink_lockCursor_c::update() {
     if (mLockCursorAngle < 21.0f) {
         mLockCursorAngle = 21.0f;
@@ -2279,6 +2223,11 @@ void daAlink_lockCursor_c::update() {
     }
 
     cLib_chaseUC(&field_0x4, 0x80, 30);
+#if TARGET_PC
+    const dusk::interp::SightAnimation frame = {mLockCursorAngle, field_0x30,
+        static_cast<f32>(field_0x4), static_cast<f32>(field_0x1c->getFrameMax())};
+    dusk::interp::get<dusk::interp::Samples<dusk::interp::SightAnimation>>(this).capture(&frame, 1);
+#endif
 }
 
 void daAlink_lockCursor_c::draw() {
@@ -2286,46 +2235,28 @@ void daAlink_lockCursor_c::draw() {
         return;
     }
 
-    f32 lockCursorAngle = mLockCursorAngle;
-    f32 lockCursorFrame = field_0x30;
 #if TARGET_PC
-    if (dusk::interp::is_enabled() && !dusk::game_clock::is_sim_frame()) {
-        const f32 step = dusk::interp::get_interpolation_step();
-
-        lockCursorAngle += 0.9f * step;
-        if (lockCursorAngle >= 50.0f) {
-            lockCursorAngle -= 29.0f;
-        }
-
-        lockCursorFrame += 0.9f * step;
-        if (lockCursorFrame >= field_0x1c->getFrameMax()) {
-            lockCursorFrame -= field_0x1c->getFrameMax();
-        }
-    }
+    auto& samples = dusk::interp::get<dusk::interp::Samples<dusk::interp::SightAnimation>>(this);
+    const dusk::interp::SightAnimation current = {
+        mLockCursorAngle, field_0x30, static_cast<f32>(field_0x4), static_cast<f32>(field_0x1c->getFrameMax())};
+    const auto frame = samples.read(0, current);
 #endif
+    field_0x28->setFrame(DUSK_IF_ELSE(frame.bck, mLockCursorAngle));
 
-    field_0x28->setFrame(lockCursorAngle);
-
-    f32 var_f30;
-    if (lockCursorAngle > 21.0f) {
-        var_f30 = 21.0f;
-    } else {
-        var_f30 = lockCursorAngle;
-    }
-
-    field_0x24->setFrame(var_f30);
-    field_0x1c->setFrame(lockCursorFrame);
+    field_0x24->setFrame(DUSK_IF_ELSE(frame.bck, mLockCursorAngle) > 21.0f
+                             ? 21.0f : DUSK_IF_ELSE(frame.bck, mLockCursorAngle));
+    field_0x1c->setFrame(DUSK_IF_ELSE(frame.brk, field_0x30));
 
     mScrn->animation();
     field_0xc->scale(0.6f, 0.6f);
     field_0xc->translate(mPosX, mPosY);
 
     f32 var_f31;
-    if (!(lockCursorAngle < 15.0f)) {
-        if (lockCursorAngle < 21.0f) {
-            var_f31 = ((lockCursorAngle - 15.0f) * 40.0f) * 0.16666667f;
+    if (!(DUSK_IF_ELSE(frame.bck, mLockCursorAngle) < 15.0f)) {
+        if (DUSK_IF_ELSE(frame.bck, mLockCursorAngle) < 21.0f) {
+            var_f31 = ((DUSK_IF_ELSE(frame.bck, mLockCursorAngle) - 15.0f) * 40.0f) * 0.16666667f;
         } else {
-            var_f31 = ((field_0x4 * 0.00390625f) + 0.5f) * 40.0f;
+            var_f31 = ((DUSK_IF_ELSE(frame.alpha, field_0x4) * 0.00390625f) + 0.5f) * 40.0f;
         }
 
         mCursor0->translate(0.0f, -var_f31);
@@ -2346,33 +2277,12 @@ BOOL daAlink_sight_c::create() {
 }
 
 void daAlink_sight_c::draw() {
-    f32 drawX = mProjMtx[0][3];
-    f32 drawY = mProjMtx[1][3];
-#if TARGET_PC
-    if (dusk::game_clock::is_sim_frame()) {
-        recordAlinkSightSample(drawX, drawY);
-    } else if (dusk::interp::is_enabled() && s_alinkSightInterp.initialized) {
-        const f32 step = dusk::interp::get_interpolation_step();
-        drawX = s_alinkSightInterp.prevX + (s_alinkSightInterp.currX - s_alinkSightInterp.prevX) * step;
-        drawY = s_alinkSightInterp.prevY + (s_alinkSightInterp.currY - s_alinkSightInterp.prevY) * step;
-    }
-#endif
-
     if (mLockFlag) {
-        mLockCursor.setPos(drawX, drawY);
+        IF_DUSK(setSight(false);)
+        mLockCursor.setPos(mProjMtx[0][3], mProjMtx[1][3]);
         mLockCursor.draw();
     } else {
-#if TARGET_PC
-        const f32 oldX = mProjMtx[0][3];
-        const f32 oldY = mProjMtx[1][3];
-        mProjMtx[0][3] = drawX;
-        mProjMtx[1][3] = drawY;
-#endif
         daPy_sightPacket_c::draw();
-#if TARGET_PC
-        mProjMtx[0][3] = oldX;
-        mProjMtx[1][3] = oldY;
-#endif
     }
 }
 
@@ -2381,5 +2291,6 @@ void daAlink_sight_c::onLockFlg() {
         return;
     }
     mLockFlag = true;
+    IF_DUSK(dusk::interp::erase_owned_samples(&mLockCursor);)
     mLockCursor.initFrame();
 }

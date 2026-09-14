@@ -124,7 +124,11 @@ public:
     BOOL create();
     void update();
     virtual void draw();
+#if TARGET_PC
+    virtual ~daAlink_lockCursor_c();
+#else
     virtual ~daAlink_lockCursor_c() {}
+#endif
 
     void initFrame() {
         field_0x4 = 0;
@@ -2873,9 +2877,6 @@ public:
     void setCutLargeJumpLandEffect();
     void setBootsLightEffect();
     void setLightningSwordEffect();
-#if TARGET_PC
-    void prepareSwordEffectInterpolation();
-#endif
     void setWolfRollAttackEffect();
     void setWolfDigEffect();
     void setWolfSwimEndEffect(JPABaseEmitter**, JPABaseEmitter**);
@@ -4571,7 +4572,6 @@ public:
     bool checkAimInputContext();
 
     bool mIsRollstab = false;
-    void* mAnmBuffers[3] = {};
 #endif
 };  // Size: 0x385C
 

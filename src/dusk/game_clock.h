@@ -9,6 +9,10 @@ constexpr float kSimPeriod = 1.0f / 30.0f;
 constexpr float kUiMaximumDt = 0.05f;
 constexpr float kUiInitialDt = 1.0f / 60.0f;
 
+float original_frames();
+// TAS-only presentation budget; -1 uses normal delta time, reset by advance().
+void set_presentation_tick_override(int ticks);
+
 struct FrameTiming {
     float dt;
     bool interpolating;
@@ -36,6 +40,8 @@ void begin_sim_tick();
 void commit_sim_tick();
 float sample_interpolation_step();
 bool is_sim_frame();
+bool is_presentation_frame();
+
 float consume_interval(const void* consumer);
 
 } // namespace dusk::game_clock

@@ -22,7 +22,7 @@
 
 #if TARGET_PC
 #include "dusk/settings.h"
-#include "dusk/interp/dual_buffer.h"
+#include "dusk/interp/samples.h"
 #endif
 
 #if DEBUG
@@ -463,7 +463,7 @@ static int fopAc_Delete(void* i_this) {
     #endif
 
     if (ret == TRUE) {
-        IF_DUSK(dusk::interp::erase_owned_buffers(actor));
+        IF_DUSK(dusk::interp::erase_owned_samples(actor));
         fopAcTg_ActorQTo(&actor->actor_tag);
         fopDwTg_DrawQTo(&actor->draw_tag);
         fopAcM_DeleteHeap((fopAc_ac_c*) i_this);

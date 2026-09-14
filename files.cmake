@@ -1476,9 +1476,12 @@ set(DUSK_FILES
         src/dusk/imgui/ImGuiStateShare.hpp
         src/dusk/imgui/ImGuiStubLog.cpp
         src/dusk/interp/camera.cpp
-        src/dusk/interp/dual_buffer.cpp
         src/dusk/interp/frame_interpolation.cpp
         src/dusk/interp/line.cpp
+        src/dusk/interp/material.cpp
+        src/dusk/interp/particle.cpp
+        src/dusk/interp/samples.cpp
+        src/dusk/interp/vertex.cpp
         src/dusk/io.cpp
         src/dusk/iso_validate.cpp
         src/dusk/language.cpp

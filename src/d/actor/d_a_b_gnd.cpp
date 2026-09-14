@@ -1195,16 +1195,12 @@ static void b_gnd_h_end(b_gnd_class* i_this) {
 
             if (i_this->mDemoCamMode < 32) {
                 i_this->mDemoCamMode = 32;
-#if TARGET_PC
-                i_this->mDemoCamSyncTicks = 2;
-#endif
+                IF_DUSK(i_this->mDemoCamSyncTicks = 2);
             } else {
                 i_this->mDemoCamMode = 34;
                 i_this->mDemoCamTimer = 0;
                 i_this->mMoveMode = 2;
-#if TARGET_PC
-                i_this->mDemoCamSyncTicks = 2;
-#endif
+                IF_DUSK(i_this->mDemoCamSyncTicks = 2);
             }
         }
         break;
