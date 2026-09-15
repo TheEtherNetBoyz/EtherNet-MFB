@@ -120,8 +120,11 @@ public:
     void _draw();
 #if TARGET_PC
     void presentAnims();
-    void presentZoomView();
-    f32 getRenderZoomLevel() const;
+    void presentZoomView(u8 process, f32 zoomLevel, f32 zoomBlend);
+    void captureRenderState();
+    void captureZoomEnd(u8 process);
+    void resetRenderState();
+    void resetZoomEnd();
 #endif
     u8 getNextStatus(u8*);
     bool isSync();

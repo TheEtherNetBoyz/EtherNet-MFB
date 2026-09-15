@@ -207,7 +207,6 @@ public:
     bool isClose();
 #if TARGET_PC
     void presentAnims();
-    void presentLayoutAnims();
     void presentMapView();
 #endif
     void _draw();

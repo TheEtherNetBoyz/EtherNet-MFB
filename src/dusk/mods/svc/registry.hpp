@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dusk/mod_loader.hpp"
+#include "dusk/mods/services.hpp"
 #include "mods/svc/host.h"
 #include "mods/svc/log.h"
 
@@ -47,6 +48,9 @@ struct ServiceModule {
     // ModLoader::shutdown, after every mod has deactivated.
     void (*shutdown)() = nullptr;
 };
+
+std::vector<ServiceExport> list_services();
+uint64_t services_generation() noexcept;
 
 bool valid_service_id(const char* serviceId);
 ModResult register_service(const char* serviceId, uint16_t majorVersion, uint16_t minorVersion,

@@ -29,6 +29,7 @@ public:
     void _draw();
 #if TARGET_PC
     void advanceSelectItem();
+    void captureRenderState();
 #endif
     void setKanteraPos(f32, f32);
     bool isOpen();

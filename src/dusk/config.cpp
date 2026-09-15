@@ -479,6 +479,11 @@ static void LoadFromPath(const char* path) {
         return;
     }
 
+    // Configure mod update checks from the existing Dusklight updates cvar
+    if (!j.contains("backend.checkForModUpdates") && j.contains("backend.checkForUpdates")) {
+        j["backend.checkForModUpdates"] = j["backend.checkForUpdates"];
+    }
+
     UnregisteredConfigVars.clear();
 
     for (const auto& el : j.items()) {

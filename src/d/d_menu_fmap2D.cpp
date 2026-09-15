@@ -2111,6 +2111,11 @@ void dMenu_Fmap2DBack_c::stageMapMove(STControl* i_stick, u8 param_1, bool param
 }
 
 void dMenu_Fmap2DBack_c::setAllAlphaRate(f32 i_rate, bool i_init) {
+#if TARGET_PC
+    if (!i_init && i_rate == 1.0f && mAlphaRate == 1.0f) {
+        return;
+    }
+#endif
     mAlphaRate = i_rate;
     if (i_init) {
         mpBaseRoot->setBackupAlpha();
@@ -2305,6 +2310,7 @@ dMenu_Fmap2DTop_c::dMenu_Fmap2DTop_c(JKRExpHeap* i_heap, STControl* i_stick) {
     mpHeap = i_heap;
     mTransX = 0.0f;
     mTransY = 0.0f;
+    IF_DUSK(mAlphaRate = 0.0f;)
     mpPortalBin = NULL;
     mpScrnExplain = NULL;
 
@@ -2794,6 +2800,11 @@ void dMenu_Fmap2DTop_c::_execute() {
 }
 
 void dMenu_Fmap2DTop_c::setAllAlphaRate(f32 i_rate, bool i_init) {
+#if TARGET_PC
+    if (!i_init && i_rate == 1.0f && mAlphaRate == 1.0f) {
+        return;
+    }
+#endif
     mAlphaRate = i_rate;
     if (i_init) {
         mpTitleRoot->setBackupAlpha();

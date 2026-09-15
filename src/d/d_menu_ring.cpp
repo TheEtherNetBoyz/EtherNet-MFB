@@ -688,13 +688,28 @@ void dMenu_Ring_c::_move() {
         mRingCursorScale = g_ringHIO.mCursorScale;
         mpDrawCursor->setScale(g_ringHIO.mCursorScale);
     }
-    IF_DUSK(dusk::interp::capture_menu_values(this, mCenterPosX, mCenterPosY, mAlphaRate,
-                                              field_0x674[0], field_0x674[1], field_0x674[2], field_0x674[3]));
+    IF_DUSK(captureRenderState());
 }
+
+#if TARGET_PC
+namespace {
+struct RingSelectionSamples {
+    dusk::interp::Samples<f32> frames;
+};
+}
+
+void dMenu_Ring_c::captureRenderState() {
+    dusk::interp::capture_menu_pose(this, {mCenterPosX, mCenterPosY, mAlphaRate});
+    dusk::interp::get<RingSelectionSamples>(this).frames.capture(4, [&](int i) {
+        return (f32)field_0x674[i];
+    });
+}
+#endif
 
 void dMenu_Ring_c::_draw() {
 #if TARGET_PC
-    dusk::interp::ScopedMenuValues pose(this, mCenterPosX, mCenterPosY, mAlphaRate);
+    const auto [mCenterPosX, mCenterPosY, mAlphaRate] =
+        dusk::interp::read_menu_pose(this, {this->mCenterPosX, this->mCenterPosY, this->mAlphaRate});
     if (mDrawFlag == 0) {
         dusk::vdt::advance_looping_frame(field_0x684, 1.0f, g_ringHIO.mItemAlphaFlashDuration);
     }
@@ -799,8 +814,7 @@ bool dMenu_Ring_c::isOpen() {
         mpDrawCursor->setParam(1.0f, 1.0f, 0.1f, 0.6f, 0.5f);
     }
 
-    IF_DUSK(dusk::interp::capture_menu_values(this, mCenterPosX, mCenterPosY, mAlphaRate,
-                                              field_0x674[0], field_0x674[1], field_0x674[2], field_0x674[3]));
+    IF_DUSK(captureRenderState());
     return opened;
 }
 
@@ -864,8 +878,7 @@ bool dMenu_Ring_c::isClose() {
         mpDrawCursor->setParam(1.0f, 1.0f, 0.1f, 0.6f, 0.5f);
     }
 
-    IF_DUSK(dusk::interp::capture_menu_values(this, mCenterPosX, mCenterPosY, mAlphaRate,
-                                              field_0x674[0], field_0x674[1], field_0x674[2], field_0x674[3]));
+    IF_DUSK(captureRenderState());
     return closed;
 }
 
@@ -1389,7 +1402,10 @@ void dMenu_Ring_c::setMixItem() {
 }
 
 void dMenu_Ring_c::drawItem() {
-#if !TARGET_PC
+#if TARGET_PC
+    const auto [mCenterPosX, mCenterPosY, mAlphaRate] =
+        dusk::interp::read_menu_pose(this, {this->mCenterPosX, this->mCenterPosY, this->mAlphaRate});
+#else
     field_0x684++;
     if (field_0x684 >= g_ringHIO.mItemAlphaFlashDuration) {
         field_0x684 = 0;
@@ -1448,6 +1464,10 @@ void dMenu_Ring_c::drawItem() {
 }
 
 void dMenu_Ring_c::drawItem2() {
+#if TARGET_PC
+    const auto [mCenterPosX, mCenterPosY, mAlphaRate] =
+        dusk::interp::read_menu_pose(this, {this->mCenterPosX, this->mCenterPosY, this->mAlphaRate});
+#endif
     s32 idx = mCurrentSlot;
     if (mStatus == STATUS_WAIT || mStatus == STATUS_EXPLAIN || mStatus == STATUS_EXPLAIN_FORCE) {
         J2DDrawFrame(mItemSlotPosX[idx] - 24.0f + mCenterPosX, mItemSlotPosY[idx] - 24.0f + mCenterPosY,
@@ -1745,12 +1765,12 @@ void dMenu_Ring_c::advanceSelectItem() {
             ++field_0x674[i];
         }
     }
-    dusk::interp::capture_menu_values(this, mCenterPosX, mCenterPosY, mAlphaRate, field_0x674[0],
-                                      field_0x674[1], field_0x674[2], field_0x674[3]);
+    captureRenderState();
 }
 #endif
 
 void dMenu_Ring_c::drawSelectItem() {
+    IF_DUSK(const auto mAlphaRate = dusk::interp::read_menu_pose(this, {mCenterPosX, mCenterPosY, this->mAlphaRate}).alpha);
     for (int i = 0; i < 4; i++) {
         if (field_0x674[i] != 0) {
             if (DUSK_IF_ELSE(true, field_0x674[i] < 10)) {
@@ -1790,8 +1810,8 @@ void dMenu_Ring_c::drawSelectItem() {
 #endif
 
 #if TARGET_PC
-                const auto& samples = dusk::interp::get<dusk::interp::MenuValues>(this).values;
-                const f32 frame = field_0x674[i] == 1 ? 1.0f : samples.read(3 + i, (f32)field_0x674[i]);
+                const auto& samples = dusk::interp::get<RingSelectionSamples>(this).frames;
+                const f32 frame = field_0x674[i] == 1 ? 1.0f : samples.read(i, (f32)field_0x674[i]);
                 f32 fVar14 = std::clamp(frame, 1.0f, 9.0f) / 10.0f;
 #else
                 f32 fVar14 = field_0x674[i] / 10.0f;
@@ -2050,6 +2070,7 @@ void dMenu_Ring_c::setCombineBomb(int param_0) {
 }
 
 void dMenu_Ring_c::drawNumber(int i_itemNum, int i_itemMaxNum, f32 i_posX, f32 i_posY) {
+    IF_DUSK(const auto mAlphaRate = dusk::interp::read_menu_pose(this, {mCenterPosX, mCenterPosY, this->mAlphaRate}).alpha);
     if (i_itemNum > 100) {
         i_itemNum = 100;
     }

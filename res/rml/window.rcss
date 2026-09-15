@@ -695,26 +695,12 @@ modal-content pane > * {
     flex: 0 0 auto;
 }
 
-window.modal.install-queue {
-    max-height: 768dp;
-}
-
 window.modal.drop-install {
     max-height: 720dp;
 }
 
 window.modal.drop-install package-row {
     padding-right: 0;
-}
-
-window.modal.install-queue modal-body {
-    display: none;
-}
-
-window.modal.install-queue modal-content pane {
-    gap: 0;
-    padding-right: 14dp;
-    padding-bottom: 6dp;
 }
 
 package-row {
@@ -929,10 +915,6 @@ package-row.installed nav {
     position: absolute;
     top: 17dp;
     right: 0;
-}
-
-package-row.installed nav > button.icon-action {
-    opacity: 0.45;
 }
 
 verification-progress {

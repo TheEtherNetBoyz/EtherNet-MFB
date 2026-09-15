@@ -55,13 +55,6 @@ catalog-filters select-button input {
     font-size: var(--font-size-sm);
 }
 
-.catalog-library-link {
-    padding: var(--space-sm) 10dp;
-    border-radius: var(--radius-panel);
-    text-align: left;
-    font-size: var(--font-size-sm);
-}
-
 catalog-results {
     display: flex;
     flex-flow: column;
@@ -228,7 +221,6 @@ catalog-card-body > footer {
     align-items: center;
     gap: 10dp;
     font-size: var(--font-size-3xs);
-    opacity: 0.52;
 }
 
 catalog-card-body > footer stat {
@@ -237,6 +229,7 @@ catalog-card-body > footer stat {
     align-items: center;
     gap: 3dp;
     white-space: nowrap;
+    opacity: 0.52;
 }
 
 catalog-card-body > footer icon {
@@ -248,10 +241,17 @@ catalog-card-body > footer icon {
 catalog-card-body > footer .size {
     margin-left: auto;
     font-size: var(--font-size-sm);
+    white-space: nowrap;
+    opacity: 0.52;
 }
 
 catalog-card-body > footer .size.installed {
     color: var(--color-success);
+}
+
+catalog-card-body > footer .size.update-available {
+    color: var(--color-accent);
+    opacity: 1;
 }
 
 catalog-pagination {

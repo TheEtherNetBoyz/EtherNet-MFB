@@ -19,9 +19,13 @@ public:
     };
 
     IconButton(Rml::Element* parent, Props props);
+    void set_icon(std::string_view icon);
+    void set_label(const Rml::String& label);
     void update() override;
 
 private:
+    Rml::Element* mIcon;
+    Rml::String mIconName;
     Tooltip mTooltip;
 };
 

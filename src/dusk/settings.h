@@ -399,6 +399,7 @@ struct UserSettings {
         ConfigVar<bool> wasPresetChosen;
         ConfigVar<bool> showPipelineCompilation;
         ConfigVar<bool> checkForUpdates;
+        ConfigVar<bool> checkForModUpdates;
         ConfigVar<int> cardFileType;
         ConfigVar<bool> enableAdvancedSettings;
     } backend;

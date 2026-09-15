@@ -1508,10 +1508,13 @@ set(DUSK_FILES
         src/dusk/mods/loader/native_module.hpp
         src/dusk/mods/loader/prepatch.cpp
         src/dusk/mods/loader/prepatch.hpp
+        src/dusk/mods/updates.cpp
+        src/dusk/mods/updates.hpp
         src/dusk/mods/catalog.cpp
         src/dusk/mods/catalog.hpp
         src/dusk/mods/queue.cpp
         src/dusk/mods/queue.hpp
+        src/dusk/mods/services.hpp
         src/dusk/mods/item.hpp
         src/dusk/mods/item_actor.cpp
         src/dusk/mods/item_checks.cpp
@@ -1579,6 +1582,8 @@ set(DUSK_FILES
         src/dusk/ui/bool_button.hpp
         src/dusk/ui/button.cpp
         src/dusk/ui/button.hpp
+        src/dusk/ui/clamped_text.cpp
+        src/dusk/ui/clamped_text.hpp
         src/dusk/ui/color_input.cpp
         src/dusk/ui/color_input.hpp
         src/dusk/ui/component.cpp
@@ -1612,8 +1617,8 @@ set(DUSK_FILES
         src/dusk/ui/menu_bar.hpp
         src/dusk/ui/mod_browser.cpp
         src/dusk/ui/mod_browser.hpp
-        src/dusk/ui/queue_window.cpp
-        src/dusk/ui/queue_window.hpp
+        src/dusk/ui/online_mods.cpp
+        src/dusk/ui/online_mods.hpp
         src/dusk/ui/package_row.cpp
         src/dusk/ui/package_row.hpp
         src/dusk/ui/mod_texture_provider.cpp
@@ -1626,6 +1631,8 @@ set(DUSK_FILES
         src/dusk/ui/mod_window.hpp
         src/dusk/ui/modal.cpp
         src/dusk/ui/modal.hpp
+        src/dusk/ui/mod_updates.cpp
+        src/dusk/ui/mod_updates.hpp
         src/dusk/ui/mods_window.cpp
         src/dusk/ui/mods_window.hpp
         src/dusk/ui/nav_types.hpp

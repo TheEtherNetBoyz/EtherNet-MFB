@@ -10,6 +10,7 @@
 #include "dusk/settings.h"
 #include "dusk/ui/format.hpp"
 #include "dusk/ui/menu_bar.hpp"
+#include "mod_updates.hpp"
 #include "modal.hpp"
 #include "mods_window.hpp"
 #include "preset.hpp"
@@ -46,6 +47,7 @@ const Rml::String kDocumentSource = R"RML(
 <rml>
 <head>
     <link type="text/rcss" href="res/rml/theme.rcss" />
+    <link type="text/rcss" href="res/rml/mod_common.rcss" />
     <link type="text/rcss" href="res/rml/prelaunch.rcss" />
 </head>
 <body>
@@ -889,6 +891,7 @@ Prelaunch::Prelaunch() : Document(kDocumentSource, false, DocumentScope::Prelaun
 }
 
 void Prelaunch::build_menu_buttons() {
+    mModsButton = nullptr;
     if (auto* menuList = mDocument->GetElementById("menu-list")) {
         // Restore the previously selected game mode before creating the play control.
         gamemode::getGameModeManager().setGameModeToPrevious();
@@ -938,6 +941,7 @@ void Prelaunch::build_menu_buttons() {
         apply_intro_animation(mMenuButtons.back()->root(), "delay-2");
 
         mMenuButtons.push_back(std::make_unique<Button>(menuList, "Mods"));
+        mModsButton = mMenuButtons.back().get();
         mMenuButtons.back()->on_pressed([this] {
             mRestartSuppressed = false;
             push(std::make_unique<ModsWindow>());
@@ -1005,6 +1009,9 @@ void Prelaunch::hide(bool close) {
 }
 
 void Prelaunch::update() {
+    if (mModsButton) {
+        set_mod_update_badge(*mModsButton);
+    }
     ensure_initialized();
     try_apply_mirrored_layout(mDocument);
 

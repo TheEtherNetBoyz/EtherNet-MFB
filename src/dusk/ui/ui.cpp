@@ -11,18 +11,21 @@
 
 #include "dusk/config.hpp"
 #include "dusk/mods/queue.hpp"
+#include "dusk/mods/updates.hpp"
 
-#include <absl/container/flat_hash_set.h>
-#include <aurora/lib/window.hpp>
-#include <aurora/rmlui.hpp>
-#include <borealis/io.hpp>
-#include <fmt/format.h>
 #include <RmlUi/Core.h>
+#include <RmlUi/Core/ElementText.h>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_gamepad.h>
 #include <SDL3/SDL_joystick.h>
 #include <SDL3/SDL_power.h>
 #include <SDL3/SDL_video.h>
+#include <absl/container/flat_hash_set.h>
+#include <aurora/lib/window.hpp>
+#include <aurora/rmlui.hpp>
+#include <borealis/io.hpp>
+#include <fmt/format.h>
+#include <tracy/Tracy.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -114,6 +117,7 @@ bool initialize() noexcept {
 }
 
 void shutdown() noexcept {
+    mods::updates::shutdown();
     mods::queue::shutdown();
     for (auto& drop : sPendingDrops) {
         drop.inspection.cancel();
@@ -439,7 +443,9 @@ Document* top_document() noexcept {
 }
 
 void update() noexcept {
+    ZoneScopedN("Dusk UI update");
     mods::queue::update();
+    mods::updates::update();
     if (!aurora::rmlui::is_initialized()) {
         return;
     }
@@ -573,9 +579,27 @@ void clear_children(Rml::Element* parent) noexcept {
 }
 
 void set_text_content(Rml::Element* parent, const Rml::String& text) noexcept {
+    if (parent == nullptr) {
+        return;
+    }
+    if (!text.empty() && parent->GetNumChildren() == 1) {
+        if (auto* element = dynamic_cast<Rml::ElementText*>(parent->GetFirstChild())) {
+            // RmlUi only dirties layout when the node's text changes.
+            element->SetText(text);
+            return;
+        }
+    }
     clear_children(parent);
     if (!text.empty()) {
         append_text(parent, text);
+    }
+}
+
+void set_display(Rml::Element* element, Rml::Style::Display display) noexcept {
+    const Rml::Property value{display};
+    const auto* current = element->GetLocalProperty(Rml::PropertyId::Display);
+    if (current == nullptr || *current != value) {
+        element->SetProperty(Rml::PropertyId::Display, value);
     }
 }
 

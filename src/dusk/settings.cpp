@@ -215,6 +215,7 @@ UserSettings g_userSettings = {
         .wasPresetChosen {"backend.wasPresetChosen", false},
         .showPipelineCompilation {"backend.showPipelineCompilation", true},
         .checkForUpdates {"backend.checkForUpdates", false},
+        .checkForModUpdates {"backend.checkForModUpdates", true},
         .cardFileType {"backend.cardFileType", static_cast<int>(CARD_GCIFOLDER)},
         .enableAdvancedSettings {"backend.enableAdvancedSettings", false},
     },
@@ -574,6 +575,7 @@ void registerSettings() {
     Register(g_userSettings.backend.wasPresetChosen);
     Register(g_userSettings.backend.showPipelineCompilation);
     Register(g_userSettings.backend.checkForUpdates);
+    Register(g_userSettings.backend.checkForModUpdates);
     Register(g_userSettings.backend.cardFileType);
     Register(g_userSettings.backend.enableAdvancedSettings);
 

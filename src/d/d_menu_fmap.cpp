@@ -498,7 +498,29 @@ void dMenu_Fmap_c::_delete() {
     /* empty function */
 }
 
+#if TARGET_PC
+namespace {
+struct FmapZoomView {
+    u8 process = 0xff;
+    f32 level = 0.0f;
+    f32 blend = 0.0f;
+};
+
+void lerp(FmapZoomView& out, const FmapZoomView& lhs, const FmapZoomView& rhs, f32 step) {
+    out = {rhs.process, dusk::interp::lerp(lhs.level, rhs.level, step),
+           dusk::interp::lerp(lhs.blend, rhs.blend, step)};
+}
+
+struct FmapZoomSamples {
+    dusk::interp::Samples<FmapZoomView> views;
+    FmapZoomView end;
+    bool needsRestore = false;
+};
+}
+#endif
+
 void dMenu_Fmap_c::_move() {
+    IF_DUSK(resetZoomEnd());
     u8 process = mProcess;
     field_0x310 = 0;
     mpDraw2DBack->clearIconInfo();
@@ -512,8 +534,9 @@ void dMenu_Fmap_c::_move() {
     IF_NOT_DUSK(mpDraw2DTop->btkAnimeLoop(g_fmHIO.mTopAnimeStep));
 
     if (mProcess != process) {
+        IF_DUSK(captureZoomEnd(process));
         (this->*init_process[mProcess])();
-        IF_DUSK(dusk::interp::erase_owned_samples(this));
+        IF_DUSK(resetRenderState());
     }
 
 #if !TARGET_PC
@@ -549,21 +572,83 @@ void dMenu_Fmap_c::_move() {
         mpDraw2DTop->mSelectRegionNo = 0xFF;
     }
 
-    dusk::interp::capture_menu_values(this, mTransX, mTransY, mAlphaRatio, field_0x1ec, mZoomLevel);
+    captureRenderState();
 #endif
 }
 
+#if TARGET_PC
+void dMenu_Fmap_c::captureRenderState() {
+    dusk::interp::capture_menu_pose(this, {mTransX, mTransY, mAlphaRatio});
+    auto& zoom = dusk::interp::get<FmapZoomSamples>(this);
+    if (zoom.end.process == 0xff) {
+        const FmapZoomView view{mProcess, (f32)mZoomLevel, field_0x1ec};
+        zoom.views.capture(&view, 1);
+    }
+}
+
+void dMenu_Fmap_c::captureZoomEnd(u8 process) {
+    switch (process) {
+    case PROC_ZOOM_ALL_TO_REGION:
+    case PROC_ZOOM_REGION_TO_ALL:
+    case PROC_ZOOM_REGION_TO_SPOT:
+    case PROC_ZOOM_SPOT_TO_REGION:
+    case PROC_PORTAL_DEMO1:
+    case PROC_PORTAL_DEMO3:
+    case PROC_YAMIBOSS_DEMO4:
+    case PROC_TABLE_DEMO1:
+    case PROC_TABLE_DEMO2:
+    case PROC_HOWL_DEMO1:
+        break;
+    default:
+        return;
+    }
+
+    auto& zoom = dusk::interp::get<FmapZoomSamples>(this);
+    zoom.end = {process, (f32)mZoomLevel, field_0x1ec};
+    zoom.views.capture(&zoom.end, 1);
+}
+
+void dMenu_Fmap_c::resetRenderState() {
+    if (dusk::interp::get<FmapZoomSamples>(this).end.process != 0xff) {
+        dusk::interp::get<dusk::interp::MenuTransition>(this).poses.reset();
+    } else {
+        dusk::interp::erase_owned_samples(this);
+    }
+}
+
+void dMenu_Fmap_c::resetZoomEnd() {
+    auto& zoom = dusk::interp::get<FmapZoomSamples>(this);
+    if (zoom.needsRestore) {
+        presentZoomView(zoom.end.process, zoom.end.level, zoom.end.blend);
+    }
+    if (zoom.end.process != 0xff) {
+        zoom.views.reset();
+        const FmapZoomView view{mProcess, (f32)mZoomLevel, field_0x1ec};
+        zoom.views.capture(&view, 1);
+    }
+    zoom.end.process = 0xff;
+    zoom.needsRestore = false;
+}
+#endif
+
 void dMenu_Fmap_c::_draw() {
-    IF_DUSK(dusk::interp::ScopedMenuValues pose(this, mTransX, mTransY, mAlphaRatio, field_0x1ec));
+    IF_DUSK(const auto pose = dusk::interp::read_menu_pose(this, {mTransX, mTransY, mAlphaRatio}));
+#if TARGET_PC
+    auto& zoom = dusk::interp::get<FmapZoomSamples>(this);
+    const auto [renderProcess, zoomLevel, zoomBlend] =
+        zoom.views.read(0, {mProcess, (f32)mZoomLevel, field_0x1ec});
+    const bool finishingZoom = renderProcess != mProcess;
+#endif
     if (mpDraw2DBack != NULL && mpDraw2DTop != NULL) {
 #if TARGET_PC
         if (dusk::game_clock::is_presentation_frame()) {
+            mpDraw2DTop->setAllAlphaRate(pose.alpha, false);
             presentAnims();
-            presentZoomView();
-            mpDraw2DBack->setAllTrans(mTransX, mTransY);
-            mpDraw2DTop->setAllTrans(mTransX, mTransY);
-            mpDraw2DBack->setAllAlphaRate(mAlphaRatio, false);
-            mpDraw2DTop->setAllAlphaRate(mAlphaRatio, false);
+            presentZoomView(renderProcess, zoomLevel, zoomBlend);
+            zoom.needsRestore |= finishingZoom;
+            mpDraw2DBack->setAllTrans(pose.x, pose.y);
+            mpDraw2DTop->setAllTrans(pose.x, pose.y);
+            mpDraw2DBack->setAllAlphaRate(pose.alpha, false);
             mpDraw2DTop->setMoyaAlpha(g_fmHIO.mMoyaAlpha);
             if (field_0x305) {
                 mpMenuFmapMap->presentRendering(mpWorldData, mStartStageNo,
@@ -584,18 +669,23 @@ void dMenu_Fmap_c::_draw() {
                                         mpDraw2DBack->getMapZoomRate());
             mpDraw2DBack->setStageInfo(mSpotNum, mpMenuFmapMap);
             IF_DUSK_BLOCK_END
-            drawIcon(field_0x1ec, false);
-            if (mProcess == PROC_ZOOM_REGION_TO_SPOT || mProcess == PROC_ZOOM_SPOT_TO_REGION
-                || mProcess == PROC_YAMIBOSS_DEMO4 || mProcess == PROC_LIGHT_DEMO1
-                || mProcess == PROC_TABLE_DEMO2 || mProcess == PROC_HOWL_DEMO1)
+            drawIcon(DUSK_IF_ELSE(zoomBlend, field_0x1ec), false);
+            if (DUSK_IF_ELSE(renderProcess, mProcess) == PROC_ZOOM_REGION_TO_SPOT ||
+                DUSK_IF_ELSE(renderProcess, mProcess) == PROC_ZOOM_SPOT_TO_REGION ||
+                DUSK_IF_ELSE(renderProcess, mProcess) == PROC_YAMIBOSS_DEMO4 ||
+                DUSK_IF_ELSE(renderProcess, mProcess) == PROC_LIGHT_DEMO1 ||
+                DUSK_IF_ELSE(renderProcess, mProcess) == PROC_TABLE_DEMO2 ||
+                DUSK_IF_ELSE(renderProcess, mProcess) == PROC_HOWL_DEMO1)
             {
-                f32 scale = 1.0f - field_0x1ec;
+                f32 scale = 1.0f - DUSK_IF_ELSE(zoomBlend, field_0x1ec);
                 mpDraw2DBack->iconScale(0, scale, scale, 1.0f - scale);
             }
         } else {
             drawPortalIcon();
-            if (mProcess == PROC_ZOOM_ALL_TO_REGION || mProcess == PROC_ZOOM_REGION_TO_ALL) {
-                f32 scale = 1.0f - DUSK_IF_ELSE(getRenderZoomLevel(), (f32)mZoomLevel) / 10.0f;
+            if (DUSK_IF_ELSE(renderProcess, mProcess) == PROC_ZOOM_ALL_TO_REGION ||
+                DUSK_IF_ELSE(renderProcess, mProcess) == PROC_ZOOM_REGION_TO_ALL)
+            {
+                f32 scale = 1.0f - DUSK_IF_ELSE(zoomLevel, (f32)mZoomLevel) / 10.0f;
                 mpDraw2DBack->iconScale(0, scale, scale, 1.0f - scale);
             }
         }
@@ -633,9 +723,8 @@ void dMenu_Fmap_c::presentAnims() {
     }
 }
 
-void dMenu_Fmap_c::presentZoomView() {
-    const f32 zoomLevel = getRenderZoomLevel();
-    switch (mProcess) {
+void dMenu_Fmap_c::presentZoomView(u8 process, f32 zoomLevel, f32 zoomBlend) {
+    switch (process) {
     case PROC_ZOOM_ALL_TO_REGION:
     case PROC_ZOOM_REGION_TO_ALL:
     case PROC_PORTAL_DEMO1:
@@ -650,19 +739,15 @@ void dMenu_Fmap_c::presentZoomView() {
     case PROC_ZOOM_REGION_TO_SPOT:
     case PROC_ZOOM_SPOT_TO_REGION:
     case PROC_YAMIBOSS_DEMO4:
-        mpDraw2DBack->zoomMapCalc2(field_0x1ec);
+        mpDraw2DBack->zoomMapCalc2(zoomBlend);
         break;
     case PROC_TABLE_DEMO2:
     case PROC_HOWL_DEMO1:
         if (zoomLevel > 0) {
-            mpDraw2DBack->zoomMapCalc2(field_0x1ec);
+            mpDraw2DBack->zoomMapCalc2(zoomBlend);
         }
         break;
     }
-}
-
-f32 dMenu_Fmap_c::getRenderZoomLevel() const {
-    return dusk::interp::get<dusk::interp::MenuValues>(this).values.read(4, (f32)mZoomLevel);
 }
 #endif
 
@@ -1851,12 +1936,13 @@ bool dMenu_Fmap_c::isOpen() {
 
 #if TARGET_PC
     mpDraw2DTop->setMoyaAlpha(g_fmHIO.mMoyaAlpha);
-    dusk::interp::capture_menu_values(this, mTransX, mTransY, mAlphaRatio, field_0x1ec, mZoomLevel);
+    captureRenderState();
 #endif
     return ret;
 }
 
 bool dMenu_Fmap_c::isClose() {
+    IF_DUSK(resetZoomEnd());
     bool ret = true;
     bool bVar2 = false;
     
@@ -1896,7 +1982,7 @@ bool dMenu_Fmap_c::isClose() {
 
 #if TARGET_PC
     mpDraw2DTop->setMoyaAlpha(g_fmHIO.mMoyaAlpha);
-    dusk::interp::capture_menu_values(this, mTransX, mTransY, mAlphaRatio, field_0x1ec, mZoomLevel);
+    captureRenderState();
 #endif
     return ret;
 }

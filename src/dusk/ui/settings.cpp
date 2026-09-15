@@ -2223,7 +2223,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             });
         config_bool_select(leftPane, rightPane, getSettings().backend.checkForUpdates,
             {
-                .key = "Check for Updates",
+                .key = "Check for Dusklight Updates",
                 .helpText = "Checks GitHub releases for a new Dusklight version on startup.<br/><br/>"
                             "No personal information is transmitted or collected.",
             });

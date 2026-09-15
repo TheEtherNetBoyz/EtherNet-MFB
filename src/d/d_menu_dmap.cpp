@@ -868,6 +868,11 @@ dMenu_DmapBg_c::~dMenu_DmapBg_c() {
 }
 
 void dMenu_DmapBg_c::setAllAlphaRate(f32 i_rate, bool param_2) {
+#if TARGET_PC
+    if (!param_2 && i_rate == 1.0f && field_0xd9c == 1.0f) {
+        return;
+    }
+#endif
     field_0xd9c = i_rate;
 
     if (param_2) {
@@ -2035,7 +2040,7 @@ void dMenu_Dmap_c::_move() {
     IF_NOT_DUSK(mpDrawBg->addGoldFrameAlphaRate());
 
     mDoExt_setCurrentHeap(prev_heap);
-    IF_DUSK(dusk::interp::capture_menu_values(this, field_0x104, field_0x108, field_0x10c));
+    IF_DUSK(dusk::interp::capture_menu_pose(this, {field_0x104, field_0x108, field_0x10c}));
 }
 
 void dMenu_Dmap_c::setMapTexture() {
@@ -2197,7 +2202,7 @@ bool dMenu_Dmap_c::isOpen() {
 
     mpDrawBg->setAllAlphaRate(field_0x10c, var_r27);
     mpDrawBg->setGoldFrameAlphaRate(0.0f);
-    IF_DUSK(dusk::interp::capture_menu_values(this, field_0x104, field_0x108, field_0x10c));
+    IF_DUSK(dusk::interp::capture_menu_pose(this, {field_0x104, field_0x108, field_0x10c}));
     return var_r28;
 }
 
@@ -2237,7 +2242,7 @@ bool dMenu_Dmap_c::isClose() {
     field_0x10c = temp_f31;
     mpDrawBg->setAllAlphaRate(field_0x10c, var_r29);
     mpDrawBg->decGoldFrameAlphaRate();
-    IF_DUSK(dusk::interp::capture_menu_values(this, field_0x104, field_0x108, field_0x10c));
+    IF_DUSK(dusk::interp::capture_menu_pose(this, {field_0x104, field_0x108, field_0x10c}));
     return var_r30;
 }
 
@@ -2269,53 +2274,6 @@ void dMenu_Dmap_c::presentAnims() {
         if (field_0x17e == 1 || field_0x17e == 2) {
             mpDrawBg->iconScaleAnm();
         }
-    }
-
-    presentLayoutAnims();
-}
-
-void dMenu_Dmap_c::presentLayoutAnims() {
-    mpDrawBg->setAllTrans(field_0x104, field_0x108);
-
-    if (mpDrawBg->mpBackTexture != NULL) {
-        f32 var_f31 = 100.0f * mpDrawBg->field_0xd88;
-        f32 sp24 = mpDrawBg->field_0xd80 / var_f31;
-        f32 sp20 = mpDrawBg->field_0xd84 / var_f31;
-
-        const ResTIMG* back_timg = mpDrawBg->mpBackTexture->getTexture(0)->getTexInfo();
-        field_0x13c = mMapCtrl->getPixelStageSizeX();
-        field_0x140 = mMapCtrl->getPixelStageSizeZ();
-        field_0x134 = mMapCtrl->getPixelCenterX();
-        field_0x138 = mMapCtrl->getPixelCenterZ();
-
-        f32 temp_f30;
-        f32 var_f29;
-        f32 var_f27;
-        if (field_0x13c > field_0x140) {
-            temp_f30 = back_timg->width * var_f31;
-            var_f29 = mMapCtrl->getStageMapSizeX();
-            var_f27 = field_0x13c * (temp_f30 / var_f29);
-        } else {
-            temp_f30 = back_timg->height * var_f31;
-            var_f29 = mMapCtrl->getStageMapSizeZ();
-            var_f27 = field_0x140 * (temp_f30 / var_f29);
-        }
-
-        f32 sp1C[2];
-        sp1C[0] = var_f27;
-        sp1C[1] = var_f27;
-
-        f32 sp14[2];
-        sp14[0] = -(field_0x134 + (100.0f * (sp24 * mMapCtrl->getPixelPerCm())));
-        sp14[1] = -(field_0x138 + 100.0f * (sp20 * mMapCtrl->getPixelPerCm()));
-
-        CPaneMgr sp70;
-        //!@bug It's unclear what this is supposed to be, but a stack pointer being converted to a bool is probably not intended.
-        u8 sp40[0x30];
-        Vec sp34 = sp70.getGlobalVtxCenter(mpDrawBg->getMapPane(), (bool)sp40, 0);
-        mpDrawBg->mpBackTexture->move(sp14[0] + (sp34.x - (sp1C[0] / 2)),
-                                      sp14[1] + (sp34.y - (sp1C[1] / 2)));
-        mpDrawBg->mpBackTexture->resize(sp1C[0], sp1C[1]);
     }
 }
 
@@ -2380,17 +2338,16 @@ void dMenu_Dmap_c::presentMapView() {
 #endif
 
 void dMenu_Dmap_c::_draw() {
-    IF_DUSK(dusk::interp::ScopedMenuValues pose(this, field_0x104, field_0x108, field_0x10c));
+    IF_DUSK(const auto pose = dusk::interp::read_menu_pose(this, {field_0x104, field_0x108, field_0x10c}));
     if (mMapCtrl != NULL) {
         IF_NOT_DUSK(mMapCtrl->draw());
         if (mpDrawBg != NULL) {
+            IF_DUSK_BLOCK(dusk::game_clock::is_presentation_frame())
 #if TARGET_PC
-            if (dusk::game_clock::is_presentation_frame()) {
-                presentAnims();
-                mpDrawBg->setAllAlphaRate(field_0x10c, false);
-            }
-#else
-            mpDrawBg->setAllTrans(field_0x104, field_0x108);
+            mpDrawBg->setAllAlphaRate(pose.alpha, false);
+            presentAnims();
+#endif
+            mpDrawBg->setAllTrans(DUSK_IF_ELSE(pose.x, field_0x104), DUSK_IF_ELSE(pose.y, field_0x108));
 
             if (mpDrawBg->mpBackTexture != NULL) {
                 f32 var_f31 = 100.0f * mpDrawBg->field_0xd88;
@@ -2426,8 +2383,10 @@ void dMenu_Dmap_c::_draw() {
                 sp14[1] = -(field_0x138 + 100.0f * (sp20 * mMapCtrl->getPixelPerCm()));
 
                 Vec spC;
+#if !TARGET_PC
                 spC.x = mpDrawBg->mMapScreen[0]->search(MULTI_CHAR('center_n'))->getGlbBounds().i.x + (mpDrawBg->mMapScreen[0]->search(MULTI_CHAR('center_n'))->getWidth() / 2);
                 spC.y = mpDrawBg->mMapScreen[0]->search(MULTI_CHAR('center_n'))->getGlbBounds().i.y + (mpDrawBg->mMapScreen[0]->search(MULTI_CHAR('center_n'))->getHeight() / 2);
+#endif
                 
                 CPaneMgr sp70;
                 //!@bug It's unclear what this is supposed to be, but a stack pointer being converted to a bool is probably not intended.
@@ -2439,9 +2398,9 @@ void dMenu_Dmap_c::_draw() {
                 mpDrawBg->mpBackTexture->move(sp14[0] + (spC.x - (sp1C[0] / 2)), sp14[1] + (spC.y - (sp1C[1] / 2)));
                 mpDrawBg->mpBackTexture->resize(sp1C[0], sp1C[1]);
             }
+            IF_DUSK_BLOCK_END
 
-            dComIfGd_set2DOpa(mpDrawBg);
-#endif
+            IF_NOT_DUSK(dComIfGd_set2DOpa(mpDrawBg));
         }
 
 #if TARGET_PC

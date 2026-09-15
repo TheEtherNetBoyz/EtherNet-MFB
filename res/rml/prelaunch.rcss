@@ -233,6 +233,14 @@ body.mirrored #menu-list button {
     text-align: right;
 }
 
+body.mirrored #menu-list button.mod-update-link {
+    justify-content: flex-end;
+}
+
+#menu-list update-badge {
+    font-size: var(--font-size-md);
+}
+
 disc-info {
     position: absolute;
     left: 96dp;

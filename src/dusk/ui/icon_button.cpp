@@ -27,6 +27,9 @@ const char* material_icon(std::string_view name) {
         {"check_circle", "\uE86C"},
         {"favorite", "\uE87D"},
         {"arrow_back", "\uE5C4"},
+        {"arrow_forward", "\uE5C8"},
+        {"expand_less", "\uE5CE"},
+        {"expand_more", "\uE5CF"},
         {"open_in_new", "\uE89E"},
         {"settings", "\uE8B8"},
         {"folder_open", "\uE2C8"},
@@ -57,9 +60,25 @@ IconButton::IconButton(Rml::Element* parent, Props props)
       mTooltip{mRoot, props.label} {
     mRoot->SetClass("icon-button", true);
     mRoot->SetAttribute("aria-label", props.label);
-    auto* icon = append(mRoot, "icon");
-    icon->SetAttribute("aria-hidden", "true");
-    append_text(icon, material_icon(props.icon));
+    mIcon = append(mRoot, "icon");
+    mIcon->SetAttribute("aria-hidden", "true");
+    set_icon(props.icon);
+}
+
+void IconButton::set_icon(std::string_view icon) {
+    if (mIconName == icon) {
+        return;
+    }
+    mIconName = icon;
+    set_text_content(mIcon, material_icon(icon));
+}
+
+void IconButton::set_label(const Rml::String& label) {
+    if (mRoot->GetAttribute<Rml::String>("aria-label", "") == label) {
+        return;
+    }
+    mRoot->SetAttribute("aria-label", label);
+    mTooltip.set_label(label);
 }
 
 void IconButton::update() {

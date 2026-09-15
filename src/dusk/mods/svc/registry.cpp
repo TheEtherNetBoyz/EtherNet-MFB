@@ -10,6 +10,7 @@
 #include <optional>
 #include <ranges>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -17,13 +18,10 @@
 namespace dusk::mods::svc {
 namespace {
 
+uint64_t s_serviceGeneration = 0;
 std::unordered_map<std::string, ServiceRecord> s_services;
 std::unordered_set<std::string> s_unavailableServices;
 std::vector<const ServiceModule*> s_modules;
-
-std::string service_key(std::string_view id, const uint16_t majorVersion) {
-    return fmt::format("{}\x1f{}", id, majorVersion);
-}
 
 const char* mod_id(const LoadedMod* mod) {
     return mod != nullptr ? mod->metadata.id.c_str() : AppName;
@@ -50,12 +48,33 @@ bool validate_service_header(const ServiceHeader* header, const char* serviceId,
 }
 
 void clear_services() {
+    ++s_serviceGeneration;
     s_services.clear();
     s_unavailableServices.clear();
     s_modules.clear();
 }
 
 }  // namespace
+
+uint64_t services_generation() noexcept {
+    return s_serviceGeneration;
+}
+
+std::vector<ServiceExport> list_services() {
+    std::vector<ServiceExport> services;
+    for (const auto& [key, record] : s_services) {
+        if (record.service == nullptr ||
+            (record.provider != nullptr && !record.provider->is_enabled()))
+        {
+            continue;
+        }
+        services.push_back({record.id, record.majorVersion, record.minorVersion,
+            record.provider != nullptr ? record.provider->metadata.id : std::string{}});
+    }
+    std::ranges::sort(
+        services, {}, [](const auto& service) { return std::tie(service.id, service.major); });
+    return services;
+}
 
 bool valid_service_id(const char* serviceId) {
     return serviceId != nullptr && serviceId[0] != '\0';
@@ -80,6 +99,7 @@ ModResult register_service(const char* serviceId, const uint16_t majorVersion,
         return MOD_CONFLICT;
     }
 
+    ++s_serviceGeneration;
     s_services.emplace(key, ServiceRecord{
                                 serviceId,
                                 majorVersion,
@@ -113,12 +133,14 @@ ModResult publish_deferred_service(
         return MOD_INVALID_ARGUMENT;
     }
 
+    ++s_serviceGeneration;
     record.service = service;
     record.minorVersion = header->minor_version;
     return MOD_OK;
 }
 
 void remove_services_for_provider(const LoadedMod& provider) {
+    ++s_serviceGeneration;
     std::erase_if(
         s_services, [&](const auto& entry) { return entry.second.provider == &provider; });
 }

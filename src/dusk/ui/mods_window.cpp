@@ -1,14 +1,17 @@
 #include "mods_window.hpp"
 
+#include "clamped_text.hpp"
+#include "dusk/mods/updates.hpp"
 #include "format.hpp"
 #include "icon_button.hpp"
 #include "logs_window.hpp"
-#include "mod_browser.hpp"
 #include "mod_texture_provider.hpp"
+#include "mod_updates.hpp"
 #include "modal.hpp"
 #include "mods/svc/http.h"
+#include "online_mods.hpp"
+#include "package_row.hpp"
 #include "pane.hpp"
-#include "queue_window.hpp"
 
 #include <borealis/http.hpp>
 
@@ -22,6 +25,7 @@
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <tracy/Tracy.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -62,6 +66,7 @@ bool mod_uses_network(const mods::LoadedMod& mod) {
 }
 
 enum class ModAction {
+    Update,
     Retry,
     Reload,
     Enable,
@@ -79,6 +84,9 @@ struct ModActionInfo {
 
 std::vector<ModActionInfo> available_mod_actions(const mods::LoadedMod& mod) {
     std::vector<ModActionInfo> actions;
+    if (const auto* update = mods::updates::find(mod.metadata.id); update && update->actionable) {
+        actions.push_back({ModAction::Update, "Update", "download"});
+    }
     if (mod.activation_failed()) {
         actions.push_back({ModAction::Retry, "Retry", "replay"});
         actions.push_back({ModAction::Disable, "Disable", "pause"});
@@ -119,18 +127,25 @@ public:
         auto* info = append(mRoot, "mod-info");
         auto* heading = append(info, "header");
         append_text(append(heading, "b"), mod.metadata.name);
-        append_text(append(heading, "small"), fmt::format("v{}", mod.metadata.version));
-        auto* sub = append(info, "small");
-        append_text(sub, fmt::format("{} - ", mod.metadata.author));
+        if (const auto* update = mods::updates::find(mod.metadata.id); update && update->actionable)
+        {
+            append_text(append(heading, "update-badge"), "Update");
+        }
+        if (mod_uses_network(mod)) {
+            append_text(append(heading, "mod-network"), "Network");
+        }
+        auto* sub = append(info, "mod-meta");
+        append_text(append(sub, "mod-author"), mod.metadata.author);
+        append_text(append(sub, "span"), "·");
+        append_text(append(sub, "mod-version"), fmt::format("v{}", mod.metadata.version));
+        append_text(append(sub, "span"), "·");
         auto* statusElement = append(sub, "mod-status");
         if (status.badgeClass[0] != '\0') {
             statusElement->SetClass(status.badgeClass, true);
         }
         append_text(statusElement, status.text);
-        if (mod_uses_network(mod)) {
-            append_text(append(sub, "mod-network"), "Network");
-        }
-        append_text(append(info, "p"), snippet(mod.metadata.description, 90));
+        mChildren.emplace_back(
+            std::make_unique<ClampedText>(append(info, "p"), mod.metadata.description, 2));
         mRoot->SetClass("inactive", !mod.active);
         mRoot->SetClass("failed", mod.loadFailed);
 
@@ -144,76 +159,31 @@ public:
     }
 };
 
-class BrowseModsEntry final : public FluentComponent<BrowseModsEntry> {
+class OnlineModsEntry final : public FluentComponent<OnlineModsEntry> {
 public:
-    BrowseModsEntry(Rml::Element* parent, std::function<void()> onOpen)
-        : FluentComponent{append(parent, "mod-entry")} {
-        mRoot->SetClass("browser", true);
+    explicit OnlineModsEntry(Rml::Element* parent) : FluentComponent{append(parent, "mod-entry")} {
+        mRoot->SetClass("online", true);
+        mRoot->SetAttribute("focus-key", "online-entry");
         append(mRoot, "mod-icon");
-
         auto* info = append(mRoot, "mod-info");
         auto* heading = append(info, "header");
-        append_text(append(heading, "b"), "Browse online mods");
-        append_text(append(info, "p"), "Discover and install mods from the community.");
-
-        on_nav_command([callback = std::move(onOpen)](Rml::Event&, NavCommand cmd) {
-            if (cmd != NavCommand::Confirm) {
+        append_text(append(heading, "b"), "Online mods");
+        append(heading, "update-badge");
+        append_text(append(info, "small"), "Download community mods and check for updates.");
+        on_nav_command([this](Rml::Event&, NavCommand command) {
+            if (command != NavCommand::Confirm) {
                 return false;
             }
-            callback();
-            return true;
-        });
-    }
-};
-
-class InstallQueueEntry final : public FluentComponent<InstallQueueEntry> {
-public:
-    InstallQueueEntry(Rml::Element* parent, std::function<void()> onOpen)
-        : FluentComponent{append(parent, "mod-entry")} {
-        mRoot->SetClass("installs", true);
-        append(mRoot, "mod-icon");
-
-        auto* info = append(mRoot, "mod-info");
-        auto* heading = append(info, "header");
-        append_text(append(heading, "b"), "Installs");
-        mSummary = append(info, "small");
-        mProgress = append(info, "progress");
-
-        on_nav_command([callback = std::move(onOpen)](Rml::Event&, NavCommand cmd) {
-            if (cmd != NavCommand::Confirm) {
-                return false;
-            }
-            callback();
+            mRoot->DispatchEvent(Rml::EventId::Submit, {});
             return true;
         });
         update();
     }
 
     void update() override {
-        const auto current = mods::queue::first_active();
-        const auto activeCount = mods::queue::active_count();
-        const auto totalCount = mods::queue::item_count();
-
-        if (!current) {
-            set_text_content(mSummary, fmt::format("0 active · {} total", totalCount));
-            mProgress->SetProperty("display", "none");
-        } else {
-            const float progress = current->total == 0 ?
-                                       0.0f :
-                                       std::clamp(static_cast<float>(current->completed) /
-                                                      static_cast<float>(current->total),
-                                           0.0f, 1.0f);
-            set_text_content(
-                mSummary, fmt::format("{} in queue · {:.0f}%", activeCount, progress * 100.0f));
-            mProgress->SetAttribute("value", progress);
-            mProgress->SetProperty("display", "block");
-        }
+        set_mod_update_badge(*this, "Online mods");
         Component::update();
     }
-
-private:
-    Rml::Element* mSummary = nullptr;
-    Rml::Element* mProgress = nullptr;
 };
 
 class ModDetailHeader : public FluentComponent<ModDetailHeader> {
@@ -288,7 +258,7 @@ ModsWindow::ModsWindow()
     : Window{Props{
           .tabBar = false,
           .persistSize = true,
-          .styleSheets = {"res/rml/mods.rcss"},
+          .styleSheets = {"res/rml/mod_common.rcss", "res/rml/mods.rcss"},
       }},
        mContextMenu{*this, mRoot, "mod-entry, mod-header", [this](Rml::Element* target) {
                         const auto id = target->GetAttribute<Rml::String>("mod-id", "");
@@ -299,7 +269,7 @@ ModsWindow::ModsWindow()
     mRoot->SetClass("mods", true);
 
     refresh_snapshot();
-    mQueueItemCount = mods::queue::item_count();
+    mUpdateGeneration = mods::updates::generation();
 
     set_content([this](Rml::Element* content) { build_content(content); });
 }
@@ -316,15 +286,50 @@ bool ModsWindow::select_mod(std::string_view id) {
     mContextMenu.dismiss();
     mSelectedModId = id;
     mSelectedMod = nullptr;
-    mBrowserSelected = false;
+    mSelection = Selection::Mod;
     mFocusSelectedMod = true;
     refresh_snapshot();
-    mQueueItemCount = mods::queue::item_count();
     rebuild_content();
     return true;
 }
 
+void ModsWindow::select_online(std::string queueId) {
+    mSelection = Selection::Online;
+    mSelectedMod = nullptr;
+    mSelectedModId.clear();
+    mFocusQueueId = std::move(queueId);
+    rebuild_content();
+}
+
+void show_online_mods(std::string queueId) {
+    pop_to_or_push<ModsWindow>([&queueId](ModsWindow& window) { window.select_online(queueId); });
+}
+
 bool ModsWindow::focus() {
+    if (mSelection == Selection::Online && mOnlineEntry) {
+        mOnlineEntry->set_selected(true);
+    }
+    if (!mFocusQueueId.empty()) {
+        mDocument->UpdateDocument();
+        auto* row =
+            mContentRoot->QuerySelector(fmt::format("queue-row[queue-id=\"{}\"]", mFocusQueueId));
+        mFocusQueueId.clear();
+        if (row) {
+            Rml::ElementList actions;
+            row->QuerySelectorAll(actions, "button");
+            for (auto* action : actions) {
+                if (action->IsVisible() && action->Focus()) {
+                    row->ScrollIntoView();
+                    return true;
+                }
+            }
+        }
+    }
+    if (auto* utility = selected_utility(); utility != nullptr) {
+        const bool focused = utility->focus();
+        utility->set_selected(true);
+        return focused;
+    }
     if (mFocusSelectedMod) {
         mDocument->UpdateDocument();
         for (size_t i = 0; i < mEntryMods.size(); ++i) {
@@ -362,6 +367,9 @@ std::vector<ContextMenu::Item> ModsWindow::mod_actions(
                         return;
                     }
                     switch (action) {
+                    case ModAction::Update:
+                        enqueue_mod_update(id);
+                        break;
                     case ModAction::Retry:
                         loader.request_reactivate(id);
                         break;
@@ -402,82 +410,67 @@ std::vector<ContextMenu::Item> ModsWindow::mod_actions(
     return items;
 }
 
+Component* ModsWindow::selected_utility() const {
+    return mSelection == Selection::Online ? mOnlineEntry : nullptr;
+}
+
+void ModsWindow::build_online(Pane& pane) {
+    mSelection = Selection::Online;
+    mSelectedMod = nullptr;
+    mSelectedModId.clear();
+    pane.root()->RemoveAttribute("mod-id");
+    build_online_mods(pane, *this, mExpandedChangelogs);
+    mark_current_entry();
+}
+
 void ModsWindow::build_content(Rml::Element* content) {
     mEntries.clear();
     mEntryMods.clear();
-    mBrowserEntry = nullptr;
-
+    mOnlineEntry = nullptr;
+    mQueueItems.clear();
+    for (const auto& item : mods::queue::items()) {
+        mQueueItems.emplace_back(item.id, mods::queue::is_completed(item.state));
+    }
     auto& listPane = add_child<Pane>(content, Pane::Type::Controlled);
     listPane.root()->SetClass("mod-list", true);
     auto& detailPane = add_child<Pane>(content, Pane::Type::Uncontrolled);
     detailPane.root()->SetClass("mod-detail", true);
-
-    bool hasUtilityEntries = false;
-    if (borealis::http::available()) {
-        auto& browse =
-            listPane.add_child<BrowseModsEntry>([this] { push(std::make_unique<ModBrowser>()); });
-        mBrowserEntry = &browse;
-        hasUtilityEntries = true;
-        listPane.register_control(browse, detailPane, [this](Pane& pane) {
-            mBrowserSelected = true;
-            mSelectedMod = nullptr;
-            mSelectedModId.clear();
-            mark_current_entry();
-        });
-    }
-
-    if (mQueueItemCount != 0) {
-        listPane.add_child<InstallQueueEntry>([this] { push(std::make_unique<QueueWindow>()); });
-        hasUtilityEntries = true;
-    }
-
+    auto& online = listPane.add_child<OnlineModsEntry>();
+    mOnlineEntry = &online;
+    listPane.register_control(online, detailPane, [this](Pane& pane) { build_online(pane); });
     const bool hasInstalledMods = !mods::ModLoader::instance().mods().empty();
-    if (hasUtilityEntries && hasInstalledMods) {
+    if (hasInstalledMods) {
         append(listPane.root(), "mod-list-separator");
     }
-
-    if (!hasInstalledMods) {
-        listPane.add_text("No mods installed.");
-        mSelectedMod = nullptr;
-        mSelectedModId.clear();
-        if (borealis::http::available()) {
-            mBrowserSelected = true;
-        }
-        mark_current_entry();
-        return;
-    }
-
     for (auto& trackedMod : mods::ModLoader::instance().mods()) {
         auto& entry = listPane.add_child<ModListEntry>(trackedMod);
         mEntries.push_back(&entry);
         mEntryMods.push_back(&trackedMod);
         listPane.register_control(entry, detailPane, [this, tracked = &trackedMod](Pane& pane) {
-            mBrowserSelected = false;
+            mSelection = Selection::Mod;
             mSelectedMod = tracked;
             mSelectedModId = tracked->metadata.id;
-            pane.clear();
             build_detail(pane, *tracked);
             mark_current_entry();
         });
     }
-
-    if (mBrowserSelected && mBrowserEntry != nullptr) {
-        mSelectedMod = nullptr;
-        mSelectedModId.clear();
+    if (!hasInstalledMods) {
+        listPane.add_text("No mods installed.");
+        mSelection = Selection::Online;
+    }
+    if (selected_utility()) {
+        build_online(detailPane);
+        mOnlineEntry->set_selected(true);
+    } else if (hasInstalledMods) {
+        mSelection = Selection::Mod;
+        const auto selected = std::ranges::find_if(
+            mEntryMods, [this](const auto* mod) { return mod->metadata.id == mSelectedModId; });
+        mSelectedMod = selected != mEntryMods.end() ? *selected : mEntryMods.front();
+        mSelectedModId = mSelectedMod->metadata.id;
+        build_detail(detailPane, *mSelectedMod);
     } else {
         mSelectedMod = nullptr;
-        if (!mSelectedModId.empty()) {
-            const auto selected = std::ranges::find_if(
-                mEntryMods, [this](const auto* mod) { return mod->metadata.id == mSelectedModId; });
-            if (selected != mEntryMods.end()) {
-                mSelectedMod = *selected;
-            }
-        }
-        if (mSelectedMod == nullptr) {
-            mSelectedMod = mEntryMods.front();
-            mSelectedModId = mSelectedMod->metadata.id;
-        }
-        build_detail(detailPane, *mSelectedMod);
+        mSelectedModId.clear();
     }
     mark_current_entry();
 }
@@ -597,8 +590,8 @@ void ModsWindow::refresh_snapshot() {
 }
 
 void ModsWindow::mark_current_entry() {
-    if (mBrowserEntry != nullptr) {
-        mBrowserEntry->root()->SetClass("current", mBrowserSelected);
+    if (mOnlineEntry) {
+        mOnlineEntry->root()->SetClass("current", mSelection == Selection::Online);
     }
     for (size_t i = 0; i < mEntries.size(); ++i) {
         mEntries[i]->root()->SetClass("current", mEntryMods[i] == mSelectedMod);
@@ -606,6 +599,7 @@ void ModsWindow::mark_current_entry() {
 }
 
 void ModsWindow::update() {
+    ZoneScopedN("Mod manager update");
     auto& loader = mods::ModLoader::instance();
     bool dirty = loader.generation() != mLoaderGeneration;
     if (dirty) {
@@ -628,13 +622,18 @@ void ModsWindow::update() {
             }
         }
     }
-    const auto queueItemCount = mods::queue::item_count();
-    if (queueItemCount != mQueueItemCount) {
-        mQueueItemCount = queueItemCount;
+    if (mUpdateGeneration != mods::updates::generation()) {
+        mUpdateGeneration = mods::updates::generation();
         dirty = true;
     }
+    std::vector<std::pair<std::string, bool>> queueItems;
+    for (const auto& item : mods::queue::items()) {
+        queueItems.emplace_back(item.id, mods::queue::is_completed(item.state));
+    }
+    dirty |= queueItems != mQueueItems;
     if (dirty) {
         mContextMenu.dismiss();
+        ZoneScopedN("Mod manager rebuild");
         const auto previousModId = mSelectedModId;
         std::optional<Rml::Property> previousBannerFilter;
         if (auto* image = mContentRoot->QuerySelector("mod-header-image")) {
@@ -643,6 +642,17 @@ void ModsWindow::update() {
         auto* list = mContentRoot->QuerySelector("pane.mod-list");
         const float listScrollTop = list != nullptr ? list->GetScrollTop() : 0.0f;
         auto* focused = mDocument != nullptr ? mDocument->GetFocusLeafNode() : nullptr;
+        std::string focusKey;
+        for (auto* node = focused; node != nullptr && node != mContentRoot;
+            node = node->GetParentNode())
+        {
+            if (node->HasAttribute("focus-key")) {
+                focusKey = node->GetAttribute<Rml::String>("focus-key", "");
+                break;
+            }
+        }
+        auto* detail = mContentRoot->QuerySelector("pane.mod-detail");
+        const float detailScrollTop = detail ? detail->GetScrollTop() : 0.0f;
         bool hadContentFocus = false;
         for (auto* node = focused; node != nullptr; node = node->GetParentNode()) {
             if (node == mContentRoot) {
@@ -653,8 +663,25 @@ void ModsWindow::update() {
         rebuild_content();
         mDocument->UpdateDocument();
         if (hadContentFocus) {
-            if (mBrowserSelected && mBrowserEntry != nullptr) {
-                mBrowserEntry->root()->Focus(true);
+            auto* restored = focusKey.empty() ? nullptr :
+                                                mContentRoot->QuerySelector(
+                                                    fmt::format("[focus-key=\"{}\"]", focusKey));
+            if (restored && restored->IsVisible() && !restored->IsPseudoClassSet("disabled") &&
+                restored->Focus(true))
+            {
+            } else if (auto* utility = selected_utility(); utility != nullptr) {
+                auto* fallback = mContentRoot->QuerySelector("queue-row button");
+                if (!fallback || !fallback->IsVisible()) {
+                    fallback = mContentRoot->QuerySelector("[focus-key=completed-clear]");
+                }
+                if (!fallback || !fallback->IsVisible()) {
+                    fallback = mContentRoot->QuerySelector("[focus-key=online-browse]");
+                }
+                if (!focusKey.empty() && focusKey != "online-entry" && fallback) {
+                    fallback->Focus(true);
+                } else {
+                    utility->root()->Focus(true);
+                }
             } else {
                 for (size_t i = 0; i < mEntryMods.size(); ++i) {
                     if (mEntryMods[i] == mSelectedMod) {
@@ -674,6 +701,9 @@ void ModsWindow::update() {
                         Rml::Tween{Rml::Tween::Cubic, Rml::Tween::InOut}, 1, false);
                 }
             }
+        }
+        if (auto* refreshedDetail = mContentRoot->QuerySelector("pane.mod-detail")) {
+            refreshedDetail->SetScrollTop(detailScrollTop);
         }
         if (auto* refreshedList = mContentRoot->QuerySelector("pane.mod-list")) {
             refreshedList->SetScrollTop(listScrollTop);
