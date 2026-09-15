@@ -1357,6 +1357,17 @@ void dMsgObject_c::selectProc() {
             if (field_0x1a3 == 2 && getSelectCancelPos() == 3) {
                 iVar8 = true;
             } else {
+#if TARGET_PC
+                // Selection animations only advance from presentAnims() on PC.  Spinning here can
+                // never complete on a non-presenting simulation frame.
+                if (getSelectCursorPosLocal() != 0xff) {
+                    iVar8 = mpScrnDraw->selectAnimeMove(
+                        2, getSelectCursorPosLocal() + 1, uVar7);
+                } else {
+                    iVar8 = mpScrnDraw->selectAnimeMove(
+                        2, (int)getSelectCursorPosLocal(), uVar7);
+                }
+#else
                 while (!iVar8) {
                     if (getSelectCursorPosLocal() != 0xff) {
                         iVar8 =
@@ -1366,6 +1377,7 @@ void dMsgObject_c::selectProc() {
                             mpScrnDraw->selectAnimeMove(2, (int)getSelectCursorPosLocal(), uVar7);
                     }
                 }
+#endif
             }
         } else if (field_0x1a3 == 2 && getSelectCancelPos() == 3) {
             iVar8 = true;
@@ -1381,9 +1393,15 @@ void dMsgObject_c::selectProc() {
                 if (field_0x1a3 == 2 && getSelectCancelPos() == 4) {
                     iVar8 = true;
                 } else {
+#if TARGET_PC
+                    // See the two-choice case above: allow presentation frames to finish it.
+                    iVar8 = mpScrnDraw->selectAnimeMove(
+                        3, getSelectCursorPosLocal(), uVar7);
+#else
                     while (!iVar8) {
                         iVar8 = mpScrnDraw->selectAnimeMove(3, getSelectCursorPosLocal(), uVar7);
                     }
+#endif
                 }
             } else if (field_0x1a3 == 2 && getSelectCancelPos() == 4) {
                 iVar8 = true;
