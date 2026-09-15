@@ -578,7 +578,12 @@ namespace dusk {
                     s_rupeeSlide.recordedCameraFrames) - 1;
                 applyRelativeCamera(
                     camera, s_rupeeSlide.presentationCamera[cameraFrame], cXyz::Zero);
-                if (presentationActive) {
+                // Keep Link pinned only for the camera presentation we actually recorded.
+                // The item-get event/text can remain active much longer than the animation;
+                // continuing to call setPlayerPosAndAngle() for the whole event hard-locks
+                // Link's position/angle until the text is dismissed.
+                if (presentationActive &&
+                    s_rupeeSlide.presentationFrames <= s_rupeeSlide.recordedCameraFrames) {
                     player->setPlayerPosAndAngle(
                         &s_rupeeSlide.replayPosition, s_rupeeSlide.replayStartAngle, TRUE);
                 }
