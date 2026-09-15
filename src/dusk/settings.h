@@ -360,6 +360,7 @@ struct UserSettings {
         ConfigVar<MagicArmorMode> armorRupeeDrain;
         ConfigVar<bool> invincibleEnemies;
         ConfigVar<bool> transformWithoutShadowCrystal;
+        ConfigVar<bool> easyQuickSpin;
 
         // Technical
         ConfigVar<bool> restoreWiiGlitches;
