@@ -1595,6 +1595,8 @@ set(DUSK_FILES
         src/dusk/ui/document.hpp
         src/dusk/ui/drop_install_modal.cpp
         src/dusk/ui/drop_install_modal.hpp
+        src/dusk/ui/dropdown_button.cpp
+        src/dusk/ui/dropdown_button.hpp
         src/dusk/ui/editor.cpp
         src/dusk/ui/editor.hpp
         src/dusk/ui/event.cpp
@@ -1648,6 +1650,8 @@ set(DUSK_FILES
         src/dusk/ui/number_button.hpp
         src/dusk/ui/overlay.cpp
         src/dusk/ui/overlay.hpp
+        src/dusk/ui/row.cpp
+        src/dusk/ui/row.hpp
         src/dusk/ui/pane.cpp
         src/dusk/ui/pane.hpp
         src/dusk/ui/popover.cpp
@@ -1681,7 +1685,6 @@ set(DUSK_FILES
         src/dusk/version.cpp
         src/dusk/utilities.cpp
         src/helpers/batch.cpp
-        src/helpers/endian.cpp
         src/helpers/offset_ptr.cpp
         src/helpers/string.cpp
         src/helpers/cast.cpp
