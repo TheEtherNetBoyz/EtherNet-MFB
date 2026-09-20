@@ -784,6 +784,7 @@ int game_main(int argc, char* argv[]) {
         dusk::discord::shutdown();
 #endif
         dusk::ui::shutdown();
+        dusk::config::shutdown();
         aurora_shutdown();
         return 0;
     }
@@ -913,6 +914,7 @@ int game_main(int argc, char* argv[]) {
                 dusk::discord::shutdown();
 #endif
                 dusk::ui::shutdown();
+                dusk::config::shutdown();
                 aurora_shutdown();
                 return 0;
             }

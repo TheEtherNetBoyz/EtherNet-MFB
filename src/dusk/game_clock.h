@@ -42,6 +42,7 @@ float sample_interpolation_step();
 bool is_sim_frame();
 bool is_presentation_frame();
 
-float consume_interval(const void* consumer);
+double sample_time();
+float consume_interval(double& lastSample);
 
 } // namespace dusk::game_clock

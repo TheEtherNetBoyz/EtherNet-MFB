@@ -30,6 +30,10 @@ static bool dOvlpFd3_isFastLoad() {
                         false);
 }
 
+static bool dOvlpFd3_isFastTransition() {
+    return DUSK_IF_ELSE(dusk::getSettings().game.fastTransitions.getValue(), false);
+}
+
 static bool dOvlpFd3_isInstaLoad() {
     return DUSK_IF_ELSE(dusk::getSettings().game.enableInstaLoads.getValue() &&
                             !mDoRst::isReset() &&
@@ -174,7 +178,8 @@ dOvlpFd3_c::dOvlpFd3_c() {
     dCam_getBody()->Stop();
     mDoGph_gInf_c::startFadeOut(dOvlpFd3_isFastLoad() ?
                                     dOvlpFd3_getFadeFrames() :
-                                    XREG_S(3) + (field_0x11f >> 1) + 90);
+                                    XREG_S(3) + (field_0x11f >> 1) +
+                                        (dOvlpFd3_isFastTransition() ? 0 : 90));
 }
 
 void dOvlpFd3_c::execFirstSnap() {
@@ -203,9 +208,13 @@ void dOvlpFd3_c::execFadeOut() {
 
     if (mTimer < 0) {
         if (++mTimer == 0) {
-            mDoGph_gInf_c::startFadeOut(dOvlpFd3_isFastLoad() ? dOvlpFd3_getFadeFrames() :
-                                                                    XREG_S(1) + 75);
-            mTimer = dOvlpFd3_isFastLoad() ? 1 : XREG_S(2) + 90;
+            if (dOvlpFd3_isFastLoad()) {
+                mDoGph_gInf_c::startFadeOut(dOvlpFd3_getFadeFrames());
+                mTimer = 1;
+            } else if (!dOvlpFd3_isFastTransition()) {
+                mDoGph_gInf_c::startFadeOut(XREG_S(1) + 75);
+                mTimer = XREG_S(2) + 90;
+            }
             mDoAud_setFadeOutStart(0);
         }
     } else {

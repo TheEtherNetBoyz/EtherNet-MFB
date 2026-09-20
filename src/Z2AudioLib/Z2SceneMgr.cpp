@@ -138,7 +138,8 @@ void Z2SceneMgr::setFadeOutStart(u8 fadeType) {
     Z2GetSeqMgr()->bgmAllMute(fadeFrames,  3.0f / 10.0f);
     Z2GetSeMgr()->seMoveVolumeAll(0.0f, fadeFrames);
     Z2GetSeqMgr()->setBattleBgmOff(true);
-    load1stWait = z2FastLoadAudioFrames(40);
+    load1stWait = z2FastLoadAudioFrames(
+        DUSK_IF_ELSE(dusk::getSettings().game.fastTransitions.getValue() ? 1 : 40, 40));
     timer = -1;
 }
 
@@ -1867,7 +1868,8 @@ void Z2SceneMgr::_load1stWaveInner_1() {
     }
 
     if (field_0x1a && Z2GetSeqMgr()->checkBgmPlaying()) {
-        s8 bgmStopFrames = z2FastLoadAudioFrames(15);
+        s8 bgmStopFrames = z2FastLoadAudioFrames(
+            DUSK_IF_ELSE(dusk::getSettings().game.fastTransitions.getValue() ? 1 : 15, 15));
         OS_REPORT("[Z2SceneMgr::load1stDynamicWave]bgm StopCount = %d\n", bgmStopFrames);
         Z2GetSeqMgr()->bgmStop(bgmStopFrames, 0);
         load1stWait = -bgmStopFrames;

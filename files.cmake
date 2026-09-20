@@ -1568,6 +1568,8 @@ set(DUSK_FILES
         src/dusk/presentation.cpp
         src/dusk/presentation.hpp
         src/dusk/scope_guard.hpp
+        src/dusk/save_manager.cpp
+        src/dusk/save_manager.hpp
         src/dusk/settings.cpp
         src/dusk/speedrun.cpp
         src/dusk/stubs.cpp
@@ -1662,6 +1664,8 @@ set(DUSK_FILES
         src/dusk/ui/preset.hpp
         src/dusk/ui/reporting.cpp
         src/dusk/ui/reporting.hpp
+        src/dusk/ui/saves_window.cpp
+        src/dusk/ui/saves_window.hpp
         src/dusk/ui/select_button.cpp
         src/dusk/ui/select_button.hpp
         src/dusk/ui/settings.cpp

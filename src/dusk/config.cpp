@@ -318,6 +318,7 @@ template class ConfigImpl<GyroMode>;
 template class ConfigImpl<AspectRatioMode>;
 template class ConfigImpl<DiscLoadingDelayMode>;
 template class ConfigImpl<AudioOutputMode>;
+template class ConfigImpl<LetterboxMode>;
 
 template <>
 void ConfigImpl<FrameInterpMode>::loadFromJson(
@@ -396,6 +397,7 @@ template class ConfigImpl<FrameInterpMode>;
 template class ConfigImpl<TouchTargeting>;
 template class ConfigImpl<MenuScaling>;
 template class ConfigImpl<Resampler>;
+template class ConfigImpl<AlwaysGreatspinMode>;
 template class ConfigImpl<MagicArmorMode>;
 template class ConfigImpl<ui::ControlLayout>;
 

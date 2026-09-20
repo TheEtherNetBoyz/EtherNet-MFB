@@ -78,7 +78,7 @@ float ui_dt() {
     }
 
     const float maximumDt = kUiMaximumDt * aurora::time::scale();
-    return std::clamp(s_presentationDtSeconds, 0.0f, maximumDt);
+    return std::clamp(g_frameTiming.dt, 0.0f, maximumDt);
 }
 }  // namespace
 
@@ -239,6 +239,11 @@ void set_presentation_tick_override(int ticks) {
     s_presentationTickOverride = std::max(ticks, -1);
 }
 
+double sample_time() {
+    const auto now = s_simTickActive ? s_pendingSimTime : game_clock::now();
+    return std::chrono::duration<double>(now.time_since_epoch()).count();
+}
+
 float original_frames() {
     // TAS pause/frame advance and turbo use completed simulation ticks rather than
     // elapsed wall time. Normal presentation retains upstream's clamped delta time.
@@ -259,6 +264,13 @@ float consume_interval(const void* consumer) {
         dt = std::min(dt, maximumDt);
     }
     s_intervalLastSample[key] = now;
+    return dt;
+}
+
+float consume_interval(double& lastSample) {
+    const double now = sample_time();
+    const float dt = std::max(0.0, now - lastSample);
+    lastSample = now;
     return dt;
 }
 
