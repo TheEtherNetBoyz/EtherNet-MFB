@@ -379,7 +379,17 @@ namespace dusk {
                 MenuCheckbox("No Item Timer", s.game.enableIndefiniteItemDrops);
                 MenuCheckbox("Moon Jump", s.game.moonJump);
                 MenuCheckbox("Super Clawshot", s.game.superClawshot);
-                MenuCheckbox("Always Greatspin", s.game.alwaysGreatspin);
+                if (ImGui::BeginMenu("Always Greatspin")) {
+                    const char* modes[] = {"Off", "After Learning Skill", "Always"};
+                    for (int mode = 0; mode < IM_ARRAYSIZE(modes); ++mode) {
+                        if (ImGui::MenuItem(modes[mode], nullptr,
+                                s.game.alwaysGreatspin.getValue() == static_cast<AlwaysGreatspinMode>(mode))) {
+                            s.game.alwaysGreatspin.setValue(static_cast<AlwaysGreatspinMode>(mode));
+                            config::save();
+                        }
+                    }
+                    ImGui::EndMenu();
+                }
                 MenuCheckbox("Fast Iron Boots", s.game.enableFastIronBoots);
                 MenuCheckbox("Transform Anywhere", s.game.canTransformAnywhere);
                 MenuCheckbox("Fast Roll", s.game.fastRoll);
