@@ -3928,6 +3928,25 @@ public:
 
     static u32 getOtherHeapSize() { return 0xF0A60; }
 
+    // Rebuild Link's model-view buffers against the currently active J3D view.
+    // Auxiliary camera passes call this once for their view and once after restoring it.
+    void refreshPlayerModelsForCurrentView() {
+        J3DModel* models[] = {
+            mpLinkModel, mpLinkFaceModel, mpLinkHatModel, mpLinkHandModel,
+            mpSwAModel, mpSwASheathModel, mpSwMModel, mpSwMSheathModel,
+            mWoodSwordModel, mpWlChangeModel, mShieldModel, mpDemoFCBlendModel,
+            mpDemoHLTmpModel, mpDemoHRTmpModel, mSwordModel, mSheathModel,
+            mpKanteraModel, mpKanteraGlowModel, mHeldItemModel, mpHookTipModel,
+            field_0x0710, field_0x0714, mpLinkBootModels[0], mpLinkBootModels[1],
+            mpWlChainModels[0], mpWlChainModels[1], mpWlChainModels[2], mpWlChainModels[3],
+        };
+        for (J3DModel* model : models) {
+            if (model != nullptr) {
+                model->viewCalc();
+            }
+        }
+    }
+
     static DUSK_GAME_DATA daAlink_BckData const m_mainBckShield[20];
     static DUSK_GAME_DATA daAlink_BckData const m_mainBckSword[5];
     static DUSK_GAME_DATA daAlink_BckData const m_mainBckFishing[28];

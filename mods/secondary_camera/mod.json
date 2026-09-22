@@ -1,0 +1,7 @@
+{
+  "id": "dev.twilitrealm.secondary_camera",
+  "name": "Camera 2 Window",
+  "version": "1.0.0",
+  "author": "Twilit Realm",
+  "description": "Renders a second controllable camera view in an auxiliary window."
+}

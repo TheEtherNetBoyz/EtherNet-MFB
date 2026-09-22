@@ -205,6 +205,22 @@ ModResult get_info_impl(ModContext* context, WindowHandle handle, WindowInfo* ou
     return populate_info(slot->window, *outInfo) ? MOD_OK : MOD_ERROR;
 }
 
+ModResult set_relative_mouse_mode_impl(
+    ModContext* context, WindowHandle handle, const bool enabled) {
+    auto* mod = mod_from_context(context);
+    auto* slot = mod != nullptr ? resolve_window(*mod, handle) : nullptr;
+    if (slot == nullptr) {
+        return MOD_INVALID_ARGUMENT;
+    }
+    if (!SDL_SetWindowMouseGrab(slot->window, enabled) ||
+        !SDL_SetWindowRelativeMouseMode(slot->window, enabled))
+    {
+        Log.error("[{}] set_relative_mouse_mode: {}", mod->metadata.id, SDL_GetError());
+        return MOD_ERROR;
+    }
+    return MOD_OK;
+}
+
 void remove_mod_windows(LoadedMod& mod) {
     auto entries = s_windows.take_all(mod);
     for (auto& entry : entries) {
@@ -222,6 +238,7 @@ constexpr WindowService s_windowService{
     .set_title = set_title_impl,
     .set_size = set_size_impl,
     .get_info = get_info_impl,
+    .set_relative_mouse_mode = set_relative_mouse_mode_impl,
 };
 
 }  // namespace
@@ -267,6 +284,21 @@ bool window_dispatch_event(const SDL_Event& event) {
     case SDL_EVENT_WINDOW_HIDDEN:
         type = WINDOW_EVENT_HIDDEN;
         break;
+    case SDL_EVENT_KEY_DOWN:
+        type = WINDOW_EVENT_KEY_DOWN;
+        break;
+    case SDL_EVENT_KEY_UP:
+        type = WINDOW_EVENT_KEY_UP;
+        break;
+    case SDL_EVENT_MOUSE_MOTION:
+        type = WINDOW_EVENT_MOUSE_MOTION;
+        break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        type = WINDOW_EVENT_MOUSE_BUTTON_DOWN;
+        break;
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        type = WINDOW_EVENT_MOUSE_BUTTON_UP;
+        break;
     default:
         exposed = false;
         break;
@@ -287,6 +319,23 @@ bool window_dispatch_event(const SDL_Event& event) {
         .pixel_width = info.pixel_width,
         .pixel_height = info.pixel_height,
         .display_scale = info.display_scale,
+        .keycode = event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP ?
+                       static_cast<int32_t>(event.key.key) :
+                       0,
+        .scancode = event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP ?
+                        static_cast<int32_t>(event.key.scancode) :
+                        0,
+        .mouse_button = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+                                event.type == SDL_EVENT_MOUSE_BUTTON_UP ?
+                            static_cast<uint32_t>(event.button.button) :
+                            0u,
+        .mouse_x = event.type == SDL_EVENT_MOUSE_MOTION ? event.motion.x : 0.0f,
+        .mouse_y = event.type == SDL_EVENT_MOUSE_MOTION ? event.motion.y : 0.0f,
+        .mouse_delta_x = event.type == SDL_EVENT_MOUSE_MOTION ? event.motion.xrel : 0.0f,
+        .mouse_delta_y = event.type == SDL_EVENT_MOUSE_MOTION ? event.motion.yrel : 0.0f,
+        .repeat = event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP ?
+                      event.key.repeat :
+                      false,
     };
     auto* owner = entry->owner;
     const auto callback = entry->value.onEvent;

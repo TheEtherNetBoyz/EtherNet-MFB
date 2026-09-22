@@ -10,7 +10,7 @@
 
 #define WINDOW_SERVICE_ID DUSKLIGHT_SERVICE_ID_PREFIX "window"
 #define WINDOW_SERVICE_MAJOR 1u
-#define WINDOW_SERVICE_MINOR 0u
+#define WINDOW_SERVICE_MINOR 1u
 
 #define WINDOW_POSITION_UNDEFINED INT32_MIN
 
@@ -33,6 +33,12 @@ typedef enum WindowEventType {
     WINDOW_EVENT_FOCUS_LOST = 4,
     WINDOW_EVENT_SHOWN = 5,
     WINDOW_EVENT_HIDDEN = 6,
+    /* Minor version 1 */
+    WINDOW_EVENT_KEY_DOWN = 7,
+    WINDOW_EVENT_KEY_UP = 8,
+    WINDOW_EVENT_MOUSE_MOTION = 9,
+    WINDOW_EVENT_MOUSE_BUTTON_DOWN = 10,
+    WINDOW_EVENT_MOUSE_BUTTON_UP = 11,
 } WindowEventType;
 
 typedef struct WindowEvent {
@@ -45,6 +51,15 @@ typedef struct WindowEvent {
     uint32_t pixel_width;
     uint32_t pixel_height;
     float display_scale;
+    /* Minor version 1. Valid for the matching input event types. */
+    int32_t keycode;
+    int32_t scancode;
+    uint32_t mouse_button;
+    float mouse_x;
+    float mouse_y;
+    float mouse_delta_x;
+    float mouse_delta_y;
+    bool repeat;
 } WindowEvent;
 
 typedef void (*WindowEventFn)(
@@ -97,6 +112,9 @@ typedef struct WindowService {
     ModResult (*set_title)(ModContext* ctx, WindowHandle window, const char* title);
     ModResult (*set_size)(ModContext* ctx, WindowHandle window, uint32_t width, uint32_t height);
     ModResult (*get_info)(ModContext* ctx, WindowHandle window, WindowInfo* out_info);
+    /* Minor version 1. Captures/releases relative mouse input for an auxiliary window. */
+    ModResult (*set_relative_mouse_mode)(
+        ModContext* ctx, WindowHandle window, bool enabled);
 } WindowService;
 
 MOD_DECLARE_SERVICE(

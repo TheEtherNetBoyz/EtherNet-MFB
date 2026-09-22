@@ -21,6 +21,16 @@ const char* window_event_name(WindowEventType type) {
         return "shown";
     case WINDOW_EVENT_HIDDEN:
         return "hidden";
+    case WINDOW_EVENT_KEY_DOWN:
+        return "key down";
+    case WINDOW_EVENT_KEY_UP:
+        return "key up";
+    case WINDOW_EVENT_MOUSE_MOTION:
+        return "mouse motion";
+    case WINDOW_EVENT_MOUSE_BUTTON_DOWN:
+        return "mouse button down";
+    case WINDOW_EVENT_MOUSE_BUTTON_UP:
+        return "mouse button up";
     }
     return "unknown";
 }

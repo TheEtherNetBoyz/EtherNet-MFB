@@ -20,6 +20,7 @@ class J3DTexMtx;
 class J3DTexMtxObj;
 class J3DTexture;
 
+
 enum J3DDiffFlag {
     J3DDiffFlag_MatColor         = 0x1,
     J3DDiffFlag_ColorChan        = 0x2,
