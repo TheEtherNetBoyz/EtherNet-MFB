@@ -503,6 +503,11 @@ ModResult openWindow() {
     if (g_window != 0) {
         return MOD_CONFLICT;
     }
+
+    // Each newly enabled Camera 2 session starts near the current gameplay Link
+    // instead of reusing a stale free-camera position from a previous window.
+    g_resetViewRequested = true;
+
     WindowDesc windowDesc = WINDOW_DESC_INIT;
     windowDesc.title = "Camera 2";
     windowDesc.width = kRenderWidth;
