@@ -1,3 +1,5 @@
+#include "dusk/legacy_practice.h"
+#if DUSK_LEGACY_PRACTICE_TOOLS
 #include "area_reload.hpp"
 
 #include "d/d_camera.h"
@@ -5,8 +7,7 @@
 #include "d/d_save.h"
 #include "dusk/dusk.h"
 #include "dusk/main.h"
-#include "dusk/settings.h"
-#include "m_Do/m_Do_controller_pad.h"
+#include "dusk/speedrun.h"
 
 #include <array>
 #include <cstring>
@@ -14,12 +15,9 @@
 namespace dusk {
 namespace {
 
-constexpr u32 kAreaReloadCombo = PAD_TRIGGER_L | PAD_TRIGGER_R | PAD_BUTTON_START | PAD_BUTTON_A;
-
 struct AreaReloadState {
     std::array<u8, sizeof(dSv_memory_c)> memory = {};
     u8 lightDrops[4] = {};
-    bool comboHeld = false;
 };
 
 AreaReloadState s_state;
@@ -27,7 +25,7 @@ AreaReloadState s_state;
 }  // namespace
 
 void reload_area() {
-    if (!IsGameLaunched || getSettings().game.speedrunMode.getValue() ||
+    if (!IsGameLaunched || speedrun::isActive() ||
         dComIfGp_isEnableNextStage()) {
         return;
     }
@@ -80,17 +78,9 @@ void reload_area() {
     }
 }
 
-void update_area_reload_input() {
-    const u32 hold = mDoCPd_c::getUnfilteredHold(PAD_1);
-    const u32 trig = mDoCPd_c::getUnfilteredTrig(PAD_1);
-    const bool comboHeld = (hold & kAreaReloadCombo) == kAreaReloadCombo;
-    const bool activate = comboHeld && (trig & PAD_BUTTON_A) != 0;
-
-    if (getSettings().game.areaReload.getValue() && activate && !s_state.comboHeld) {
-        reload_area();
-    }
-
-    s_state.comboHeld = comboHeld;
-}
-
 }  // namespace dusk
+
+#else
+#include "area_reload.hpp"
+namespace dusk { void reload_area() {} }
+#endif

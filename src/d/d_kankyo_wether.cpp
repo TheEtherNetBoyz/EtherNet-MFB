@@ -9,13 +9,27 @@
 #include "JSystem/J3DGraphBase/J3DDrawBuffer.h"
 #include "SSystem/SComponent/c_math.h"
 #include "d/d_com_inf_game.h"
+#include "d/d_bg_s_gnd_chk.h"
 #include "d/d_kankyo.h"
 #include "d/d_kankyo_rain.h"
 #include "f_op/f_op_camera_mng.h"
 #include <cstring>
 #include "m_Do/m_Do_audio.h"
+#if TARGET_PC
+#include "dusk/settings.h"
+#include "dusk/speedrun.h"
+#endif
 
 static void dKyw_pntlight_set(WIND_INFLUENCE* pntwind);
+
+static bool external_moon_visible() {
+#if TARGET_PC
+    const auto callback = dKy_geometry_hooks().celestialVisibility;
+    return callback && callback(DuskCelestial_ForceMoon, false);
+#else
+    return false;
+#endif
+}
 
 static J3DPacket* dKyw_setDrawPacketList(J3DPacket* i_packet, int i_type) {
     if (i_packet == NULL) {
@@ -413,7 +427,12 @@ void dKyw_wether_move() {
 
 static void wether_move_sun() {
     s32 sunVisible = false;
-    if (dComIfGp_checkStatus(1) && !g_env_light.hide_vrbox) {
+#if TARGET_PC
+    const bool externalMoonVisible = external_moon_visible();
+#else
+    const bool externalMoonVisible = false;
+#endif
+    if (externalMoonVisible || (dComIfGp_checkStatus(1) && !g_env_light.hide_vrbox)) {
         roomRead_class* room = dComIfGp_getStageRoom();
         if (room != NULL && room->num > dComIfGp_roomControl_getStayNo()) {
             sunVisible = dStage_roomRead_dt_c_GetVrboxswitch(
@@ -430,9 +449,15 @@ static void wether_move_sun() {
             sunVisible = false;
         }
 
+        // An explicit moon override may bypass a room's VR-box
+        // switch (or a stage's normal sun suppression) prevent its packet.
+        if (externalMoonVisible) {
+            sunVisible = true;
+        }
+
         switch (g_env_light.mSunInitialized) {
         case FALSE:
-            if (sunVisible && !dKy_twilight_visuals_check()) {
+            if (sunVisible && (dKy_darkworld_visual_effect_check() != true || externalMoonVisible)) {
                 g_env_light.mpSunPacket = JKR_NEW_ARGS (0x20) dKankyo_sun_Packet;
                 g_env_light.mpSunLenzPacket = JKR_NEW_ARGS (0x20) dKankyo_sunlenz_Packet;
                 if (g_env_light.mpSunPacket != NULL && g_env_light.mpSunLenzPacket != NULL) {
@@ -492,6 +517,9 @@ static void wether_move_sun() {
                     g_env_light.mpSunLenzPacket->mDrawLenzInSky = false;
                     dKyr_sun_move();
                     dKyr_lenzflare_move();
+                    if (externalMoonVisible) {
+                        g_env_light.mpSunPacket->mSunAlpha = 0.0f;
+                    }
                     g_env_light.mSunInitialized = true;
                 }
             }
@@ -506,6 +534,11 @@ static void wether_move_sun() {
             } else {
                 dKyr_sun_move();
                 dKyr_lenzflare_move();
+                if (externalMoonVisible) {
+                    // Keep the shared sun/moon packet for the forced moon, but
+                    // never allow daytime updates to restore the sun disc.
+                    g_env_light.mpSunPacket->mSunAlpha = 0.0f;
+                }
             }
             break;
         }
@@ -605,7 +638,7 @@ static void wether_move_star() {
                 starsVisible = true;
             }
 
-            if (starsVisible) {
+            if (starsVisible && dKy_darkworld_visual_effect_check() != true) {
                 f32 density;
                 f32 time = g_env_light.getDaytime();
                 if (time >= 330.0f || time < 45.0f) {
@@ -694,7 +727,7 @@ static void wether_move_housi() {
     if (force_twilight) {
         g_env_light.field_0xea9 = 0;
         g_env_light.mHousiCount = 200;
-    } else if (dKy_darkworld_check() == true ||
+    } else if (dKy_darkworld_visual_effect_check() == true ||
         (!strcmp(dComIfGp_getStartStageName(), "F_SP115") &&
          dComIfGp_roomControl_getStayNo() == 1 && dComIfGp_getStartStageLayer() == 9))
     {
@@ -726,7 +759,7 @@ static void wether_move_housi() {
             g_env_light.mpHousiPacket = JKR_NEW_ARGS (32) dKankyo_housi_Packet;
 
             if (g_env_light.mpHousiPacket != NULL) {
-                if (dKy_twilight_visuals_check()) {
+                if (dKy_darkworld_visual_effect_check() == true) {
                     g_env_light.mpHousiPacket->mpResTex = (u8*)dComIfG_getObjectRes("Always", 0x5E);
                 } else {
                     if (g_env_light.field_0xea9 == 2) {
@@ -770,7 +803,7 @@ static void wether_move_housi() {
             g_env_light.mpHousiPacket = NULL;
         } else {
             dKyr_housi_move();
-            if (!dKy_twilight_visuals_check()) {
+            if (!dKy_darkworld_visual_effect_check()) {
                 g_env_light.mHousiCount = 0;
             }
         }
@@ -883,7 +916,7 @@ static void wether_move_vrkumo() {
         g_env_light.mVrkumoCount = 0;
     }
 
-    if (dKy_twilight_visuals_check()) {
+    if (dKy_darkworld_visual_effect_check()) {
         g_env_light.mVrkumoCount = 30;
     }
 
@@ -1063,7 +1096,7 @@ void dKyw_wether_draw() {
     if (strcmp(dComIfGp_getStartStageName(), "Name") && g_env_light.mSunInitialized) {
         stage_stag_info_class* stag_info = dComIfGp_getStageStagInfo();
 
-        if (dStage_stagInfo_GetArg0(stag_info) != 0) {
+        if (external_moon_visible() || dStage_stagInfo_GetArg0(stag_info) != 0) {
             dKyw_Sun_Draw();
             dKyw_Sunlenz_Draw();
         }
@@ -1116,7 +1149,7 @@ void dKyw_wether_proc() {
         (!strcmp(dComIfGp_getStartStageName(), "F_SP121") &&
          g_env_light.dice_wether_time != 0.0f))
     {
-        if (!dKy_darkworld_check()) {
+        if (!dKy_darkworld_visual_effect_check()) {
             // Stage is Hyrule Field
             if (!strcmp(dComIfGp_getStartStageName(), "F_SP121") ||
                 !(g_env_light.daytime >= 75.0f) || !(g_env_light.daytime <= 120.0f))
@@ -1187,10 +1220,12 @@ void dKyw_wind_set() {
     } else {
         dStage_FileList_dt_c* fili_p = NULL;
         int wind_level = 0;
+        const int stayNo = dComIfGp_roomControl_getStayNo();
+        dStage_roomDt_c* roomDt = stayNo >= 0 ?
+            dComIfGp_roomControl_getStatusRoomDt(stayNo) : NULL;
 
-        if (dComIfGp_roomControl_getStayNo() >= 0) {
-            fili_p = dComIfGp_roomControl_getStatusRoomDt(dComIfGp_roomControl_getStayNo())
-                         ->getFileListInfo();
+        if (roomDt != NULL) {
+            fili_p = roomDt->getFileListInfo();
         }
 
         var_r30 = 0;
@@ -1199,9 +1234,8 @@ void dKyw_wind_set() {
             var_r28 = dStage_FileList_dt_GlobalWindDir(fili_p);
         }
 
-        if (dComIfGp_roomControl_getStatusRoomDt(dComIfGp_roomControl_getStayNo()) != NULL) {
-            dStage_Lbnk_c* lbnk_p =
-                dComIfGp_roomControl_getStatusRoomDt(dComIfGp_roomControl_getStayNo())->getLbnk();
+        if (roomDt != NULL) {
+            dStage_Lbnk_c* lbnk_p = roomDt->getLbnk();
             if (lbnk_p != NULL) {
                 dStage_Lbnk_dt_c* data_p = lbnk_p->entries;
 
@@ -1246,9 +1280,8 @@ void dKyw_wind_set() {
             wind_level = dStage_FileList_dt_GlobalWindLevel(fili_p);
         }
 
-        if (dComIfGp_roomControl_getStatusRoomDt(dComIfGp_roomControl_getStayNo()) != NULL) {
-            dStage_Lbnk_c* lbnk_p =
-                dComIfGp_roomControl_getStatusRoomDt(dComIfGp_roomControl_getStayNo())->getLbnk();
+        if (roomDt != NULL) {
+            dStage_Lbnk_c* lbnk_p = roomDt->getLbnk();
             if (lbnk_p != NULL) {
                 dStage_Lbnk_dt_c* data_p = lbnk_p->entries;
 
@@ -1282,7 +1315,8 @@ void dKyw_wind_set() {
         strength = 1.0f;
     }
 
-    if (strcmp(dComIfGp_getStartStageName(), "D_MN07") == 0 &&
+    const char* stageName = dComIfGp_getStartStageName();
+    if (stageName != NULL && strcmp(stageName, "D_MN07") == 0 &&
         (dComIfGp_roomControl_getStayNo() == 0 || dComIfGp_roomControl_getStayNo() == 3 ||
          dComIfGp_roomControl_getStayNo() == 6 || dComIfGp_roomControl_getStayNo() == 13))
     {

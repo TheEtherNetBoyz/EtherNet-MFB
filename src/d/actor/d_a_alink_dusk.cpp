@@ -1,8 +1,27 @@
+#include "dusk/legacy_practice.h"
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_midna.h"
 #include "d/d_meter2.h"
 #include "d/d_meter2_draw.h"
 #include "d/d_meter2_info.h"
+
+namespace {
+bool sFixedQuickTransformActive = false;
+}
+
+bool daAlink_fixedQuickTransformFreezeActive() {
+    if (!sFixedQuickTransformActive) {
+        return false;
+    }
+
+    daAlink_c* player = daAlink_getAlinkActorClass();
+    if (player == NULL || !player->checkMetamorphose()) {
+        sFixedQuickTransformActive = false;
+        return false;
+    }
+
+    return true;
+}
 
 void daAlink_c::handleWolfHowl() {
     if (checkWolf()) {
@@ -72,7 +91,7 @@ void daAlink_c::handleQuickTransform() {
     }
 
     // Check to see if Link has the ability to transform.
-    if (!dComIfGs_isEventBit(dSv_event_flag_c::M_077) && !dusk::getSettings().game.transformWithoutShadowCrystal) {
+    if (!dComIfGs_isEventBit(dSv_event_flag_c::M_077) && !(DUSK_LEGACY_PRACTICE_TOOLS && dusk::getSettings().game.transformWithoutShadowCrystal)) {
         return;
     }
 
@@ -102,13 +121,19 @@ void daAlink_c::handleQuickTransform() {
     }
 
     // Ensure that the Z Button is not dimmed
-    if (meterDrawPtr->getButtonZAlpha() != 1.f && !dusk::getSettings().game.transformWithoutShadowCrystal) {
+    if (meterDrawPtr->getButtonZAlpha() != 1.f && !(DUSK_LEGACY_PRACTICE_TOOLS && dusk::getSettings().game.transformWithoutShadowCrystal)) {
         Z2GetAudioMgr()->seStart(Z2SE_SYS_ERROR, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
         return;
     }
 
     // The game will crash if trying to quick transform while holding the Ball and Chain
     if (mEquipItem == dItemNo_IRONBALL_e) {
+        Z2GetAudioMgr()->seStart(Z2SE_SYS_ERROR, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        return;
+    }
+
+    // Ensure Link is not underwater
+    if (!checkNoResetFlg0(FLG0_SWIM_UP)) {
         Z2GetAudioMgr()->seStart(Z2SE_SYS_ERROR, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
         return;
     }
@@ -122,7 +147,7 @@ void daAlink_c::handleQuickTransform() {
     bool canTransform = false;
 
     if (mLinkAcch.ChkGroundHit() && !checkModeFlg(MODE_PLAYER_FLY) && !checkMagneBootsOn()) {
-        if (checkMidnaRide() || dusk::getSettings().game.transformWithoutShadowCrystal) {
+        if (checkMidnaRide() || (DUSK_LEGACY_PRACTICE_TOOLS && dusk::getSettings().game.transformWithoutShadowCrystal)) {
             if ((checkWolf() &&
                  (checkModeFlg(MODE_UNK_1000) || dComIfGp_checkPlayerStatus0(0, 0x10))) ||
                 (!checkWolf() &&
@@ -141,6 +166,17 @@ void daAlink_c::handleQuickTransform() {
     }
 
     OSReport("Running quick transform!");
+
+    if (dusk::getSettings().game.fixedQuickTransform) {
+        // Keep Dusk's proven immediate transform path. Actor execution is suspended separately
+        // while this specific quick transformation is active, avoiding incompatible event state.
+        sFixedQuickTransformActive = true;
+        if (!procCoMetamorphoseInit() || !checkMetamorphose()) {
+            sFixedQuickTransformActive = false;
+        }
+        return;
+    }
+
     procCoMetamorphoseInit();
 }
 

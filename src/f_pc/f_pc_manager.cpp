@@ -23,12 +23,14 @@
 #include "dusk/latency.h"
 #if TARGET_PC
 #include "dusk/detached_camera.h"
-#include "dusk/frame_interpolation.h"
+#include "dusk/interp/frame_interpolation.h"
 #include "dusk/tas_movie.h"
 #include "dusk/game_clock.h"
-#endif
 
-#include "tracy/Tracy.hpp"
+#include "m_Do/m_Do_graphic.h"
+
+#include <tracy/Tracy.hpp>
+#endif
 
 void fpcM_Draw(void* i_proc) {
     fpcDw_Execute((base_process_class*)i_proc);
@@ -70,8 +72,17 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
                 l_dvdError = false;
             }
 
-#ifdef TARGET_PC
-            // The main loop manages painting for separate presentation and low-latency modes.
+#if TARGET_PC
+            if (dusk::game_clock::g_frameTiming.separatePresentation) {
+                if (JUTFader* fader = mDoGph_gInf_c::getFader()) {
+                    fader->advance();
+                }
+            }
+#endif
+
+            // Normal mode paints the previous draw list. Low latency paints after execution;
+            // separate presentation is painted by the main loop.
+#if TARGET_PC
             if (!dusk::game_clock::g_frameTiming.separatePresentation &&
                 !dusk::low_latency_presentation_enabled())
 #endif
@@ -118,7 +129,7 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
 #endif
                 fpcDw_Handler((fpcDw_HandlerFuncFunc)fpcM_DrawIterater, (fpcDw_HandlerFunc)fpcM_Draw);
 #ifdef TARGET_PC
-                if (!dusk::frame_interp::is_enabled() &&
+                if (!dusk::interp::is_enabled() &&
                     !dusk::low_latency_presentation_enabled())
                 {
                     dusk::detached_camera::restore();
@@ -127,14 +138,17 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
 #endif
             }
 
+            IF_DUSK(dComIfGp_drawSimpleModel());
+
             if (i_postExecuteFn != NULL) {
                 i_postExecuteFn();
             }
 
-            dComIfGp_drawSimpleModel();
+            IF_NOT_DUSK(dComIfGp_drawSimpleModel());
 
 #ifdef TARGET_PC
-            if (!dusk::frame_interp::is_enabled() && dusk::low_latency_presentation_enabled()) {
+            if (!dusk::game_clock::g_frameTiming.separatePresentation &&
+                dusk::low_latency_presentation_enabled()) {
                 cAPIGph_Painter();
                 dusk::detached_camera::restore();
                 dusk::tas_movie::restorePresentationCamera();

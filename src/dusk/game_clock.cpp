@@ -5,8 +5,11 @@
 #include "dusk/settings.h"
 #include "dusk/time.h"
 
-#include <algorithm>
+
+
 #include <aurora/time.hpp>
+
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <unordered_map>
@@ -16,11 +19,10 @@ namespace dusk::game_clock {
 using native_clock = aurora::time::native_clock;
 using game_clock = aurora::time::game_clock;
 
-FrameTiming g_frameTiming;
+FrameTiming g_frameTiming{.dt = kUiInitialDt};
 
 namespace {
 bool s_initialized = false;
-bool s_fixedStepActive = false;
 bool s_simTickActive = false;
 native_clock::time_point s_previousNativeSample{};
 game_clock::time_point s_latestGameSample{};
@@ -32,6 +34,13 @@ game_clock::duration s_simPeriodDuration =
 Limiter s_frameLimiter;
 
 std::unordered_map<uintptr_t, game_clock::time_point> s_intervalLastSample;
+uint64_t s_presentationEpoch = 1;
+bool s_timingModeInitialized = false;
+bool s_previousSeparatePresentation = false;
+bool s_previousInterpolating = false;
+bool s_previousTimeStopped = false;
+float s_presentationDtSeconds = kUiInitialDt;
+int s_presentationTickOverride = -1;
 
 constexpr native_clock::duration kAbnormalGapResetThreshold = std::chrono::milliseconds(250);
 constexpr int kMaxSimTicksPerFrame = static_cast<int>(aurora::time::kMaximumTimeScale) * 4;
@@ -62,7 +71,16 @@ void apply_frame_rate_limit() {
     const auto sleepTime = s_frameLimiter.Sleep(target);
     frameUsagePct = 100.0f * (1.0f - static_cast<float>(sleepTime) / static_cast<float>(target));
 }
-} // namespace
+
+float ui_dt() {
+    if (s_simTickActive) {
+        return sim_pace();
+    }
+
+    const float maximumDt = kUiMaximumDt * aurora::time::scale();
+    return std::clamp(g_frameTiming.dt, 0.0f, maximumDt);
+}
+}  // namespace
 
 void initialize() {
     if (s_initialized) {
@@ -88,6 +106,7 @@ void reset() {
     s_pendingSimTime = s_currentSnapshotTime;
     s_simTickActive = false;
     s_frameLimiter.Reset();
+    ++s_presentationEpoch;
 }
 
 void reset_frame_timer() {
@@ -122,18 +141,38 @@ const FrameTiming& advance() {
     const auto nativeNow = native_clock::now();
     const auto gameNow = game_clock::now();
     const auto nativeFrameGap = nativeNow - s_previousNativeSample;
+    const auto gameFrameGap = gameNow - s_latestGameSample;
     s_previousNativeSample = nativeNow;
     s_latestGameSample = gameNow;
 
     auto& out = g_frameTiming;
-    out = {.dt = std::chrono::duration<float>(nativeFrameGap).count()};
+    out = {
+        .dt = std::chrono::duration<float>(gameFrameGap).count(),
+        .presentationEpoch = s_presentationEpoch,
+    };
+    s_presentationDtSeconds = out.dt;
+    s_presentationTickOverride = -1;
 
     const float timeScale = aurora::time::scale();
     const bool interpolating = interpolation_enabled();
     const bool separatePresentation = interpolating || timeScale != 1.0f;
     out.interpolating = interpolating;
     out.separatePresentation = separatePresentation;
-    s_fixedStepActive = separatePresentation;
+
+    const bool timeStopped = timeScale == 0.0f;
+    const bool timingModeChanged =
+        s_timingModeInitialized &&
+        (separatePresentation != s_previousSeparatePresentation ||
+            interpolating != s_previousInterpolating || timeStopped != s_previousTimeStopped);
+    const bool abnormalGap = nativeFrameGap > kAbnormalGapResetThreshold;
+    if (timingModeChanged || abnormalGap) {
+        ++s_presentationEpoch;
+        out.presentationEpoch = s_presentationEpoch;
+    }
+    s_timingModeInitialized = true;
+    s_previousSeparatePresentation = separatePresentation;
+    s_previousInterpolating = interpolating;
+    s_previousTimeStopped = timeStopped;
 
     if (!separatePresentation) {
         s_currentSnapshotTime = gameNow;
@@ -142,7 +181,7 @@ const FrameTiming& advance() {
     }
 
     const auto simulationTarget = interpolating ? gameNow - s_simPeriodDuration : gameNow;
-    if (timeScale == 0.f || nativeFrameGap > kAbnormalGapResetThreshold) {
+    if (timeStopped || abnormalGap) {
         s_currentSnapshotTime = simulationTarget;
         out.numSimTicks = 0;
         return out;
@@ -169,7 +208,8 @@ void finish_main_loop() {
 }
 
 void begin_sim_tick() {
-    s_pendingSimTime = s_fixedStepActive ? s_currentSnapshotTime + s_simPeriodDuration : s_latestGameSample;
+    s_pendingSimTime = g_frameTiming.separatePresentation ? s_currentSnapshotTime + s_simPeriodDuration :
+                                                            s_latestGameSample;
     s_simTickActive = true;
 }
 
@@ -182,9 +222,35 @@ void commit_sim_tick() {
     }
 }
 
+bool is_sim_frame() {
+    return !g_frameTiming.separatePresentation || s_simTickActive;
+}
+
+bool is_presentation_frame() {
+    return !g_frameTiming.separatePresentation || !s_simTickActive;
+}
+
 float sample_interpolation_step() {
     const float step = std::chrono::duration<float>(game_clock::now() - s_currentSnapshotTime).count() / sim_pace();
     return std::clamp(step, 0.0f, 1.0f);
+}
+
+void set_presentation_tick_override(int ticks) {
+    s_presentationTickOverride = std::max(ticks, -1);
+}
+
+double sample_time() {
+    const auto now = s_simTickActive ? s_pendingSimTime : game_clock::now();
+    return std::chrono::duration<double>(now.time_since_epoch()).count();
+}
+
+float original_frames() {
+    // TAS pause/frame advance and turbo use completed simulation ticks rather than
+    // elapsed wall time. Normal presentation retains upstream's clamped delta time.
+    if (!s_simTickActive && s_presentationTickOverride >= 0) {
+        return static_cast<float>(s_presentationTickOverride);
+    }
+    return ui_dt() / sim_pace();
 }
 
 float consume_interval(const void* consumer) {
@@ -198,6 +264,13 @@ float consume_interval(const void* consumer) {
         dt = std::min(dt, maximumDt);
     }
     s_intervalLastSample[key] = now;
+    return dt;
+}
+
+float consume_interval(double& lastSample) {
+    const double now = sample_time();
+    const float dt = std::max(0.0, now - lastSample);
+    lastSample = now;
     return dt;
 }
 

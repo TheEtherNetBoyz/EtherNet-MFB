@@ -73,6 +73,13 @@ public:
     JASAramStream();
     void init(u32, u32, StreamCallback, void*);
     bool prepare(s32, int);
+#if TARGET_PC
+    // Native AST blocks supplied by a host asset instead of a DVD entry.
+    // Caller retains the immutable data until the finish callback.
+    bool prepareMemory(const void* data, u32 size, int preload = -1);
+    s32 readSource(void* destination, u32 size, u32 offset);
+    const u8* mMemorySource = nullptr;
+#endif
     bool start();
     bool stop(u16);
     bool pause(bool);

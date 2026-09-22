@@ -454,10 +454,6 @@ void ImGuiMenuTools::ShowTasMovie() {
     if (ImGui::Checkbox("Control detached camera", &controlsEnabled)) {
         tas_movie::setPresentationCameraControlEnabled(controlsEnabled);
     }
-    bool mouseLook = tas_movie::presentationCameraMouseLookEnabled();
-    if (ImGui::Checkbox("Mouse look (P)", &mouseLook)) {
-        tas_movie::setPresentationCameraMouseLookEnabled(mouseLook);
-    }
     bool dualCulling = tas_movie::presentationCameraDualCullingEnabled();
     if (ImGui::Checkbox("Keep gameplay-camera actors visible", &dualCulling)) {
         tas_movie::setPresentationCameraDualCullingEnabled(dualCulling);
@@ -483,7 +479,7 @@ void ImGuiMenuTools::ShowTasMovie() {
     }
     ImGui::TextDisabled("Standalone camera: regular Fly Mode should remain off.");
     ImGui::TextDisabled("WASD move, Space/Ctrl vertical, Shift fast, Q/E roll.");
-    ImGui::TextDisabled("P toggles mouse look. K captures a keyframe.");
+    ImGui::TextDisabled("Right-click+mouse looks. K captures a keyframe.");
     if (ImGui::Button("Copy Gameplay Camera")) {
         auto* camera = dComIfGp_getCamera(0);
         if (camera != nullptr) {

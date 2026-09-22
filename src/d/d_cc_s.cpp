@@ -11,7 +11,6 @@
 #include "f_op/f_op_actor_mng.h"
 #if TARGET_PC
 #include "dusk/settings.h"
-#include "dusk/trigger_view.h"
 #endif
 
 class dCcS_HIO : public JORReflexible {
@@ -849,10 +848,6 @@ void dCcS::Draw() {
             }
         }
     }
-
-#if TARGET_PC
-    dusk::trigger_view::Draw();
-#endif
 
     #if DEBUG
     if (s_Hio.ChkCounter()) {

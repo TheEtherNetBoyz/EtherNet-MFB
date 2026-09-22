@@ -1,15 +1,17 @@
+#include "internal.hpp"
 #include "registry.hpp"
-#include "slot_map.hpp"
 
 #include "dusk/main.h"
 #include "dusk/mods/loader/loader.hpp"
 #include "dusk/mods/log_buffer.hpp"
 #include "dusk/mods/manifest.hpp"
-#include "fmt/format.h"
+#include "dusk/utilities.hpp"
 
-#include <algorithm>
 #include <borealis/io.hpp>
 #include <borealis/version.h>
+#include <fmt/format.h>
+
+#include <algorithm>
 #include <filesystem>
 #include <vector>
 
@@ -33,7 +35,7 @@ ModResult host_get_service(ModContext*, const char* serviceId, const uint16_t ma
 ModResult host_publish_service(
     ModContext* context, const char* serviceId, const uint16_t majorVersion, const void* service) {
     auto* mod = mod_from_context(context);
-    if (mod == nullptr || !valid_service_id(serviceId) || service == nullptr) {
+    if (mod == nullptr || !utils::is_valid_name(serviceId) || service == nullptr) {
         return MOD_INVALID_ARGUMENT;
     }
 

@@ -23,12 +23,15 @@
 #include "m_Do/m_Do_graphic.h"
 #include <cstring>
 
-#include "dusk/version.hpp"
-
 #if TARGET_PC
+#include "dusk/game_clock.h"
+#include "dusk/game_mode.hpp"
+#include "dusk/interp/user_interface.h"
 #include "dusk/menu_pointer.h"
-#include "helpers/string.hpp"
 #include "dusk/mods/svc/save.hpp"
+#include "dusk/utilities.hpp"
+#include "dusk/version.hpp"
+#include "helpers/string.hpp"
 
 namespace {
 constexpr u8 pointer_target(u8 group, u8 index) noexcept {
@@ -356,6 +359,8 @@ static DataSelProcFunc DataSelProc[] = {
 };
 
 void dFile_select_c::_move() {
+    IF_DUSK(mNameMoveRequested = false);
+
     #if DEBUG
     if (g_fsHIO.title_mesg_check) {
         titleMsgCheck();
@@ -392,6 +397,7 @@ void dFile_select_c::_move() {
 
     (this->*DataSelProc[mDataSelProc])();
 
+#if !TARGET_PC
     selFileWakuAnm();
     bookIconAnm();
     dataDelEffAnm();
@@ -407,6 +413,7 @@ void dFile_select_c::_move() {
         copyBookIconAnm();
         mCpSel.Scr->animation();
     }
+#endif
 
     mpFileWarning->_move();
     mpFileSelect3d->_move();
@@ -476,6 +483,15 @@ void dFile_select_c::errorMsgCheck() {
 #endif
 
 void dFile_select_c::selFileWakuAnm() {
+#if TARGET_PC
+    dusk::vdt::present_looping(mSelFileBpkFrame, mFileSelBpk, 2.0f);
+    dusk::vdt::present_looping(mSelFileBtk05Frame, mFileSel05Btk, 2.0f);
+    dusk::vdt::present_looping(mYnSelBpkFrame, mYnSelBpk, 2.0f);
+    dusk::vdt::present_looping(mYnSelBtkFrame, mYnSelBtk, 2.0f);
+    dusk::vdt::present_looping(m3mBpkFrame, m3mBpk, 2.0f);
+    dusk::vdt::present_looping(m3mBtkFrame, m3mBtk, 2.0f);
+    dusk::vdt::present_looping(mSelDtBtkFrame, mSelDtBtk, 2.0f);
+#else
     mSelFileBpkFrame += 2;
     if (mSelFileBpkFrame >= mFileSelBpk->getFrameMax())
         mSelFileBpkFrame -= mFileSelBpk->getFrameMax();
@@ -510,9 +526,15 @@ void dFile_select_c::selFileWakuAnm() {
     if (mSelDtBtkFrame >= mSelDtBtk->getFrameMax())
         mSelDtBtkFrame -= mSelDtBtk->getFrameMax();
     mSelDtBtk->setFrame(mSelDtBtkFrame);
+#endif
 }
 
 void dFile_select_c::bookIconAnm() {
+#if TARGET_PC
+    dusk::vdt::present_looping(mSelFileBookBpkFrame, mSelFileBookBpk, 2.0f);
+    dusk::vdt::present_looping(mSelFileBookBtkFrame, mSelFileBookBtk, 2.0f);
+    dusk::vdt::present_looping(mSelFileBookBrkFrame, mSelFileBookBrk, 2.0f);
+#else
     mSelFileBookBpkFrame += 2;
     if (mSelFileBookBpkFrame >= mSelFileBookBpk->getFrameMax())
         mSelFileBookBpkFrame -= mSelFileBookBpk->getFrameMax();
@@ -527,9 +549,14 @@ void dFile_select_c::bookIconAnm() {
     if (mSelFileBookBrkFrame >= mSelFileBookBrk->getFrameMax())
         mSelFileBookBrkFrame -= mSelFileBookBrk->getFrameMax();
     mSelFileBookBrk->setFrame(mSelFileBookBrkFrame);
+#endif
 }
 
 void dFile_select_c::selCopyFileWakuAnm() {
+#if TARGET_PC
+    dusk::vdt::present_looping(mCpSelBpkFrame, mCpSelBpk, 2.0f);
+    dusk::vdt::present_looping(mCpSel03BtkFrame, mCpSel03Btk, 2.0f);
+#else
     mCpSelBpkFrame += 2;
     if (mCpSelBpkFrame >= mCpSelBpk->getFrameMax())
         mCpSelBpkFrame -= mCpSelBpk->getFrameMax();
@@ -539,9 +566,15 @@ void dFile_select_c::selCopyFileWakuAnm() {
     if (mCpSel03BtkFrame >= mCpSel03Btk->getFrameMax())
         mCpSel03BtkFrame -= mCpSel03Btk->getFrameMax();
     mCpSel03Btk->setFrame(mCpSel03BtkFrame);
+#endif
 }
 
 void dFile_select_c::copyBookIconAnm() {
+#if TARGET_PC
+    dusk::vdt::present_looping(mCpSelBookBpkFrame, mCpSelBookBpk, 2.0f);
+    dusk::vdt::present_looping(mCpSelBookBtkFrame, mCpSelBookBtk, 2.0f);
+    dusk::vdt::present_looping(mCpSelBookBrkFrame, mCpSelBookBrk, 2.0f);
+#else
     mCpSelBookBpkFrame += 2;
     if (mCpSelBookBpkFrame >= mCpSelBookBpk->getFrameMax())
         mCpSelBookBpkFrame -= mCpSelBookBpk->getFrameMax();
@@ -556,10 +589,15 @@ void dFile_select_c::copyBookIconAnm() {
     if (mCpSelBookBrkFrame >= mCpSelBookBrk->getFrameMax())
         mCpSelBookBrkFrame -= mCpSelBookBrk->getFrameMax();
     mCpSelBookBrk->setFrame(mCpSelBookBrkFrame);
+#endif
 }
 
 void dFile_select_c::dataDelEffAnm() {
     if (field_0x0208 != 0) {
+#if TARGET_PC
+        dusk::vdt::present_looping(mCpDtEffBrkFrame, mCpDtEffBrk, 2.0f);
+        dusk::vdt::present_looping(mDtEffBtkFrame, mDtEffBtk, 2.0f);
+#else
         mCpDtEffBrkFrame += 2;
         if (mCpDtEffBrkFrame >= mCpDtEffBrk->getFrameMax())
             mCpDtEffBrkFrame -= mCpDtEffBrk->getFrameMax();
@@ -569,11 +607,16 @@ void dFile_select_c::dataDelEffAnm() {
         if (mDtEffBtkFrame >= mDtEffBtk->getFrameMax())
             mDtEffBtkFrame -= mDtEffBtk->getFrameMax();
         mDtEffBtk->setFrame(mDtEffBtkFrame);
+#endif
     }
 }
 
 void dFile_select_c::dataCopyEffAnm() {
     if (field_0x0209 != 0) {
+#if TARGET_PC
+        dusk::vdt::present_looping(mCpDtEffBrkFrame, mCpDtEffBrk, 2.0f);
+        dusk::vdt::present_looping(mCpEffBtkFrame, mCpEffBtk, 2.0f);
+#else
         mCpDtEffBrkFrame += 2;
         if (mCpDtEffBrkFrame >= mCpDtEffBrk->getFrameMax())
             mCpDtEffBrkFrame -= mCpDtEffBrk->getFrameMax();
@@ -583,6 +626,7 @@ void dFile_select_c::dataCopyEffAnm() {
         if (mCpEffBtkFrame >= mCpEffBtk->getFrameMax())
             mCpEffBtkFrame -= mCpEffBtk->getFrameMax();
         mCpEffBtk->setFrame(mCpEffBtkFrame);
+#endif
     }
 }
 
@@ -601,6 +645,7 @@ void dFile_select_c::selectDataBaseMoveAnmInitSet(int i_frame, int i_frameMax) {
 bool dFile_select_c::selectDataBaseMoveAnm() {
     bool ret;
     if (mBaseMoveAnmFrame != mBaseMoveAnmFrameMax) {
+#if !TARGET_PC
         if (mBaseMoveAnmFrame < mBaseMoveAnmFrameMax) {
             mBaseMoveAnmFrame += 2;
             if (mBaseMoveAnmFrame > mBaseMoveAnmFrameMax)
@@ -613,6 +658,7 @@ bool dFile_select_c::selectDataBaseMoveAnm() {
 
         mBaseMoveAnm->setFrame(mBaseMoveAnmFrame);
         mBaseMovePane->getPanePtr()->animationTransform();
+#endif
         ret = false;
     } else {
         if (mBaseMoveAnmFrame == 33) {
@@ -752,6 +798,7 @@ void dFile_select_c::dataSelectInit() {
         isKetteiTxtDisp = ketteiTxtDispAnm();
 
         if (field_0x00e0[mSelectNum] != SelEndFrameTbl[mSelectNum]) {
+#if !TARGET_PC
             field_0x00e0[mSelectNum] += 2;
 
             if (field_0x00e0[mSelectNum] > SelEndFrameTbl[mSelectNum])
@@ -759,6 +806,7 @@ void dFile_select_c::dataSelectInit() {
 
             mBaseMoveAnm->setFrame(field_0x00e0[mSelectNum]);
             mSelFilePanes[mSelectNum]->getPanePtr()->animationTransform();
+#endif
             check = false;
         }
     }
@@ -1057,6 +1105,7 @@ bool dFile_select_c::selectDataMoveAnm() {
     bool ret;
 
     if (field_0x00e0[mSelectNum] != field_0x00ec) {
+#if !TARGET_PC
         if (field_0x00e0[mSelectNum] < field_0x00ec) {
             field_0x00e0[mSelectNum] += 2;
 
@@ -1076,6 +1125,7 @@ bool dFile_select_c::selectDataMoveAnm() {
             mSelFilePanes[i]->getPanePtr()->animationTransform();
         }
         mBaseSubPane->animationTransform();
+#endif
     }
 
     if (field_0x00e0[mSelectNum] == field_0x00ec) {
@@ -1132,6 +1182,7 @@ void dFile_select_c::dataSelectMoveAnime() {
         iVar6 = selectWakuAlpahAnm(mLastSelectNum);
 
         if (field_0x00e0[mLastSelectNum] != SelStartFrameTbl[mLastSelectNum]) {
+#if !TARGET_PC
             field_0x00e0[mLastSelectNum] -= 2;
 
             if (field_0x00e0[mLastSelectNum] < SelStartFrameTbl[mLastSelectNum])
@@ -1139,6 +1190,7 @@ void dFile_select_c::dataSelectMoveAnime() {
 
             field_0x0088->setFrame(field_0x00e0[mLastSelectNum]);
             mSelFilePanes[mLastSelectNum]->getPanePtr()->animationTransform();
+#endif
             bVar1 = false;
         }
     }
@@ -1150,6 +1202,7 @@ void dFile_select_c::dataSelectMoveAnime() {
         iVar5 = mSelFilePane_Book_l[mSelectNum]->alphaAnime(g_fsHIO.base_effect_appear_frames, 0, 0xff, 1);
 
         if (field_0x00e0[mSelectNum] != SelEndFrameTbl[mSelectNum]) {
+#if !TARGET_PC
             field_0x00e0[mSelectNum] += 2;
 
             if (field_0x00e0[mSelectNum] > SelEndFrameTbl[mSelectNum])
@@ -1157,6 +1210,7 @@ void dFile_select_c::dataSelectMoveAnime() {
 
             mBaseMoveAnm->setFrame(field_0x00e0[mSelectNum]);
             mSelFilePanes[mSelectNum]->getPanePtr()->animationTransform();
+#endif
             bVar2 = false;
         }
     }
@@ -1310,12 +1364,42 @@ void dFile_select_c::selectDataOpenMove() {
 void dFile_select_c::selectDataNameMove() {
     bool isHeaderTxtChange = headerTxtChangeAnm();
     bool isFileRecScale = fileRecScaleAnm2();
-    bool isNameMove = nameMoveAnm();
+    IF_NOT_DUSK(bool isNameMove = nameMoveAnm();)
     bool isModoruTxtDisp = modoruTxtDispAnm();
+
+#ifdef TARGET_PC
+    const dusk::gamemode::GameMode* gameMode =
+        dusk::gamemode::getGameModeManager().getCurrentGameMode();
+    if (gameMode) {
+        if (isHeaderTxtChange == true && isFileRecScale == true && isModoruTxtDisp == true) {
+            if (mGameModeSaveStartBuildUi) {
+                gameMode->invokeOnNewSaveSelectFunction(&mGameModeNewSaveState);
+                mGameModeSaveStartBuildUi = false;
+            }
+            if (mGameModeNewSaveState == GAME_MODE_STATE_RETURN) {
+                backToDataSelectMove();
+                mGameModeSaveStartBuildUi = true;
+                mGameModeNewSaveState = GAME_MODE_STATE_PENDING;
+                return;
+            }
+            if (mGameModeNewSaveState != GAME_MODE_STATE_PROCEED) {
+                return;
+            }
+        } else {
+            return;
+        }
+    }
+#endif
+
+    IF_DUSK(bool isNameMove = nameMoveAnm();)
 
     if (isHeaderTxtChange == true && isFileRecScale == true && isNameMove == true &&
         isModoruTxtDisp == true)
     {
+#ifdef TARGET_PC
+        mGameModeSaveStartBuildUi = true;
+        mGameModeNewSaveState = GAME_MODE_STATE_PENDING;
+#endif
         mDataSelProc = DATASELPROC_NAME_INPUT_WAIT;
     }
 }
@@ -1396,7 +1480,13 @@ void dFile_select_c::menuSelectStart() {
         mDataSelProc = DATASELPROC_NEXT_MODE_WAIT;
         dComIfGs_setDataNum(mSelectNum);
 #if TARGET_PC
-        dusk::mods::svc::save_slot_loaded(mSelectNum, &mSaveData[mSelectNum]);
+        dusk::mods::svc::save_slot_loaded(mSelectNum);
+
+        const dusk::gamemode::GameMode* gameMode =
+            dusk::gamemode::getGameModeManager().getCurrentGameMode();
+        if (gameMode) {
+            gameMode->invokeOnSaveLoadedFunction();
+        }
 #endif
     } else if (mSelectMenuNum == 0) {
         mSelIcon->setAlphaRate(0.0f);
@@ -1451,6 +1541,7 @@ bool dFile_select_c::menuMoveAnm() {
     bool ret;
 
     if (field_0x0358 != field_0x035c) {
+#if !TARGET_PC
         if (field_0x0358 < field_0x035c) {
             field_0x0358 += 2;
 
@@ -1465,6 +1556,7 @@ bool dFile_select_c::menuMoveAnm() {
 
         m3mBck->setFrame(field_0x0358);
         m3mMenuPane->animationTransform();
+#endif
         ret = false;
     } else {
         m3mMenuPane->setAnimation((J2DAnmTransform*)NULL);
@@ -1524,6 +1616,7 @@ void dFile_select_c::menuSelectMoveAnm() {
     if (mSelectMenuNum != 0xFF &&
         field_0x034c[mSelectMenuNum] != MenuSelStartFrameTbl[mSelectMenuNum])
     {
+#if !TARGET_PC
         if (field_0x034c[mSelectMenuNum] > MenuSelStartFrameTbl[mSelectMenuNum]) {
             field_0x034c[mSelectMenuNum] -= 2;
 
@@ -1538,6 +1631,7 @@ void dFile_select_c::menuSelectMoveAnm() {
 
         m3mBck->setFrame(field_0x034c[mSelectMenuNum]);
         m3mSelPane[mSelectMenuNum]->getPanePtr()->animationTransform();
+#endif
         tmp1 = false;
     }
 
@@ -1546,6 +1640,7 @@ void dFile_select_c::menuSelectMoveAnm() {
 
     if (mLastSelectMenuNum != 0xFF) {
         if (field_0x034c[mLastSelectMenuNum] != MenuSelEndFrameTbl[mLastSelectMenuNum]) {
+#if !TARGET_PC
             if (field_0x034c[mLastSelectMenuNum] < MenuSelEndFrameTbl[mLastSelectMenuNum]) {
                 field_0x034c[mLastSelectMenuNum] += 2;
 
@@ -1560,6 +1655,7 @@ void dFile_select_c::menuSelectMoveAnm() {
             }
             m3mBck2->setFrame(field_0x034c[mLastSelectMenuNum]);
             m3mSelPane[mLastSelectMenuNum]->getPanePtr()->animationTransform();
+#endif
             tmp2 = false;
         }
 
@@ -1681,14 +1777,14 @@ void dFile_select_c::nameToDataSelectMove() {
 }
 
 void dFile_select_c::nameInputFade() {
-    mFadeTimer--;
+    IF_NOT_DUSK(mFadeTimer--);
 
-    #if PLATFORM_GCN
+#if !TARGET_PC && PLATFORM_GCN
     u8 alpha = (1.0f - (mFadeTimer / 15.0f)) * 255.0f;
     mpFadePict->setAlpha(alpha);
-    #endif
+#endif
 
-    if (mFadeTimer == 0) {
+    if (mFadeTimer DUSK_IF_ELSE(<=, ==) 0) {
         char name[32];
         headerTxtSet(900, 1, 1);
         dMeter2Info_getString(899, name, NULL);
@@ -1709,14 +1805,14 @@ void dFile_select_c::nameInputFade() {
 
 void dFile_select_c::nameInput2Move() {
     if (!mDoRst::isReset()) {
-        mFadeTimer--;
+        IF_NOT_DUSK(mFadeTimer--);
 
-        #if PLATFORM_GCN
+#if !TARGET_PC && PLATFORM_GCN
         u8 alpha = (mFadeTimer / 15.0f) * 255.0f;
         mpFadePict->setAlpha(alpha);
-        #endif
+#endif
 
-        if (mFadeTimer == 0) {
+        if (mFadeTimer DUSK_IF_ELSE(<=, ==) 0) {
             mpName->showIcon();
             mDataSelProc = DATASELPROC_NAME_INPUT2;
         }
@@ -1750,20 +1846,32 @@ void dFile_select_c::nameInput2() {
         mIsSelectEnd = true;
 #if TARGET_PC
         dusk::mods::svc::save_slot_new(mSelectNum);
+        const dusk::gamemode::GameMode* gameMode =
+                dusk::gamemode::getGameModeManager().getCurrentGameMode();
+        if (gameMode) {
+            gameMode->invokeOnNewSaveFunction();
+        }
+
+        // only do OnSaveLoaded callback here if hiding the brightness check screen
+        if (dusk::getSettings().game.hideTvSettingsScreen) {
+            if (gameMode) {
+                gameMode->invokeOnSaveLoadedFunction();
+            }
+        }
 #endif
         mDataSelProc = DATASELPROC_NEXT_MODE_WAIT;
     }
 }
 
 void dFile_select_c::backNameInputMove0() {
-    mFadeTimer--;
+    IF_NOT_DUSK(mFadeTimer--);
 
-    #if PLATFORM_GCN
+#if !TARGET_PC && PLATFORM_GCN
     u8 alpha = (1.0f - (mFadeTimer / 15.0f)) * 255.0f;
     mpFadePict->setAlpha(alpha);
-    #endif
+#endif
 
-    if (mFadeTimer == 0) {
+    if (mFadeTimer DUSK_IF_ELSE(<=, ==) 0) {
         headerTxtSet(901, 1, 1);
         mpName->setNextNameStr(dComIfGs_getPlayerName());
         mpName->initial();
@@ -1782,14 +1890,14 @@ void dFile_select_c::backNameInputMove0() {
 
 void dFile_select_c::backNameInputMove() {
     if (!mDoRst::isReset()) {
-        mFadeTimer--;
+        IF_NOT_DUSK(mFadeTimer--);
 
-        #if PLATFORM_GCN
+#if !TARGET_PC && PLATFORM_GCN
         u8 alpha = (mFadeTimer / 15.0f) * 255.0f;
         mpFadePict->setAlpha(alpha);
-        #endif
+#endif
 
-        if (mFadeTimer == 0) {
+        if (mFadeTimer DUSK_IF_ELSE(<=, ==) 0) {
             modoruTxtChange(1);
             mDataSelProc = DATASELPROC_NAME_INPUT_WAIT;
         }
@@ -2035,12 +2143,14 @@ void dFile_select_c::copyDataToSelectMoveAnm() {
         iVar7 = mCpSelPane_book[field_0x026c]->alphaAnime(g_fsHIO.base_effect_appear_frames, 0xff, 0, 1);
         iVar6 = copySelectWakuAlpahAnm(field_0x026c);
         if (field_0x02b4[field_0x026c] != 109) {
+#if !TARGET_PC
             field_0x02b4[field_0x026c] += 2;
             if (field_0x02b4[field_0x026c] > 109) {
                 field_0x02b4[field_0x026c] = 109;
             }
             mCpSelBck2->setFrame(field_0x02b4[field_0x026c]);
             mCpSelPane[field_0x026c]->getPanePtr()->animationTransform();
+#endif
             bVar1 = false;
         }
     }
@@ -2050,12 +2160,14 @@ void dFile_select_c::copyDataToSelectMoveAnm() {
     if (field_0x026b != 0xff) {
         iVar5 = mCpSelPane_book[field_0x026b]->alphaAnime(g_fsHIO.base_effect_appear_frames, 0, 0xff, 1);
         if (field_0x02b4[field_0x026b] != 99) {
+#if !TARGET_PC
             field_0x02b4[field_0x026b] -= 2;
             if (field_0x02b4[field_0x026b] < 99) {
                 field_0x02b4[field_0x026b] = 99;
             }
             mCpSelBck->setFrame(field_0x02b4[field_0x026b]);
             mCpSelPane[field_0x026b]->getPanePtr()->animationTransform();
+#endif
             bVar2 = false;
         }
     }
@@ -2210,6 +2322,7 @@ void dFile_select_c::yesnoMenuMoveAnmInitSet(int param_1, int param_2) {
 bool dFile_select_c::yesnoMenuMoveAnm() {
     bool rv;
     if (field_0x0100 != field_0x0104) {
+#if !TARGET_PC
         if (field_0x0100 < field_0x0104) {
             field_0x0100 += 2;
             if (field_0x0100 > field_0x0104) {
@@ -2225,6 +2338,7 @@ bool dFile_select_c::yesnoMenuMoveAnm() {
         mYnSelBck3->setFrame(field_0x0100);
         mYnSelPane[0]->getPanePtr()->animationTransform();
         mYnSelPane[1]->getPanePtr()->animationTransform();
+#endif
         rv = false;
     } else {
         mYnSelPane[0]->getPanePtr()->setAnimation((J2DAnmTransform*)NULL);
@@ -2288,6 +2402,7 @@ bool dFile_select_c::yesnoSelectMoveAnm() {
     bool bVar1 = true;
 
     if (field_0x0269 != 0xff && field_0x00f8[field_0x0269] != YnSelStartFrameTbl[field_0x0269]) {
+#if !TARGET_PC
         if (field_0x00f8[field_0x0269] < YnSelStartFrameTbl[field_0x0269]) {
             field_0x00f8[field_0x0269] += 2;
             if (field_0x00f8[field_0x0269] > YnSelStartFrameTbl[field_0x0269]) {
@@ -2302,11 +2417,13 @@ bool dFile_select_c::yesnoSelectMoveAnm() {
 
         mYnSelBck->setFrame(field_0x00f8[field_0x0269]);
         mYnSelPane[field_0x0269]->getPanePtr()->animationTransform();
+#endif
         bVar1 = false;
     }
 
     bool bVar2 = true;
     if (field_0x0268 != 0xff && field_0x00f8[field_0x0268] != YnSelEndFrameTbl[field_0x0268]) {
+#if !TARGET_PC
         if (field_0x00f8[field_0x0268] < YnSelEndFrameTbl[field_0x0268]) {
             field_0x00f8[field_0x0268] += 2;
             if (field_0x00f8[field_0x0268] > YnSelEndFrameTbl[field_0x0268]) {
@@ -2321,6 +2438,7 @@ bool dFile_select_c::yesnoSelectMoveAnm() {
 
         mYnSelBck2->setFrame(field_0x00f8[field_0x0268]);
         mYnSelPane[field_0x0268]->getPanePtr()->animationTransform();
+#endif
         bVar2 = false;
     }
 
@@ -3528,9 +3646,7 @@ void dFile_select_c::screenSet() {
                                 timg, NULL);
     mpFadePict->setBlackWhite(black, white);
     mpFadePict->setAlpha(0);
-#ifdef TARGET_PC
-    mFadeDlst.mpPict = mpFadePict;
-#endif
+    IF_DUSK(mFadeDlst.mpPict = mpFadePict);
     #endif
 }
 
@@ -3733,6 +3849,10 @@ void dFile_select_c::screenSet3Menu() {
 
     m3mMenuPane = m3mSel.Scr3m->search(MULTI_CHAR('wmenu_n'));
     m3mMenuPane->setAnimation(m3mBck);
+#if TARGET_PC
+    field_0x0358 = 799;
+    field_0x035c = 799;
+#endif
     m3mBck->setFrame(799.0f);
     m3mMenuPane->animationTransform();
 
@@ -4110,11 +4230,45 @@ bool dFile_select_c::yesnoWakuAlpahAnm(u8 param_1) {
 }
 
 #if TARGET_PC
+
+static dusk::utils::PaneCache mSelDtPanes[] = {
+    {MULTI_CHAR('tate_n0'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('tate_n1'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('ken_n0'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('ken_n1'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('fuku_n0'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('fuku_n1'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('fuku_n2'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('gray_n'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('b_base'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('b_base1'), 0.0f, 0.0f, false},
+};
+
+static dusk::utils::PaneCache fileSelPanes[] = {
+    {MULTI_CHAR('w_uzu00'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('w_uzu01'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('w_uzu02'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('w_uzu03'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('w_uzu04'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('w_uzu05'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('w_uzu06'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('w_uzu07'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('w_uzu08'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('w_uzu09'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('w_er_msg'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('w_er_msE'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('w_er_msR'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('er_for0'), 0.0f, 0.0f, false},
+    {MULTI_CHAR('er_for1'), 0.0f, 0.0f, false},
+};
+
+static bool sFileSelectDetailsWindowActive = false;
+
 void dFile_select_c::fileSelectWide() {
     static bool cachedPanes = false;
     // Get pre-scale values for each pane
     if (!cachedPanes) {
-        for (PaneCache& entry : mSelDtPanes) {
+        for (dusk::utils::PaneCache& entry : mSelDtPanes) {
             J2DPane* pane = mSelDt.ScrDt->search(entry.tag);
             if (!entry.cached) {
                 entry.origTransX = pane->getTranslateX(); 
@@ -4122,7 +4276,7 @@ void dFile_select_c::fileSelectWide() {
                 entry.cached = true;
             }
         }
-        for (PaneCache& entry : fileSelPanes) {
+        for (dusk::utils::PaneCache& entry : fileSelPanes) {
             J2DPane* pane = fileSel.Scr->search(entry.tag);
             if (!entry.cached) {
                 entry.origTransX = pane->getTranslateX();
@@ -4136,41 +4290,46 @@ void dFile_select_c::fileSelectWide() {
     // Reset all panes
     mSelDt.ScrDt->scale(1.0f, 1.0f);
     mSelDt.ScrDt->translate(0.0f, 0.0f);
-    for (PaneCache& entry : mSelDtPanes) {
+    for (dusk::utils::PaneCache& entry : mSelDtPanes) {
         J2DPane* pane = mSelDt.ScrDt->search(entry.tag);
         pane->setBasePosition(J2DBasePosition_4);
         pane->scale(1.0f, 1.0f);
         pane->translate(entry.origTransX, entry.origTransY);
     }
-    for (PaneCache& entry : fileSelPanes) {
+    for (dusk::utils::PaneCache& entry : fileSelPanes) {
         J2DPane* pane = fileSel.Scr->search(entry.tag);
         pane->setBasePosition(J2DBasePosition_4);
         pane->scale(1.0f, 1.0f);
         pane->translate(entry.origTransX, entry.origTransY);
     }
 
-    bool wideScaling = dusk::getSettings().game.menuScalingMode.getValue() != dusk::MenuScaling::GameCube;
-    const f32 rootScale = wideScaling ? mDoGph_gInf_c::hudAspectScaleUp : 1.0f;
-    const f32 childScale = wideScaling ? mDoGph_gInf_c::hudAspectScaleDown : 1.0f;
-    const f32 rootTransX = wideScaling ? mDoGph_gInf_c::getSafeMinXF() : 0.0f;
+    const bool gameCubeScaling =
+        dusk::getSettings().game.menuScalingMode.getValue() == dusk::MenuScaling::GameCube;
+    const f32 rootScale = mDoGph_gInf_c::hudAspectScaleUp;
+    const f32 childScale = mDoGph_gInf_c::hudAspectScaleDown;
+    const f32 animatedChildScale = gameCubeScaling ? 1.0f : childScale;
+    const f32 rootTransX = mDoGph_gInf_c::getSafeMinXF();
+
+    sFileSelectDetailsWindowActive =
+        gameCubeScaling && mDataSelProc >= DATASELPROC_SELECT_DATA_OPEN_MOVE;
 
     mYnSel.ScrYn->scale(rootScale, 1.0f);
     mYnSel.ScrYn->translate(rootTransX, 0.0f);
 
-    mYnSel.ScrYn->search(MULTI_CHAR('w_no_t'))->scale(childScale, 1.0f);
-    mYnSel.ScrYn->search(MULTI_CHAR('f_no_t'))->scale(childScale, 1.0f);
-    mYnSel.ScrYn->search(MULTI_CHAR('w_yes_t'))->scale(childScale, 1.0f);
-    mYnSel.ScrYn->search(MULTI_CHAR('f_yes_t'))->scale(childScale, 1.0f);
+    mYnSel.ScrYn->search(MULTI_CHAR('w_no_t'))->scale(animatedChildScale, 1.0f);
+    mYnSel.ScrYn->search(MULTI_CHAR('f_no_t'))->scale(animatedChildScale, 1.0f);
+    mYnSel.ScrYn->search(MULTI_CHAR('w_yes_t'))->scale(animatedChildScale, 1.0f);
+    mYnSel.ScrYn->search(MULTI_CHAR('f_yes_t'))->scale(animatedChildScale, 1.0f);
 
     m3mSel.Scr3m->scale(rootScale, 1.0f);
     m3mSel.Scr3m->translate(rootTransX, 0.0f);
 
-    m3mSel.Scr3m->search(MULTI_CHAR('w_sta'))->scale(childScale, 1.0f);
-    m3mSel.Scr3m->search(MULTI_CHAR('f_sta'))->scale(childScale, 1.0f);
-    m3mSel.Scr3m->search(MULTI_CHAR('w_del'))->scale(childScale, 1.0f);
-    m3mSel.Scr3m->search(MULTI_CHAR('f_del'))->scale(childScale, 1.0f);
-    m3mSel.Scr3m->search(MULTI_CHAR('w_cop_t'))->scale(childScale, 1.0f);
-    m3mSel.Scr3m->search(MULTI_CHAR('f_cop_t'))->scale(childScale, 1.0f);
+    m3mSel.Scr3m->search(MULTI_CHAR('w_sta'))->scale(animatedChildScale, 1.0f);
+    m3mSel.Scr3m->search(MULTI_CHAR('f_sta'))->scale(animatedChildScale, 1.0f);
+    m3mSel.Scr3m->search(MULTI_CHAR('w_del'))->scale(animatedChildScale, 1.0f);
+    m3mSel.Scr3m->search(MULTI_CHAR('f_del'))->scale(animatedChildScale, 1.0f);
+    m3mSel.Scr3m->search(MULTI_CHAR('w_cop_t'))->scale(animatedChildScale, 1.0f);
+    m3mSel.Scr3m->search(MULTI_CHAR('f_cop_t'))->scale(animatedChildScale, 1.0f);
 
     fileSel.Scr->scale(rootScale, 1.0f);
     fileSel.Scr->translate(rootTransX, 0.0f);
@@ -4180,13 +4339,13 @@ void dFile_select_c::fileSelectWide() {
 
     fileSel.Scr->search(MULTI_CHAR('w_btn_n'))->scale(childScale, 1.0f);
 
-    fileSel.Scr->search(MULTI_CHAR('w_n_bk00'))->scale(childScale, 1.0f);
-    fileSel.Scr->search(MULTI_CHAR('w_n_bk01'))->scale(childScale, 1.0f);
-    fileSel.Scr->search(MULTI_CHAR('w_n_bk02'))->scale(childScale, 1.0f);
+    fileSel.Scr->search(MULTI_CHAR('w_n_bk00'))->scale(animatedChildScale, 1.0f);
+    fileSel.Scr->search(MULTI_CHAR('w_n_bk01'))->scale(animatedChildScale, 1.0f);
+    fileSel.Scr->search(MULTI_CHAR('w_n_bk02'))->scale(animatedChildScale, 1.0f);
 
-    fileSel.Scr->search(MULTI_CHAR('w_dat_i0'))->scale(childScale, 1.0f);
-    fileSel.Scr->search(MULTI_CHAR('w_dat_i1'))->scale(childScale, 1.0f);
-    fileSel.Scr->search(MULTI_CHAR('w_dat_i2'))->scale(childScale, 1.0f);
+    fileSel.Scr->search(MULTI_CHAR('w_dat_i0'))->scale(animatedChildScale, 1.0f);
+    fileSel.Scr->search(MULTI_CHAR('w_dat_i1'))->scale(animatedChildScale, 1.0f);
+    fileSel.Scr->search(MULTI_CHAR('w_dat_i2'))->scale(animatedChildScale, 1.0f);
 
     mCpSel.Scr->search(MULTI_CHAR('w_dat_i1'))->scale(childScale, 1.0f);
     mCpSel.Scr->search(MULTI_CHAR('w_dat_i2'))->scale(childScale, 1.0f);
@@ -4195,9 +4354,42 @@ void dFile_select_c::fileSelectWide() {
 
     switch (dusk::getSettings().game.menuScalingMode) {
     case (dusk::MenuScaling::GameCube):
+        for (dusk::utils::PaneCache& entry : fileSelPanes) {
+            fileSel.Scr->search(entry.tag)->scale(childScale, 1.0f);
+        }
+
         // Selection Cursor
         if (mSelIcon) {
             mSelIcon->refreshAspectScale(1.0f);
+
+            J2DPane* sourcePane = mSelIcon->getSourcePane();
+            for (int i = 0; i < 2; ++i) {
+                if (sourcePane == mYnSelPane[i]->getPanePtr()) {
+                    const Vec left = mYnSelPane[0]->getGlobalVtxCenter(false, 0);
+                    const Vec right = mYnSelPane[1]->getGlobalVtxCenter(false, 0);
+                    const Vec selected = mYnSelPane[i]->getGlobalVtxCenter(false, 0);
+                    const f32 midX = (left.x + right.x) * 0.5f;
+                    const f32 correctedX =
+                        midX + (selected.x - midX) * mDoGph_gInf_c::hudAspectScaleDown;
+                    mSelIcon->setPos(correctedX, selected.y, sourcePane, true);
+                    mSelIcon->setPos(correctedX, selected.y, NULL, false);
+                    break;
+                }
+            }
+
+            for (int i = 0; i < 3; ++i) {
+                if (sourcePane == m3mSelPane[i]->getPanePtr()) {
+                    const Vec first = m3mSelPane[0]->getGlobalVtxCenter(false, 0);
+                    const Vec last = m3mSelPane[2]->getGlobalVtxCenter(false, 0);
+                    const Vec selected = m3mSelPane[i]->getGlobalVtxCenter(false, 0);
+                    const f32 midX = (first.x + last.x) * 0.5f;
+                    const f32 correctedX =
+                        midX + (selected.x - midX) * mDoGph_gInf_c::hudAspectScaleDown;
+                    mSelIcon->setPos(correctedX, selected.y, sourcePane, true);
+                    mSelIcon->setPos(correctedX, selected.y, NULL, false);
+                    break;
+                }
+            }
         }
         if (mSelIcon2) {
             mSelIcon2->refreshAspectScale(1.0f);
@@ -4214,7 +4406,7 @@ void dFile_select_c::fileSelectWide() {
         mSelDt.ScrDt->search(MULTI_CHAR('fuku_n2'))->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
 
         // Spirals & Memory Card Text
-        for (PaneCache& entry : fileSelPanes) {
+        for (dusk::utils::PaneCache& entry : fileSelPanes) {
             J2DPane* pane = fileSel.Scr->search(entry.tag);
             pane->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
         }
@@ -4240,7 +4432,7 @@ void dFile_select_c::fileSelectWide() {
         const f32 wideShiftFactor = mSelDt.ScrDt->search(MULTI_CHAR('gray_n'))->getTranslateX() * (wideScaleFactor - mDoGph_gInf_c::hudAspectScaleDown);
         const f32 ultraShiftFactor = mSelDt.ScrDt->search(MULTI_CHAR('gray_n'))->getTranslateX() * (ultraScaleFactor - mDoGph_gInf_c::hudAspectScaleDown);
 
-        for (PaneCache& entry : mSelDtPanes) {
+        for (dusk::utils::PaneCache& entry : mSelDtPanes) {
             const size_t index = &entry - mSelDtPanes;
             J2DPane* pane = mSelDt.ScrDt->search(entry.tag);
             pane->setBasePosition(J2DBasePosition_0);
@@ -4308,21 +4500,164 @@ void dFile_select_c::fileSelectWide() {
         }
 
         // Spirals & Memory Card Text
-        for (PaneCache& entry : fileSelPanes) {
+        for (dusk::utils::PaneCache& entry : fileSelPanes) {
             J2DPane* pane = fileSel.Scr->search(entry.tag);
             pane->scale(mDoGph_gInf_c::hudAspectScaleDown, 1.0f);
         }
         break;
     }
 }
+
+void dFile_select_c::presentLayoutAnims() {
+    dusk::vdt::present_toward(mBaseMoveAnmFrame, (f32)mBaseMoveAnmFrameMax, mBaseMoveAnm,
+                              mBaseMovePane != NULL ? mBaseMovePane->getPanePtr() : NULL);
+
+    if (mBaseSubPane != NULL && mBaseSubPane->mTransform == mBaseMoveAnm && mSelectNum != 0xFF) {
+        dusk::vdt::present_toward(field_0x00e0[mSelectNum], (f32)field_0x00ec, mBaseMoveAnm);
+        for (int i = 0; i < 3; i++) {
+            J2DPane* pane = mSelFilePanes[i]->getPanePtr();
+            if (pane != NULL && pane->mTransform != NULL) {
+                pane->animationTransform();
+            }
+        }
+        mBaseSubPane->animationTransform();
+    } else {
+        for (int i = 0; i < 3; i++) {
+            J2DPane* pane = mSelFilePanes[i]->getPanePtr();
+            dusk::vdt::present_selected(field_0x00e0[i], pane, mBaseMoveAnm, (f32)SelEndFrameTbl[i],
+                                        field_0x0088, (f32)SelStartFrameTbl[i]);
+        }
+    }
+
+    dusk::vdt::present_toward(field_0x0358, (f32)field_0x035c, m3mBck, m3mMenuPane);
+
+    for (int i = 0; i < 3; i++) {
+        J2DPane* pane = m3mSelPane[i]->getPanePtr();
+        dusk::vdt::present_selected(field_0x034c[i], pane, m3mBck, (f32)MenuSelStartFrameTbl[i],
+                                    m3mBck2, (f32)MenuSelEndFrameTbl[i]);
+    }
+
+    if (field_0x0100 != field_0x0104) {
+        dusk::vdt::present_shared(field_0x0100, (f32)field_0x0104, mYnSelBck3,
+                                  {mYnSelPane[0]->getPanePtr(), mYnSelPane[1]->getPanePtr()});
+    }
+
+    for (int i = 0; i < 2; i++) {
+        J2DPane* pane = mYnSelPane[i]->getPanePtr();
+        dusk::vdt::present_selected(field_0x00f8[i], pane, mYnSelBck, (f32)YnSelStartFrameTbl[i],
+                                    mYnSelBck2, (f32)YnSelEndFrameTbl[i]);
+    }
+
+    for (int i = 0; i < 2; i++) {
+        if (mCpSelPane[i] == NULL) {
+            continue;
+        }
+        J2DPane* pane = mCpSelPane[i]->getPanePtr();
+        dusk::vdt::present_selected(field_0x02b4[i], pane, mCpSelBck, 99.0f, mCpSelBck2, 109.0f);
+    }
+
+    dusk::vdt::present_toward(field_0x0130, (f32)field_0x0134, field_0x0090, mErrorMsgPane);
+
+    if (mBaseSubPane != NULL && mBaseSubPane->mTransform == field_0x009c) {
+        dusk::vdt::present_toward(field_0x0110, (f32)field_0x0114, field_0x009c, mBaseSubPane);
+    }
+
+    if (mNameMoveRequested) {
+        dusk::vdt::present_toward(field_0x0120, (f32)field_0x0124, field_0x0094, mNameBasePane);
+    }
+}
+
+void dFile_select_c::presentNameInputFade() {
+    bool fadeOut;
+    switch (mDataSelProc) {
+    case DATASELPROC_NAME_INPUT_FADE:
+    case DATASELPROC_BACK_NAME_INPUT_MOVE0:
+        fadeOut = true;
+        break;
+    case DATASELPROC_NAME_INPUT2_MOVE:
+    case DATASELPROC_BACK_NAME_INPUT_MOVE:
+        if (mDoRst::isReset()) {
+            return;
+        }
+        fadeOut = false;
+        break;
+    default:
+        return;
+    }
+
+    mFadeTimer -= dusk::game_clock::original_frames();
+    if (mFadeTimer < 0.0f) {
+        mFadeTimer = 0.0f;
+    }
+
+    f32 t = mFadeTimer / 15.0f;
+    u8 alpha = fadeOut ? (1.0f - t) * 255.0f : t * 255.0f;
+    mpFadePict->setAlpha(alpha);
+}
+
+void dFile_select_c::presentAnims() {
+    if (mpFileWarning != NULL) {
+        mpFileWarning->presentAnims();
+    }
+
+    presentNameInputFade();
+    selFileWakuAnm();
+    bookIconAnm();
+    dataDelEffAnm();
+    dataCopyEffAnm();
+    fileSel.Scr->animation();
+    mYnSel.ScrYn->animation();
+    m3mSel.Scr3m->animation();
+    mSelDt.ScrDt->animation();
+    if (mCpSel.isShow) {
+        selCopyFileWakuAnm();
+        copyBookIconAnm();
+        mCpSel.Scr->animation();
+    }
+    presentLayoutAnims();
+    for (int i = 0; i < 3; ++i) {
+        mSelFilePanes[i]->presentAnime();
+        mDeleteEfPane[i]->presentAlphaAnime();
+        mCopyEfPane[i]->presentAlphaAnime();
+        mSelFileMoyoPane[i]->presentAnime();
+        mSelFileGoldPane[i]->presentAnime();
+        mSelFileGold2Pane[i]->presentAnime();
+        mSelFilePane_Book_l[i]->presentAnime();
+        mFileInfoDatBasePane[i]->presentAlphaAnime();
+        mFileInfoNoDatBasePane[i]->presentAlphaAnime();
+        m3mSelPane_mo[i]->presentAnime();
+        m3mSelPane_g[i]->presentAnime();
+        m3mSelPane_gr[i]->presentAnime();
+        m3mSelTextPane[i]->presentAnime();
+    }
+    for (int i = 0; i < 2; ++i) {
+        mErrorMsgTxtPane[i]->presentAlphaAnime();
+        mYnSelPane_m[i]->presentAlphaAnime();
+        mYnSelPane_g[i]->presentAlphaAnime();
+        mYnSelPane_gr[i]->presentAlphaAnime();
+        mYnSelTxtPane[i]->presentAnime();
+        mHeaderTxtPane[i]->presentAlphaAnime();
+        mCpSelPane_moyo[i]->presentAnime();
+        mCpSelPane_gold[i]->presentAnime();
+        mCpSelPane_gold2[i]->presentAnime();
+        mCpSelPane_book[i]->presentAnime();
+    }
+    mBbtnPane->presentAlphaAnime();
+    mAbtnPane->presentAlphaAnime();
+    mModoruTxtPane->presentAlphaAnime();
+    mKetteiTxtPane->presentAlphaAnime();
+    fileSelectWide();
+}
 #endif
 
 void dFile_select_c::_draw() {
-    #if TARGET_PC
-    fileSelectWide();
-    #endif
-
     if (!mHasDrawn) {
+#if TARGET_PC
+        if (dusk::game_clock::is_presentation_frame()) {
+            presentAnims();
+        }
+#endif
+
         dComIfGd_set2DOpa(&fileSel);
 
         for (int i = 0; i < 3; i++) {
@@ -4350,20 +4685,80 @@ void dFile_select_c::_draw() {
         dComIfGd_set2DOpa(mSelIcon);
         dComIfGd_set2DOpa(mSelIcon2);
 
-        #if PLATFORM_GCN
-        #if TARGET_PC
+#if PLATFORM_GCN
+#if TARGET_PC
         dComIfGd_set2DOpaTop(&mFadeDlst);
-        #else
+#else
         mpFadePict->draw(mDoGph_gInf_c::getMinXF(), mDoGph_gInf_c::getMinYF(),
                            mDoGph_gInf_c::getWidthF(), mDoGph_gInf_c::getHeightF(), false, false,
                            false);
-        #endif
-        #endif
+#endif
+#endif
     }
 }
 
 void dDlst_FileSel_c::draw() {
     J2DGrafContext* graf = dComIfGp_getCurrentGrafPort();
+#if TARGET_PC
+    if (dusk::getSettings().game.menuScalingMode.getValue() == dusk::MenuScaling::GameCube) {
+        static const u64 nativeTags[] = {
+            MULTI_CHAR('w_sel_00'), MULTI_CHAR('w_sel_01'), MULTI_CHAR('w_sel_02'),
+        };
+        f32 scaleX[3];
+        f32 scaleY[3];
+        for (int i = 0; i < 3; ++i) {
+            J2DPane* pane = Scr->search(nativeTags[i]);
+            scaleX[i] = pane->getScaleX();
+            scaleY[i] = pane->getScaleY();
+            pane->scale(scaleX[i] * mDoGph_gInf_c::hudAspectScaleDown, scaleY[i]);
+        }
+
+        J2DPane* detailsBorder = Scr->search(MULTI_CHAR('w_sub_n'));
+        const f32 detailsScaleX = detailsBorder->getScaleX();
+        const f32 detailsScaleY = detailsBorder->getScaleY();
+        if (sFileSelectDetailsWindowActive) {
+            detailsBorder->scale(detailsScaleX * mDoGph_gInf_c::hudAspectScaleDown,
+                                 detailsScaleY);
+        }
+
+        static const u64 spiralTags[] = {
+            MULTI_CHAR('w_uzu00'), MULTI_CHAR('w_uzu01'), MULTI_CHAR('w_uzu02'),
+            MULTI_CHAR('w_uzu03'), MULTI_CHAR('w_uzu04'), MULTI_CHAR('w_uzu05'),
+            MULTI_CHAR('w_uzu06'), MULTI_CHAR('w_uzu07'), MULTI_CHAR('w_uzu08'),
+            MULTI_CHAR('w_uzu09'),
+        };
+        f32 spiralX[10];
+        f32 spiralY[10];
+        f32 minX = 100000.0f;
+        f32 maxX = -100000.0f;
+        for (int i = 0; i < 10; ++i) {
+            J2DPane* pane = Scr->search(spiralTags[i]);
+            spiralX[i] = pane->getTranslateX();
+            spiralY[i] = pane->getTranslateY();
+            if (spiralX[i] < minX) minX = spiralX[i];
+            if (spiralX[i] > maxX) maxX = spiralX[i];
+        }
+        const f32 midX = (minX + maxX) * 0.5f;
+        for (int i = 0; i < 10; ++i) {
+            Scr->search(spiralTags[i])
+                ->translate(midX + (spiralX[i] - midX) * mDoGph_gInf_c::hudAspectScaleDown,
+                            spiralY[i]);
+        }
+
+        Scr->draw(0.0f, 0.0f, graf);
+
+        for (int i = 0; i < 10; ++i) {
+            Scr->search(spiralTags[i])->translate(spiralX[i], spiralY[i]);
+        }
+        for (int i = 0; i < 3; ++i) {
+            Scr->search(nativeTags[i])->scale(scaleX[i], scaleY[i]);
+        }
+        if (sFileSelectDetailsWindowActive) {
+            detailsBorder->scale(detailsScaleX, detailsScaleY);
+        }
+        return;
+    }
+#endif
     Scr->draw(0.0f, 0.0f, graf);
 }
 
@@ -4374,7 +4769,18 @@ void dDlst_FileSelDt_c::draw() {
     Mtx auStack_90;
     MTXTrans(auStack_60, mpPane->getWidth() / 2, mpPane->getHeight() / 2, 0.0f);
     MTXConcat(local_98, auStack_60, local_98);
-    MTXScale(auStack_90, mpPane->getWidth() / mpPane2->getWidth(),
+    f32 aspectCorrection = 1.0f;
+#if TARGET_PC
+    if (dusk::getSettings().game.menuScalingMode.getValue() == dusk::MenuScaling::GameCube) {
+        // While the opened-file border is drawn, its native correction is
+        // already present in this attachment pane's global matrix. Do not
+        // apply the same correction a second time to the item screen.
+        aspectCorrection = sFileSelectDetailsWindowActive
+                               ? 1.0f
+                               : mDoGph_gInf_c::hudAspectScaleDown;
+    }
+#endif
+    MTXScale(auStack_90, (mpPane->getWidth() / mpPane2->getWidth()) * aspectCorrection,
              mpPane->getHeight() / mpPane2->getHeight(), 1.0f);
     MTXConcat(local_98, auStack_90, local_98);
     mpPane2->setMtx(local_98);
@@ -4394,11 +4800,77 @@ void dDlst_FileSelCp_c::draw() {
 
 void dDlst_FileSelYn_c::draw() {
     J2DGrafContext* graf = dComIfGp_getCurrentGrafPort();
+#if TARGET_PC
+    if (dusk::getSettings().game.menuScalingMode.getValue() == dusk::MenuScaling::GameCube) {
+        static const u64 nativeTags[] = {MULTI_CHAR('w_no_n'), MULTI_CHAR('w_yes_n')};
+        f32 scaleX[2];
+        f32 scaleY[2];
+        f32 transX[2];
+        f32 transY[2];
+        for (int i = 0; i < 2; ++i) {
+            J2DPane* pane = ScrYn->search(nativeTags[i]);
+            scaleX[i] = pane->getScaleX();
+            scaleY[i] = pane->getScaleY();
+            transX[i] = pane->getTranslateX();
+            transY[i] = pane->getTranslateY();
+            pane->scale(scaleX[i] * mDoGph_gInf_c::hudAspectScaleDown, scaleY[i]);
+        }
+        const f32 midX = (transX[0] + transX[1]) * 0.5f;
+        for (int i = 0; i < 2; ++i) {
+            ScrYn->search(nativeTags[i])
+                ->translate(midX + (transX[i] - midX) * mDoGph_gInf_c::hudAspectScaleDown,
+                            transY[i]);
+        }
+        ScrYn->draw(0.0f, 0.0f, graf);
+        for (int i = 0; i < 2; ++i) {
+            J2DPane* pane = ScrYn->search(nativeTags[i]);
+            pane->scale(scaleX[i], scaleY[i]);
+            pane->translate(transX[i], transY[i]);
+        }
+        return;
+    }
+#endif
     ScrYn->draw(0.0f, 0.0f, graf);
 }
 
 void dDlst_FileSel3m_c::draw() {
     J2DGrafContext* graf = dComIfGp_getCurrentGrafPort();
+#if TARGET_PC
+    if (dusk::getSettings().game.menuScalingMode.getValue() == dusk::MenuScaling::GameCube) {
+        static const u64 nativeTags[] = {
+            MULTI_CHAR('w_sta_n'), MULTI_CHAR('w_del_n'), MULTI_CHAR('w_cop_n'),
+        };
+        f32 scaleX[3];
+        f32 scaleY[3];
+        f32 transX[3];
+        f32 transY[3];
+        f32 minX = 100000.0f;
+        f32 maxX = -100000.0f;
+        for (int i = 0; i < 3; ++i) {
+            J2DPane* pane = Scr3m->search(nativeTags[i]);
+            scaleX[i] = pane->getScaleX();
+            scaleY[i] = pane->getScaleY();
+            transX[i] = pane->getTranslateX();
+            transY[i] = pane->getTranslateY();
+            if (transX[i] < minX) minX = transX[i];
+            if (transX[i] > maxX) maxX = transX[i];
+            pane->scale(scaleX[i] * mDoGph_gInf_c::hudAspectScaleDown, scaleY[i]);
+        }
+        const f32 midX = (minX + maxX) * 0.5f;
+        for (int i = 0; i < 3; ++i) {
+            Scr3m->search(nativeTags[i])
+                ->translate(midX + (transX[i] - midX) * mDoGph_gInf_c::hudAspectScaleDown,
+                            transY[i]);
+        }
+        Scr3m->draw(0.0f, 0.0f, graf);
+        for (int i = 0; i < 3; ++i) {
+            J2DPane* pane = Scr3m->search(nativeTags[i]);
+            pane->scale(scaleX[i], scaleY[i]);
+            pane->translate(transX[i], transY[i]);
+        }
+        return;
+    }
+#endif
     Scr3m->draw(0.0f, 0.0f, graf);
 }
 
@@ -4424,6 +4896,7 @@ void dFile_select_c::errorMoveAnmInitSet(int param_1, int param_2) {
 bool dFile_select_c::errorMoveAnm() {
     bool ret;
     if (field_0x0130 != field_0x0134) {
+#if !TARGET_PC
         if (field_0x0130 < field_0x0134) {
             field_0x0130 += 2;
 
@@ -4438,6 +4911,7 @@ bool dFile_select_c::errorMoveAnm() {
 
         field_0x0090->setFrame(field_0x0130);
         mErrorMsgPane->animationTransform();
+#endif
         ret = false;
     } else {
         mErrorMsgPane->setAnimation((J2DAnmTransform*)NULL);
@@ -5716,6 +6190,7 @@ bool dFile_select_c::fileInfoScaleAnm() {
     bool ret;
 
     if (field_0x0110 != field_0x0114) {
+#if !TARGET_PC
         if (field_0x0110 < field_0x0114) {
             field_0x0110 += 2;
 
@@ -5730,6 +6205,7 @@ bool dFile_select_c::fileInfoScaleAnm() {
 
         field_0x009c->setFrame(field_0x0110);
         mBaseSubPane->animationTransform();
+#endif
         ret = false;
     }
 
@@ -5742,6 +6218,13 @@ bool dFile_select_c::fileInfoScaleAnm() {
 }
 
 void dFile_select_c::nameMoveAnmInitSet(int param_1, int param_2) {
+#if TARGET_PC
+    f32 startFrame = param_1;
+    if (mNameBasePane->mTransform == field_0x0094 && field_0x0124 == param_1) {
+        startFrame = field_0x0120;
+    }
+    mNameMoveRequested = false;
+#endif
     if (param_1 == 3359) {
         field_0x0128 = true;
     }
@@ -5749,15 +6232,17 @@ void dFile_select_c::nameMoveAnmInitSet(int param_1, int param_2) {
         mpName->hideIcon();
     }
     mNameBasePane->setAnimation(field_0x0094);
-    field_0x0120 = param_1;
+    field_0x0120 = DUSK_IF_ELSE(startFrame, param_1);
     field_0x0124 = param_2;
     field_0x0094->setFrame(field_0x0120);
     mNameBasePane->animationTransform();
 }
 
 bool dFile_select_c::nameMoveAnm() {
+    IF_DUSK(mNameMoveRequested = true);
     bool ret;
     if (field_0x0120 != field_0x0124) {
+#if !TARGET_PC
         if (field_0x0120 < field_0x0124) {
             field_0x0120 += 2;
 
@@ -5773,6 +6258,7 @@ bool dFile_select_c::nameMoveAnm() {
         }
         field_0x0094->setFrame(field_0x0120);
         mNameBasePane->animationTransform();
+#endif
         ret = false;
     } else {
         mNameBasePane->setAnimation((J2DAnmTransform*)0);
@@ -5906,6 +6392,7 @@ void dFile_select3D_c::_move() {
 }
 
 void dFile_select3D_c::draw() {
+    IF_DUSK_BLOCK(dusk::game_clock::is_sim_frame())
     if (mpModel) {
         dComIfGd_setListItem3D();
         g_env_light.settingTevStruct(13, &field_0x03a4, &mTevstr);
@@ -5914,6 +6401,7 @@ void dFile_select3D_c::draw() {
         mDoExt_modelUpdateDL(mpModel);
         dComIfGd_setList();
     }
+    IF_DUSK_BLOCK_END
 }
 
 void dFile_select3D_c::setJ3D(char const* param_0, char const* param_1, char const* param_2) {

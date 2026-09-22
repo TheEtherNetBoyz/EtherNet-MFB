@@ -1,3 +1,4 @@
+#include "dusk/legacy_practice.h"
 /**
  * m_Do_controller_pad.cpp
  * JUTGamePad Wrapper and Conversion
@@ -6,13 +7,13 @@
 #include "m_Do/m_Do_controller_pad.h"
 #include "JSystem/JAWExtSystem/JAWExtSystem.h"
 #include "SSystem/SComponent/c_lib.h"
+#include "d/actor/d_a_alink.h"
 #include "d/d_com_inf_game.h"
 #include "dusk/input_macro.h"
 #include "dusk/tas_movie.h"
 #include "f_ap/f_ap_game.h"
 #include "m_Do/m_Do_Reset.h"
 #include "m_Do/m_Do_main.h"
-#include "tracy/Tracy.hpp"
 
 #if TARGET_PC
 #include <SDL3/SDL_keyboard.h>
@@ -20,7 +21,10 @@
 
 #include "dusk/menu_pointer.h"
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
 #include "dusk/ui/touch_controls.hpp"
+
+#include <tracy/Tracy.hpp>
 #endif
 
 DUSK_GAME_DATA JUTGamePad* mDoCPd_c::m_gamePad[4];
@@ -48,6 +52,7 @@ f32 mDoCPd_c::getSubStickX3D(u32 pad) {
 
 #if TARGET_PC
 static bool sCtrlRResetHeld = false;
+static bool sCutsceneBufferActive = false;
 static constexpr u32 kPracticeMenuInputMask = PAD_BUTTON_UP | PAD_BUTTON_DOWN | PAD_BUTTON_LEFT |
                                               PAD_BUTTON_RIGHT | PAD_BUTTON_A | PAD_BUTTON_B |
                                               PAD_TRIGGER_L | PAD_TRIGGER_R;
@@ -85,6 +90,48 @@ static void clearTeleportLinkDpadInput(interface_of_controller_pad* interface) {
     interface->mPressedButtonFlags &= ~kTeleportDpadMask;
 }
 
+static void updateCutsceneInputBuffer() {
+    if (dusk::speedrun::isActive() ||
+        !dusk::getSettings().game.cutsceneInputBuffering.getValue()) {
+        sCutsceneBufferActive = false;
+        return;
+    }
+
+    daAlink_c* player = daAlink_getAlinkActorClass();
+    if (player == nullptr) {
+        // Scene-transition cutscenes destroy and recreate Link. Keep the armed
+        // state across that gap, but do not sample any input during it.
+        return;
+    }
+
+    // Match the exact gate used by daAlink_c::setStickData(). Some cutscenes leave this active
+    // after the global event and player-demo flags clear, and Link discards triggers until it
+    // becomes false.
+    const bool cutsceneActive = player->checkEventRun();
+    if (cutsceneActive) {
+        sCutsceneBufferActive = true;
+    }
+}
+
+#endif
+
+#if TARGET_PC
+void mDoCPd_c::applyCutsceneInputBuffer() {
+    if (dusk::speedrun::isActive() ||
+        !dusk::getSettings().game.cutsceneInputBuffering.getValue())
+    {
+        sCutsceneBufferActive = false;
+        return;
+    }
+    if (!sCutsceneBufferActive) {
+        return;
+    }
+
+    // Sample only now, at the exact setStickData branch where Link regains
+    // control. Buttons held on earlier cutscene frames are deliberately ignored.
+    m_cpadInfo[PAD_1].mPressedButtonFlags |= m_cpadInfo[PAD_1].mButtonFlags;
+    sCutsceneBufferActive = false;
+}
 #endif
 
 void mDoCPd_c::create() {
@@ -177,7 +224,8 @@ void mDoCPd_c::read() {
 #endif
             LRlockCheck(interface);
 #if TARGET_PC
-            if (i == PAD_1 && dusk::getTransientSettings().practiceMenuInputCapture) {
+            if (DUSK_LEGACY_PRACTICE_TOOLS && i == PAD_1 &&
+                dusk::getTransientSettings().practiceMenuInputCapture) {
                 clearPracticeMenuInput(interface);
             }
 #endif
@@ -193,6 +241,8 @@ void mDoCPd_c::read() {
     }
 
 #if TARGET_PC
+    updateCutsceneInputBuffer();
+
     const bool tasOwnsInput =
         dusk::tas_movie::state() == dusk::tas_movie::State::Recording ||
         dusk::tas_movie::state() == dusk::tas_movie::State::Playing;

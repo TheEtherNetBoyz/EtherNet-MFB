@@ -344,6 +344,24 @@ int daAlink_c::checkNextActionSwim() {
 }
 
 int daAlink_c::checkSwimAction(int param_0) {
+#if TARGET_PC
+    if (checkDuskMagicArmorWaterRun()) {
+        offModeFlg(MODE_SWIMMING);
+        offNoResetFlg0(FLG0_WATER_IN_MOVE);
+        offNoResetFlg0(FLG0_SWIM_UP);
+        mZ2Link.setInWater(false);
+        current.pos.y = mWaterY + 2.0f;
+        speed.y = 0.0f;
+        mFallHeight = current.pos.y;
+        if (mProcID == PROC_SWIM_UP || mProcID == PROC_SWIM_WAIT ||
+            mProcID == PROC_SWIM_MOVE || mProcID == PROC_SWIM_DIVE ||
+            mProcID == PROC_FALL || mProcID == PROC_AUTO_JUMP ||
+            mProcID == PROC_DIVE_JUMP) {
+            procMoveInit();
+        }
+        return 0;
+    }
+#endif
     f32 var_f31;
     if (checkWolf()) {
         if (getMoveBGActorName(mLinkAcch.m_gnd, 0) == fpcNm_Obj_ITA_e) {
@@ -660,9 +678,11 @@ void daAlink_c::setSwimMoveAnime() {
         field_0x3478 = mpHIO->mSwim.m.mUnderwaterMinAnmSpeed;
         field_0x347c = mpHIO->mSwim.m.mUnderwaterMaxAnmSpeed;
 
+        IF_DUSK(const bool holdToMash = DUSK_IF_ELSE(dusk::getSettings().game.holdToMash, false);)
+
         if (mMaxSpeed < mpHIO->mSwim.m.mUnderwaterMaxSpeed) {
             mMaxSpeed = mpHIO->mSwim.m.mUnderwaterMaxSpeed;
-        } else if (doTrigger()) {
+        } else if (holdToMash ? doButton() : doTrigger()) {
             mMaxSpeed += 0.75f;
             if (mMaxSpeed > temp_f29) {
                 mMaxSpeed = temp_f29;

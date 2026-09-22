@@ -68,6 +68,13 @@ enum HotkeyModifier : int {
     HOTKEY_MOD_ALT = 1 << 2,
 };
 
+enum class LetterboxMode : u8 {
+    Off = 0,
+    On = 1,
+    GameplayOnly = 2,
+    CutsceneOnly = 3,
+};
+
 enum class TouchTargeting : u8 {
     Hybrid = 0,
     Hold = 1,
@@ -80,12 +87,31 @@ enum class MenuScaling : u8 {
     Dusklight = 2,
 };
 
+enum class AlwaysGreatspinMode : u8 {
+    OFF = 0,
+    AFTER_SKILL = 1,
+    ALWAYS = 2,
+};
+
 enum class MagicArmorMode : u8 {
     NORMAL = 0,
     ON_DAMAGE = 1,
     DOUBLE_DEFENSE = 2,
     INVINCIBLE = 3,
     COSMETIC = 4,
+};
+
+enum class DiscLoadingDelayMode : u8 {
+    Off = 0,
+    On = 1,
+    Timed = 2,
+};
+
+enum class AudioOutputMode : u8 {
+    StereoSpeakers = 0,
+    StereoHeadphones = 1,   // spatial audio
+    Surround6ch = 2,        // discrete 5.1
+    Surround8ch = 3,        // discrete 7.1
 };
 
 namespace config {
@@ -138,6 +164,12 @@ struct ConfigEnumRange<FrameInterpMode> {
 };
 
 template <>
+struct ConfigEnumRange<LetterboxMode> {
+    static constexpr auto min = LetterboxMode::Off;
+    static constexpr auto max = LetterboxMode::CutsceneOnly;
+};
+
+template <>
 struct ConfigEnumRange<TouchTargeting> {
     static constexpr auto min = TouchTargeting::Hybrid;
     static constexpr auto max = TouchTargeting::Switch;
@@ -150,9 +182,27 @@ struct ConfigEnumRange<MenuScaling> {
 };
 
 template <>
+struct ConfigEnumRange<AlwaysGreatspinMode> {
+    static constexpr auto min = AlwaysGreatspinMode::OFF;
+    static constexpr auto max = AlwaysGreatspinMode::ALWAYS;
+};
+
+template <>
 struct ConfigEnumRange<MagicArmorMode> {
     static constexpr auto min = MagicArmorMode::NORMAL;
     static constexpr auto max = MagicArmorMode::COSMETIC;
+};
+
+template <>
+struct ConfigEnumRange<DiscLoadingDelayMode> {
+    static constexpr auto min = DiscLoadingDelayMode::Off;
+    static constexpr auto max = DiscLoadingDelayMode::Timed;
+};
+
+template <>
+struct ConfigEnumRange<AudioOutputMode> {
+    static constexpr auto min = AudioOutputMode::StereoSpeakers;
+    static constexpr auto max = AudioOutputMode::Surround8ch;
 };
 
 template <>
@@ -184,17 +234,25 @@ struct UserSettings {
         ConfigVar<bool> rememberWindowSize;
         ConfigVar<int> lastWindowWidth;
         ConfigVar<int> lastWindowHeight;
+        ConfigVar<int> uiScale;
     } video;
 
     struct {
+        ConfigVar<std::string> settingsFavorites;
+        ConfigVar<int> menuWidthDp;
+        ConfigVar<int> menuHeightDp;
+        ConfigVar<bool> menuSizeCustomized;
+    } ui;
+
+    struct {
         // Audio
+        ConfigVar<AudioOutputMode> outputMode;
         ConfigVar<int> masterVolume;
         ConfigVar<int> mainMusicVolume;
         ConfigVar<int> subMusicVolume;
         ConfigVar<int> soundEffectsVolume;
         ConfigVar<int> fanfareVolume;
         ConfigVar<bool> enableReverb;
-        ConfigVar<bool> enableHrtf;
         ConfigVar<bool> menuSounds;
     } audio;
 
@@ -205,12 +263,14 @@ struct UserSettings {
 
         // QoL
         ConfigVar<bool> enableQuickTransform;
+        ConfigVar<bool> fixedQuickTransform;
         ConfigVar<bool> humanMidnaWarp;
         ConfigVar<bool> hideTvSettingsScreen;
         ConfigVar<bool> biggerWallets;
         ConfigVar<bool> noReturnRupees;
         ConfigVar<bool> disableRupeeCutscenes;
         ConfigVar<bool> skipAllCutscenes;
+        ConfigVar<bool> fastTransitions;
         ConfigVar<bool> noSwordRecoil;
         ConfigVar<int> damageMultiplier;
         ConfigVar<bool> noHeartDrops;
@@ -221,10 +281,14 @@ struct UserSettings {
         ConfigVar<bool> no2ndFishForCat;
         ConfigVar<bool> enableFastLoads;
         ConfigVar<bool> enableInstaLoads;
+        ConfigVar<DiscLoadingDelayMode> discLoadingDelayMode;
+        ConfigVar<int> discLoadingDelaySeconds;
+        ConfigVar<bool> theEtherNetBoyzExperience;
         ConfigVar<bool> instantMovement;
         ConfigVar<bool> buttonFishing;
         ConfigVar<bool> instantSaves;
         ConfigVar<bool> instantText;
+        ConfigVar<bool> holdToMash;
         ConfigVar<bool> sunsSong;
         ConfigVar<bool> autoSave;
         ConfigVar<bool> enhancedMapMenus;
@@ -255,6 +319,7 @@ struct UserSettings {
         ConfigVar<Resampler> resampler;
         ConfigVar<bool> enableMapBackground;
         ConfigVar<bool> disableCutscenePillarboxing;
+        ConfigVar<LetterboxMode> disableLetterboxing;
         ConfigVar<bool> enableHighQualityMinimapTextures;
         ConfigVar<bool> forceTwilightVisuals;
 
@@ -300,6 +365,7 @@ struct UserSettings {
         ConfigVar<bool> debugFlyCam;
         ConfigVar<bool> debugFlyCamLockEvents;
         ConfigVar<bool> allowBackgroundInput;
+        ConfigVar<bool> cutsceneInputBuffering;
         ConfigVar<int> inputLagMs;
         std::array<ConfigVar<bool>, 4> enableLED;
         ConfigVar<bool> swapDirectSelect;
@@ -315,7 +381,7 @@ struct UserSettings {
         ConfigVar<bool> enableIndefiniteItemDrops;
         ConfigVar<bool> moonJump;
         ConfigVar<bool> superClawshot;
-        ConfigVar<bool> alwaysGreatspin;
+        ConfigVar<AlwaysGreatspinMode> alwaysGreatspin;
         ConfigVar<bool> enableFastIronBoots;
         ConfigVar<bool> canTransformAnywhere;
         ConfigVar<bool> fastRoll;
@@ -323,6 +389,7 @@ struct UserSettings {
         ConfigVar<MagicArmorMode> armorRupeeDrain;
         ConfigVar<bool> invincibleEnemies;
         ConfigVar<bool> transformWithoutShadowCrystal;
+        ConfigVar<bool> easyQuickSpin;
 
         // Technical
         ConfigVar<bool> restoreWiiGlitches;
@@ -346,6 +413,8 @@ struct UserSettings {
         ConfigVar<int> rupeeSlideRoom;
         ConfigVar<int> rupeeSlideLayer;
         ConfigVar<bool> rupeeSlidePositionValid;
+        ConfigVar<bool> enableMoveLinkCombo;
+        ConfigVar<bool> enableTeleportCombo;
         ConfigVar<bool> areaReload;
         ConfigVar<bool> gorgeVoidChecker;
         ConfigVar<bool> recordingMode;
@@ -354,11 +423,12 @@ struct UserSettings {
         ConfigVar<bool> showInputViewerGyro;
         ConfigVar<bool> nativeInputViewer;
         ConfigVar<bool> nativeLinkDebugInfo;
-        ConfigVar<std::string> triggerViewDefinitions;
         // When true, the practice-tools menu renders natively (J2D/GX), which
         // scales with resolution but is controller-only. When false, it uses
         // the imgui menu (mouse-capable).
         ConfigVar<bool> nativePracticeMenu;
+
+        ConfigVar<std::string> lastSelectedGameModeId;
     } game;
 
     struct {
@@ -366,9 +436,10 @@ struct UserSettings {
         ConfigVar<DiscVerificationState> isoVerification;
         ConfigVar<std::string> graphicsBackend;
         ConfigVar<bool> skipPreLaunchUI;
-        ConfigVar<bool> wasPresetChosen;
         ConfigVar<bool> showPipelineCompilation;
+        ConfigVar<bool> wasPresetChosen;
         ConfigVar<bool> checkForUpdates;
+        ConfigVar<bool> checkForModUpdates;
         ConfigVar<int> cardFileType;
         ConfigVar<bool> enableAdvancedSettings;
     } backend;
@@ -392,6 +463,8 @@ struct UserSettings {
         HotkeyBinding gyroAim;
         HotkeyBinding showInputViewer;
         HotkeyBinding moveLink;
+        HotkeyBinding cycleBloomMode;
+        HotkeyBinding toggleDiscLoadingDelay;
     } hotkeys;
 
     // Arrays of size 4 for 4 ports
@@ -409,12 +482,21 @@ UserSettings& getSettings();
 
 void registerSettings();
 
+void applyInternalResolutionScale(int scale);
+void applyResampler(Resampler resampler);
+
+inline bool isLetterboxingDisabled(bool inCutscene) {
+    const auto mode = getSettings().game.disableLetterboxing.getValue();
+    return mode == LetterboxMode::On ||
+           (mode == LetterboxMode::CutsceneOnly && inCutscene) ||
+           (mode == LetterboxMode::GameplayOnly && !inCutscene);
+}
+
 // Transient settings
 
 struct CollisionViewSettings {
     bool enableTerrainView;
     bool enableWireframe;
-    bool enableTriggerView;
     bool enableAtView;
     bool enableTgView;
     bool enableCoView;
@@ -423,8 +505,25 @@ struct CollisionViewSettings {
     float drawRange;
 };
 
+struct TriggerViewSettings {
+    bool loadZones;
+    bool eventAreas;
+    bool switchAreas;
+    bool eventTags;
+    bool midnaStops;
+    bool twilightGates;
+    bool checkpoints;
+    bool paths;
+    bool transformDists;
+    bool attentionDists;
+    bool purpleMistAvoid;
+    bool leevers;
+    float opacity;
+};
+
 struct TransientSettings {
     CollisionViewSettings collisionView;
+    TriggerViewSettings triggerView;
     bool skipFrameRateLimit;
     bool forceThirtyFpsLimit;
     bool turboMode;
@@ -434,5 +533,8 @@ struct TransientSettings {
 };
 
 TransientSettings& getTransientSettings();
+
+void updateDiscLoadingDelay();
+void toggleDiscLoadingDelay();
 
 }  // namespace dusk

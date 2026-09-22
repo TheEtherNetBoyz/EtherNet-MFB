@@ -6,7 +6,4 @@ namespace dusk {
 // transition state.
 void reload_area();
 
-// Poll the fixed L+R+Start+A controller command once per game frame.
-void update_area_reload_input();
-
 }  // namespace dusk

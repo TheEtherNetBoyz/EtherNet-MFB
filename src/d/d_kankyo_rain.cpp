@@ -6,16 +6,99 @@
 #include "d/actor/d_a_player.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_demo.h"
+#include "d/d_kankyo.h"
 #include "d/d_kankyo_rain.h"
+#include "d/d_stage.h"
+#if TARGET_PC
+#include "dusk/TwilightHostApi.h"
+#include "dusk/game_clock.h"
+#include "dusk/interp/frame_interpolation.h"
+#endif
 #include "f_op/f_op_camera_mng.h"
 #include "f_op/f_op_kankyo_mng.h"
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_lib.h"
+#include "m_Do/m_Do_audio.h"
 #include <cstring>
 
-#include "dusk/version.hpp"
 #if TARGET_PC
-#include "dusk/frame_interpolation.h"
+extern "C" void DuskSetAudioHooksV1(const DuskAudioHooksV1*);
+extern "C" float DuskGetMasterVolume();
+extern void dStage_set_external_twilight_enemy_proc_provider(
+    DuskTwilightEnemyProcProviderV1 provider);
+extern void dKy_set_external_visual_bloom_provider(DuskTwilightBloomProviderV1 provider);
+extern void Z2SetTwilightSceneMusicProvider(DuskTwilightSceneMusicProviderV1 provider);
+
+
+extern "C" const DuskTwilightHostApiV1* DuskGetTwilightHostApiV1() {
+    static const DuskTwilightHostApiV1 api = {
+        .abiVersion = DUSK_TWILIGHT_HOST_ABI_V1,
+        .structSize = sizeof(DuskTwilightHostApiV1),
+        .capabilities = DUSK_TWILIGHT_HOST_CAP_MASTER_VOLUME |
+            DUSK_TWILIGHT_HOST_CAP_ENEMY_PROC_PROVIDER |
+            DUSK_TWILIGHT_HOST_CAP_BLOOM_PROVIDER |
+            DUSK_TWILIGHT_HOST_CAP_SCENE_MUSIC_PROVIDER |
+            DUSK_TWILIGHT_HOST_CAP_GEOMETRY_HOOKS |
+            DUSK_TWILIGHT_HOST_CAP_AUDIO_HOOKS |
+            DUSK_TWILIGHT_HOST_CAP_ENVIRONMENT_HOOKS |
+            DUSK_TWILIGHT_HOST_CAP_PLAYER_HOOKS |
+            DUSK_TWILIGHT_HOST_CAP_SEQUENCE_HOOKS |
+            DUSK_TWILIGHT_HOST_CAP_INTERPOLATION |
+            DUSK_TWILIGHT_HOST_CAP_AUDIO_MANAGER,
+        .getMasterVolume = &DuskGetMasterVolume,
+        .setEnemyProcProvider = &dStage_set_external_twilight_enemy_proc_provider,
+        .setBloomProvider = &dKy_set_external_visual_bloom_provider,
+        .setSceneMusicProvider = &Z2SetTwilightSceneMusicProvider,
+        .setGeometryHooks = &dKy_set_geometry_hooks,
+        .setAudioHooks = &DuskSetAudioHooksV1,
+        .setEnvironmentHooks = &dKy_set_environment_hooks,
+        .setPlayerHooks = &dKy_set_player_hooks,
+        .setSequenceHooks = &dKy_set_sequence_hooks,
+        .interpolationStep = &dusk::interp::get_interpolation_step,
+        .interpolationEnabled = &dusk::interp::is_enabled,
+        .simulationFrame = &dusk::game_clock::is_sim_frame,
+        .recordMatrix = static_cast<void(*)(Mtx, const void*)>(&dusk::interp::record_final_mtx),
+        .lookupMatrix = &dusk::interp::lookup_replacement,
+        .audioManager = [](DuskAudioManagerKind kind) -> void* {
+            switch (kind) {
+            case DuskAudioManager_Scene: return Z2GetSceneMgr();
+            case DuskAudioManager_Sequence: return Z2GetSeqMgr();
+            case DuskAudioManager_Status: return Z2GetStatusMgr();
+            default: return nullptr;
+            }
+        },
+    };
+    return &api;
+}
+#endif
+
+
+#if TARGET_PC
+#include "dusk/interp/samples.h"
+#include "dusk/interp/user_interface.h"
+#include "dusk/version.hpp"
+
+namespace {
+dusk::interp::Samples<cXyz> s_rain;
+dusk::interp::Samples<cXyz> s_snow_pos;
+dusk::interp::Samples<cXyz> s_snow_base;
+dusk::interp::Samples<cXyz> s_housi_world;
+dusk::interp::Samples<cXyz> s_housi_scale;
+dusk::interp::Samples<cXyz> s_cloud;
+dusk::interp::Samples<cXyz> s_vrkumo;
+}  // namespace
+
+namespace dusk::interp {
+void clear_weather_samples() {
+    s_rain = {};
+    s_snow_pos = {};
+    s_snow_base = {};
+    s_housi_world = {};
+    s_housi_scale = {};
+    s_cloud = {};
+    s_vrkumo = {};
+}
+}  // namespace dusk::interp
 #endif
 
 static void vectle_calc(DOUBLE_POS* i_pos, cXyz* o_out) {
@@ -129,24 +212,73 @@ static GXTexObj* load_cached_tex(CachedTexObjs<N>& cache, ResTIMG* img, GXTexMap
 }
 #endif
 
+#if TARGET_PC
+static void dKyr_place_sun(camera_class* camera, cXyz* o_sunpos) {
+    cXyz lightDir;
+    u32 stage_type = dStage_stagInfo_GetSTType(dComIfGp_getStage()->getStagInfo());
+    if (g_env_light.base_light.mColor.r == 0 && stage_type != ST_ROOM) {
+        dKyr_get_vectle_calc(&camera->view.lookat.eye, &g_env_light.base_light.mPosition,
+                             &lightDir);
+    } else {
+        dKyr_get_vectle_calc(&camera->view.lookat.eye, &g_env_light.sun_light_pos, &lightDir);
+    }
+    o_sunpos->x = camera->view.lookat.eye.x + 8000.0f * lightDir.x;
+    o_sunpos->y = camera->view.lookat.eye.y + 8000.0f * lightDir.y;
+    o_sunpos->z = camera->view.lookat.eye.z + 8000.0f * lightDir.z;
+}
+
+static void dKyr_place_lenzflare(camera_class* camera, cXyz* sunpos, cXyz* o_positions) {
+    cXyz eyeVect;
+    cXyz sunDirSmth;
+    cXyz camFwd;
+
+    dKy_set_eyevect_calc(camera, &eyeVect, 4000.0f, 4000.0f);
+    dKyr_get_vectle_calc(&eyeVect, sunpos, &sunDirSmth);
+    o_positions[0] = *sunpos;
+    o_positions[1] = *sunpos;
+
+    dKyr_get_vectle_calc(&camera->view.lookat.eye, &camera->view.lookat.center, &camFwd);
+
+    for (int i = 2; i < 8; i++) {
+        if (i == 2) {
+            f32 size = 250.0f + 600.0f * sunDirSmth.abs(camFwd);
+            o_positions[i].x = sunpos->x - sunDirSmth.x * size * i;
+            o_positions[i].y = sunpos->y - sunDirSmth.y * size * i;
+            o_positions[i].z = sunpos->z - sunDirSmth.z * size * i;
+        } else {
+            f32 size = 250.0f + 110.0f * sunDirSmth.abs(camFwd);
+            o_positions[i].x = sunpos->x - (4100.0f * sunDirSmth.x + sunDirSmth.x * size * i);
+            o_positions[i].y = sunpos->y - (4100.0f * sunDirSmth.y + sunDirSmth.y * size * i);
+            o_positions[i].z = sunpos->z - (4100.0f * sunDirSmth.z + sunDirSmth.z * size * i);
+        }
+    }
+}
+#endif
+
 void dKyr_lenzflare_move() {
     dKankyo_sun_Packet* sun_packet = g_env_light.mpSunPacket;
     dKankyo_sunlenz_Packet* lenz_packet = g_env_light.mpSunLenzPacket;
     camera_process_class* camera = dComIfGp_getCamera(0);
 
+#if !TARGET_PC
     cXyz eyeVect;
     cXyz field_0x3c;
     cXyz sunDirSmth;
     cXyz camFwd;
+#endif
 
     if (sun_packet->mVisibility < 0.0001f) {
         return;
     }
 
+#if TARGET_PC
+    dKyr_place_lenzflare(camera, sun_packet->mPos, lenz_packet->mPositions);
+#else
     dKy_set_eyevect_calc(camera, &eyeVect, 4000.0f, 4000.0f);
     dKyr_get_vectle_calc(&eyeVect, sun_packet->mPos, &sunDirSmth);
     lenz_packet->mPositions[0] = sun_packet->mPos[0];
     lenz_packet->mPositions[1] = sun_packet->mPos[0];
+#endif
 
     cXyz vect;
     cXyz proj;
@@ -162,6 +294,7 @@ void dKyr_lenzflare_move() {
     lenz_packet->field_0x94 *= S2DEG_CONSTANT;  // convert from short angle to degrees
     lenz_packet->field_0x94 += 180.0f;
 
+#if !TARGET_PC
     dKyr_get_vectle_calc(&camera->view.lookat.eye, &camera->view.lookat.center, &camFwd);
 
     for (int i = 2; i < 8; i++) {
@@ -177,6 +310,7 @@ void dKyr_lenzflare_move() {
             lenz_packet->mPositions[i].z = sun_packet->mPos[0].z - (4100.0f * sunDirSmth.z + sunDirSmth.z * size * i);
         }
     }
+#endif
 }
 
 static BOOL dKyr_moon_arrival_check() {
@@ -205,6 +339,10 @@ void dKyr_sun_move() {
 
     u32 stage_type = dStage_stagInfo_GetSTType(dComIfGp_getStage()->getStagInfo());
 
+#if TARGET_PC
+    dKyr_place_sun(camera_p2, &sun_packet->mPos[0]);
+    dKyr_get_vectle_calc(&camera_p2->view.lookat.eye, &sun_packet->mPos[0], &lightDir);
+#else
     if (g_env_light.base_light.mColor.r == 0 && stage_type != ST_ROOM) {
         dKyr_get_vectle_calc(&camera_p2->view.lookat.eye, &g_env_light.base_light.mPosition,
                              &lightDir);
@@ -215,6 +353,7 @@ void dKyr_sun_move() {
     sun_packet->mPos[0].x = camera_p2->view.lookat.eye.x + 8000.0f * lightDir.x;
     sun_packet->mPos[0].y = camera_p2->view.lookat.eye.y + 8000.0f * lightDir.y;
     sun_packet->mPos[0].z = camera_p2->view.lookat.eye.z + 8000.0f * lightDir.z;
+#endif
 
     f32 horizon_y = (sun_packet->mPos[0].y - camera_p2->view.lookat.eye.y) / 8000.0f;
     if (horizon_y < 0.0f) {
@@ -477,6 +616,7 @@ void dKyr_rain_init() {
         g_env_light.mpRainPacket->mRainEff[i].mStatus = 0;
     }
     g_env_light.mpRainPacket->raincnt = 0;
+    IF_DUSK(s_rain.reset());
 }
 
 static void rain_bg_chk(dKankyo_rain_Packet* i_packet, int i_idx) {
@@ -700,9 +840,6 @@ void dKyr_rain_move() {
 
         for (int i = rain_packet->raincnt - 1; i >= 0; i--) {
             rain_packet->mRainEff[i].mBasePos.y = spFC.y;
-#if TARGET_PC
-            bool skipInterpolation = rain_packet->mRainEff[i].mStatus == 0;
-#endif
 
             switch (rain_packet->mRainEff[i].mStatus) {
             case 0:
@@ -750,9 +887,6 @@ void dKyr_rain_move() {
 
                 if (rain_packet->mRainEff[i].mTimer == 0) {
                     if (var_f1 > 800.0f) {
-#if TARGET_PC
-                        skipInterpolation = true;
-#endif
                         rain_packet->mRainEff[i].mTimer = 10;
                         rain_packet->mRainEff[i].field_0x24 = -(cM_rndF(10.0f) + 35.5f);
                         rain_packet->mRainEff[i].mBasePos = spFC;
@@ -776,9 +910,6 @@ void dKyr_rain_move() {
 
                     spC0.y = rain_packet->mRainEff[i].mBasePos.y + rain_packet->mRainEff[i].mPosition.y;
                     if (spC0.y < rain_packet->mRainEff[i].field_0x30 + 20.0f) {
-#if TARGET_PC
-                        skipInterpolation = true;
-#endif
                         rain_packet->mRainEff[i].mBasePos = spFC;
                         rain_packet->mRainEff[i].mPosition.x = cM_rndFX(800.0f);
                         rain_packet->mRainEff[i].mPosition.y = 200.0f;
@@ -908,15 +1039,29 @@ void dKyr_rain_move() {
             }
 
             rain_packet->mRainEff[i].mAlpha = var_f31 * (1.0f + cM_rndFX(0.5f));
-#if TARGET_PC
-            if (!skipInterpolation) {
-                Mtx effectMtx;
-                MTXTrans(effectMtx, spC0.x, spC0.y, spC0.z);
-                dusk::frame_interp::record_final_mtx(effectMtx, &rain_packet->mRainEff[i]);
-            }
-#endif
         }
     }
+
+#if TARGET_PC
+    s_rain.capture(rain_packet->raincnt, [&](int i) {
+        return rain_packet->mRainEff[i].mBasePos + rain_packet->mRainEff[i].mPosition;
+    });
+#endif
+}
+
+static bool celestial_visibility(u32 point, bool nativeValue) {
+#if TARGET_PC
+    const auto callback = dKy_geometry_hooks().celestialVisibility;
+    return callback ? callback(static_cast<DuskCelestialVisibility>(point), nativeValue) : nativeValue;
+#else
+    return nativeValue;
+#endif
+}
+static void celestial_parameter(u32 point, void* value) {
+#if TARGET_PC
+    if (dKy_geometry_hooks().celestialParameter)
+        dKy_geometry_hooks().celestialParameter(static_cast<DuskCelestialParameter>(point), value);
+#endif
 }
 
 static BOOL d_krain_cut_turn_check() {
@@ -990,6 +1135,10 @@ void dKyr_housi_move() {
     }
 
     if (housi_packet->mHousiCount == 0) {
+#if TARGET_PC
+        s_housi_world.reset();
+        s_housi_scale.reset();
+#endif
         return;
     }
 
@@ -1031,9 +1180,6 @@ void dKyr_housi_move() {
     for (int i = housi_packet->mHousiCount - 1; i >= 0; i--) {
         f32 var_f26 = 0.4f * housi_packet->field_0x5de8;
         effect = &housi_packet->mHousiEff[i];
-#if TARGET_PC
-        bool skipInterpolation = effect->mStatus == 0;
-#endif
 
         switch (housi_packet->mHousiEff[i].mStatus) {
         case 0:
@@ -1188,9 +1334,6 @@ void dKyr_housi_move() {
 
             if (effect->field_0x3c == 0) {
                 if (var_f1_4 > 1000.0f || sp6C.y < -99979.9f) {
-#if TARGET_PC
-                    skipInterpolation = true;
-#endif
                     effect->field_0x3c = 10;
                     effect->mBasePos = sp84;
 
@@ -1284,15 +1427,18 @@ void dKyr_housi_move() {
         f32 var_f1_8 = sp6C.abs(camera->view.lookat.eye);
         f32 temp_f25 = var_f1_8 / 2000.0f;
         effect->field_0x48 = 1.0f - (temp_f25 * temp_f25);
-#if TARGET_PC
-        if (!skipInterpolation) {
-            Mtx effectMtx;
-            MTXTrans(effectMtx, sp6C.x, sp6C.y, sp6C.z);
-            dusk::frame_interp::record_final_mtx(effectMtx, effect);
-        }
-#endif
     }
+
+#if TARGET_PC
+    s_housi_world.capture(housi_packet->mHousiCount, [&](int i) {
+        return housi_packet->mHousiEff[i].mBasePos + housi_packet->mHousiEff[i].mPosition;
+    });
+    s_housi_scale.capture(housi_packet->mHousiCount, [&](int i) {
+        return housi_packet->mHousiEff[i].mScale;
+    });
+#endif
 }
+
 
 void dKyr_snow_init() {
     camera_class* camera = (camera_class*)dComIfGp_getCamera(0);
@@ -1308,6 +1454,10 @@ void dKyr_snow_init() {
         g_env_light.mpSnowPacket->mSnowEff[i].mStatus = 0;
     }
 
+#if TARGET_PC
+    s_snow_pos.reset();
+    s_snow_base.reset();
+#endif
     g_env_light.mpSnowPacket->field_0x6d88 = 0;
     g_env_light.mpSnowPacket->field_0x6d74 = camera->view.lookat.eye;
     g_env_light.mpSnowPacket->field_0x6d80 = 0.0f;
@@ -1342,6 +1492,10 @@ void dKyr_snow_move() {
     }
 
     if (snow_packet->field_0x6d88 == 0) {
+#if TARGET_PC
+        s_snow_pos.reset();
+        s_snow_base.reset();
+#endif
         return;
     }
 
@@ -1389,10 +1543,6 @@ void dKyr_snow_move() {
     for (int i = snow_packet->field_0x6d88 - 1; i >= 0; i--) {
         f32 gravity = -(2.0f + cM_rndF(6.5f));
         f32 speed = 2.0f * (5.0f + (f32)(i & 15));
-#if TARGET_PC
-        bool skipPositionInterpolation = snow_packet->mSnowEff[i].mStatus == 0;
-        bool skipBaseInterpolation = skipPositionInterpolation;
-#endif
 
         switch (snow_packet->mSnowEff[i].mStatus) {
         case 0:
@@ -1471,9 +1621,6 @@ void dKyr_snow_move() {
 
             if (snow_packet->mSnowEff[i].mTimer == 0) {
                 if (var_f1_6 > 550.0f) {
-#if TARGET_PC
-                    skipPositionInterpolation = true;
-#endif
                     snow_packet->mSnowEff[i].mTimer = 10;
                     snow_packet->mSnowEff[i].mWindSpeed = speed;
                     snow_packet->mSnowEff[i].mGravity = gravity;
@@ -1498,9 +1645,6 @@ void dKyr_snow_move() {
             sp7C = snow_packet->mSnowEff[i].mBasePos;
             f32 sp18 = sp7C.abs(spAC);
             if (sp18 > 1100.0f) {
-#if TARGET_PC
-                skipBaseInterpolation = true;
-#endif
                 if (sp7C.abs(spAC) > 1150.0f) {
                     snow_packet->mSnowEff[i].mBasePos.x = spAC.x + cM_rndFX(1100.0f);
                     snow_packet->mSnowEff[i].mBasePos.y = spAC.y + cM_rndFX(1100.0f);
@@ -1595,25 +1739,16 @@ void dKyr_snow_move() {
                 snow_packet->mSnowEff[i].field_0x30 = 0.0f;
             }
         }
-#if TARGET_PC
-        if (!skipPositionInterpolation) {
-            Mtx effectMtx;
-            MTXTrans(effectMtx, snow_packet->mSnowEff[i].mPosition.x,
-                     snow_packet->mSnowEff[i].mPosition.y,
-                     snow_packet->mSnowEff[i].mPosition.z);
-            dusk::frame_interp::record_final_mtx(effectMtx,
-                                                  &snow_packet->mSnowEff[i].mPosition);
-        }
-        if (!skipBaseInterpolation) {
-            Mtx effectMtx;
-            MTXTrans(effectMtx, snow_packet->mSnowEff[i].mBasePos.x,
-                     snow_packet->mSnowEff[i].mBasePos.y,
-                     snow_packet->mSnowEff[i].mBasePos.z);
-            dusk::frame_interp::record_final_mtx(effectMtx,
-                                                  &snow_packet->mSnowEff[i].mBasePos);
-        }
-#endif
     }
+
+#if TARGET_PC
+    s_snow_pos.capture(snow_packet->field_0x6d88, [&](int i) {
+        return snow_packet->mSnowEff[i].mPosition;
+    });
+    s_snow_base.capture(snow_packet->field_0x6d88, [&](int i) {
+        return snow_packet->mSnowEff[i].mBasePos;
+    });
+#endif
 }
 
 void dKyr_star_init() {
@@ -1897,6 +2032,12 @@ void cloud_shadow_move() {
             cLib_addCalc(&packet->mCloudEff[i].mAlpha, alpha_max * alpha_target, 0.1f, 0.1f, 0.001f);
         }
     }
+
+#if TARGET_PC
+    s_cloud.capture(packet->mCount, [&](int i) {
+        return packet->mCloudEff[i].mBasePos + packet->mCloudEff[i].mPosition;
+    });
+#endif
 }
 
 void vrkumo_move() {
@@ -1910,7 +2051,7 @@ void vrkumo_move() {
 
     f32 sp70, sp6C, sp68, sp64, sp60;
     f32 sp5C, sp58, sp54, sp50, sp4C;
-    if (dKy_darkworld_check()) {
+    if (dKy_darkworld_visual_effect_check()) {
         sp70 = 80.0f;
         sp6C = 0.0f;
         sp68 = 0.0f;
@@ -2115,6 +2256,12 @@ void vrkumo_move() {
         max_alpha *= spC;
         cLib_addCalc(&vrkumo_packet->mVrkumoEff[i].mAlpha, max_alpha, 0.5f, alpha_step, 0.001f);
     }
+
+#if TARGET_PC
+    s_vrkumo.capture(100, [&](int i) {
+        return vrkumo_packet->mVrkumoEff[i].mPosition;
+    });
+#endif
 }
 
 static void dKr_cullVtx_Set(IF_DUSK(bool const vtxColor = false)) {
@@ -2444,10 +2591,14 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
     u8 draw_moon = false;
     u8 draw_sun = false;
     u16 date = dComIfGs_getDate();
+    f32 moonAlpha = sun_packet->mMoonAlpha;
+    IF_DUSK(celestial_parameter(DuskCelestial_MoonAlpha, &moonAlpha));
 
 #if TARGET_PC || VERSION == VERSION_GCN_JPN
     IF_DUSK_BLOCK(dusk::version::isRegionJpn())
-    if (g_env_light.hide_vrbox) {
+    bool hideSky = g_env_light.hide_vrbox;
+    IF_DUSK(hideSky = celestial_visibility(DuskCelestial_HideSky, hideSky));
+    if (hideSky) {
         return;
     }
     IF_DUSK_BLOCK_END
@@ -2465,21 +2616,27 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
     if (sun_packet->mMoonAlpha > 0.0f) {
         draw_moon = true;
     }
+    IF_DUSK(draw_sun = celestial_visibility(DuskCelestial_DrawSun, draw_sun));
+    IF_DUSK(draw_moon = celestial_visibility(DuskCelestial_DrawMoon, draw_moon));
 
     if ((draw_sun | draw_moon) != 0) {
         sunpos.x = ppos->x;
         sunpos.y = ppos->y;
         sunpos.z = ppos->z;
 
+        IF_DUSK(dKyr_place_sun(camera, &sunpos));
+
         u32 stage_type = dStage_stagInfo_GetSTType(dComIfGp_getStage()->getStagInfo());
         if (g_env_light.base_light.mColor.r == 0 && stage_type != ST_ROOM) {
-            if (g_env_light.daytime > 285.0f || g_env_light.daytime < 105.0f) {
+            bool hideMoonForTime = g_env_light.daytime > 285.0f || g_env_light.daytime < 105.0f;
+            IF_DUSK(hideMoonForTime = celestial_visibility(DuskCelestial_HideMoonForTime, hideMoonForTime));
+            if (hideMoonForTime) {
                 draw_moon = false;
             }
 
-            spB4.x = ppos->x;
-            spB4.y = ppos->y;
-            spB4.z = ppos->z;
+            spB4.x = DUSK_IF_ELSE(sunpos.x, ppos->x);
+            spB4.y = DUSK_IF_ELSE(sunpos.y, ppos->y);
+            spB4.z = DUSK_IF_ELSE(sunpos.z, ppos->z);
         } else {
             if (strcmp(dComIfGp_getStartStageName(), "F_SP200") == 0 && dComIfG_play_c::getLayerNo(0) == 0) {
                 spB4 = envlight->moon_pos;
@@ -2502,6 +2659,11 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
             moon_pos.z = spB4.z - camera->view.lookat.eye.z;
         }
 
+#if TARGET_PC
+        DuskCelestialPositionV1 position{&moon_pos, &spB4, &camera->view.lookat.eye};
+        celestial_parameter(DuskCelestial_MoonPosition, &position);
+#endif
+
         int weekday = date % 8;
         if (g_env_light.getDaytime() < 180.0f) {
             if (weekday != 0) {
@@ -2523,6 +2685,8 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
                 weekday = 3;
             }
         }
+
+        IF_DUSK(celestial_parameter(DuskCelestial_MoonPhase, &weekday));
 
         if (weekday != 4) {
             int texidx;
@@ -2645,7 +2809,8 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
                 };
 
                 if (strcmp(dComIfGp_getStartStageName(), "F_SP200") != 0) {
-                    dKyr_get_vectle_calc(&camera->view.lookat.eye, &camera->view.lookat.center, &camfwd);
+                    dKyr_get_vectle_calc(&camera->view.lookat.eye,
+                                         &camera->view.lookat.center, &camfwd);
                     f32 cam_distXZ = JMAFastSqrt((camfwd.x * camfwd.x) + (camfwd.z * camfwd.z));
                     f32 cam_theta = atan2f(camfwd.x, camfwd.z);
                     f32 cam_phi = atan2f(camfwd.y, cam_distXZ);
@@ -2685,7 +2850,9 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
                     }
                 }
 
-                color_reg0.a = 255.0f * sun_packet->mMoonAlpha;
+                IF_DUSK(celestial_parameter(DuskCelestial_MoonSize, &size));
+
+                color_reg0.a = 255.0f * moonAlpha;
                 GXSetTevColor(GX_TEVREG0, color_reg0);
 
                 for (int i = 0; i < 2; i++) {
@@ -2707,7 +2874,7 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
                         GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_ONE, GX_LO_COPY);
 
                         size *= 2.3f;
-                        color_reg0.a = 40.0f * sun_packet->mMoonAlpha;
+                        color_reg0.a = 40.0f * moonAlpha;
 
                         color_reg0.r = 0xFF;
                         color_reg0.g = 0xFF;
@@ -2808,12 +2975,15 @@ void dKyr_drawSun(Mtx drawMtx, cXyz* ppos, GXColor& unused, u8** tex) {
 
 void dKyr_drawLenzflare(Mtx drawMtx, cXyz* ppos, GXColor& param_2, u8** tex) {
     ZoneScoped;
+#if TARGET_PC
+    if (!celestial_visibility(DuskCelestial_DrawSunLens, true)) return;
+#endif
     dKankyo_sunlenz_Packet* lenz_packet = g_env_light.mpSunLenzPacket;
     dKankyo_sun_Packet* sun_packet = g_env_light.mpSunPacket;
     camera_class* camera = (camera_class*)dComIfGp_getCamera(0);
 
-    static s16 S_rot_work1 = 0;
-    static s16 S_rot_work2 = 0;
+    static DUSK_IF_ELSE(f32, s16) S_rot_work1 = 0;
+    static DUSK_IF_ELSE(f32, s16) S_rot_work2 = 0;
 
 #if TARGET_PC || VERSION == VERSION_GCN_JPN
     IF_DUSK_BLOCK(dusk::version::isRegionJpn())
@@ -2840,6 +3010,13 @@ void dKyr_drawLenzflare(Mtx drawMtx, cXyz* ppos, GXColor& param_2, u8** tex) {
     f32 spA8 = sun_packet->mVisibility * sun_packet->mVisibility;
 
     if (!(sun_visibility < 0.1f)) {
+#if TARGET_PC
+        cXyz sunpos;
+        cXyz positions[8];
+        dKyr_place_sun(camera, &sunpos);
+        dKyr_place_lenzflare(camera, &sunpos, positions);
+        ppos = positions;
+#endif
         dKy_set_eyevect_calc2(camera, &spFC, 8000.0f, 8000.0f);
 
         GXColor color_reg0;
@@ -2892,10 +3069,10 @@ void dKyr_drawLenzflare(Mtx drawMtx, cXyz* ppos, GXColor& param_2, u8** tex) {
         GXSetCurrentMtx(GX_PNMTX0);
 
         if (sun_packet->field_0x6c > 0.0f) {
-            spC = S_rot_work1 - 0x7F6;
-            spA = S_rot_work2 + 0x416B;
-            S_rot_work1 += 8;
-            S_rot_work2 -= 14;
+            spC = (s16)S_rot_work1 - 0x7F6;
+            spA = (s16)S_rot_work2 + 0x416B;
+            S_rot_work1 += 8 IF_DUSK(* dusk::game_clock::original_frames());
+            S_rot_work2 -= 14 IF_DUSK(* dusk::game_clock::original_frames());
 
             if (dComIfGd_getView() != NULL) {
                 MTXInverse(dComIfGd_getView()->viewMtxNoTrans, camMtx);
@@ -3019,25 +3196,25 @@ void dKyr_drawLenzflare(Mtx drawMtx, cXyz* ppos, GXColor& param_2, u8** tex) {
                 spE4.y = sp9C;
                 spE4.z = 0.0f;
                 cMtx_multVec(camMtx, &spE4, &spD8);
-                pos[0].x = sun_packet->mPos[0].x + spD8.x;
-                pos[0].y = sun_packet->mPos[0].y + spD8.y;
-                pos[0].z = sun_packet->mPos[0].z + spD8.z;
+                pos[0].x = DUSK_IF_ELSE(sunpos, sun_packet->mPos[0]).x + spD8.x;
+                pos[0].y = DUSK_IF_ELSE(sunpos, sun_packet->mPos[0]).y + spD8.y;
+                pos[0].z = DUSK_IF_ELSE(sunpos, sun_packet->mPos[0]).z + spD8.z;
 
                 spE4.x = sp98;
                 spE4.y = sp94;
                 spE4.z = 0.0f;
                 cMtx_multVec(camMtx, &spE4, &spD8);
-                pos[1].x = sun_packet->mPos[0].x + spD8.x;
-                pos[1].y = sun_packet->mPos[0].y + spD8.y;
-                pos[1].z = sun_packet->mPos[0].z + spD8.z;
+                pos[1].x = DUSK_IF_ELSE(sunpos, sun_packet->mPos[0]).x + spD8.x;
+                pos[1].y = DUSK_IF_ELSE(sunpos, sun_packet->mPos[0]).y + spD8.y;
+                pos[1].z = DUSK_IF_ELSE(sunpos, sun_packet->mPos[0]).z + spD8.z;
 
                 spE4.x = sp90;
                 spE4.y = sp8C;
                 spE4.z = 0.0f;
                 cMtx_multVec(camMtx, &spE4, &spD8);
-                pos[2].x = sun_packet->mPos[0].x + spD8.x;
-                pos[2].y = sun_packet->mPos[0].y + spD8.y;
-                pos[2].z = sun_packet->mPos[0].z + spD8.z;
+                pos[2].x = DUSK_IF_ELSE(sunpos, sun_packet->mPos[0]).x + spD8.x;
+                pos[2].y = DUSK_IF_ELSE(sunpos, sun_packet->mPos[0]).y + spD8.y;
+                pos[2].z = DUSK_IF_ELSE(sunpos, sun_packet->mPos[0]).z + spD8.z;
 
                 GXBegin(GX_TRIANGLES, GX_VTXFMT0, 3);
                 GXPosition3f32(pos[0].x, pos[0].y, pos[0].z);
@@ -3312,7 +3489,7 @@ void dKyr_drawRain(Mtx drawMtx, u8** tex) {
                 f32 temp_f30 = -1.0f;
 
                 if (!(rain_packet->mRainEff[i].mAlpha <= 0.0f)) {
-                    if (dKy_darkworld_check()) {
+                    if (dKy_darkworld_visual_effect_check()) {
                         color_reg0.a = 34.0f * rain_packet->mRainEff[i].mAlpha;
                     } else if (strcmp(dComIfGp_getStartStageName(), "D_MN07A") == 0) {
                         color_reg0.a = 9.0f * rain_packet->mRainEff[i].mAlpha;
@@ -3324,15 +3501,7 @@ void dKyr_drawRain(Mtx drawMtx, u8** tex) {
                     sp3C.x = rain_packet->mRainEff[i].mBasePos.x + rain_packet->mRainEff[i].mPosition.x;
                     sp3C.y = rain_packet->mRainEff[i].mBasePos.y + rain_packet->mRainEff[i].mPosition.y;
                     sp3C.z = rain_packet->mRainEff[i].mBasePos.z + rain_packet->mRainEff[i].mPosition.z;
-#if TARGET_PC
-                    Mtx presentationMtx;
-                    if (dusk::frame_interp::lookup_replacement(&rain_packet->mRainEff[i],
-                                                                presentationMtx))
-                    {
-                        sp3C.set(presentationMtx[0][3], presentationMtx[1][3],
-                                 presentationMtx[2][3]);
-                    }
-#endif
+                    IF_DUSK(sp3C = s_rain.read(i, sp3C, 300.0f);)
 
                     f32 dist = 0.1f + (sp3C.abs(camera->view.lookat.eye) / 1500.0f);
                     if (dist > 1.0f) {
@@ -3435,19 +3604,7 @@ void dKyr_drawSibuki(Mtx drawMtx, u8** tex) {
         alpha = 200.0f;
     }
 
-#if TARGET_PC
-    static u32 sSibukiCounter = 0;
-    static bool sSibukiInitialized = false;
-    const bool newSimulationTick =
-        !sSibukiInitialized || sSibukiCounter != g_Counter.mCounter0;
-    if (newSimulationTick) {
-        sSibukiCounter = g_Counter.mCounter0;
-        sSibukiInitialized = true;
-        cLib_addCalc(&rain_packet->mSibukiAlpha, alpha, 0.2f, 30.0f, 0.001f);
-    }
-#else
-    cLib_addCalc(&rain_packet->mSibukiAlpha, alpha, 0.2f, 30.0f, 0.001f);
-#endif
+    DUSK_IF_ELSE(dusk::vdt::present_addCalc, cLib_addCalc)(&rain_packet->mSibukiAlpha, alpha, 0.2f, 30.0f, 0.001f);
     dKy_set_eyevect_calc(camera, &eyevect, 7000.0f, 4000.0f);
     cXyz camdir;
     dKyr_get_vectle_calc(&camera->view.lookat.eye, &camera->view.lookat.center, &camdir);
@@ -3507,42 +3664,14 @@ void dKyr_drawSibuki(Mtx drawMtx, u8** tex) {
         scale = 0.2f;
     }
 
-    int splashCount = g_env_light.raincnt >> 1;
-#if TARGET_PC
-    struct SibukiSample {
-        f32 sizeOffset;
-        f32 x;
-        f32 y;
-        f32 z;
-    };
-    static SibukiSample sSibukiSamples[125];
-    if (splashCount > 125) {
-        splashCount = 125;
-    }
-    if (newSimulationTick) {
-        for (int i = 0; i < splashCount; i++) {
-            sSibukiSamples[i].sizeOffset = cM_rndF(10.0f);
-            sSibukiSamples[i].x = cM_rndFX(3600.0f);
-            sSibukiSamples[i].y = cM_rndFX(1500.0f);
-            sSibukiSamples[i].z = cM_rndFX(3600.0f);
-        }
-    }
-#endif
-
-    for (int i = 0; i < splashCount; i++) {
+    for (int i = 0; i < g_env_light.raincnt >> 1; i++) {
         cXyz pos[4];
-#if TARGET_PC
-        f32 size = scale * (15.0f + sSibukiSamples[i].sizeOffset);
-        f32 local_x = sSibukiSamples[i].x;
-        f32 local_y = sSibukiSamples[i].y;
-        f32 local_z = sSibukiSamples[i].z;
-#else
         f32 size = scale * (15.0f + cM_rndF(10.0f));
+        cXyz sp20;
+
         f32 local_x = cM_rndFX(3600.0f);
         f32 local_y = cM_rndFX(1500.0f);
         f32 local_z = cM_rndFX(3600.0f);
-#endif
-        cXyz sp20;
 
         sp20.x = eyevect.x + local_x;
         sp20.y = eyevect.y + local_y;
@@ -3601,12 +3730,6 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
     Vec spB8;
 
     bool isPalaceOfTwilight = 0;
-#if TARGET_PC
-    f32 presentationCounter = g_Counter.mCounter0;
-    if (dusk::frame_interp::is_enabled() && !dusk::frame_interp::is_sim_frame()) {
-        presentationCounter -= 1.0f - dusk::frame_interp::get_interpolation_step();
-    }
-#endif
     if (housi_packet->mHousiCount != 0) {
         if (strcmp(dComIfGp_getStartStageName(), "D_MN08") == 0) {
             isPalaceOfTwilight = 1;
@@ -3733,7 +3856,7 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
                 GXSetNumIndStages(0);
                 dKr_cullVtx_Set(IF_DUSK(true));
 
-                rot += 1.2f;
+                rot += 1.2f IF_DUSK(* dusk::game_clock::original_frames());
                 MTXRotRad(rotMtx, 'Z', DEG_TO_RAD(rot));
                 MTXConcat(camMtx, rotMtx, camMtx);
 
@@ -3746,6 +3869,13 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
                 GXBegin(GX_QUADS, GX_VTXFMT0, vertCount);
 #endif
 
+#if TARGET_PC
+                f32 housi_counter = (f32)g_Counter.mCounter0;
+                if (dusk::interp::is_enabled()) {
+                    housi_counter += dusk::interp::get_interpolation_step() - 1.0f;
+                }
+#endif
+
                 for (int j = 0; j < housi_packet->mHousiCount; j++) {
                     fopAc_ac_c* player = dComIfGp_getPlayer(0);
 
@@ -3755,15 +3885,7 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
                         housi_packet->mHousiEff[j].mBasePos.y + housi_packet->mHousiEff[j].mPosition.y;
                     spD0.z =
                         housi_packet->mHousiEff[j].mBasePos.z + housi_packet->mHousiEff[j].mPosition.z;
-#if TARGET_PC
-                    Mtx presentationMtx;
-                    if (dusk::frame_interp::lookup_replacement(&housi_packet->mHousiEff[j],
-                                                                presentationMtx))
-                    {
-                        spD0.set(presentationMtx[0][3], presentationMtx[1][3],
-                                 presentationMtx[2][3]);
-                    }
-#endif
+                    IF_DUSK(spD0 = s_housi_world.read(j, spD0, 300.0f);)
 
                     if (i == 1 && j == 0) {
 #if TARGET_PC
@@ -3808,10 +3930,9 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
                             var_f27 = housi_packet->mHousiEff[j].field_0x48 * 18.0f;
                         }
 
-                        f32 temp_f28 =
-                            (var_f27 * 0.2f) * cM_fsin(housi_packet->mHousiEff[j].mScale.x * 5.0f);
-                        f32 temp_f30 =
-                            (var_f27 * 0.2f) * cM_fcos(housi_packet->mHousiEff[j].mScale.y * 6.0f);
+                        IF_DUSK(cXyz scale = s_housi_scale.read(j, housi_packet->mHousiEff[j].mScale, 1.0f));
+                        f32 temp_f28 = (var_f27 * 0.2f) * cM_fsin(DUSK_IF_ELSE(scale.x, housi_packet->mHousiEff[j].mScale.x) * 5.0f);
+                        f32 temp_f30 = (var_f27 * 0.2f) * cM_fcos(DUSK_IF_ELSE(scale.y, housi_packet->mHousiEff[j].mScale.y) * 6.0f);
 
                         if (dKy_darkworld_check() == 1 || isPalaceOfTwilight == 1) {
                             cXyz sp7C[] = {
@@ -3825,13 +3946,7 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
                                 cXyz spAC;
                                 cXyz spA0;
 
-#if TARGET_PC
-                                f32 temp_f26_2 =
-                                    cM_ssin((f32)j * 123.0f + presentationCounter * 600.0f);
-#else
-                                f32 temp_f26_2 = cM_ssin(
-                                    (f32)j * 123.0f + (f32)(g_Counter.mCounter0 * 600));
-#endif
+                                f32 temp_f26_2 = cM_ssin((f32)j * 123.0f + DUSK_IF_ELSE(housi_counter * 600.0f, (f32)(g_Counter.mCounter0 * 600)));
 
                                 cXyz* temp_r3 = &sp7C[k];
                                 spAC.x = temp_r3->x * (8.0f * (1.0f + (temp_f26_2 * 0.3f)));
@@ -3863,11 +3978,11 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
                                         0.2f +
                                         (housi_packet->mHousiEff[j].field_0x34 *
                                             (fabsf(cM_ssin((f32)j * 213.0f +
-                                                        (f32)(g_Counter.mCounter0 * 330))) *
+                                                        DUSK_IF_ELSE(housi_counter * 330.0f, (f32)(g_Counter.mCounter0 * 330)))) *
                                             0.8f));
                                 } else {
                                     var_f24 = cM_ssin((f32)j * 123.0f +
-                                                        (f32)(g_Counter.mCounter0 * 80));
+                                                        DUSK_IF_ELSE(housi_counter * 80.0f, (f32)(g_Counter.mCounter0 * 80)));
                                 }
 
                                 f32 var_f2;
@@ -3878,10 +3993,10 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
                                         var_f24 =
                                             housi_packet->mHousiEff[j].field_0x34 *
                                             fabsf(cM_ssin((f32)j * 250.0f +
-                                                            (f32)(g_Counter.mCounter0 * 88)));
+                                                            DUSK_IF_ELSE(housi_counter * 88.0f, (f32)(g_Counter.mCounter0 * 88))));
                                     } else {
                                         var_f24 = cM_ssin((f32)j * 685.0f +
-                                                            (f32)(g_Counter.mCounter0 * 20));
+                                                            DUSK_IF_ELSE(housi_counter * 20.0f, (f32)(g_Counter.mCounter0 * 20)));
                                     }
                                 } else {
                                     var_f2 = 6.0f;
@@ -3897,7 +4012,7 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
                                     housi_packet->mHousiEff[j].mStatus == 3)
                                 {
                                     housi_packet->mHousiEff[j].field_0x38 +=
-                                        483.0f * (0.5f + (var_f24 * 0.5f));
+                                        483.0f * (0.5f + (var_f24 * 0.5f)) IF_DUSK(* dusk::game_clock::original_frames());
 
                                     housi_packet->mHousiEff[j].field_0x44 =
                                         (s16)housi_packet->mHousiEff[j].field_0x38;
@@ -3907,19 +4022,21 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
                                 } else {
                                     if (housi_packet->mHousiEff[j].mStatus == 2) {
                                         if (g_env_light.fishing_hole_season == 3) {
-                                            housi_packet->mHousiEff[j].field_0x38 += var_f24 * 30.0f;
+                                            housi_packet->mHousiEff[j].field_0x38 += var_f24 * 30.0f IF_DUSK(* dusk::game_clock::original_frames());
                                         } else {
                                             housi_packet->mHousiEff[j].field_0x38 +=
-                                                var_f24 * 100.0f;
+                                                var_f24 * 100.0f IF_DUSK(* dusk::game_clock::original_frames());
                                         }
                                     }
 
                                     if (housi_packet->mHousiEff[j].field_0x38 > 32765.0f) {
-                                        cLib_addCalc(&housi_packet->mHousiEff[j].field_0x44,
-                                                        -16384.0f, 0.1f, 500.0f, 0.0001f);
+                                        DUSK_IF_ELSE(dusk::vdt::present_addCalc, cLib_addCalc)(
+                                            &housi_packet->mHousiEff[j].field_0x44,
+                                            -16384.0f, 0.1f, 500.0f, 0.0001f);
                                     } else {
-                                        cLib_addCalc(&housi_packet->mHousiEff[j].field_0x44,
-                                                        16384.0f, 0.1f, 500.0f, 0.0001f);
+                                        DUSK_IF_ELSE(dusk::vdt::present_addCalc, cLib_addCalc)(
+                                            &housi_packet->mHousiEff[j].field_0x44,
+                                            16384.0f, 0.1f, 500.0f, 0.0001f);
                                     }
 
                                     mDoMtx_stack_c::YrotM(housi_packet->mHousiEff[j].field_0x38);
@@ -4000,6 +4117,7 @@ void dKyr_drawHousi(Mtx drawMtx, u8** tex) {
     }
 }
 
+
 void dKyr_drawSnow(Mtx drawMtx, u8** tex) {
     ZoneScoped;
     camera_class* camera = (camera_class*)dComIfGp_getCamera(0);
@@ -4032,12 +4150,7 @@ void dKyr_drawSnow(Mtx drawMtx, u8** tex) {
     };
 
     static f32 S_fubuki_ratio = 0.0f;
-#if TARGET_PC
-    f32 presentationCounter = g_Counter.mCounter0;
-    if (dusk::frame_interp::is_enabled() && !dusk::frame_interp::is_sim_frame()) {
-        presentationCounter -= 1.0f - dusk::frame_interp::get_interpolation_step();
-    }
-#endif
+    const bool visualSnowStorm = dKy_visual_snow_storm_check() != 0;
 
     if (camera != NULL) {
         j3dSys.reinitGX();
@@ -4106,7 +4219,7 @@ void dKyr_drawSnow(Mtx drawMtx, u8** tex) {
                     Mtx rotMtx;
                     MTXRotRad(rotMtx, 'Z', DEG_TO_RAD(rot));
 
-                    rot += 5.0f + cM_rndFX(2.0f);
+                    rot += 5.0f DUSK_IF_ELSE(* dusk::game_clock::original_frames(), + cM_rndFX(2.0f));
                     if (rot > 719.0f) {
                         rot = 0.0f;
                     }
@@ -4116,7 +4229,8 @@ void dKyr_drawSnow(Mtx drawMtx, u8** tex) {
                     GXSetCurrentMtx(GX_PNMTX0);
 
                     if (g_env_light.field_0xe92 == 0 && sp4C == 0) {
-                        cLib_addCalc(&S_fubuki_ratio, 0.0f, 0.25f, 0.1f, 0.001f);
+                        DUSK_IF_ELSE(dusk::vdt::present_addCalc, cLib_addCalc)(
+                            &S_fubuki_ratio, 0.0f, 0.25f, 0.1f, 0.001f);
                         if (S_fubuki_ratio > 0.0f) {
                             spC = 2;
                         }
@@ -4124,7 +4238,8 @@ void dKyr_drawSnow(Mtx drawMtx, u8** tex) {
                         if (g_env_light.field_0xe92) {
                             spC = 2;
                         }
-                        cLib_addCalc(&S_fubuki_ratio, 1.0f, 0.25f, 0.1f, 0.001f);
+                        DUSK_IF_ELSE(dusk::vdt::present_addCalc, cLib_addCalc)(
+                            &S_fubuki_ratio, 1.0f, 0.25f, 0.1f, 0.001f);
                     }
 
                     f32 sp50;
@@ -4143,12 +4258,7 @@ void dKyr_drawSnow(Mtx drawMtx, u8** tex) {
                             if (g_env_light.mpSnowPacket->mSnowEff[i].mStatus != 0) {
                                 f32 var_f30;
                                 f32 temp_f29;
-#if TARGET_PC
-                                f32 temp_f31 =
-                                    1.5f + (((i & 15) / 15.0f) * cM_ssin(presentationCounter));
-#else
                                 f32 temp_f31 = 1.5f + (((i & 15) / 15.0f) * cM_ssin(g_Counter.mCounter0));
-#endif
                                 temp_f29 = 0.3f * ((i & 15) / 15.0f);
 
                                 color_reg0.r = (255.0f * temp_f29) + (sp60.r * (1.0f - temp_f29));
@@ -4158,29 +4268,19 @@ void dKyr_drawSnow(Mtx drawMtx, u8** tex) {
                                 f32 sp40, sp3C;
                                 if (j == 0) {
                                     sp7C = snow_packet->mSnowEff[i].mPosition;
+                                    IF_DUSK(sp7C = s_snow_pos.read(i, sp7C, 200.0f);)
                                     sp40 = snow_packet->mSnowEff[i].mScale * snow_packet->mSnowEff[i].mScale;
                                     sp3C = (snow_packet->mSnowEff[i].mScale - sp40) + snow_packet->mSnowEff[i].mScale;
 
-                                    color_reg0.a = 180.0f * ((snow_packet->mSnowEff[i].mScale * 0.8f) + temp_f29);
+                                    color_reg0.a = (visualSnowStorm ? 1.15f : 1.0f) * 180.0f * ((snow_packet->mSnowEff[i].mScale * 0.8f) + temp_f29);
                                 } else {
                                     sp7C = snow_packet->mSnowEff[i].mBasePos;
+                                    IF_DUSK(sp7C = s_snow_base.read(i, sp7C, 300.0f);)
                                     sp40 = snow_packet->mSnowEff[i].field_0x30 * snow_packet->mSnowEff[i].field_0x30;
                                     sp3C = (snow_packet->mSnowEff[i].field_0x30 - sp40) + snow_packet->mSnowEff[i].field_0x30;
 
-                                    color_reg0.a = S_fubuki_ratio * (220.0f * ((0.8f * (snow_packet->mSnowEff[i].field_0x30)) + temp_f29));
+                                    color_reg0.a = S_fubuki_ratio * (visualSnowStorm ? 1.15f : 1.0f) * (220.0f * ((0.8f * (snow_packet->mSnowEff[i].field_0x30)) + temp_f29));
                                 }
-#if TARGET_PC
-                                Mtx presentationMtx;
-                                const void* interpolationKey =
-                                    j == 0 ? (const void*)&snow_packet->mSnowEff[i].mPosition :
-                                             (const void*)&snow_packet->mSnowEff[i].mBasePos;
-                                if (dusk::frame_interp::lookup_replacement(interpolationKey,
-                                                                            presentationMtx))
-                                {
-                                    sp7C.set(presentationMtx[0][3], presentationMtx[1][3],
-                                             presentationMtx[2][3]);
-                                }
-#endif
 
                                 if (strcmp(dComIfGp_getStartStageName(), "D_MN11") == 0) {
                                     if (dComIfGp_roomControl_getStayNo() == 4) {
@@ -4206,6 +4306,10 @@ void dKyr_drawSnow(Mtx drawMtx, u8** tex) {
                                     var_f30 = sp68 * (sp3C * (sp6C + (int)(10.0f * ((i & 15) / 15.0f))));
                                 } else {
                                     var_f30 = sp68 * (sp3C * (sp6C + (int)(14.0f * ((i & 15) / 15.0f))));
+                                }
+
+                                if (visualSnowStorm) {
+                                    var_f30 *= 1.35f;
                                 }
 
                                 sp94.x = -var_f30 * sp44;
@@ -4457,7 +4561,7 @@ void dKyr_drawStar(Mtx drawMtx, u8** tex) {
         GXLoadPosMtxImm(drawMtx, GX_PNMTX0);
         GXSetCurrentMtx(GX_PNMTX0);
 
-        rot += 0.65f;
+        rot += 0.65f IF_DUSK(* dusk::game_clock::original_frames());
         if (rot > 719.0f) {
             rot = 0.0f;
         }
@@ -4749,7 +4853,7 @@ void drawCloudShadow(Mtx drawMtx, u8** tex) {
             MTXConcat(camMtx, rotMtx, camMtx);
             GXLoadPosMtxImm(drawMtx, GX_PNMTX0);
 
-            rot -= 0.45f;
+            rot -= 0.45f IF_DUSK(* dusk::game_clock::original_frames());
             if (rot < 0.0f) {
                 rot = 719.0f;
             }
@@ -4783,7 +4887,7 @@ void drawCloudShadow(Mtx drawMtx, u8** tex) {
             #endif
             cMtx_concat(sp120, j3dSys.getViewMtx(), spF0);
 
-            rot += 2.0f;
+            rot += 2.0f IF_DUSK(* dusk::game_clock::original_frames());
             MTXRotRad(rotMtx, 'Z', DEG_TO_RAD(rot));
             MTXConcat(camMtx, rotMtx, camMtx);
 
@@ -4838,6 +4942,7 @@ void drawCloudShadow(Mtx drawMtx, u8** tex) {
                 sp5C.x = cloud_packet->mCloudEff[i].mBasePos.x + cloud_packet->mCloudEff[i].mPosition.x;
                 sp5C.y = cloud_packet->mCloudEff[i].mBasePos.y + cloud_packet->mCloudEff[i].mPosition.y;
                 sp5C.z = cloud_packet->mCloudEff[i].mBasePos.z + cloud_packet->mCloudEff[i].mPosition.z;
+                IF_DUSK(sp5C = s_cloud.read(i, sp5C, 300.0f);)
 
                 sp74.x = -size;
                 sp74.y = size;
@@ -5100,7 +5205,7 @@ void drawVrkumo(Mtx drawMtx, GXColor& color, u8** tex) {
                     spA8 = 0.84f;
 #endif
 
-                    if (dKy_darkworld_check()) {
+                    if (dKy_darkworld_visual_effect_check()) {
                         spAC = 0.8f;
                         spA8 = 0.8f;
                     }
@@ -5114,7 +5219,7 @@ void drawVrkumo(Mtx drawMtx, GXColor& color, u8** tex) {
 
                     sp50 = cM_fsin(j + (0.0001f * howa_loop_cnt));
                     sp50 *= vrkumo_packet->mVrkumoEff[k].mDistFalloff;
-                    howa_loop_cnt += 1.5f * sp58;
+                    howa_loop_cnt += 1.5f * sp58 IF_DUSK(* dusk::game_clock::original_frames());
 
                     sp68 += (0.05f * sp68 * sp50);
                     sp64 = sp68 + (sp68 * vrkumo_packet->mVrkumoEff[k].mHeight);
@@ -5151,6 +5256,7 @@ void drawVrkumo(Mtx drawMtx, GXColor& color, u8** tex) {
                         sp60 = sp68 * (0.2f + (0.2f * (k / 100.0f)));
                         sp5C = sp68 * (0.55f + (0.3f * (k / 100.0f)));
                         spFC = vrkumo_packet->mVrkumoEff[k].mPosition;
+                        IF_DUSK(spFC = s_vrkumo.read(k, spFC, 1000.0f);)
 
                         spA4 = 0.0f;
                         spA0 = 0.0f;
@@ -5785,7 +5891,7 @@ void dKyr_odour_draw(Mtx drawMtx, u8** tex) {
     C_MTXLightPerspective(sp120, window_cam->view.fovy, window_cam->view.aspect, scale, -scale, 0.5f, 0.5f);
     cMtx_concat(sp120, j3dSys.getViewMtx(), spF0);
 
-    rot += 2.0f;
+    rot += 2.0f IF_DUSK(* dusk::game_clock::original_frames());
     MTXRotRad(rotMtx, 'Z', DEG_TO_RAD(rot));
     MTXConcat(camMtx, rotMtx, camMtx);
 
@@ -6357,12 +6463,7 @@ static void dKyr_evil_draw2(Mtx drawMtx, u8** tex) {
         dKyr_set_btitex(&texobj, (ResTIMG*)tex[1]);
 #endif
 
-#if TARGET_PC
-        if (dusk::frame_interp::get_ui_tick_pending())
-#endif
-        {
-            rot += 0.7f;
-        }
+        rot += 0.7f IF_DUSK(* dusk::game_clock::original_frames());
         MTXRotRad(rotMtx, 'Z', DEG_TO_RAD(rot));
         MTXConcat(camMtx, rotMtx, camMtx);
 
@@ -6601,12 +6702,7 @@ void dKyr_evil_draw(Mtx drawMtx, u8** tex) {
         dKyr_set_btitex(&texobj, (ResTIMG*)tex[0]);
 #endif
 
-#if TARGET_PC
-        if (dusk::frame_interp::get_ui_tick_pending())
-#endif
-        {
-            rot += 1.0f;
-        }
+        rot += 1.0f IF_DUSK(* dusk::game_clock::original_frames());
         MTXRotRad(rotMtx, 'Z', DEG_TO_RAD(rot));
         MTXConcat(camMtx, rotMtx, camMtx);
 
@@ -6724,7 +6820,8 @@ void dKyr_evil_draw(Mtx drawMtx, u8** tex) {
                         } else {
                             sp5C = 0.0f;
                         }
-                        cLib_addCalc(&effect->field_0x2c, sp5C, 0.5f, 0.1f, 0.01f);
+                        DUSK_IF_ELSE(dusk::vdt::present_addCalc, cLib_addCalc)(
+                            &effect->field_0x2c, sp5C, 0.5f, 0.1f, 0.01f);
 
                         daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
                         if (player != NULL && player->getKandelaarFlamePos() != NULL) {

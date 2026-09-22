@@ -5,6 +5,9 @@
 #include "JSystem/JAudio2/JAISoundChild.h"
 #include "JSystem/JAudio2/JASCriticalSection.h"
 #include "JSystem/JAudio2/JAIAudience.h"
+#if TARGET_PC
+#include "Z2AudioLib/Z2SeqMgr.h"
+#endif
 
 namespace {
 
@@ -28,7 +31,7 @@ void JAISeq::JAISeqMgr_startID_(JAISoundID id, const JGeometry::TVec3<f32>* posP
                                 JAIAudience* audience, int category, int param_4) {
     inner_.field_0x39c = category;
     reserveChildTracks_(param_4);
-    start_JAISound_(id, posPtr, audience);
+    start_JAISound_(id, posPtr, audience IF_DUSK_ARG(nullptr));
 
     if (inner_.strategyMgr) {
         field_0x3a8 = inner_.strategyMgr->calc(id);
@@ -219,6 +222,11 @@ void JAISeq::mixOut_(const JASSoundParams& params, JAISoundActivity activity) {
     if (field_0x3a8) {
         field_0x3a8->virtual4(this, outParams);
     }
+#if TARGET_PC
+    // Tag ownership only. The channel callback applies the gate without
+    // changing sequence parameters or stopping/pausing sustained notes.
+    inner_.outputTrack.mDuskSequenceId = static_cast<u32>(getID());
+#endif
 
     if (audible_) {
         int maxChannels = audience_->getMaxChannels();

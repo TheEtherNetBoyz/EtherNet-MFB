@@ -1,7 +1,7 @@
 #include "dusk/tas_movie.h"
 
 #include "dusk/game_clock.h"
-#include "dusk/frame_interpolation.h"
+#include "dusk/interp/frame_interpolation.h"
 #include "d/d_camera.h"
 #include "f_op/f_op_view.h"
 #include "m_Do/m_Do_controller_pad.h"
@@ -70,8 +70,6 @@ struct PresentationCamera {
     bool enabled = false;
     bool controlsEnabled = false;
     bool initialized = false;
-    bool mouseLookEnabled = true;
-    bool pWasDown = false;
     bool captureWasDown = false;
     cXyz eye;
     cXyz center;
@@ -163,10 +161,10 @@ void restorePlaybackRumble() {
 
 float timelineFrame() {
     if (sState == State::Playing) {
-        if (frame_interp::is_enabled() && !frame_interp::is_sim_frame()) {
+        if (interp::is_enabled() && !game_clock::is_sim_frame()) {
             return std::max(
                 0.0f, static_cast<float>(sPlaybackFrame) - 1.0f +
-                          frame_interp::get_interpolation_step());
+                          interp::get_interpolation_step());
         }
         return static_cast<float>(sPlaybackFrame);
     }
@@ -688,7 +686,6 @@ bool presentationCameraEnabled() {
 
 void setPresentationCameraControlEnabled(bool enabled) {
     sPresentationCamera.controlsEnabled = enabled && sPresentationCamera.enabled;
-    sPresentationCamera.pWasDown = false;
     sPresentationCamera.captureWasDown = false;
     if (sPresentationCamera.controlsEnabled) {
         stopCameraTrack();
@@ -697,14 +694,6 @@ void setPresentationCameraControlEnabled(bool enabled) {
 
 bool presentationCameraControlEnabled() {
     return sPresentationCamera.controlsEnabled;
-}
-
-void setPresentationCameraMouseLookEnabled(bool enabled) {
-    sPresentationCamera.mouseLookEnabled = enabled;
-}
-
-bool presentationCameraMouseLookEnabled() {
-    return sPresentationCamera.mouseLookEnabled;
 }
 
 bool presentationCameraDualCullingEnabled() {
@@ -824,19 +813,16 @@ void updatePresentationCameraControls(float deltaSeconds) {
         return static_cast<int>(key) < keyCount && keys[key];
     };
 
-    const bool pDown = down(SDL_SCANCODE_P);
-    if (pDown && !sPresentationCamera.pWasDown) {
-        sPresentationCamera.mouseLookEnabled = !sPresentationCamera.mouseLookEnabled;
-    }
-    sPresentationCamera.pWasDown = pDown;
-
     const bool captureDown = down(SDL_SCANCODE_K);
     if (captureDown && !sPresentationCamera.captureWasDown) {
         captureCameraKeyframe();
     }
     sPresentationCamera.captureWasDown = captureDown;
 
-    if (sPresentationCamera.mouseLookEnabled) {
+    const bool mouseValid = !io.WantCaptureMouse && io.MousePos.x >= 0.0f &&
+                            io.MousePos.y >= 0.0f &&
+                            ImGui::IsMouseDown(ImGuiMouseButton_Right);
+    if (mouseValid) {
         sPresentationCamera.yaw += io.MouseDelta.x * kCameraLookSensitivity;
         sPresentationCamera.pitch -= io.MouseDelta.y * kCameraLookSensitivity;
         sPresentationCamera.pitch =

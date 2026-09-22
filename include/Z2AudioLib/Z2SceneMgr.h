@@ -47,7 +47,6 @@ public:
     s32 getBgmLoadStatus(u32 wave) { return getWaveLoadStatus(wave, 1); }
     u8 getDemoSeWaveNum() { return loadedDemoWave; }
 
-private:
     /* 0x00 */ JAISoundID BGM_ID;
     /* 0x04 */ int sceneNum;
     /* 0x08 */ int timer;
@@ -159,5 +158,10 @@ enum Z2Scene {
     /* 0x4F */ Z2SCENE_GROTTO_POND,
     /* 0x50 */ Z2SCENE_FARON_WOODS_CAVE,
 };
+
+#if TARGET_PC
+bool Z2IsTwilightVisualMusicScene();
+bool Z2IsTwilightVisualMusicRefreshPending();
+#endif
 
 #endif /* Z2SCENEMGR_H */

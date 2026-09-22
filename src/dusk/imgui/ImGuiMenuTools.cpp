@@ -1,33 +1,35 @@
-#include "fmt/format.h"
-#include "imgui.h"
-#include "aurora/gfx.h"
-
-#include "ImGuiConfig.hpp"
+#include "dusk/legacy_practice.h"
 #include "dusk/audio/DuskAudioSystem.h"
 #include "dusk/audio/DuskDsp.hpp"
-#include "dusk/hotkeys.h"
-#include "dusk/settings.h"
-#include "dusk/trigger_view.h"
-#include "ImGuiConsole.hpp"
 #include "ImGuiMenuTools.hpp"
 
+#include "ImGuiConfig.hpp"
+#include "ImGuiConsole.hpp"
 #include "ImGuiEngine.hpp"
+
+#include "dusk/data.hpp"
+#include "dusk/dusk.h"
+#include "dusk/hotkeys.h"
+#include "dusk/main.h"
+#include "dusk/os.h"
+#include "dusk/settings.h"
+#include "dusk/speedrun.h"
+
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_horse.h"
 #include "d/d_com_inf_game.h"
-#include "dusk/data.hpp"
-#include "dusk/dusk.h"
 #include "dusk/livesplit.h"
-#include "dusk/main.h"
 #include "dusk/ui/menu_bar.hpp"
 #include "dusk/ui/ui.hpp"
 #include "dusk/vector_rsqrt.h"
-#include "dusk/os.h"
 #include "m_Do/m_Do_main.h"
 
+#include <aurora/gfx.h>
 #include <aurora/lib/internal.hpp>
 #include <dolphin/gx/GXAurora.h>
 #include <dolphin/vi.h>
+#include <fmt/format.h>
+#include <imgui.h>
 #include <SDL3/SDL_misc.h>
 #include <algorithm>
 #include <cstdint>
@@ -43,69 +45,6 @@ namespace dusk {
         bool MenuCheckbox(const char* label, ConfigVar<bool>& value, bool enabled = true) {
             return config::ImGuiMenuItem(label, nullptr, value, enabled);
         }
-        void RefreshRmlMenuBar() {
-            for (auto& doc : ui::get_document_stack()) {
-                if (dynamic_cast<ui::MenuBar*>(doc.get())) {
-                    doc = std::make_unique<ui::MenuBar>();
-                    break;
-                }
-            }
-        }
-
-        void ClearSpeedrunOverrides() {
-            config::EnumerateRegistered([](config::ConfigVarBase& cvar) {
-                cvar.clearSpeedrunOverride();
-            });
-        }
-
-        void ResetForSpeedrunMode() {
-            auto& s = getSettings();
-            mDoMain::developmentMode = -1;
-
-            s.game.enableTurboKeybind.setSpeedrunValue(false);
-
-            s.game.damageMultiplier.setSpeedrunValue(1);
-            s.game.instantDeath.setSpeedrunValue(false);
-            s.game.noHeartDrops.setSpeedrunValue(false);
-            s.game.autoSave.setSpeedrunValue(false);
-            s.game.sunsSong.setSpeedrunValue(false);
-
-            s.game.infiniteHearts.setSpeedrunValue(false);
-            s.game.infiniteArrows.setSpeedrunValue(false);
-            s.game.infiniteSeeds.setSpeedrunValue(false);
-            s.game.infiniteBombs.setSpeedrunValue(false);
-            s.game.infiniteOil.setSpeedrunValue(false);
-            s.game.infiniteOxygen.setSpeedrunValue(false);
-            s.game.infiniteRupees.setSpeedrunValue(false);
-            s.game.enableIndefiniteItemDrops.setSpeedrunValue(false);
-            s.game.moonJump.setSpeedrunValue(false);
-            s.game.superClawshot.setSpeedrunValue(false);
-            s.game.alwaysGreatspin.setSpeedrunValue(false);
-            s.game.enableFastIronBoots.setSpeedrunValue(false);
-            s.game.canTransformAnywhere.setSpeedrunValue(false);
-            s.game.fastRoll.setSpeedrunValue(false);
-            s.game.fastSpinner.setSpeedrunValue(false);
-            s.game.armorRupeeDrain.setSpeedrunValue(dusk::MagicArmorMode::NORMAL);
-            s.game.invincibleEnemies.setSpeedrunValue(false);
-
-            s.game.pauseOnFocusLost.setSpeedrunValue(false);
-            aurora_set_pause_on_focus_lost(false);
-
-            s.backend.enableAdvancedSettings.setSpeedrunValue(false);
-            s.game.recordingMode.setSpeedrunValue(false);
-            s.game.debugFlyCam.setSpeedrunValue(false);
-            s.game.moveLink.setSpeedrunValue(false);
-            s.game.teleportLink.setSpeedrunValue(false);
-            s.game.areaReload.setSpeedrunValue(false);
-            s.game.gorgeVoidChecker.setSpeedrunValue(false);
-            getTransientSettings().moveLinkActive = false;
-        }
-
-        void RestoreFromSpeedrunMode() {
-            ClearSpeedrunOverrides();
-            aurora_set_pause_on_focus_lost(getSettings().game.pauseOnFocusLost.getValue());
-        }
-
         bool SpeedrunModeCheckbox() {
             auto& s = getSettings();
             bool copy = s.game.speedrunMode.getValue();
@@ -115,14 +54,11 @@ namespace dusk {
 
             s.game.speedrunMode.setValue(copy);
             if (copy) {
-                ResetForSpeedrunMode();
+                speedrun::registerSpeedrunGameMode();
             } else {
-                RestoreFromSpeedrunMode();
-                if (s.game.liveSplitEnabled) {
-                    speedrun::disconnectLiveSplit();
-                }
+                speedrun::unregisterSpeedrunGameMode();
             }
-            RefreshRmlMenuBar();
+            ui::MenuBar::refresh_tabs();
             config::save();
             return true;
         }
@@ -130,7 +66,8 @@ namespace dusk {
         bool LiveSplitCheckbox() {
             auto& s = getSettings();
             bool copy = s.game.liveSplitEnabled.getValue();
-            if (!ImGui::MenuItem("LiveSplit", nullptr, &copy, !IsMobile && s.game.speedrunMode)) {
+            if (!ImGui::MenuItem("LiveSplit", nullptr, &copy,
+                    !IsMobile && speedrun::isActive())) {
                 return false;
             }
 
@@ -364,18 +301,18 @@ namespace dusk {
                 MenuCheckbox("No Climbing Miss Animation", s.game.noMissClimbing);
                 MenuCheckbox("Faster Tears of Light", s.game.fastTears);
                 MenuCheckbox("No 2nd Fish for Cat", s.game.no2ndFishForCat);
-                MenuCheckbox("Sun's Song (R+X)", s.game.sunsSong, !s.game.speedrunMode);
+                MenuCheckbox("Sun's Song (R+X)", s.game.sunsSong, !dusk::speedrun::isActive());
                 ImGui::Separator();
                 LoadModeCheckbox("Fast Loads", s.game.enableFastLoads, s.game.enableInstaLoads);
                 LoadModeCheckbox("Insta Loads", s.game.enableInstaLoads, s.game.enableFastLoads);
                 MenuCheckbox("Instant Movement", s.game.instantMovement);
-                MenuCheckbox("Autosave", s.game.autoSave, !s.game.speedrunMode);
+                MenuCheckbox("Autosave", s.game.autoSave, !dusk::speedrun::isActive());
                 MenuCheckbox("Instant Saves", s.game.instantSaves);
                 MenuCheckbox("Hold B for Instant Text", s.game.instantText);
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Difficulty")) {
-                ImGui::BeginDisabled(s.game.speedrunMode);
+                ImGui::BeginDisabled(dusk::speedrun::isActive());
                 SliderIntItem("Damage Multiplier", s.game.damageMultiplier, 1, 8);
                 MenuCheckbox("Instant Death", s.game.instantDeath);
                 MenuCheckbox("No Heart Drops", s.game.noHeartDrops);
@@ -389,13 +326,13 @@ namespace dusk {
                 }
                 MenuCheckbox("Rotating Link Doll", s.game.enableLinkDollRotation);
                 MenuCheckbox("Hide TV Settings Screen", s.game.hideTvSettingsScreen);
-                MenuCheckbox("Pause On Focus Lost", s.game.pauseOnFocusLost, !s.game.speedrunMode);
-                MenuCheckbox("Recording Mode", s.game.recordingMode, !s.game.speedrunMode);
+                MenuCheckbox("Pause On Focus Lost", s.game.pauseOnFocusLost, !dusk::speedrun::isActive());
+                MenuCheckbox("Recording Mode", s.game.recordingMode, !dusk::speedrun::isActive());
                 MenuCheckbox("Skip Pre-Launch UI", s.backend.skipPreLaunchUI);
                 ImGui::Separator();
                 SpeedrunModeCheckbox();
                 LiveSplitCheckbox();
-                MenuCheckbox("Show RTA", s.game.showSpeedrunRTATimer, s.game.speedrunMode);
+                MenuCheckbox("Show RTA", s.game.showSpeedrunRTATimer, dusk::speedrun::isActive());
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Input")) {
@@ -430,7 +367,7 @@ namespace dusk {
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Cheats")) {
-                ImGui::BeginDisabled(s.game.speedrunMode);
+                ImGui::BeginDisabled(dusk::speedrun::isActive());
                 MenuCheckbox("Infinite Hearts", s.game.infiniteHearts);
                 MenuCheckbox("Infinite Arrows", s.game.infiniteArrows);
                 MenuCheckbox("Infinite Seeds", s.game.infiniteSeeds);
@@ -442,7 +379,17 @@ namespace dusk {
                 MenuCheckbox("No Item Timer", s.game.enableIndefiniteItemDrops);
                 MenuCheckbox("Moon Jump", s.game.moonJump);
                 MenuCheckbox("Super Clawshot", s.game.superClawshot);
-                MenuCheckbox("Always Greatspin", s.game.alwaysGreatspin);
+                if (ImGui::BeginMenu("Always Greatspin")) {
+                    const char* modes[] = {"Off", "After Learning Skill", "Always"};
+                    for (int mode = 0; mode < IM_ARRAYSIZE(modes); ++mode) {
+                        if (ImGui::MenuItem(modes[mode], nullptr,
+                                s.game.alwaysGreatspin.getValue() == static_cast<AlwaysGreatspinMode>(mode))) {
+                            s.game.alwaysGreatspin.setValue(static_cast<AlwaysGreatspinMode>(mode));
+                            config::save();
+                        }
+                    }
+                    ImGui::EndMenu();
+                }
                 MenuCheckbox("Fast Iron Boots", s.game.enableFastIronBoots);
                 MenuCheckbox("Transform Anywhere", s.game.canTransformAnywhere);
                 MenuCheckbox("Fast Roll", s.game.fastRoll);
@@ -477,6 +424,22 @@ namespace dusk {
 
         void DrawAudioMenu() {
             auto& s = getSettings();
+            static constexpr const char* outputModeNames[] = {
+                "Stereo (Speakers)",
+                "Stereo (Headphones)",
+                "5.1 Surround",
+                "7.1 Surround",
+            };
+            int outputMode = static_cast<int>(s.audio.outputMode.getValue());
+            ImGui::TextUnformatted("Output Mode");
+            ImGui::SameLine(170.0f);
+            ImGui::SetNextItemWidth(150.0f);
+            if (ImGui::Combo("##OutputMode", &outputMode, outputModeNames, IM_ARRAYSIZE(outputModeNames))) {
+                s.audio.outputMode.setValue(static_cast<AudioOutputMode>(outputMode));
+                audio::Reinitialize();
+                config::save();
+            }
+            ImGui::Separator();
             int masterVolume = s.audio.masterVolume.getValue();
             ImGui::TextUnformatted("Master Volume");
             ImGui::SameLine(170.0f);
@@ -490,9 +453,6 @@ namespace dusk {
             if (MenuCheckbox("Enable Reverb", s.audio.enableReverb)) {
                 audio::SetEnableReverb(s.audio.enableReverb.getValue());
             }
-            if (MenuCheckbox("Enable Spatial Sound", s.audio.enableHrtf)) {
-                audio::EnableHrtf = s.audio.enableHrtf.getValue();
-            }
             MenuCheckbox("Menu Sounds", s.audio.menuSounds);
             MenuCheckbox("No Low HP Sound", s.game.noLowHpSound);
             MenuCheckbox("Non-Stop Midna's Lament", s.game.midnasLamentNonStop);
@@ -500,11 +460,14 @@ namespace dusk {
     }
 
     void ImGuiMenuTools::togglePracticeSaves() {
+#if DUSK_LEGACY_PRACTICE_TOOLS
         m_showPracticeSaves = !m_showPracticeSaves;
+#endif
     }
 
     void ImGuiMenuTools::drawPracticeSavesNative() {
-        if (getSettings().game.speedrunMode) {
+#if DUSK_LEGACY_PRACTICE_TOOLS
+        if (dusk::speedrun::isActive()) {
             m_showPracticeSaves = false;
             getTransientSettings().practiceMenuInputCapture = false;
             return;
@@ -512,6 +475,7 @@ namespace dusk {
         if (getSettings().game.nativePracticeMenu) {
             m_practiceSaves.drawNative(m_showPracticeSaves);
         }
+#endif
     }
 
     void ImGuiMenuTools::draw() {
@@ -535,22 +499,26 @@ namespace dusk {
                 ImGui::BeginDisabled();
             }
 
-            ImGui::BeginDisabled(getSettings().game.speedrunMode);
+            ImGui::BeginDisabled(dusk::speedrun::isActive());
 
             ImGui::MenuItem("Save Editor", hotkeys::SHOW_SAVE_EDITOR, &m_showSaveEditor);
+#if DUSK_LEGACY_PRACTICE_TOOLS
             ImGui::MenuItem("Practice Saves", nullptr, &m_showPracticeSaves);
+#endif
             ImGui::MenuItem("Input Macro", nullptr, &m_showInputMacro);
             ImGui::MenuItem("TAS Movie", nullptr, &m_showTasMovie);
             ImGui::MenuItem("State Share", hotkeys::SHOW_STATE_SHARE, &m_showStateShare);
-            MenuCheckbox("Move Link", getSettings().game.moveLink);
-            MenuCheckbox("Teleport Link", getSettings().game.teleportLink);
+            MenuCheckbox("Move Link", getSettings().game.enableMoveLinkCombo);
+            MenuCheckbox("Teleport Link", getSettings().game.enableTeleportCombo);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("D-pad Up + R: set point\nD-pad Down + R: teleport");
             }
-            MenuCheckbox("Area Reload (L+R+Start+A)", getSettings().game.areaReload);
+#if DUSK_LEGACY_PRACTICE_TOOLS
+            MenuCheckbox("Area Reload", getSettings().game.areaReload);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("L+R+Start+A: reload the current area at its last entrance");
             }
+#endif
 
             ImGui::EndDisabled();
 
@@ -565,7 +533,7 @@ namespace dusk {
 
             ImGui::Separator();
             config::ImGuiMenuItem("Turbo Speed Key", hotkeys::TURBO,
-                getSettings().game.enableTurboKeybind, !getSettings().game.speedrunMode);
+                getSettings().game.enableTurboKeybind, !dusk::speedrun::isActive());
 
 #if DUSK_CAN_OPEN_DATA_FOLDER
             ImGui::Separator();
@@ -578,7 +546,7 @@ namespace dusk {
         }
 
         if (ImGui::BeginMenu("Debug")) {
-            ImGui::BeginDisabled(getSettings().game.speedrunMode);
+            ImGui::BeginDisabled(dusk::speedrun::isActive());
 
             config::ImGuiMenuItem("Advanced Settings", nullptr, getSettings().backend.enableAdvancedSettings);
             config::ImGuiMenuItem("Show Pipeline Compilation", nullptr, getSettings().backend.showPipelineCompilation);
@@ -611,177 +579,26 @@ namespace dusk {
                 ImGui::Checkbox("Enable Target Collider view", &collisionView.enableTgView);
                 ImGui::Checkbox("Enable Push Collider view", &collisionView.enableCoView);
                 ImGui::SliderFloat("Opacity##colliders", &collisionView.colliderViewOpacity, 0.0f, 100.0f);
+                ImGui::EndMenu();
+            }
+
+            auto& triggerView = getTransientSettings().triggerView;
+            if (ImGui::BeginMenu("Trigger View")) {
+                ImGui::Checkbox("Load Zones", &triggerView.loadZones);
+                ImGui::Checkbox("Event Areas", &triggerView.eventAreas);
+                ImGui::Checkbox("Event Tags", &triggerView.eventTags);
+                ImGui::Checkbox("Switch Areas", &triggerView.switchAreas);
+                ImGui::Checkbox("Midna Stops", &triggerView.midnaStops);
+                ImGui::Checkbox("Twilight Gates", &triggerView.twilightGates);
+                ImGui::Checkbox("Checkpoints", &triggerView.checkpoints);
+                ImGui::Checkbox("Paths", &triggerView.paths);
                 ImGui::Separator();
-                ImGui::Checkbox("Enable Trigger Actor view", &collisionView.enableTriggerView);
-
-                if (ImGui::TreeNode("Trigger Actor Definitions")) {
-                    ImGui::TextDisabled(
-                        "Enter any actor process name in short or full fpcNm_*_e form.");
-
-                    static std::string newTriggerActorName;
-                    ImGui::SetNextItemWidth(220.0f);
-                    ImGui::InputTextWithHint(
-                        "##newTriggerActor", "Actor process name", &newTriggerActorName);
-                    ImGui::SameLine();
-                    const bool validNewName =
-                        !newTriggerActorName.empty() &&
-                        trigger_view::IsActorNameValid(newTriggerActorName);
-                    if (!validNewName) {
-                        ImGui::BeginDisabled();
-                    }
-                    if (ImGui::Button("Add")) {
-                        trigger_view::Definition definition;
-                        definition.actorName = newTriggerActorName;
-                        trigger_view::GetDefinitions().push_back(std::move(definition));
-                        trigger_view::Save();
-                        newTriggerActorName.clear();
-                    }
-                    if (!validNewName) {
-                        ImGui::EndDisabled();
-                    }
-                    if (!newTriggerActorName.empty() && !validNewName) {
-                        ImGui::TextColored(
-                            ImVec4(1.0f, 0.45f, 0.35f, 1.0f), "Unknown actor process name.");
-                    }
-
-                    auto& definitions = trigger_view::GetDefinitions();
-                    int definitionToDelete = -1;
-                    for (int i = 0; i < static_cast<int>(definitions.size()); ++i) {
-                        auto& definition = definitions[i];
-                        ImGui::PushID(i);
-                        const std::string label =
-                            definition.actorName.empty() ? "Unnamed trigger" : definition.actorName;
-                        if (ImGui::TreeNode("definition", "%s", label.c_str())) {
-                            ImGui::Text(
-                                "Live actors: %d   Drawn: %d",
-                                definition.liveMatches, definition.visibleMatches);
-                            if (definition.nearestVolumeDistance >= 0.0f) {
-                                ImGui::Text(
-                                    "Distance to volume: %.1f",
-                                    definition.nearestVolumeDistance);
-                                ImGui::Text(
-                                    "Actor position: %.1f, %.1f, %.1f",
-                                    definition.nearestActorPosition[0],
-                                    definition.nearestActorPosition[1],
-                                    definition.nearestActorPosition[2]);
-                                ImGui::Text(
-                                    "Resolved size: %.1f, %.1f, %.1f",
-                                    definition.nearestResolvedSize[0],
-                                    definition.nearestResolvedSize[1],
-                                    definition.nearestResolvedSize[2]);
-                            }
-                            if (ImGui::Checkbox("Enabled", &definition.enabled)) {
-                                trigger_view::Save();
-                            }
-
-                            ImGui::SetNextItemWidth(240.0f);
-                            if (ImGui::InputText(
-                                    "Actor name", &definition.actorName,
-                                    ImGuiInputTextFlags_EnterReturnsTrue))
-                            {
-                                if (trigger_view::IsActorNameValid(definition.actorName)) {
-                                    trigger_view::Save();
-                                }
-                            }
-                            if (!trigger_view::IsActorNameValid(definition.actorName)) {
-                                ImGui::TextColored(
-                                    ImVec4(1.0f, 0.45f, 0.35f, 1.0f),
-                                    "Unknown name; this definition will not match anything.");
-                            }
-
-                            int shape = static_cast<int>(definition.shape);
-                            constexpr const char* shapeNames[] = {
-                                "Cylinder",
-                                "Box",
-                                "Sphere",
-                                "Ground Circle",
-                                "Ground Rectangle",
-                            };
-                            if (ImGui::Combo("Shape", &shape, shapeNames,
-                                             IM_ARRAYSIZE(shapeNames)))
-                            {
-                                definition.shape = static_cast<trigger_view::Shape>(shape);
-                                trigger_view::Save();
-                            }
-                            ImGui::ColorEdit4("Colour", definition.color);
-                            if (ImGui::IsItemDeactivatedAfterEdit()) {
-                                trigger_view::Save();
-                            }
-                            if (ImGui::Checkbox(
-                                    "Multiply size by actor scale",
-                                    &definition.useActorScale))
-                            {
-                                trigger_view::Save();
-                            }
-                            if (ImGui::Checkbox(
-                                    "Use actor yaw", &definition.useActorYaw))
-                            {
-                                trigger_view::Save();
-                            }
-                            if (definition.shape == trigger_view::Shape::Cylinder)
-                            {
-                                ImGui::DragFloat(
-                                    "Radius", &definition.size[0], 1.0f, 0.01f, 100000.0f);
-                                if (ImGui::IsItemDeactivatedAfterEdit()) {
-                                    trigger_view::Save();
-                                }
-                                ImGui::DragFloat(
-                                    "Height", &definition.size[1], 1.0f, 0.01f, 100000.0f);
-                                if (ImGui::IsItemDeactivatedAfterEdit()) {
-                                    trigger_view::Save();
-                                }
-                            } else if (
-                                definition.shape == trigger_view::Shape::Sphere ||
-                                definition.shape == trigger_view::Shape::GroundCircle)
-                            {
-                                ImGui::DragFloat(
-                                    "Radius", &definition.size[0], 1.0f, 0.01f, 100000.0f);
-                                if (ImGui::IsItemDeactivatedAfterEdit()) {
-                                    trigger_view::Save();
-                                }
-                            } else if (
-                                definition.shape == trigger_view::Shape::Box)
-                            {
-                                ImGui::DragFloat3(
-                                    "Size", definition.size, 1.0f, 0.01f, 100000.0f);
-                                if (ImGui::IsItemDeactivatedAfterEdit()) {
-                                    trigger_view::Save();
-                                }
-                            } else {
-                                ImGui::DragFloat(
-                                    "Width", &definition.size[0],
-                                    1.0f, 0.01f, 100000.0f);
-                                if (ImGui::IsItemDeactivatedAfterEdit()) {
-                                    trigger_view::Save();
-                                }
-                                ImGui::DragFloat(
-                                    "Depth", &definition.size[2],
-                                    1.0f, 0.01f, 100000.0f);
-                                if (ImGui::IsItemDeactivatedAfterEdit()) {
-                                    trigger_view::Save();
-                                }
-                            }
-                            ImGui::DragFloat3(
-                                "Position offset", definition.offset, 1.0f,
-                                -100000.0f, 100000.0f);
-                            if (ImGui::IsItemDeactivatedAfterEdit()) {
-                                trigger_view::Save();
-                            }
-
-                            if (ImGui::Button("Delete Definition")) {
-                                definitionToDelete = i;
-                            }
-                            ImGui::TreePop();
-                        }
-                        ImGui::PopID();
-                    }
-                    if (definitionToDelete >= 0) {
-                        definitions.erase(definitions.begin() + definitionToDelete);
-                        trigger_view::Save();
-                    }
-
-                    ImGui::TreePop();
-                }
+                ImGui::Checkbox("Transform Distances", &triggerView.transformDists);
+                ImGui::Checkbox("Attention Distances", &triggerView.attentionDists);
+                ImGui::Checkbox("Purple Mist Avoid", &triggerView.purpleMistAvoid);
+                ImGui::Checkbox("Leever Ranges", &triggerView.leevers);
+                ImGui::Separator();
+                ImGui::SliderFloat("Opacity##triggers", &triggerView.opacity, 0.0f, 100.0f);
                 ImGui::EndMenu();
             }
 

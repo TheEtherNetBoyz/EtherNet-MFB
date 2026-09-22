@@ -12,7 +12,7 @@
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/imgui/ImGuiMenuTools.hpp"
 #include "dusk/detached_camera.h"
-#include "dusk/frame_interpolation.h"
+#include "dusk/game_clock.h"
 #include "dusk/io.hpp"
 #include "dusk/load_position_overlay.hpp"
 #include "dusk/main.h"
@@ -508,7 +508,7 @@ namespace dusk {
                 return;
             }
 
-            if (!frame_interp::get_ui_tick_pending()) {
+            if (!game_clock::is_sim_frame()) {
                 if (s_rupeeSlide.phase == RupeeSlidePhase::ReplayWaiting) {
                     if (s_rupeeSlide.presentationFrames == 0) {
                         applyRelativeCamera(camera, s_rupeeSlide.initialCamera, cXyz::Zero);
@@ -613,7 +613,7 @@ namespace dusk {
 
             updateSlidePresentation(player, camera);
 
-            if (!frame_interp::get_ui_tick_pending()) {
+            if (!game_clock::is_sim_frame()) {
                 return;
             }
 

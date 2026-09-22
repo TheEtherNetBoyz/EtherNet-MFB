@@ -19,7 +19,7 @@
 #include "d/actor/d_a_hozelda.h"
 #if TARGET_PC
 #include "dusk/achievements.h"
-#include "dusk/frame_interpolation.h"
+#include "dusk/interp/frame_interpolation.h"
 #endif
 
 int daArrow_c::createHeap() {
@@ -185,7 +185,7 @@ void daArrow_c::prepareLightArrowEffectInterpolation() {
             emitterMtx[0][3] = emitter->mGlobalTrs.x;
             emitterMtx[1][3] = emitter->mGlobalTrs.y;
             emitterMtx[2][3] = emitter->mGlobalTrs.z;
-            dusk::frame_interp::record_final_mtx(emitterMtx, emitter);
+            dusk::interp::record_final_mtx(emitterMtx, emitter);
         }
     }
 
@@ -196,7 +196,7 @@ void daArrow_c::prepareLightArrowEffectInterpolation() {
             emitterMtx[0][3] = emitter->mGlobalTrs.x;
             emitterMtx[1][3] = emitter->mGlobalTrs.y;
             emitterMtx[2][3] = emitter->mGlobalTrs.z;
-            dusk::frame_interp::record_final_mtx(emitterMtx, emitter);
+            dusk::interp::record_final_mtx(emitterMtx, emitter);
         }
     }
 }

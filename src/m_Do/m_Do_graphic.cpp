@@ -4,6 +4,7 @@
  */
 
 #include <cstdio>
+#include <algorithm>
 
 #include "d/dolzel.h" // IWYU pragma: keep
 
@@ -36,7 +37,6 @@
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_machine.h"
 #include "m_Do/m_Do_main.h"
-#include "tracy/Tracy.hpp"
 
 #if PLATFORM_WII || PLATFORM_SHIELD
 #include <revolution/sc.h>
@@ -47,18 +47,21 @@
 #endif
 
 #if TARGET_PC
-#include <SDL3/SDL_video.h>
-#include "aurora/lib/window.hpp"
-#include "d/actor/d_a_horse.h"
 #include "dusk/dusk.h"
-#include "helpers/endian.h"
-#include "dusk/frame_interpolation.h"
+#include "dusk/game_clock.h"
 #include "dusk/gfx.hpp"
-#include "helpers/gx_helper.h"
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/load_position_overlay.hpp"
+#include "dusk/interp/frame_interpolation.h"
 #include "dusk/logging.h"
 #include "dusk/settings.h"
+#include "dusk/speedrun.h"
+#include "helpers/endian.h"
+#include "helpers/gx_helper.h"
+
+#include <aurora/lib/window.hpp>
+#include <SDL3/SDL_video.h>
+#include <tracy/Tracy.hpp>
 #endif
 
 class mDoGph_HIO_c : public JORReflexible {
@@ -87,6 +90,13 @@ static void drawQuad(f32 param_0, f32 param_1, f32 param_2, f32 param_3) {
     GXPosition2f32(param_0, param_3);
     GXEnd();
 }
+
+#if TARGET_PC
+static f32 twilight_bloom_brightness() {
+    const auto callback = dKy_geometry_hooks().bloomGain;
+    return callback ? callback() : 1.0f;
+}
+#endif
 
 #if DEBUG
 class dDlst_heapMap_c : public dDlst_base_c {
@@ -331,12 +341,14 @@ static void drawFullFrameBuffer(bool mirror) {
     GXSetNumIndStages(0);
     GXSetNumTexGens(1);
     GXSetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, 0x3C);
-    GXSetNumTevStages(1);
-    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
-    GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_TEXC);
-    GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_ENABLE, GX_TEVPREV);
-    GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO);
-    GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_ENABLE, GX_TEVPREV);
+        GXSetNumTevStages(1);
+        GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
+        GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_TEXC);
+        GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_ENABLE,
+                        GX_TEVPREV);
+        GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO);
+        GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_ENABLE,
+                        GX_TEVPREV);
     GXSetZCompLoc(GX_ENABLE);
     GXSetZMode(GX_DISABLE, GX_ALWAYS, GX_DISABLE);
     GXSetBlendMode(GX_BM_NONE, GX_BL_SRCALPHA, GX_BL_ONE, GX_LO_CLEAR);
@@ -541,43 +553,30 @@ void darwFilter(GXColor matColor) {
 }
 
 void mDoGph_gInf_c::calcFade() {
-#if TARGET_PC
-    if (dusk::frame_interp::get_ui_tick_pending())
-#endif
-    {
-        if (mFade != 0) {
-            mFadeRate += mFadeSpeed;
+    if (mFade != 0) {
+        mFadeRate += mFadeSpeed IF_DUSK(* dusk::game_clock::original_frames());
 
-            if (mFadeRate < 0.0f) {
-                mFadeRate = 0.0f;
-                mFade = 0;
-            } else {
-                if (mFadeRate > 1.0f) {
-                    mFadeRate = 1.0f;
-                }
-            }
-            mFadeColor.a = 255.0f * mFadeRate;
+        if (mFadeRate < 0.0f) {
+            mFadeRate = 0.0f;
+            mFade = 0;
         } else {
-            if (dComIfG_getBrightness() != 255) {
-                mFadeColor.r = 0;
-                mFadeColor.g = 0;
-                mFadeColor.b = 0;
-                mFadeColor.a = 255 - dComIfG_getBrightness();
-            } else {
-                mFadeColor.a = 0;
+            if (mFadeRate > 1.0f) {
+                mFadeRate = 1.0f;
             }
+        }
+        mFadeColor.a = 255.0f * mFadeRate;
+    } else {
+        if (dComIfG_getBrightness() != 255) {
+            mFadeColor.r = 0;
+            mFadeColor.g = 0;
+            mFadeColor.b = 0;
+            mFadeColor.a = 255 - dComIfG_getBrightness();
+        } else {
+            mFadeColor.a = 0;
         }
     }
 
     if (mFadeColor.a != 0) {
-#ifdef TARGET_PC
-        if (dusk::frame_interp::is_enabled() && mFade != 0) {
-            const auto step = dusk::frame_interp::get_interpolation_step();
-            const auto progress = mFadeSpeed < 0.0f ? 1.0f - mFadeRate : mFadeRate;
-            const auto fade_amt = mFadeRate + mFadeSpeed * (step - 1.0f + progress);
-            mFadeColor.a = 255.0f * std::clamp(fade_amt, 0.0f, 1.0f);
-        }
-#endif
         darwFilter(mFadeColor);
     }
 }
@@ -1742,7 +1741,9 @@ void mDoGph_gInf_c::bloom_c::draw2() {
         GXSetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, GX_IDENTITY);
         GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_ONE, GX_LO_OR);
         for (int i = divNum; i > divStart; i--) {
-            float alpha = 255.0f * powf(0.25f * dusk::getSettings().game.bloomMultiplier.getValue(), 1.0f / (i - divStart + 1));
+            const f32 bloomMultiplier =
+                dusk::getSettings().game.bloomMultiplier.getValue() * twilight_bloom_brightness();
+            float alpha = 255.0f * powf(0.25f * bloomMultiplier, 1.0f / (i - divStart + 1));
             GXSetTevColorS10(GX_TEVREG0, {0, 0, 0, s16(alpha)});
 
             divCopySrc(i);
@@ -1875,8 +1876,9 @@ void mDoGph_gInf_c::bloom_c::drawClassicPass(bool legacy) {
                             GX_TEVPREV);
             GXSetBlendMode(GX_BM_NONE, GX_BL_ZERO, GX_BL_ZERO, GX_LO_OR);
             s16 bloomAlpha =
-                legacy ? 0x40
-                       : s16(0x40 * dusk::getSettings().game.bloomMultiplier.getValue());
+                legacy ? s16(0x40 * twilight_bloom_brightness())
+                       : s16(0x40 * dusk::getSettings().game.bloomMultiplier.getValue() *
+                             twilight_bloom_brightness());
             GXColorS10 tevColor0 = {(s16)-mPoint, (s16)-mPoint, (s16)-mPoint,
                                     bloomAlpha};
             GXSetTevColorS10(GX_TEVREG0, tevColor0);
@@ -2105,7 +2107,8 @@ void mDoGph_gInf_c::bloom_c::draw() {
                             GX_TEVPREV);
             GXSetBlendMode(GX_BM_NONE, GX_BL_ZERO, GX_BL_ZERO, GX_LO_OR);
 #if TARGET_PC
-            s16 bloomAlpha = s16(0x40 * dusk::getSettings().game.bloomMultiplier.getValue());
+            s16 bloomAlpha = s16(0x40 * dusk::getSettings().game.bloomMultiplier.getValue() *
+                                 twilight_bloom_brightness());
 #else
             s16 bloomAlpha = 0x40;
 #endif
@@ -2253,6 +2256,7 @@ void mDoGph_gInf_c::bloom_c::draw() {
         }
     }
 }
+
 
 static void retry_captue_frame(view_class* param_0, view_port_class* param_1, int param_2) {
     UNUSED(param_0);
@@ -2472,16 +2476,6 @@ static void captureScreenPerspDrawInfo(JPADrawInfo& info) {
 
 static void drawItem3D() {
     ZoneScoped;
-#ifdef TARGET_PC
-    if (dusk::frame_interp::is_enabled()) {
-        // FRAME INTERP NOTE: Title screen needs 0.0f while everything else that runs through this is -100.0f.
-        if (fopAcM_SearchByName(fpcNm_TITLE_e) != nullptr) {
-            dMenu_Collect3D_c::setViewPortOffsetY(0.0f);
-        } else {
-            dMenu_Collect3D_c::setViewPortOffsetY(-100.0f);
-        }
-    }
-#endif
     Mtx item_mtx;
     dMenu_Collect3D_c::setupItem3D(item_mtx);
 
@@ -2517,12 +2511,7 @@ int mDoGph_Painter() {
     drawHeapMap();
     #endif
 
-#ifdef TARGET_PC
-    if (dusk::frame_interp::get_ui_tick_pending())
-#endif
-    {
-        dComIfGp_particle_calcMenu();
-    }
+    IF_NOT_DUSK(dComIfGp_particle_calcMenu());
 
     JFWDisplay::getManager()->setFader(mDoGph_gInf_c::getFader());
     mDoGph_gInf_c::setClearColor(mDoGph_gInf_c::getBackColor());
@@ -2652,7 +2641,7 @@ int mDoGph_Painter() {
 #endif
             dKy_setLight();
 #if TARGET_PC
-            if (dusk::frame_interp::is_enabled()) {
+            if (dusk::interp::is_enabled()) {
                 dKy_setLight_again();
             }
 #endif
@@ -2674,6 +2663,12 @@ int mDoGph_Painter() {
 
             GX_DEBUG_GROUP(dComIfGd_drawOpaListBG);
             GX_DEBUG_GROUP(dComIfGd_drawOpaListDarkBG);
+
+#if TARGET_PC
+            if (const auto callback = dKy_geometry_hooks().afterBackground)
+                callback(&camera_p->view, view_port);
+#endif
+
             GX_DEBUG_GROUP(dComIfGd_drawOpaListMiddle);
 
             if (fapGmHIO_getParticle()) {
@@ -2707,7 +2702,7 @@ int mDoGph_Painter() {
             GX_DEBUG_GROUP(dComIfGd_drawOpaList);
 
             if (DEBUG && g_kankyoHIO.navy.field_0x30d) {
-                if (dKy_darkworld_check() != TRUE) {
+                if (dKy_darkworld_visual_effect_check() != TRUE) {
                     GX_DEBUG_GROUP(dComIfGd_drawOpaListDark);
                 }
             } else {
@@ -2715,12 +2710,8 @@ int mDoGph_Painter() {
             }
 
 #if TARGET_PC
-            if (dusk::frame_interp::is_enabled()) {
-                // FRAME INTERP NOTE: Currently only recalculating points for Epona's reins. Need a more global solution.
-                if (daHorse_c* horse = dComIfGp_getHorseActor()) {
-                    horse->lerpControlPoints(dusk::frame_interp::get_interpolation_step());
-                }
-                g_dComIfG_gameInfo.drawlist.refresh3DlineMats(camera_p->view.lookat.eye);
+            if (dusk::interp::is_enabled()) {
+                g_dComIfG_gameInfo.drawlist.refresh3DlineMats();
             }
 #endif
 
@@ -2755,7 +2746,7 @@ int mDoGph_Painter() {
             GX_DEBUG_GROUP(dComIfGd_drawXluList);
 
             if (DEBUG && g_kankyoHIO.navy.field_0x30d) {
-                if (dKy_darkworld_check() != TRUE) {
+                if (dKy_darkworld_visual_effect_check() != TRUE) {
                     GX_DEBUG_GROUP(dComIfGd_drawXluListDark);
                 }
             } else {
@@ -2805,7 +2796,7 @@ int mDoGph_Painter() {
                 #endif
 
                 if (!(DEBUG && g_kankyoHIO.navy.field_0x30d != 0 &&
-                      dKy_darkworld_check() == TRUE)) {
+                      dKy_darkworld_visual_effect_check() == TRUE)) {
                     if (g_env_light.is_blure == 0) {
                         GX_DEBUG_GROUP(dComIfGd_drawOpaListInvisible);
                         GX_DEBUG_GROUP(dComIfGd_drawXluListInvisible);
@@ -2844,7 +2835,7 @@ int mDoGph_Painter() {
                 GXSetClipMode(GX_CLIP_ENABLE);
 
                 if (DEBUG && g_kankyoHIO.navy.field_0x30d) {
-                    if (dKy_darkworld_check() != TRUE) {
+                    if (dKy_darkworld_visual_effect_check() != TRUE) {
                         GX_DEBUG_GROUP(dComIfGd_drawOpaListFilter);
                     }
                 } else {
@@ -2889,7 +2880,7 @@ int mDoGph_Painter() {
                 GXSetClipMode(GX_CLIP_ENABLE);
 
                 if (!(DEBUG && g_kankyoHIO.navy.field_0x30d != 0 &&
-                      dKy_darkworld_check() == TRUE)) {
+                      dKy_darkworld_visual_effect_check() == TRUE)) {
                     if (g_env_light.is_blure == 1) {
                         GX_DEBUG_GROUP(dComIfGd_drawOpaListInvisible);
                         GX_DEBUG_GROUP(dComIfGd_drawXluListInvisible);
@@ -2969,7 +2960,7 @@ int mDoGph_Painter() {
                 GXSetProjection(camera_p->view.projMtx, GX_PERSPECTIVE);
 
                 #if DEBUG
-                if (g_kankyoHIO.navy.field_0x30d != 0 && dKy_darkworld_check() == TRUE) {
+                if (g_kankyoHIO.navy.field_0x30d != 0 && dKy_darkworld_visual_effect_check() == TRUE) {
                     dComIfGd_drawOpaListDark();
                     dComIfGd_drawXluListDark();
                     retry_captue_frame(&camera_p->view, view_port,
@@ -3041,12 +3032,7 @@ int mDoGph_Painter() {
     #endif
 
     GXSetClipMode(GX_CLIP_ENABLE);
-#if TARGET_PC
-    if (dusk::frame_interp::get_ui_tick_pending())
-#endif
-    {
-        dDlst_list_c::calcWipe();
-    }
+    dDlst_list_c::calcWipe();
     j3dSys.reinitGX();
 
     ortho.setOrtho(mDoGph_gInf_c::getMinXF(), mDoGph_gInf_c::getMinYF(),
@@ -3140,13 +3126,6 @@ int mDoGph_Painter() {
 #endif
 
     mDoGph_gInf_c::endRender();
-
-#if TARGET_PC
-    // decompGZ submits its persistent overlay after the game's painter has
-    // completely finished. In particular, keep this after endRender(): load
-    // transitions may apply their final scene/fader output there.
-    dusk::g_imguiConsole.DrawPracticeSavesNative();
-#endif
 
     #if WIDESCREEN_SUPPORT
     mDoGph_gInf_c::offWideZoom();

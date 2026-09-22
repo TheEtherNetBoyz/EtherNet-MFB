@@ -18,6 +18,10 @@
 #include "Z2AudioLib/Z2Instances.h"
 #include "dusk/cutscene_skip.h"
 
+#if TARGET_PC
+#include "dusk/interp/frame_interpolation.h"
+#endif
+
 #define ANM_EYE_TEST            6
 #define ANM_GM_BEAM             7
 #define ANM_GOMA_ATTACK_01      8
@@ -1132,6 +1136,7 @@ static void demo_camera(b_gm_class* i_this) {
 
         spBC.set(0.0f, 0.0f, 2418.0f);
         daPy_getPlayerActorClass()->setPlayerPosAndAngle(&spBC, 0x8000, 0);
+        IF_DUSK(dusk::interp::request_presentation_sync());
 
         dComIfGp_getEvent()->startCheckSkipEdge(i_this);
         
@@ -1143,6 +1148,7 @@ static void demo_camera(b_gm_class* i_this) {
             if (i_this->mDemoModeTimer == 1) {
                 i_this->mDemoCamCenter.set(-400.0f, 130.0f, 1883.0f);
                 i_this->mDemoCamEye.set(0.0f, 197.0f, 2680.0f);
+                IF_DUSK(dusk::interp::request_presentation_sync());
             }
 
             cLib_addCalc2(&i_this->mDemoCamCenter.x, 400.0f, 0.05f, i_this->field_0x1cdc * 4.0f);
@@ -1163,6 +1169,7 @@ static void demo_camera(b_gm_class* i_this) {
             
             i_this->mDemoCamCenter.set(-1090.0f, 227.0f, -1070.0f);
             i_this->mDemoCamEye.set(-688.0f, 155.0f, -680.0f);
+            IF_DUSK(dusk::interp::request_presentation_sync());
         }
         break;
     case 3:
@@ -1190,6 +1197,7 @@ static void demo_camera(b_gm_class* i_this) {
             i_this->field_0x1ce4 = player->shape_angle.y;
             i_this->mDemoCamCenter.set(-973.0f, 192.0f, -991.0f);
             i_this->mDemoCamEye.set(-1368.0f, 158.0f, -1397.0f);
+            IF_DUSK(dusk::interp::request_presentation_sync());
             i_this->field_0x1cdc = 0.0f;
             i_this->field_0x6f5 = 0;
             i_this->field_0x1cfc = 2;
@@ -1279,6 +1287,7 @@ static void demo_camera(b_gm_class* i_this) {
         if (i_this->mDemoModeTimer == 0) {
             i_this->mDemoCamCenter = spA4;
             i_this->mDemoCamEye = spB0;
+            IF_DUSK(dusk::interp::request_presentation_sync());
         } else {
             cLib_addCalc2(&i_this->mDemoCamCenter.x, spA4.x, 0.1f, 5.0f);
             cLib_addCalc2(&i_this->mDemoCamCenter.z, spA4.z, 0.1f, 5.0f);
@@ -1318,6 +1327,7 @@ static void demo_camera(b_gm_class* i_this) {
         if (i_this->mDemoModeTimer == 0) {
             i_this->mDemoCamCenter = spA4;
             i_this->mDemoCamEye = spB0;
+            IF_DUSK(dusk::interp::request_presentation_sync());
         } else {
             cLib_addCalc2(&i_this->mDemoCamCenter.x, spA4.x, 0.1f, 5.0f);
             cLib_addCalc2(&i_this->mDemoCamCenter.z, spA4.z, 0.1f, 5.0f);
@@ -1354,6 +1364,11 @@ static void demo_camera(b_gm_class* i_this) {
         Z2GetAudioMgr()->bgmStreamPrepare(0x200004E);
         Z2GetAudioMgr()->bgmStreamPlay();
     case 31:
+#if TARGET_PC
+        if (i_this->mDemoModeTimer == 0) {
+            dusk::interp::request_presentation_sync();
+        }
+#endif
         if (i_this->mDemoModeTimer < 10) {
             cMtx_YrotS(*calc_mtx, cM_atan2s(-a_this->current.pos.x, -a_this->current.pos.z));
             spC8.x = 1100.0f;
@@ -1404,6 +1419,7 @@ static void demo_camera(b_gm_class* i_this) {
         i_this->mDemoMode = 32;
         i_this->mDemoModeTimer = 0;
         i_this->mDemoCamFovy = 65.0f;
+        IF_DUSK(dusk::interp::request_presentation_sync());
     case 32:
         cMtx_YrotS(*calc_mtx, player->shape_angle.y + 8000);
         spC8.x = 0.0f;
@@ -1501,6 +1517,7 @@ static void demo_camera(b_gm_class* i_this) {
         
         a_this->current.pos = i_this->field_0x1cec;
         a_this->eyePos = i_this->field_0x1cec;
+        IF_DUSK(dusk::interp::request_presentation_sync());
 
         i_this->field_0x1ce4 = -25000;
         i_this->field_0x1ce8 = -2500;
@@ -1623,6 +1640,7 @@ static void demo_camera(b_gm_class* i_this) {
         if (i_this->mDemoModeTimer == 0) {
             i_this->mDemoCamCenter = spA4;
             i_this->mDemoCamEye = spB0;
+            IF_DUSK(dusk::interp::request_presentation_sync());
         } else {
             cLib_addCalc2(&i_this->mDemoCamCenter.x, spA4.x, 0.1f, 5.0f);
             cLib_addCalc2(&i_this->mDemoCamCenter.z, spA4.z, 0.1f, 5.0f);
@@ -1632,6 +1650,7 @@ static void demo_camera(b_gm_class* i_this) {
 
         if (i_this->mDemoModeTimer == 60) {
             i_this->mDemoMode = 41;
+            IF_DUSK(i_this->mDemoCamSyncTicks = 2);
             i_this->mDemoModeTimer = 40;
             i_this->mDemoCamFovy = 55.0f;
             camera->mCamera.SetTrimSize(3);
@@ -1684,6 +1703,7 @@ static void demo_camera(b_gm_class* i_this) {
         }
 
         camera->mCamera.Reset(i_this->mDemoCamCenter, i_this->mDemoCamEye);
+        IF_DUSK(dusk::interp::request_presentation_sync());
         camera->mCamera.Start();
         camera->mCamera.SetTrimSize(0);
         dComIfGp_event_reset();
@@ -1701,6 +1721,12 @@ static void demo_camera(b_gm_class* i_this) {
         camera->mCamera.Set(center, eye, i_this->mDemoCamFovy, 0);
         i_this->mDemoModeTimer++;
     }
+#if TARGET_PC
+    if (i_this->mDemoCamSyncTicks > 0) {
+        dusk::interp::request_presentation_sync();
+        i_this->mDemoCamSyncTicks--;
+    }
+#endif
 }
 
 static int daB_GM_Execute(b_gm_class* i_this) {

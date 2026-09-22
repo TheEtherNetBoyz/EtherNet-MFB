@@ -1,20 +1,25 @@
 #include "window.hpp"
 
-#include "aurora/lib/window.hpp"
-#include "aurora/rmlui.hpp"
-#include "fmt/format.h"
-#include "magic_enum.hpp"
+#include "dusk/config.hpp"
+#include "dusk/settings.h"
 #include "pane.hpp"
 #include "ui.hpp"
 
-#include "Z2AudioLib/Z2SeMgr.h"
 #include "m_Do/m_Do_audio.h"
+
+#include <aurora/lib/window.hpp>
+#include <aurora/rmlui.hpp>
+#include <fmt/format.h>
+#include <magic_enum.hpp>
 
 #include <algorithm>
 #include <cmath>
 
 namespace dusk::ui {
 namespace {
+
+constexpr int kDefaultMenuWidthDp = 1088;
+constexpr int kDefaultMenuHeightDp = 768;
 
 float base_body_padding(Rml::Context* context) noexcept {
     const float dpRatio = context->GetDensityIndependentPixelRatio();
@@ -25,6 +30,17 @@ float base_body_padding(Rml::Context* context) noexcept {
     return 64.0f * dpRatio;
 }
 
+Rml::Vector2f resize_pointer_position(const Rml::Event& event) noexcept {
+    if (event == aurora::rmlui::TouchStartEvent || event == aurora::rmlui::TouchMoveEvent ||
+        event == aurora::rmlui::TouchEndEvent || event == aurora::rmlui::TouchCancelEvent) {
+        return {
+            event.GetParameter("x", 0.0f),
+            event.GetParameter("y", 0.0f),
+        };
+    }
+    return event.GetUnprojectedMouseScreenPos();
+}
+
 Rml::String window_document_source(const std::vector<Rml::String>& styleSheets) {
     Rml::String links;
     for (const auto& sheet : styleSheets) {
@@ -33,11 +49,15 @@ Rml::String window_document_source(const std::vector<Rml::String>& styleSheets) 
     return fmt::format(R"RML(
 <rml>
 <head>
+    <link type="text/rcss" href="res/rml/theme.rcss" />
+    <link type="text/rcss" href="res/rml/controls.rcss" />
     <link type="text/rcss" href="res/rml/tabbing.rcss" />
     <link type="text/rcss" href="res/rml/window.rcss" />
 {}</head>
 <body>
-    <window id="window"></window>
+    <window id="window">
+        <resize-handle id="window-resize-handle" />
+    </window>
 </body>
 </rml>
 )RML",
@@ -47,11 +67,13 @@ Rml::String window_document_source(const std::vector<Rml::String>& styleSheets) 
 const Rml::String kDocumentSourceSmall = R"RML(
 <rml>
 <head>
+    <link type="text/rcss" href="res/rml/theme.rcss" />
+    <link type="text/rcss" href="res/rml/controls.rcss" />
     <link type="text/rcss" href="res/rml/window.rcss" />
 </head>
 <body>
     <window id="window" class="small">
-        <div id="dialog"/>
+        <modal-dialog id="dialog"/>
     </window>
 </body>
 </rml>
@@ -62,6 +84,74 @@ const Rml::String kDocumentSourceSmall = R"RML(
 Window::Window(Props props)
     : Document(window_document_source(props.styleSheets), false, DocumentScope::Window),
       mRoot(mDocument->GetElementById("window")) {
+    mPersistSize = props.persistSize;
+    mResizeHandle = mDocument->GetElementById("window-resize-handle");
+    if (mResizeHandle != nullptr) {
+        listen(mResizeHandle, Rml::EventId::Mousedown, [this](Rml::Event& event) {
+            if (event.GetParameter("button", -1) != 0 || mRoot == nullptr) {
+                return;
+            }
+            mResize.active = true;
+            mResize.startPointer = resize_pointer_position(event);
+            mResize.startWidth = mRoot->GetOffsetWidth();
+            mResize.startHeight = mRoot->GetOffsetHeight();
+            event.StopPropagation();
+        });
+        listen(mResizeHandle, aurora::rmlui::TouchStartEvent, [this](Rml::Event& event) {
+            if (mRoot == nullptr) {
+                return;
+            }
+            mResize.active = true;
+            mResize.startPointer = resize_pointer_position(event);
+            mResize.startWidth = mRoot->GetOffsetWidth();
+            mResize.startHeight = mRoot->GetOffsetHeight();
+            event.StopPropagation();
+        });
+    }
+    const auto resize = [this](Rml::Event& event) {
+        if (!mResize.active || mRoot == nullptr || mDocument == nullptr) {
+            return;
+        }
+        const auto pointer = resize_pointer_position(event);
+        const auto delta = pointer - mResize.startPointer;
+        auto* context = mDocument->GetContext();
+        const float dpRatio = context != nullptr ? context->GetDensityIndependentPixelRatio() : 1.0f;
+        const float availableWidth = context != nullptr
+                                          ? static_cast<float>(context->GetDimensions().x) -
+                                                mBodyPadding.left - mBodyPadding.right
+                                          : mResize.startWidth;
+        const float availableHeight = context != nullptr
+                                           ? static_cast<float>(context->GetDimensions().y) -
+                                                 mBodyPadding.top - mBodyPadding.bottom
+                                           : mResize.startHeight;
+        const float minWidth = std::min(640.0f * dpRatio, availableWidth);
+        const float minHeight = std::min(400.0f * dpRatio, availableHeight);
+        const float maxWidth = availableWidth;
+        const float maxHeight = availableHeight;
+        mRoot->SetProperty(Rml::PropertyId::Width,
+            Rml::Property(std::clamp(mResize.startWidth + delta.x, minWidth, maxWidth),
+                Rml::Unit::PX));
+        mRoot->SetProperty(Rml::PropertyId::Height,
+            Rml::Property(std::clamp(mResize.startHeight + delta.y, minHeight, maxHeight),
+                Rml::Unit::PX));
+        event.StopPropagation();
+    };
+    listen(mDocument, Rml::EventId::Mousemove, resize, true);
+    listen(mDocument, aurora::rmlui::TouchMoveEvent, resize, true);
+    const auto endResize = [this](Rml::Event& event) {
+        if (!mResize.active) {
+            return;
+        }
+        mResize.active = false;
+        if (mPersistSize) {
+            getSettings().ui.menuSizeCustomized.setValue(true);
+        }
+        save_persisted_size();
+        event.StopPropagation();
+    };
+    listen(mDocument, Rml::EventId::Mouseup, endResize, true);
+    listen(mDocument, aurora::rmlui::TouchEndEvent, endResize, true);
+    listen(mDocument, aurora::rmlui::TouchCancelEvent, endResize, true);
     if (props.tabBar) {
         mTabBar = std::make_unique<TabBar>(mRoot, TabBar::Props{
                                                       .onClose = [this] { request_close(); },
@@ -158,6 +248,7 @@ void Window::update_safe_area() noexcept {
         std::round(std::max(basePadding, safeInsets.left)),
     };
     if (safeInsets == mBodyPadding) {
+        apply_persisted_size();
         return;
     }
 
@@ -170,6 +261,69 @@ void Window::update_safe_area() noexcept {
         Rml::PropertyId::PaddingBottom, Rml::Property(safeInsets.bottom, Rml::Unit::PX));
     mDocument->SetProperty(
         Rml::PropertyId::PaddingLeft, Rml::Property(safeInsets.left, Rml::Unit::PX));
+    apply_persisted_size();
+}
+
+void Window::apply_persisted_size() noexcept {
+    if (!mPersistSize || mResize.active || mRoot == nullptr || mDocument == nullptr) {
+        return;
+    }
+
+    auto* context = mDocument->GetContext();
+    if (context == nullptr) {
+        return;
+    }
+    const float dpRatio = context->GetDensityIndependentPixelRatio();
+    const float availableWidth = std::max(0.0f,
+        static_cast<float>(context->GetDimensions().x) - mBodyPadding.left - mBodyPadding.right);
+    const float availableHeight = std::max(0.0f,
+        static_cast<float>(context->GetDimensions().y) - mBodyPadding.top - mBodyPadding.bottom);
+    const float minWidth = std::min(640.0f * dpRatio, availableWidth);
+    const float minHeight = std::min(400.0f * dpRatio, availableHeight);
+
+    const auto& settings = getSettings().ui;
+    const bool customized = settings.menuSizeCustomized.getValue();
+    const int savedWidthDp = customized && settings.menuWidthDp.getValue() > 0 ?
+                                  settings.menuWidthDp.getValue() : kDefaultMenuWidthDp;
+    const int savedHeightDp = customized && settings.menuHeightDp.getValue() > 0 ?
+                                   settings.menuHeightDp.getValue() : kDefaultMenuHeightDp;
+    const Rml::Vector2f size{
+        std::clamp(savedWidthDp * dpRatio, minWidth, availableWidth),
+        std::clamp(savedHeightDp * dpRatio, minHeight, availableHeight),
+    };
+    if (mPersistedSizeApplied && size == mAppliedMenuSize) {
+        return;
+    }
+    mRoot->SetProperty(Rml::PropertyId::Width, Rml::Property(size.x, Rml::Unit::PX));
+    mRoot->SetProperty(Rml::PropertyId::Height, Rml::Property(size.y, Rml::Unit::PX));
+    mAppliedMenuSize = size;
+    mPersistedSizeApplied = true;
+}
+
+void Window::save_persisted_size() noexcept {
+    if (!mPersistSize || mRoot == nullptr || mDocument == nullptr) {
+        return;
+    }
+    auto* context = mDocument->GetContext();
+    if (context == nullptr) {
+        return;
+    }
+    auto& settings = getSettings().ui;
+    if (!settings.menuSizeCustomized.getValue()) {
+        settings.menuWidthDp.setValue(settings.menuWidthDp.getDefaultValue());
+        settings.menuHeightDp.setValue(settings.menuHeightDp.getDefaultValue());
+        config::save();
+        return;
+    }
+    const float dpRatio = context->GetDensityIndependentPixelRatio();
+    const int widthDp = static_cast<int>(std::lround(mRoot->GetOffsetWidth() / dpRatio));
+    const int heightDp = static_cast<int>(std::lround(mRoot->GetOffsetHeight() / dpRatio));
+    if (widthDp <= 0 || heightDp <= 0) {
+        return;
+    }
+    settings.menuWidthDp.setValue(widthDp);
+    settings.menuHeightDp.setValue(heightDp);
+    config::save();
 }
 
 bool Window::set_active_tab(int index) {
@@ -330,7 +484,7 @@ bool Window::handle_content_nav(Rml::Event& event, NavCommand cmd) noexcept {
     return false;
 }
 
-WindowSmall::WindowSmall(const Rml::String& windowClass, const Rml::String& dialogClass)
+WindowSmall::WindowSmall(const Rml::String& windowClass)
     : Document(kDocumentSourceSmall, false, DocumentScope::Window),
       mRoot(mDocument->GetElementById("window")), mDialog(mDocument->GetElementById("dialog")) {
     listen(mRoot, Rml::EventId::Transitionend, [this](Rml::Event& event) {
@@ -342,7 +496,6 @@ WindowSmall::WindowSmall(const Rml::String& windowClass, const Rml::String& dial
     });
 
     mRoot->SetClass(windowClass, true);
-    mDialog->SetClass(dialogClass, true);
 }
 
 void WindowSmall::show() {

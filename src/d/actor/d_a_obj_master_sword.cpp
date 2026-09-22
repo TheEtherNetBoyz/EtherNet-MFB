@@ -1,6 +1,6 @@
 /**
  * @file d_a_obj_master_sword.cpp
- * 
+ *
 */
 
 #include "d/dolzel_rel.h" // IWYU pragma: keep
@@ -15,16 +15,54 @@
 #include "dusk/cutscene_skip.h"
 #include "Z2AudioLib/Z2Instances.h"
 
+#if TARGET_PC
+#include "dusk/mods/item.hpp"
+#include "mods/items.h"
+
+#include "d/d_item.h"
+#endif
+
 DUSK_GAME_DATA daObjMasterSword_Attr_c const daObjMasterSword_c::mAttr = {1.0f};
 
 static daObjMasterSword_c* s_activeMasterSwordSkipActor;
 
 static void completeMasterSwordGet(daObjMasterSword_c* i_this) {
+#if TARGET_PC
+    const auto masterSword = dusk::mods::item_check_commit(
+        ITEM_CHECK_MASTER_SWORD, dItemNo_MASTER_SWORD_e, i_this);
+    if (!masterSword.was_resolved) {
+        dComIfGs_onItemFirstBit(dItemNo_MASTER_SWORD_e);
+        dMeter2Info_setSword(dItemNo_MASTER_SWORD_e, false);
+        dComIfGs_setSelectEquipSword(dItemNo_MASTER_SWORD_e);
+        // Preserve the vanilla event state, including when MFB's cutscene skip
+        // completes the reward without running the remainder of the event script.
+        dComIfGs_onEventBit(dSv_event_flag_c::F_0264);
+        dusk::mods::item_check_complete(masterSword, i_this);
+    } else if (masterSword.itemNo == dItemNo_NONE_e) {
+        dusk::mods::item_check_complete(masterSword, i_this);
+    } else {
+        dusk::mods::item_check_enqueue(masterSword, dusk::mods::ItemGiveMode::Demo);
+    }
+#else
     dComIfGs_onItemFirstBit(dItemNo_MASTER_SWORD_e);
     dMeter2Info_setSword(dItemNo_MASTER_SWORD_e, false);
     dComIfGs_setSelectEquipSword(dItemNo_MASTER_SWORD_e);
+#endif
 
     dComIfGp_setItemLifeCount(dComIfGs_getMaxLife(), 0);
+
+#if TARGET_PC
+    const auto shadowCrystal = dusk::mods::item_check_commit(
+        ITEM_CHECK_SHADOW_CRYSTAL, dItemNo_SHADOW_CRYSTAL_e, i_this);
+    if (!shadowCrystal.was_resolved) {
+        execItemGet(shadowCrystal.itemNo, shadowCrystal.tag, i_this);
+    } else if (shadowCrystal.itemNo == dItemNo_NONE_e) {
+        dusk::mods::item_check_complete(shadowCrystal, i_this);
+    } else {
+        dusk::mods::item_check_enqueue(shadowCrystal, dusk::mods::ItemGiveMode::Demo);
+    }
+
+#endif
     dComIfGs_onEventBit(dSv_event_flag_c::saveBitLabels[i_this->getFlagNo()]);
     s_activeMasterSwordSkipActor = NULL;
     fopAcM_delete(i_this);

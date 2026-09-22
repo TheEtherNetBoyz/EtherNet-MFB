@@ -336,6 +336,10 @@ int daBg_c::draw() {
             static int l_tevStrType[6] = {32, 33, 34, 35, 35, 32};
             g_env_light.settingTevStruct(l_tevStrType[i], NULL, bgPart->tevstr);
             g_env_light.setLightTevColorType_MAJI(bg_model, bgPart->tevstr);
+#if TARGET_PC
+            const auto hooks = dKy_geometry_hooks();
+            void* drawToken = hooks.beforeModel ? hooks.beforeModel(modelData, bgPart->tevstr) : nullptr;
+#endif
             dKy_bg_MAxx_proc(bg_model);
 
             if (bg_model != NULL) {
@@ -450,6 +454,9 @@ int daBg_c::draw() {
             }
 
             mDoExt_modelEntryDL(bg_model);
+#if TARGET_PC
+            if (hooks.afterModel) hooks.afterModel(drawToken);
+#endif
             dComIfGd_setListBG();
         }
 
@@ -624,9 +631,7 @@ int daBg_c::create() {
     dComIfGp_roomControl_onStatusFlag(roomNo, 0x10);
     OS_REPORT("<BG> room%d\n", roomNo);
 
-#if TARGET_PC
-    draw_interp_frame = true;
-#endif
+    IF_DUSK(draw_interp_frame = true);
 
     return cPhs_COMPLEATE_e;
 }

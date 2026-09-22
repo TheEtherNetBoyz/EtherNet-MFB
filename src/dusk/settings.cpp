@@ -1,8 +1,17 @@
+#include "dusk/legacy_practice.h"
 #include "dusk/settings.h"
 #include "dusk/config.hpp"
-#include <aurora/aurora.h>
+#include "dusk/game_mode.hpp"
+#include "dusk/speedrun.h"
+#include "dusk/texture_replacements.hpp"
+#include "dusk/ui/ui.hpp"
+
+#include <algorithm>
 
 #include <SDL3/SDL_scancode.h>
+#include <aurora/aurora.h>
+#include <aurora/dvd.h>
+#include <dolphin/vi.h>
 
 namespace dusk {
 
@@ -18,16 +27,24 @@ UserSettings g_userSettings = {
         .rememberWindowSize {"video.rememberWindowSize", false},
         .lastWindowWidth {"video.lastWindowWidth", 0},
         .lastWindowHeight {"video.lastWindowHeight", 0},
+        .uiScale {"video.uiScale", 100},
+    },
+
+    .ui = {
+        .settingsFavorites {"ui.settingsFavorites", ""},
+        .menuWidthDp {"ui.menuWidthDp", 1088},
+        .menuHeightDp {"ui.menuHeightDp", 768},
+        .menuSizeCustomized {"ui.menuSizeCustomized", false},
     },
 
     .audio = {
+        .outputMode {"audio.outputMode", AudioOutputMode::StereoSpeakers},
         .masterVolume {"audio.masterVolume", 60},
         .mainMusicVolume {"audio.mainMusicVolume", 100},
         .subMusicVolume {"audio.subMusicVolume", 100},
         .soundEffectsVolume {"audio.soundEffectsVolume", 100},
         .fanfareVolume {"audio.fanfareVolume", 100},
         .enableReverb {"audio.enableReverb", true},
-        .enableHrtf {"audio.enableHrtf", false},
         .menuSounds {"audio.menuSounds", true},
     },
 
@@ -36,12 +53,14 @@ UserSettings g_userSettings = {
 
         // Quality of Life
         .enableQuickTransform {"game.enableQuickTransform", false},
+        .fixedQuickTransform {"game.fixedQuickTransform", false},
         .humanMidnaWarp {"game.humanMidnaWarp", false},
         .hideTvSettingsScreen {"game.hideTvSettingsScreen", true},
         .biggerWallets {"game.biggerWallets", false},
         .noReturnRupees {"game.noReturnRupees", false},
         .disableRupeeCutscenes {"game.disableRupeeCutscenes", false},
         .skipAllCutscenes {"game.skipAllCutscenes", false},
+        .fastTransitions {"game.fastTransitions", false},
         .noSwordRecoil {"game.noSwordRecoil", false},
         .damageMultiplier {"game.damageMultiplier", 1},
         .noHeartDrops {"game.noHeartDrops", false},
@@ -52,10 +71,14 @@ UserSettings g_userSettings = {
         .no2ndFishForCat {"game.no2ndFishForCat", false},
         .enableFastLoads {"game.enableFastLoads", false},
         .enableInstaLoads {"game.enableInstaLoads", false},
+        .discLoadingDelayMode {"game.loadDelayMode", DiscLoadingDelayMode::Off},
+        .discLoadingDelaySeconds {"game.discLoadingDelaySeconds", 1},
+        .theEtherNetBoyzExperience {"game.theEtherNetBoyzExperience", false},
         .instantMovement {"game.instantMovement", false},
         .buttonFishing {"game.buttonFishing", false},
         .instantSaves {"game.instantSaves", false},
         .instantText {"game.instantText", false},
+        .holdToMash {"game.holdToMash", false},
         .sunsSong {"game.sunsSong", false},
         .autoSave {"game.autoSave", false},
         .enhancedMapMenus {"game.enhancedMapMenus", false},
@@ -86,6 +109,7 @@ UserSettings g_userSettings = {
         .resampler {"game.resampler", Resampler::Bilinear},
         .enableMapBackground {"game.enableMapBackground", true},
         .disableCutscenePillarboxing {"game.disableCutscenePillarboxing", false},
+        .disableLetterboxing {"game.disableLetterboxing", LetterboxMode::Off},
         .enableHighQualityMinimapTextures {"game.enableHighQualityMinimapTextures", true},
         .forceTwilightVisuals {"game.forceTwilightVisuals", false},
 
@@ -131,6 +155,7 @@ UserSettings g_userSettings = {
         .debugFlyCam {"game.debugFlyCam", false},
         .debugFlyCamLockEvents {"game.debugFlyCamLockEvents", true},
         .allowBackgroundInput {"game.allowBackgroundInput", true},
+        .cutsceneInputBuffering {"game.cutsceneInputBuffering", false},
         .inputLagMs {"game.inputLagMs", 0},
         .enableLED {
             ConfigVar<bool>{"game.enableLED_port0", true},
@@ -151,7 +176,7 @@ UserSettings g_userSettings = {
         .enableIndefiniteItemDrops {"game.enableIndefiniteItemDrops", false},
         .moonJump {"game.moonJump", false},
         .superClawshot {"game.superClawshot", false},
-        .alwaysGreatspin {"game.alwaysGreatspin", false},
+        .alwaysGreatspin {"game.alwaysGreatspin", AlwaysGreatspinMode::OFF},
         .enableFastIronBoots {"game.enableFastIronBoots", false},
         .canTransformAnywhere {"game.canTransformAnywhere", false},
         .fastRoll {"game.fastRoll", false},
@@ -159,6 +184,7 @@ UserSettings g_userSettings = {
         .armorRupeeDrain {"game.armorRupeeDrain", MagicArmorMode::NORMAL},
         .invincibleEnemies {"game.invincibleEnemies", false},
         .transformWithoutShadowCrystal {"game.transformWithoutShadowCrystal", false},
+        .easyQuickSpin {"game.easyQuickSpin", false},
 
         // Technical
         .restoreWiiGlitches {"game.restoreWiiGlitches", false},
@@ -182,6 +208,8 @@ UserSettings g_userSettings = {
         .rupeeSlideRoom {"game.rupeeSlideRoom", -1},
         .rupeeSlideLayer {"game.rupeeSlideLayer", -1},
         .rupeeSlidePositionValid {"game.rupeeSlidePositionValid", false},
+        .enableMoveLinkCombo {"game.enableMoveLinkCombo", false},
+        .enableTeleportCombo {"game.enableTeleportCombo", false},
         .areaReload {"game.areaReload", false},
         .gorgeVoidChecker {"game.gorgeVoidChecker", false},
         .recordingMode {"game.recordingMode", false},
@@ -190,11 +218,8 @@ UserSettings g_userSettings = {
         .showInputViewerGyro {"game.showInputViewerGyro", false},
         .nativeInputViewer {"game.nativeInputViewer", false},
         .nativeLinkDebugInfo {"game.nativeLinkDebugInfo", false},
-        .triggerViewDefinitions {
-            "tools.triggerViewDefinitions",
-            "[]"
-        },
-        .nativePracticeMenu {"game.nativePracticeMenu", true}
+        .nativePracticeMenu {"game.nativePracticeMenu", true},
+        .lastSelectedGameModeId {"game.lastSelectedGameModeId", gamemode::kVanillaGameModeId}
     },
 
     .backend = {
@@ -202,9 +227,10 @@ UserSettings g_userSettings = {
         .isoVerification {"backend.isoVerification", DiscVerificationState::Unknown},
         .graphicsBackend {"backend.graphicsBackend", "auto"},
         .skipPreLaunchUI {"backend.skipPreLaunchUI", false},
-        .wasPresetChosen {"backend.wasPresetChosen", false},
         .showPipelineCompilation {"backend.showPipelineCompilation", true},
+        .wasPresetChosen {"backend.wasPresetChosen", false},
         .checkForUpdates {"backend.checkForUpdates", false},
+        .checkForModUpdates {"backend.checkForModUpdates", true},
         .cardFileType {"backend.cardFileType", static_cast<int>(CARD_GCIFOLDER)},
         .enableAdvancedSettings {"backend.enableAdvancedSettings", false},
     },
@@ -300,6 +326,16 @@ UserSettings g_userSettings = {
             ConfigVar<int>{"hotkeys.moveLink.modifiers", HOTKEY_MOD_NONE},
             ConfigVar<int>{"hotkeys.moveLink.controllerButton", PAD_NATIVE_BUTTON_INVALID},
         },
+        .cycleBloomMode = {
+            ConfigVar<int>{"hotkeys.cycleBloomMode.key", SDL_SCANCODE_UNKNOWN},
+            ConfigVar<int>{"hotkeys.cycleBloomMode.modifiers", HOTKEY_MOD_NONE},
+            ConfigVar<int>{"hotkeys.cycleBloomMode.controllerButton", PAD_NATIVE_BUTTON_INVALID},
+        },
+        .toggleDiscLoadingDelay = {
+            ConfigVar<int>{"hotkeys.toggleDiscLoadingDelay.key", SDL_SCANCODE_UNKNOWN},
+            ConfigVar<int>{"hotkeys.toggleDiscLoadingDelay.modifiers", HOTKEY_MOD_NONE},
+            ConfigVar<int>{"hotkeys.toggleDiscLoadingDelay.controllerButton", PAD_NATIVE_BUTTON_INVALID},
+        },
     },
 
     // Not sure if there's a better way to declare this
@@ -347,7 +383,28 @@ UserSettings& getSettings() {
     return g_userSettings;
 }
 
+void applyInternalResolutionScale(int scale) {
+    VISetFrameBufferScale(static_cast<float>(scale));
+}
+
+void applyResampler(Resampler resampler) {
+    switch (resampler) {
+    case Resampler::Area:
+        aurora_set_resampler(SAMPLER_AREA);
+        break;
+    case Resampler::Bilinear:
+    default:
+        aurora_set_resampler(SAMPLER_BILINEAR);
+        break;
+    }
+}
+
 void registerSettings() {
+    Register(g_userSettings.ui.settingsFavorites);
+    Register(g_userSettings.ui.menuWidthDp);
+    Register(g_userSettings.ui.menuHeightDp);
+    Register(g_userSettings.ui.menuSizeCustomized);
+
     // Video
     Register(g_userSettings.video.enableFullscreen);
     Register(g_userSettings.video.enableVsync);
@@ -359,27 +416,33 @@ void registerSettings() {
     Register(g_userSettings.video.rememberWindowSize);
     Register(g_userSettings.video.lastWindowWidth);
     Register(g_userSettings.video.lastWindowHeight);
+    Register(g_userSettings.video.uiScale,
+        [](const int&, const int&) { dusk::ui::apply_scale(); });
 
     // Audio
+    Register(g_userSettings.audio.outputMode);
     Register(g_userSettings.audio.masterVolume);
     Register(g_userSettings.audio.mainMusicVolume);
     Register(g_userSettings.audio.subMusicVolume);
     Register(g_userSettings.audio.soundEffectsVolume);
     Register(g_userSettings.audio.fanfareVolume);
     Register(g_userSettings.audio.enableReverb);
-    Register(g_userSettings.audio.enableHrtf);
     Register(g_userSettings.audio.menuSounds);
 
     // Game
     Register(g_userSettings.game.language);
     Register(g_userSettings.game.enableQuickTransform);
+    Register(g_userSettings.game.fixedQuickTransform);
     Register(g_userSettings.game.humanMidnaWarp);
+#if DUSK_LEGACY_PRACTICE_TOOLS
     Register(g_userSettings.game.transformWithoutShadowCrystal);
+#endif
     Register(g_userSettings.game.hideTvSettingsScreen);
     Register(g_userSettings.game.biggerWallets);
     Register(g_userSettings.game.noReturnRupees);
     Register(g_userSettings.game.disableRupeeCutscenes);
     Register(g_userSettings.game.skipAllCutscenes);
+    Register(g_userSettings.game.fastTransitions);
     Register(g_userSettings.game.noSwordRecoil);
     Register(g_userSettings.game.damageMultiplier);
     Register(g_userSettings.game.noHeartDrops);
@@ -389,10 +452,14 @@ void registerSettings() {
     Register(g_userSettings.game.no2ndFishForCat);
     Register(g_userSettings.game.enableFastLoads);
     Register(g_userSettings.game.enableInstaLoads);
+    Register(g_userSettings.game.discLoadingDelayMode);
+    Register(g_userSettings.game.discLoadingDelaySeconds);
+    Register(g_userSettings.game.theEtherNetBoyzExperience);
     Register(g_userSettings.game.instantMovement);
     Register(g_userSettings.game.buttonFishing);
     Register(g_userSettings.game.instantSaves);
     Register(g_userSettings.game.instantText);
+    Register(g_userSettings.game.holdToMash);
     Register(g_userSettings.game.sunsSong);
     Register(g_userSettings.game.autoSave);
     Register(g_userSettings.game.enhancedMapMenus);
@@ -422,12 +489,16 @@ void registerSettings() {
     Register(g_userSettings.game.bloomMultiplier);
     Register(g_userSettings.game.depthOfFieldMode);
     Register(g_userSettings.game.disableWaterRefraction);
-    Register(g_userSettings.game.enableTextureReplacements);
-    Register(g_userSettings.game.internalResolutionScale);
-    Register(g_userSettings.game.resampler);
+    Register(g_userSettings.game.enableTextureReplacements,
+        [](const bool&, const bool&) { texture_replacements::reload(); });
+    Register(g_userSettings.game.internalResolutionScale,
+        [](const int& value, const int&) { applyInternalResolutionScale(value); });
+    Register(g_userSettings.game.resampler,
+        [](const Resampler& value, const Resampler&) { applyResampler(value); });
     Register(g_userSettings.game.shadowResolutionMultiplier);
     Register(g_userSettings.game.enableMapBackground);
     Register(g_userSettings.game.disableCutscenePillarboxing);
+    Register(g_userSettings.game.disableLetterboxing);
     Register(g_userSettings.game.enableHighQualityMinimapTextures);
     Register(g_userSettings.game.forceTwilightVisuals);
     Register(g_userSettings.game.enableFastIronBoots);
@@ -457,17 +528,29 @@ void registerSettings() {
     Register(g_userSettings.game.rupeeSlideRoom);
     Register(g_userSettings.game.rupeeSlideLayer);
     Register(g_userSettings.game.rupeeSlidePositionValid);
+    Register(g_userSettings.game.enableMoveLinkCombo);
+    Register(g_userSettings.game.enableTeleportCombo);
+#if DUSK_LEGACY_PRACTICE_TOOLS
     Register(g_userSettings.game.areaReload);
+#endif
+#if DUSK_LEGACY_PRACTICE_TOOLS
     Register(g_userSettings.game.gorgeVoidChecker);
+#endif
     Register(g_userSettings.game.recordingMode);
     Register(g_userSettings.game.menuScalingMode);
     Register(g_userSettings.game.removeQuestMapMarkers);
     Register(g_userSettings.game.showInputViewer);
     Register(g_userSettings.game.showInputViewerGyro);
+#if DUSK_LEGACY_PRACTICE_TOOLS
     Register(g_userSettings.game.nativeInputViewer);
+#endif
+#if DUSK_LEGACY_PRACTICE_TOOLS
     Register(g_userSettings.game.nativeLinkDebugInfo);
-    Register(g_userSettings.game.triggerViewDefinitions);
+#endif
+#if DUSK_LEGACY_PRACTICE_TOOLS
     Register(g_userSettings.game.nativePracticeMenu);
+#endif
+    Register(g_userSettings.game.lastSelectedGameModeId);
     Register(g_userSettings.game.fastSpinner);
     Register(g_userSettings.game.infiniteHearts);
     Register(g_userSettings.game.infiniteArrows);
@@ -481,6 +564,8 @@ void registerSettings() {
     Register(g_userSettings.game.superClawshot);
     Register(g_userSettings.game.alwaysGreatspin);
     Register(g_userSettings.game.invincibleEnemies);
+    Register(g_userSettings.game.easyQuickSpin);
+
     Register(g_userSettings.game.enableFrameInterpolation);
     Register(g_userSettings.game.frameRateLimit);
     Register(g_userSettings.game.lowLatencyPresentation);
@@ -506,6 +591,7 @@ void registerSettings() {
     Register(g_userSettings.game.debugFlyCam);
     Register(g_userSettings.game.debugFlyCamLockEvents);
     Register(g_userSettings.game.allowBackgroundInput);
+    Register(g_userSettings.game.cutsceneInputBuffering);
     Register(g_userSettings.game.inputLagMs);
     Register(g_userSettings.game.enableLED[0]);
     Register(g_userSettings.game.enableLED[1]);
@@ -517,9 +603,10 @@ void registerSettings() {
     Register(g_userSettings.backend.isoVerification);
     Register(g_userSettings.backend.graphicsBackend);
     Register(g_userSettings.backend.skipPreLaunchUI);
-    Register(g_userSettings.backend.wasPresetChosen);
     Register(g_userSettings.backend.showPipelineCompilation);
+    Register(g_userSettings.backend.wasPresetChosen);
     Register(g_userSettings.backend.checkForUpdates);
+    Register(g_userSettings.backend.checkForModUpdates);
     Register(g_userSettings.backend.cardFileType);
     Register(g_userSettings.backend.enableAdvancedSettings);
 
@@ -577,6 +664,12 @@ void registerSettings() {
     Register(g_userSettings.hotkeys.moveLink.key);
     Register(g_userSettings.hotkeys.moveLink.modifiers);
     Register(g_userSettings.hotkeys.moveLink.controllerButton);
+    Register(g_userSettings.hotkeys.cycleBloomMode.key);
+    Register(g_userSettings.hotkeys.cycleBloomMode.modifiers);
+    Register(g_userSettings.hotkeys.cycleBloomMode.controllerButton);
+    Register(g_userSettings.hotkeys.toggleDiscLoadingDelay.key);
+    Register(g_userSettings.hotkeys.toggleDiscLoadingDelay.modifiers);
+    Register(g_userSettings.hotkeys.toggleDiscLoadingDelay.controllerButton);
 
     Register(g_userSettings.actionBindings.firstPersonCamera[0]);
     Register(g_userSettings.actionBindings.firstPersonCamera[1]);
@@ -610,13 +703,27 @@ static TransientSettings g_transientSettings = {
     .collisionView = {
         .enableTerrainView = false,
         .enableWireframe = false,
-        .enableTriggerView = false,
         .enableAtView = false,
         .enableTgView = false,
         .enableCoView = false,
         .terrainViewOpacity = 50.0f,
         .colliderViewOpacity = 50.0f,
         .drawRange = 100.0f,
+    },
+    .triggerView = {
+        .loadZones = false,
+        .eventAreas = false,
+        .switchAreas = false,
+        .eventTags = false,
+        .midnaStops = false,
+        .twilightGates = false,
+        .checkpoints = false,
+        .paths = false,
+        .transformDists = false,
+        .attentionDists = false,
+        .purpleMistAvoid = false,
+        .leevers = false,
+        .opacity = 75.0f,
     },
     .skipFrameRateLimit = false,
     .forceThirtyFpsLimit = false,
@@ -628,6 +735,31 @@ static TransientSettings g_transientSettings = {
 
 TransientSettings& getTransientSettings() {
     return g_transientSettings;
+}
+
+void updateDiscLoadingDelay() {
+    const int delaySeconds = std::clamp(getSettings().game.discLoadingDelaySeconds.getValue(), 1, 10);
+    const auto mode = speedrun::isActive() ? DiscLoadingDelayMode::Off :
+                                             getSettings().game.discLoadingDelayMode.getValue();
+
+    aurora_dvd_set_read_delay_seconds(static_cast<u32>(delaySeconds));
+    const u32 dvdMode = mode == DiscLoadingDelayMode::Off ? AURORA_DVD_READ_DELAY_OFF :
+        (mode == DiscLoadingDelayMode::On ? AURORA_DVD_READ_DELAY_BLOCKED :
+                                            AURORA_DVD_READ_DELAY_TIMED);
+    aurora_dvd_set_read_delay_mode(dvdMode);
+}
+
+void toggleDiscLoadingDelay() {
+    if (speedrun::isActive()) {
+        return;
+    }
+    auto& mode = getSettings().game.discLoadingDelayMode;
+    const auto nextMode = static_cast<u8>(mode.getValue()) >= static_cast<u8>(DiscLoadingDelayMode::Timed)
+        ? DiscLoadingDelayMode::Off
+        : static_cast<DiscLoadingDelayMode>(static_cast<u8>(mode.getValue()) + 1);
+    mode.setValue(nextMode);
+    config::save();
+    updateDiscLoadingDelay();
 }
 
 }

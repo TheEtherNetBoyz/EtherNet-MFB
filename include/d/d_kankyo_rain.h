@@ -13,6 +13,7 @@ void dKyr_drawSnow(Mtx param_0, u8** param_1);
 void dKyr_drawStar(Mtx param_0, u8** param_1);
 void drawCloudShadow(Mtx param_0, u8** param_1);
 void dKyr_drawHousi(Mtx param_0, u8** param_1);
+class dKankyo_housi_Packet;
 void drawVrkumo(Mtx param_0, GXColor& param_1, u8** param_2);
 void dKyr_odour_draw(Mtx param_0, u8** param_1);
 void dKyr_mud_draw(Mtx param_0, u8** param_1);

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 namespace dusk::game_clock {
 
 // Default amount of time advanced by a simulation tick.
@@ -7,11 +9,17 @@ constexpr float kSimPeriod = 1.0f / 30.0f;
 constexpr float kUiMaximumDt = 0.05f;
 constexpr float kUiInitialDt = 1.0f / 60.0f;
 
+float original_frames();
+// TAS-only presentation budget; -1 uses normal delta time, reset by advance().
+void set_presentation_tick_override(int ticks);
+
 struct FrameTiming {
     float dt;
     bool interpolating;
     bool separatePresentation;
     int numSimTicks;
+    // Changes whenever presentation history must be discarded and re-anchored.
+    uint64_t presentationEpoch;
 };
 extern FrameTiming g_frameTiming;
 
@@ -31,6 +39,10 @@ void finish_main_loop();
 void begin_sim_tick();
 void commit_sim_tick();
 float sample_interpolation_step();
-float consume_interval(const void* consumer);
+bool is_sim_frame();
+bool is_presentation_frame();
+
+double sample_time();
+float consume_interval(double& lastSample);
 
 } // namespace dusk::game_clock

@@ -73,8 +73,6 @@ void setPresentationCameraEnabled(bool enabled);
 bool presentationCameraEnabled();
 void setPresentationCameraControlEnabled(bool enabled);
 bool presentationCameraControlEnabled();
-void setPresentationCameraMouseLookEnabled(bool enabled);
-bool presentationCameraMouseLookEnabled();
 bool presentationCameraDualCullingEnabled();
 void setPresentationCameraDualCullingEnabled(bool enabled);
 bool getGameplayCullView(Mtx outView, float* fovy, float* aspect, float* nearPlane);

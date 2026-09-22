@@ -8,29 +8,27 @@
 // weak data from it (unlike here).
 
 #include "d/d_particle.h"
-#include <cstdio>
-#include "JSystem/J3DGraphAnimator/J3DMaterialAnm.h"
-#include "JSystem/J3DGraphBase/J3DMaterial.h"
+#include "d/d_jnt_col.h"
 #include "JSystem/JKernel/JKRExpHeap.h"
 #include "JSystem/JKernel/JKRSolidHeap.h"
-#include "JSystem/JMath/JMATrigonometric.h"
+#include "JSystem/J3DGraphBase/J3DMaterial.h"
+#include "JSystem/J3DGraphAnimator/J3DMaterialAnm.h"
 #include "JSystem/JParticle/JPAEmitterManager.h"
 #include "JSystem/JParticle/JPAResourceManager.h"
-#include "SSystem/SComponent/c_math.h"
-#include "d/actor/d_a_player.h"
-#include "d/d_com_inf_game.h"
-#include "d/d_jnt_col.h"
+#include "JSystem/JMath/JMATrigonometric.h"
 #include "d/d_s_play.h"
-#include "f_op/f_op_actor_mng.h"
-#include "m_Do/m_Do_graphic.h"
+#include <cstdio>
+#include "d/d_com_inf_game.h"
 #include "m_Do/m_Do_lib.h"
-#include "tracy/Tracy.hpp"
-#if TARGET_PC
-#include "dusk/frame_interpolation.h"
-#endif
+#include "m_Do/m_Do_graphic.h"
+#include "f_op/f_op_actor_mng.h"
+#include "d/actor/d_a_player.h"
+#include "SSystem/SComponent/c_math.h"
 
-#ifndef __MWERKS__
-#include "helpers/math.h"
+#if TARGET_PC
+#include "dusk/game_clock.h"
+
+#include <tracy/Tracy.hpp>
 #endif
 
 #if DEBUG
@@ -443,57 +441,6 @@ static void dPa_setWindPower(JPABaseParticle* param_0) {
     param_0->setOffsetPosition(sp3C);
 }
 
-#if TARGET_PC
-static void dPa_getModelParticleMtx(JPABaseEmitter* i_emitter, JPABaseParticle* i_particle,
-                                    Mtx o_mtx) {
-    Mtx rotationMtx;
-    MTXIdentity(o_mtx);
-    MTXIdentity(rotationMtx);
-
-    f32 rotation = -90.0f / 16384.0f * i_particle->getRotateAngle();
-    if (rotation) {
-        switch (dPa_modelEcallBack::getRotAxis(i_emitter)) {
-        case 0:
-            MTXRotRad(rotationMtx, 'y', DEG_TO_RAD(rotation));
-            break;
-        case 1:
-            MTXRotRad(rotationMtx, 'x', DEG_TO_RAD(rotation));
-            break;
-        case 2:
-            MTXRotRad(rotationMtx, 'z', DEG_TO_RAD(rotation));
-            break;
-        case 3: {
-            Vec axis = {1.0f, 1.0f, 1.0f};
-            MTXRotAxisRad(rotationMtx, &axis, DEG_TO_RAD(rotation));
-            break;
-        }
-        }
-        MTXConcat(o_mtx, rotationMtx, o_mtx);
-    }
-
-    JGeometry::TVec3<f32> position;
-    i_particle->getGlobalPosition(&position);
-    o_mtx[0][3] = position.x;
-    o_mtx[1][3] = position.y;
-    o_mtx[2][3] = position.z;
-
-    JGeometry::TVec3<f32> scale;
-    i_emitter->getGlobalParticleScale(&scale);
-    scale.x *= i_particle->getParticleScaleX();
-    scale.y *= i_particle->getParticleScaleY();
-    scale.z = scale.x;
-    Mtx scaleMtx;
-    MTXScale(scaleMtx, scale.x, scale.y, scale.z);
-    MTXConcat(o_mtx, scaleMtx, o_mtx);
-}
-
-void dPa_modelPcallBack::interp(JPABaseEmitter* i_emitter, JPABaseParticle* i_particle) {
-    Mtx particleMtx;
-    dPa_getModelParticleMtx(i_emitter, i_particle, particleMtx);
-    dusk::frame_interp::record_final_mtx(particleMtx, i_particle);
-}
-#endif
-
 void dPa_modelPcallBack::draw(JPABaseEmitter* i_emitter, JPABaseParticle* param_1) {
     Mtx local_74;
     Mtx local_44;
@@ -534,12 +481,6 @@ void dPa_modelPcallBack::draw(JPABaseEmitter* i_emitter, JPABaseParticle* param_
     local_fc.z = local_fc.x;
     MTXScale(auStack_c0, local_fc.x, local_fc.y, local_fc.z);
     MTXConcat(local_74, auStack_c0, local_74);
-#if TARGET_PC
-    Mtx presentationMtx;
-    if (dusk::frame_interp::lookup_replacement(param_1, presentationMtx)) {
-        MTXCopy(presentationMtx, local_74);
-    }
-#endif
     dPa_modelEcallBack::drawModel(i_emitter, local_74);
     param_1->setInvisibleParticleFlag();
 }
@@ -2035,7 +1976,7 @@ void dPa_light8PcallBack::draw(JPABaseEmitter* param_1, JPABaseParticle* param_2
     JGeometry::TVec3<f32> local_160;
     JGeometry::TVec3<f32> local_16c;
 #if TARGET_PC
-    if (dusk::frame_interp::is_sim_frame())
+    if (dusk::game_clock::is_sim_frame())
 #endif
     {
         dPa_setWindPower(param_2);

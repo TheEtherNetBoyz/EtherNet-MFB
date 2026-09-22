@@ -51,14 +51,20 @@ dRes_info_c::~dRes_info_c() {
 }
 
 int dRes_info_c::set(char const* i_arcName, char const* i_path, u8 i_mountDirection, JKRHeap* i_heap) {
+    char path[40];
+
+    snprintf(path, sizeof(path), "%s%s.arc", i_path, i_arcName);
+    return setFile(i_arcName, path, i_mountDirection, i_heap);
+}
+
+int dRes_info_c::setFile(char const* i_arcName, char const* i_filePath, u8 i_mountDirection,
+                         JKRHeap* i_heap) {
 #ifdef __MWERKS__
     JUT_ASSERT(120, strlen(i_arcName) <= NAME_MAX);
 #endif
 
-    if (*i_path != '\0') {
-        char path[40];
-        snprintf(path, sizeof(path), "%s%s.arc", i_path, i_arcName);
-        mDMCommand = mDoDvdThd_mountArchive_c::create(path, i_mountDirection, i_heap);
+    if (*i_filePath != '\0') {
+        mDMCommand = mDoDvdThd_mountArchive_c::create(i_filePath, i_mountDirection, i_heap);
 
         if (mDMCommand == NULL) {
             return false;
@@ -95,13 +101,28 @@ static void setIndirectTex(J3DModelData* i_modelData) {
 
     for (u16 i = 0; i < texture->getNum(); i++) {
         textureName = nameTab->getName(i);
+#if TARGET_PC
+        if (textureName == NULL) {
+            continue;
+        }
+        if (strcmp(textureName, "fbtex_dummy") == 0) {
+#else
         if (memcmp(textureName, "fbtex_dummy", 0xc) == 0) {
+#endif
             texture->setResTIMG(i, *mDoGph_gInf_c::getFrameBufferTimg());
         }
+#if TARGET_PC
+        if (strcmp(textureName, "dummy") == 0) {
+#else
         if (memcmp(textureName, "dummy", 6) == 0) {
+#endif
             texture->setResTIMG(i, *mDoGph_gInf_c::getFrameBufferTimg());
         }
+#if TARGET_PC
+        if (strcmp(textureName, "Zbuffer") == 0) {
+#else
         if (memcmp(textureName, "Zbuffer", 8) == 0) {
+#endif
             texture->setResTIMG(i, *mDoGph_gInf_c::getZbufferTimg());
         }
     }
@@ -335,7 +356,7 @@ int dRes_info_c::loadResource() {
 #endif
                 void* res = mArchive->getIdxResource(fileIndex);
 #if TARGET_PC
-                u32 size = mArchive->findIdxResource(fileIndex)->data_size;
+                u32 size = mArchive->getFileSize(mArchive->findIdxResource(fileIndex));
                 std::string fileName = mArchive->mStringTable +
                         (mArchive->findIdxResource(fileIndex)->type_flags_and_name_offset & 0xFFFFFF);
                 DuskLog.debug("Loading Resource: {} (Size: {})", fileName, size);
@@ -369,7 +390,7 @@ int dRes_info_c::loadResource() {
                         parentHeap = NULL;
                     }
 
-                    int rt = dComIfG_setObjectRes(arcName, res, entry->data_size, parentHeap);
+                    int rt = dComIfG_setObjectRes(arcName, res, DUSK_IF_ELSE(mArchive->getFileSize(entry),entry->data_size), parentHeap);
                     JUT_ASSERT(788, rt);
                 } else if (nodeType == 'BMDP') {
 #if DEBUG

@@ -4,24 +4,29 @@
  */
 
 #include "m_Do/m_Do_Reset.h"
+#include <gx.h>
 #include "JSystem/JAudio2/JASDvdThread.h"
 #include "JSystem/JUtility/JUTGamePad.h"
 #include "JSystem/JUtility/JUTXfb.h"
 #include "SSystem/SComponent/c_API_controller_pad.h"
-#include <gx.h>
-#include "m_Do/m_Do_audio.h"
 #include "m_Do/m_Do_DVDError.h"
-#include "m_Do/m_Do_ext.h"
 #include "m_Do/m_Do_MemCard.h"
 #if TARGET_PC
 #include "dusk/input_macro.h"
 #include "dusk/tas_movie.h"
 #endif
+#include "m_Do/m_Do_audio.h"
+#include "m_Do/m_Do_ext.h"
 
 #if !PLATFORM_GCN
 #include <revolution/os.h>
 #endif
 #include "os_report.h"
+
+#ifdef TARGET_PC
+#include "dusk/game_mode.hpp"
+#include "dusk/ui/prelaunch.hpp"
+#endif
 
 static void my_OSCancelAlarmAll() {}
 
@@ -112,6 +117,14 @@ void mDoRst_resetCallBack(int port, void*) {
     dusk::input_macro::recordResetRequest();
     dusk::tas_movie::recordResetRequest();
 #endif
+#ifdef TARGET_PC
+    const dusk::gamemode::GameMode* gameMode =
+        dusk::gamemode::getGameModeManager().getCurrentGameMode();
+    if (gameMode) {
+        gameMode->invokeOnGameResetFunction();
+    }
+#endif
+
     if (mDoRst::isReset()) {
         return;
     }
@@ -137,7 +150,8 @@ void mDoRst_resetCallBack(int port, void*) {
 #else
     DVDCommandBlock block;
     block.userData = (void*)-1;
-    while (DVDCheckDiskAsync(&block, checkDiskCallback));
+    while (DVDCheckDiskAsync(&block, checkDiskCallback))
+        ;
     do {
         check = (int)block.userData;
     } while (check == -1);
@@ -149,6 +163,12 @@ void mDoRst_resetCallBack(int port, void*) {
         }
     }
     mDoRst::onReset();
+#ifdef TARGET_PC
+    if (dusk::ui::prelaunch_state().returnToPrelaunchOnReset) {
+        dusk::ui::return_to_prelaunch();
+        dusk::ui::prelaunch_state().returnToPrelaunchOnReset = false;
+    }
+#endif
 }
 
 void mDoRst_shutdownCallBack() {

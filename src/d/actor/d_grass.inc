@@ -1,5 +1,6 @@
 #include "d/actor/d_grass.h"
 #include "d/d_com_inf_game.h"
+#include "d/d_kankyo.h"
 #include "d/actor/d_a_player.h"
 #include "d/d_s_play.h"
 #include "JSystem/J3DGraphBase/J3DDrawBuffer.h"
@@ -11,16 +12,32 @@
 #include "d/d_camera.h"
 #include "f_op/f_op_camera_mng.h"
 
-#include "dusk/frame_interpolation.h"
+#include "dusk/settings.h"
+#include "dusk/speedrun.h"
 
-const u16 l_M_Hijiki00TEX__width = 31;
-const u16 l_M_Hijiki00TEX__height = 31;
-const u16 l_M_kusa05_RGBATEX__width = 31;
-const u16 l_M_kusa05_RGBATEX__height = 31;
+#include <algorithm>
 
 #if TARGET_PC
 #include "dusk/dvd_asset.hpp"
+#include "dusk/interp/frame_interpolation.h"
+
 using GameVersion = dusk::version::GameVersion;
+
+static void grass_color(GXColor& value) {
+    if (auto callback = dKy_geometry_hooks().grassColor) callback(&value, false);
+}
+static void grass_color(GXColorS10& value) {
+    if (auto callback = dKy_geometry_hooks().grassColor) callback(&value, true);
+}
+static GXTexObj* grass_texture(GXTexObj* original, const u8* pixels, bool first) {
+    if (auto callback = dKy_geometry_hooks().grassTexture)
+        return static_cast<GXTexObj*>(callback(original, pixels, first));
+    return original;
+}
+static bool grass_lighting() {
+    auto callback = dKy_geometry_hooks().grassLighting;
+    return callback && callback();
+}
 
 template <typename T, size_t N>
 static bool LoadGrassAsset(T (&dst)[N], std::initializer_list<dusk::OffsetVersion> offset) {
@@ -60,6 +77,11 @@ DEFINE_GRASS_ASSET(l_M_Hijiki00TEX, u8, 0x800, {
 #include "assets/l_M_kusa05_RGBATEX.h"  // ALIGN 32
 #include "assets/l_M_Hijiki00TEX.h"     // ALIGN 32
 #endif
+
+const u16 l_M_Hijiki00TEX__width = 31;
+const u16 l_M_Hijiki00TEX__height = 31;
+const u16 l_M_kusa05_RGBATEX__width = 31;
+const u16 l_M_kusa05_RGBATEX__height = 31;
 
 static u8 l_pos[960] = {
     0x3F, 0x4A, 0x56, 0xEF, 0xC2, 0x20, 0x00, 0x00, 0x41, 0xFB, 0x17, 0xE4, 0x41, 0xAA, 0xBB, 0xEA,
@@ -608,11 +630,12 @@ dGrass_packet_c::dGrass_packet_c() {
 
 #if TARGET_PC
 static MtxP get_model_mtx(Mtx modelMtx, Mtx storage) {
-    if (dusk::frame_interp::lookup_replacement(modelMtx, storage)) {
+    if (dusk::interp::lookup_replacement(modelMtx, storage)) {
         cMtx_concat(j3dSys.getViewMtx(), storage, storage);
-        return storage;
+    } else {
+        cMtx_concat(j3dSys.getViewMtx(), modelMtx, storage);
     }
-    return modelMtx;
+    return storage;
 }
 
 static void transform_positions(
@@ -641,6 +664,7 @@ static GXColor blade_amb_color(const dGrass_data_c* blade, const dKy_tevstr_c* t
         amb.r = g_kankyoHIO.navy.grass_ambcol.r * 2;
         amb.g = g_kankyoHIO.navy.grass_ambcol.g * 2;
         amb.b = g_kankyoHIO.navy.grass_ambcol.b * 2;
+        grass_color(amb);
         return amb;
     }
 #endif
@@ -688,6 +712,8 @@ static GXColor blade_amb_color(const dGrass_data_c* blade, const dKy_tevstr_c* t
     } else {
         amb.b = amb.b * colScale;
     }
+
+    grass_color(amb);
 
     return amb;
 }
@@ -798,6 +824,7 @@ void dGrass_packet_c::draw() {
             reg1.b = 5;
             reg1.a = 0x50;
         }
+        grass_color(reg1);
         GFSetTevColorS10(GX_TEVREG1, reg1);
 
         if (dComIfGp_roomControl_getStatusRoomDt(i) != nullptr) {
@@ -822,14 +849,14 @@ void dGrass_packet_c::draw() {
 
         // room-level setup
         if (first->field_0x05 <= 3 || first->field_0x05 >= 10) {
-            GXLoadTexObj(&mTexObj_l_M_kusa05_RGBATEX, GX_TEXMAP0);
+            GXLoadTexObj(grass_texture(&mTexObj_l_M_kusa05_RGBATEX, l_M_kusa05_RGBATEX, true), GX_TEXMAP0);
             if (lightCount <= 3) {
                 GXCallDisplayList(mp_kusa9q_14_DL, m_kusa9q_DL_14_size);
             } else {
                 GXCallDisplayList(mp_kusa9q_DL, m_kusa9q_DL_size);
             }
         } else {
-            GXLoadTexObj(&mTexObj_l_M_Hijiki00TEX, GX_TEXMAP0);
+            GXLoadTexObj(grass_texture(&mTexObj_l_M_Hijiki00TEX, l_M_Hijiki00TEX, false), GX_TEXMAP0);
             GXCallDisplayList(l_Tengusa_matDL, 0xA0);
         }
 
@@ -868,14 +895,14 @@ void dGrass_packet_c::draw() {
 
                 if (!open) {
                     if (kusaTex) {
-                        GXLoadTexObj(&mTexObj_l_M_kusa05_RGBATEX, GX_TEXMAP0);
+                        GXLoadTexObj(grass_texture(&mTexObj_l_M_kusa05_RGBATEX, l_M_kusa05_RGBATEX, true), GX_TEXMAP0);
                         if (lightCount <= 2) {
                             GXCallDisplayList(mp_kusa9q_14_DL, m_kusa9q_DL_14_size);
                         } else {
                             GXCallDisplayList(mp_kusa9q_DL, m_kusa9q_DL_size);
                         }
                     } else {
-                        GXLoadTexObj(&mTexObj_l_M_Hijiki00TEX, GX_TEXMAP0);
+                        GXLoadTexObj(grass_texture(&mTexObj_l_M_Hijiki00TEX, l_M_Hijiki00TEX, false), GX_TEXMAP0);
                         GXCallDisplayList(l_Tengusa_matDL, 0xA0);
                     }
                     // change amb_src to GX_SRC_VTX
@@ -884,8 +911,10 @@ void dGrass_packet_c::draw() {
                             ? (GX_LIGHT1 | GX_LIGHT2 | GX_LIGHT3 | GX_LIGHT4)
                             : (GX_LIGHT1 | GX_LIGHT2 | GX_LIGHT3 | GX_LIGHT4 | GX_LIGHT5 |
                                GX_LIGHT6 | GX_LIGHT7);
-                    GXSetChanCtrl(GX_COLOR0, GX_TRUE, GX_SRC_VTX, GX_SRC_REG, lightMask,
-                                  GX_DF_CLAMP, GX_AF_SPOT);
+                    if (!grass_lighting()) {
+                        GXSetChanCtrl(GX_COLOR0, GX_TRUE, GX_SRC_VTX, GX_SRC_REG, lightMask,
+                                      GX_DF_CLAMP, GX_AF_SPOT);
+                    }
                     reg1.a = cut ? 0 : shine;
                     GFSetTevColorS10(GX_TEVREG1, reg1);
                     GXBegin(GX_TRIANGLES, GX_VTXFMT1, GX_AUTO);
@@ -908,6 +937,10 @@ void dGrass_packet_c::draw() {
         // draw them with the original immediate path
         if (hasRegrowing) {
             GXSetVtxDescv(l_vtxDescList);
+            if (grass_lighting()) {
+                GXSetChanCtrl(GX_COLOR0, GX_FALSE, GX_SRC_REG, GX_SRC_VTX, 0,
+                              GX_DF_NONE, GX_AF_NONE);
+            }
             for (dGrass_data_c* blade = first; blade != NULL; blade = blade->mp_next) {
                 if (blade->field_0x02 >= -1 || cLib_checkBit<u8>(blade->field_0x01, 2)) {
                     continue;
@@ -915,14 +948,14 @@ void dGrass_packet_c::draw() {
 
                 const bool kusaTex = blade->field_0x05 <= 3 || blade->field_0x05 >= 10;
                 if (kusaTex) {
-                    GXLoadTexObj(&mTexObj_l_M_kusa05_RGBATEX, GX_TEXMAP0);
+                    GXLoadTexObj(grass_texture(&mTexObj_l_M_kusa05_RGBATEX, l_M_kusa05_RGBATEX, true), GX_TEXMAP0);
                     if (lightCount <= 2) {
                         GXCallDisplayList(mp_kusa9q_14_DL, m_kusa9q_DL_14_size);
                     } else {
                         GXCallDisplayList(mp_kusa9q_DL, m_kusa9q_DL_size);
                     }
                 } else {
-                    GXLoadTexObj(&mTexObj_l_M_Hijiki00TEX, GX_TEXMAP0);
+                    GXLoadTexObj(grass_texture(&mTexObj_l_M_Hijiki00TEX, l_M_Hijiki00TEX, false), GX_TEXMAP0);
                     GXCallDisplayList(l_Tengusa_matDL, 0xA0);
                 }
 
@@ -950,6 +983,7 @@ void dGrass_packet_c::draw() {
                 GFSetTevColorS10(GX_TEVREG2, {0, 0, 0, 0});
             }
         }
+
     }
 
     J3DShape::resetVcdVatCache();
@@ -1193,16 +1227,12 @@ void dGrass_packet_c::draw() {
                 GXSetChanAmbColor(GX_COLOR0A0, sp38);
 
                 if (!cLib_checkBit<u8>(var_r29->field_0x01, 2)) {
-#ifdef TARGET_PC
-                    Mtx grass_mtx;
-                    if (dusk::frame_interp::lookup_replacement(reinterpret_cast<const void*>(&var_r29->m_modelMtx), grass_mtx)) {
-                        cMtx_concat(j3dSys.getViewMtx(), grass_mtx, grass_mtx);
-                        GXLoadPosMtxImm(grass_mtx, 0);
-                    } else
+#if TARGET_PC
+                    Mtx grassMtx;
+                    GXLoadPosMtxImm(get_model_mtx(var_r29->m_modelMtx, grassMtx), 0);
+#else
+                    GXLoadPosMtxImm(var_r29->m_modelMtx, 0);
 #endif
-                    {
-                        GXLoadPosMtxImm(var_r29->m_modelMtx, 0);
-                    }
                     GXLoadNrmMtxImm(j3dSys.getViewMtx(), 0);
                     if (var_r29->field_0x05 <= 3 || var_r29->field_0x05 >= 10) {
                         if (var_r29->field_0x02 < -1) {
@@ -1445,7 +1475,11 @@ void dGrass_packet_c::update() {
                         }
                     }
 
+#if TARGET_PC
+                    cMtx_copy(mDoMtx_stack_c::get(), data_p->m_modelMtx);
+#else
                     cMtx_concat(j3dSys.getViewMtx(), mDoMtx_stack_c::get(), data_p->m_modelMtx);
+#endif
                 } else {
                     mDoMtx_stack_c::transS(data_p->m_pos.x, data_p->m_pos.y, data_p->m_pos.z);
                     mDoMtx_stack_c::YrotM(i * 3535);
@@ -1456,11 +1490,13 @@ void dGrass_packet_c::update() {
 
                     f32 scale = ((((s16)data_p->m_pos.x * 3535) & 0xFFF) / 4096.0f) * 0.3f + 0.7f;
                     mDoMtx_stack_c::scaleM(scale, scale, scale);
+#if TARGET_PC
+                    cMtx_copy(mDoMtx_stack_c::get(), data_p->m_modelMtx);
+#else
                     cMtx_concat(j3dSys.getViewMtx(), mDoMtx_stack_c::get(), data_p->m_modelMtx);
-                }
-#ifdef TARGET_PC
-                dusk::frame_interp::record_final_mtx(mDoMtx_stack_c::get(), data_p->m_modelMtx);
 #endif
+                }
+                IF_DUSK(dusk::interp::record_final_mtx(mDoMtx_stack_c::get(), data_p->m_modelMtx));
             }
         }
         data_p++;

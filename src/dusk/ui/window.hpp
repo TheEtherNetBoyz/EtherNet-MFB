@@ -19,6 +19,8 @@ public:
     };
     struct Props {
         bool tabBar = true;
+        // All full-size Dusk windows share the persisted menu shell size.
+        bool persistSize = true;
         std::vector<Rml::String> styleSheets;
     };
 
@@ -44,6 +46,8 @@ protected:
     void rebuild_content();
     void refresh_active_tab();
     void update_safe_area() noexcept;
+    void apply_persisted_size() noexcept;
+    void save_persisted_size() noexcept;
     void clear_content() noexcept;
     bool handle_nav_command(Rml::Event& event, NavCommand cmd) override;
     bool handle_content_nav(Rml::Event& event, NavCommand cmd) noexcept;
@@ -59,19 +63,29 @@ protected:
 
     Rml::Element* mRoot;
     Rml::Element* mContentRoot;
+    Rml::Element* mResizeHandle = nullptr;
     std::unique_ptr<TabBar> mTabBar;
     // Only set for tab-bar-less windows.
     std::unique_ptr<Button> mCloseButton;
     TabBuilder mContentBuilder;
     std::vector<std::unique_ptr<Component>> mContentComponents;
     Insets mBodyPadding;
+    bool mPersistSize = false;
+    bool mPersistedSizeApplied = false;
+    Rml::Vector2f mAppliedMenuSize;
+    struct ResizeState {
+        bool active = false;
+        Rml::Vector2f startPointer;
+        float startWidth = 0.0f;
+        float startHeight = 0.0f;
+    } mResize;
     bool mInitialOpen = true;
 };
 
 // Shared shell for small-style windows such as Modal and PresetWindow
 class WindowSmall : public Document {
 public:
-    WindowSmall(const Rml::String& windowClass, const Rml::String& dialogClass);
+    explicit WindowSmall(const Rml::String& windowClass);
 
     void show() override;
     void hide(bool close) override;

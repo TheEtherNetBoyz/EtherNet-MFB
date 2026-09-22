@@ -21,6 +21,7 @@
 #include "d/d_debug_viewer.h"
 #include "d/d_kankyo_debug.h"
 #include "d/d_kankyo_rain.h"
+#include "dusk/TwilightHostApi.h"
 #include "d/d_kankyo_static.h"
 #include "d/d_meter2_info.h"
 #include "d/d_msg_object.h"
@@ -32,17 +33,70 @@
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_lib.h"
 #include "JSystem/JKernel/JKRSolidHeap.h"
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
+
 #if TARGET_PC
-#include "dusk/imgui/ImGuiBloomWindow.hpp"
 #include "dusk/settings.h"
-#include "dusk/frame_interpolation.h"
+#include "dusk/audio/DuskAudioSystem.h"
+#include "dusk/speedrun.h"
 #include "dusk/game_clock.h"
+#include "dusk/interp/material.h"
+#include "dusk/imgui/ImGuiBloomWindow.hpp"
 static f32 timeScale = 1.0f;
 #endif
 
 static void GxXFog_set();
+
+#if TARGET_PC
+#endif
+
+#if TARGET_PC
+static DuskEnvironmentHooksV1 s_environment_hooks{};
+void dKy_set_environment_hooks(const DuskEnvironmentHooksV1* hooks) {
+    s_environment_hooks = hooks ? *hooks : DuskEnvironmentHooksV1{};
+}
+static DuskTwilightBloomProviderV1 s_external_visual_bloom_provider = nullptr;
+static DuskGeometryHooksV1 s_geometry_hooks{};
+static DuskSequenceHooksV1 s_sequence_hooks{};
+void dKy_set_sequence_hooks(const DuskSequenceHooksV1* hooks) {
+    s_sequence_hooks = hooks ? *hooks : DuskSequenceHooksV1{};
+}
+const DuskSequenceHooksV1& dKy_sequence_hooks() { return s_sequence_hooks; }
+static DuskPlayerHooksV1 s_player_hooks{};
+void dKy_set_player_hooks(const DuskPlayerHooksV1* hooks) {
+    s_player_hooks = hooks ? *hooks : DuskPlayerHooksV1{};
+}
+const DuskPlayerHooksV1& dKy_player_hooks() { return s_player_hooks; }
+const DuskGeometryHooksV1& dKy_geometry_hooks() { return s_geometry_hooks; }
+void dKy_set_geometry_hooks(const DuskGeometryHooksV1* hooks) {
+    s_geometry_hooks = hooks != nullptr ? *hooks : DuskGeometryHooksV1{};
+}
+
+
+
+
+void dKy_set_external_visual_bloom_provider(DuskTwilightBloomProviderV1 provider) {
+    s_external_visual_bloom_provider = provider;
+}
+
+
+
+
+
+
+#endif
+#if TARGET_PC
+
+#endif
+
+
+#if TARGET_PC
+#endif
+
+
 
 #if TARGET_PC
 static bool dKy_shouldRefreshAcceleratedRoomBgm() {
@@ -1229,7 +1283,7 @@ void dKy_light_size_get(char const* stageName) {
     dKydata_lightsizeInfo_c* size_tbl = dKyd_light_size_tbl_getp();
     dKydata_lightsizeInfo_c* tw_size_tbl = dKyd_light_tw_size_tbl_getp();
 
-    if (!dKy_twilight_visuals_check()) {
+    if (!dKy_darkworld_visual_effect_check()) {
         for (int i = 0; i < 36; i++) {
             if (!strcmp(stageName, size_tbl->stageName)) {
                 g_env_light.light_size = size_tbl->size;
@@ -1248,7 +1302,20 @@ void dKy_light_size_get(char const* stageName) {
     }
 }
 
+
+static void dKy_update_visual_environment() {
+#if TARGET_PC
+    if (s_environment_hooks.update) s_environment_hooks.update();
+#endif
+}
+
 static void envcolor_init() {
+#if TARGET_PC
+    if (s_environment_hooks.commitArea) s_environment_hooks.commitArea();
+#endif
+
+    dKy_update_visual_environment();
+
     stage_palette_info_class* stage_palette_p = dComIfGp_getStagePaletteInfo();
     stage_pselect_info_class* stage_psel_p = dComIfGp_getStagePselectInfo();
     stage_envr_info_class* stage_envr_p = dComIfGp_getStageEnvrInfo();
@@ -1449,7 +1516,7 @@ static void envcolor_init() {
     g_kankyoHIO.navy.influence_multiplier = 1.0f;
     g_kankyoHIO.navy.cutoff_multiplier = 1.0f;
 
-    if (dKy_darkworld_check()) {
+    if (dKy_darkworld_visual_effect_check()) {
         g_kankyoHIO.navy.cloud_sunny_wind_influence_rate = 80.0f;
         g_kankyoHIO.navy.cloud_sunny_bottom_height = 0.0f;
         g_kankyoHIO.navy.cloud_sunny_top_height = 0.0f;
@@ -1654,7 +1721,7 @@ void dScnKy_env_light_c::setDaytime() {
             data_8074c978++;
         }
     }
-    #endif
+#endif
 
     if (daytime >= 360.0f) {
         daytime = 0.0f;
@@ -1811,9 +1878,7 @@ void dScnKy_env_light_c::setLight_palno_get(u8* prev_envr_id_p, u8* next_envr_id
     u8 psel_idx = 0;
     int i;
     int sp14 = 0;
-#if TARGET_PC
-    const f32 timeScale = (pattern_ratio_p == &g_env_light.pat_ratio) ? ::timeScale : 1.0f;
-#endif
+    IF_DUSK(const f32 timeScale = pattern_ratio_p == &g_env_light.pat_ratio ? ::timeScale : 1.0f);
 
     if (*init_timer_p != 0) {
         (*init_timer_p)++;
@@ -2472,10 +2537,7 @@ void dScnKy_env_light_c::setLight() {
         u8 next_pal_start_id;
         u8 prev_pal_end_id;
         u8 next_pal_end_id;
-#if TARGET_PC
-        const f32 deltaTime = dusk::game_clock::consume_interval(this);
-        timeScale = deltaTime / dusk::game_clock::kSimPeriod;
-#endif
+        IF_DUSK(timeScale = dusk::game_clock::original_frames());
         setLight_palno_get(&g_env_light.PrevCol, &g_env_light.UseCol, &g_env_light.wether_pat0,
                            &g_env_light.wether_pat1, &prev_pal_start_id, &prev_pal_end_id,
                            &next_pal_start_id, &next_pal_end_id, &color_ratio, &start_pat_pal_id,
@@ -2626,6 +2688,14 @@ void dScnKy_env_light_c::setLight() {
                 color_ratio = g_env_light.field_0x1278;
             }
 
+            if (s_external_visual_bloom_provider) {
+                const u8 profile = s_external_visual_bloom_provider(0xff);
+                if (profile != 0xff) {
+                    prev_bloom_start_id = next_bloom_start_id = prev_bloom_end_id =
+                        next_bloom_end_id = profile;
+                }
+            }
+
             GXColor bloom_blend_col;
 
             dKydata_BloomInfo_c* bloomInf0_p;
@@ -2655,7 +2725,7 @@ void dScnKy_env_light_c::setLight() {
 
             GXColor bloom_mono_col;
 
-            if (dKy_twilight_visuals_check()) {
+            if (dKy_darkworld_visual_effect_check()) {
                 static s16 S_fuwan_sin;
 
                 f32 sin = cM_ssin(S_fuwan_sin);
@@ -2739,6 +2809,7 @@ void dScnKy_env_light_c::setLight() {
 
 #if TARGET_PC
             dusk::ApplyBloomOverride();
+
 #endif
 
             f32 var_f30;
@@ -2782,7 +2853,7 @@ void dScnKy_env_light_c::setLight() {
                 field_0x123c = 0.65f;
             }
 
-            if (dKy_twilight_visuals_check()) {
+            if (dKy_darkworld_visual_effect_check()) {
                 var_f30 = 0.55f;
                 field_0x123c = 0.55f;
             }
@@ -2953,6 +3024,7 @@ void dScnKy_env_light_c::setLight() {
                 vrbox_kasumi_inner_col.g = 0;
                 vrbox_kasumi_inner_col.b = 0;
             }
+
             }
 
             #if DEBUG
@@ -3281,9 +3353,9 @@ void dScnKy_env_light_c::settingTevStruct_colget_actor(cXyz* unused, dKy_tevstr_
     }
 
     if ((tevstr_p->Type >= 1 && tevstr_p->Type <= 7) ||
-        (tevstr_p->Type == 9 && dKy_darkworld_check()))
+        (tevstr_p->Type == 9 && dKy_darkworld_visual_effect_check()))
     {
-        if ((tevstr_p->Type != 2 && tevstr_p->Type != 3) || dKy_darkworld_check()) {
+        if ((tevstr_p->Type != 2 && tevstr_p->Type != 3) || dKy_darkworld_visual_effect_check()) {
             tevstr_p->field_0x374 = 0.0f;
         }
     }
@@ -3405,11 +3477,11 @@ void dScnKy_env_light_c::settingTevStruct_plightcol_plus(cXyz* pos_p, dKy_tevstr
 
         if (tevstr_p->Type == 7 || tevstr_p->Type == 1 ||
             ((tevstr_p->Type == 2 || tevstr_p->Type == 6 || tevstr_p->Type == 3) &&
-             dKy_darkworld_check()) ||
+             dKy_darkworld_visual_effect_check()) ||
             tevstr_p->Type == 4 || tevstr_p->Type == 5)
         {
             light_inf_id = -2;
-        } else if (tevstr_p->Type == 9 && dKy_darkworld_check()) {
+        } else if (tevstr_p->Type == 9 && dKy_darkworld_visual_effect_check()) {
             light_inf_id = -2;
         }
 
@@ -3546,7 +3618,7 @@ void dScnKy_env_light_c::settingTevStruct_plightcol_plus(cXyz* pos_p, dKy_tevstr
                     light_power = 5000.0f;
                     break;
                 case 2:
-                    if (dKy_darkworld_check()) {
+                    if (dKy_darkworld_visual_effect_check()) {
                         field_0x10f8.r = 103;
                         field_0x10f8.g = 129;
                         field_0x10f8.b = 199;
@@ -3555,7 +3627,7 @@ void dScnKy_env_light_c::settingTevStruct_plightcol_plus(cXyz* pos_p, dKy_tevstr
                     }
                     break;
                 case 3:
-                    if (dKy_darkworld_check()) {
+                    if (dKy_darkworld_visual_effect_check()) {
                         field_0x10f8.r = 53;
                         field_0x10f8.g = 53;
                         field_0x10f8.b = 80;
@@ -3564,7 +3636,7 @@ void dScnKy_env_light_c::settingTevStruct_plightcol_plus(cXyz* pos_p, dKy_tevstr
                     }
                     break;
                 case 9:
-                    if (dKy_darkworld_check()) {
+                    if (dKy_darkworld_visual_effect_check()) {
                         field_0x10f8.r = 110;
                         field_0x10f8.g = 110;
                         field_0x10f8.b = 140;
@@ -3595,7 +3667,7 @@ void dScnKy_env_light_c::settingTevStruct_plightcol_plus(cXyz* pos_p, dKy_tevstr
                     break;
                 }
                 case 6:
-                    if (dKy_darkworld_check()) {
+                    if (dKy_darkworld_visual_effect_check()) {
                         field_0x10f8.r = 255;
                         field_0x10f8.g = 255;
                         field_0x10f8.b = 255;
@@ -3881,7 +3953,7 @@ void dScnKy_env_light_c::settingTevStruct(int tevstrType, cXyz* pos_p, dKy_tevst
             tevstr_p->UseCol = tevstr_p->room_no;
         }
 
-        if (!dKy_darkworld_check()) {
+        if (!dKy_darkworld_visual_effect_check()) {
             field_0x10f0.r = 24;
             field_0x10f0.g = 24;
             field_0x10f0.b = 24;
@@ -3913,7 +3985,7 @@ void dScnKy_env_light_c::settingTevStruct(int tevstrType, cXyz* pos_p, dKy_tevst
             J3DLightInfo& light_info = *tevstr_p->mLights[i].getLightInfo();
 
             if (i == 0) {
-                if (!dKy_darkworld_check()) {
+                if (!dKy_darkworld_visual_effect_check()) {
                     light_info.mColor.r = 126;
                     light_info.mColor.g = 110;
                     light_info.mColor.b = 89;
@@ -3931,7 +4003,7 @@ void dScnKy_env_light_c::settingTevStruct(int tevstrType, cXyz* pos_p, dKy_tevst
                 }
                 #endif
             } else if (i == 1) {
-                if (!dKy_darkworld_check()) {
+                if (!dKy_darkworld_visual_effect_check()) {
                     light_info.mColor.r = 24;
                     light_info.mColor.g = 41;
                     light_info.mColor.b = 50;
@@ -4397,8 +4469,8 @@ static void setLightTevColorType_MAJI_sub(J3DMaterial* material_p, dKy_tevstr_c*
         amb_col.a = tevstr_p->AmbCol.a;
 
         if (((tevstr_p->Type >= 1 && tevstr_p->Type <= 7) || tevstr_p->Type == 5 ||
-             tevstr_p->Type == 15 || (tevstr_p->Type == 9 && dKy_darkworld_check())) &&
-            ((tevstr_p->Type != 2 && tevstr_p->Type != 3) || dKy_darkworld_check()))
+             tevstr_p->Type == 15 || (tevstr_p->Type == 9 && dKy_darkworld_visual_effect_check())) &&
+            ((tevstr_p->Type != 2 && tevstr_p->Type != 3) || dKy_darkworld_visual_effect_check()))
         {
             amb_col.r = 0;
             amb_col.g = 0;
@@ -4438,7 +4510,7 @@ static void setLightTevColorType_MAJI_sub(J3DMaterial* material_p, dKy_tevstr_c*
 
             #if DEBUG
             if ((tevstr_p->Type == 4 || tevstr_p->Type == 2 || tevstr_p->Type == 1 || tevstr_p->Type == 7 ||
-                tevstr_p->Type == 6 || tevstr_p->Type == 5 || tevstr_p->Type == 15 || (tevstr_p->Type == 9 && dKy_darkworld_check())))
+                tevstr_p->Type == 6 || tevstr_p->Type == 5 || tevstr_p->Type == 15 || (tevstr_p->Type == 9 && dKy_darkworld_visual_effect_check())))
             {
                 if (g_kankyoHIO.navy.adjust_light_mode == 2) {
                     amb_col.r = g_kankyoHIO.navy.adjust_light_ambcol.r & 0xFF;
@@ -4638,6 +4710,7 @@ static void setLightTevColorType_MAJI_sub(J3DMaterial* material_p, dKy_tevstr_c*
                 }
             }
         }
+        IF_DUSK(dusk::interp::material::record_light_view(material_p));
     }
 }
 
@@ -4862,6 +4935,8 @@ void dScnKy_env_light_c::SetBaseLight() {
 
 void dScnKy_env_light_c::exeKankyo() {
     int sp18 = 0;
+
+    dKy_update_visual_environment();
 
     for (int i = 0; i < 6; i++) {
         field_0x0c18[i].field_0x26 = 0;
@@ -8369,12 +8444,21 @@ static int dKy_Draw(sub_kankyo__class* i_this) {
     return 1;
 }
 
+#if TARGET_PC
+static void dKy_update_visual_twilight_audio() {
+    if (s_sequence_hooks.tick) s_sequence_hooks.tick();
+}
+#endif
+
 static int dKy_Execute(sub_kankyo__class* i_this) {
     UNUSED(i_this);
     dScnKy_env_light_c* kankyo = dKy_getEnvlight();
     g_env_light.exeKankyo();
     dKyw_wind_set();
     dKy_twilight_camelight_set();
+#if TARGET_PC
+    dKy_update_visual_twilight_audio();
+#endif
 
     #if DEBUG
     if (g_kankyoHIO.display_schedule_bit) {
@@ -8428,9 +8512,7 @@ static int dKy_Create(void* i_this) {
     kankyo_class* kankyo = (kankyo_class*)i_this;
     BOOL next_time_set = false;
 
-#if TARGET_PC
-    kankyo->base.draw_interp_frame = true;
-#endif
+    IF_DUSK(kankyo->base.draw_interp_frame = true);
 
     stage_envr_info_class* stage_envr_p = dComIfGp_getStageEnvrInfo();
     if (stage_envr_p != NULL && dComIfGp_getStartStageRoomNo() != -1) {
@@ -9203,7 +9285,7 @@ void dKy_Global_amb_set(dKy_tevstr_c* tevstr_p) {
     color.a = tevstr_p->AmbCol.a;
 
     if (tevstr_p->Type == 2 || tevstr_p->Type == 3) {
-        if (dKy_darkworld_check()) {
+        if (dKy_darkworld_visual_effect_check()) {
             if (tevstr_p->Type == 2) {
                 color.r = 18;
                 color.g = 18;
@@ -9217,7 +9299,7 @@ void dKy_Global_amb_set(dKy_tevstr_c* tevstr_p) {
             }
         }
     } else if ((tevstr_p->Type >= 1 && tevstr_p->Type <= 7) ||
-               (tevstr_p->Type == 9 && dKy_darkworld_check()))
+               (tevstr_p->Type == 9 && dKy_darkworld_visual_effect_check()))
     {
         color.r = 0;
         color.g = 0;
@@ -9526,7 +9608,7 @@ void dKy_SordFlush_set(cXyz light_pos, int light_type) {
     dScnKy_env_light_c* light = dKy_getEnvlight();
     EF_THUNDER* thunder = &light->mThunderEff;
 
-    if (!dKy_darkworld_check() && (thunder->mState >= 10 || thunder->mFlashTimer <= 0.0f)) {
+    if (!dKy_darkworld_visual_effect_check() && (thunder->mState >= 10 || thunder->mFlashTimer <= 0.0f)) {
         if (g_env_light.eflight.mState == 0) {
             g_env_light.eflight.mState = 1;
             g_env_light.eflight.mLightType = light_type;
@@ -10429,7 +10511,7 @@ void dKy_twilight_camelight_set() {
     if (strcmp(dComIfGp_getStartStageName(), "R_SP107") != 0 ||
         dComIfGp_roomControl_getStayNo() != 3 || dComIfGp_getStartStageLayer() != 12)
     {
-        if (!dKy_twilight_visuals_check() || memcmp(dComIfGp_getStartStageName(), "D_MN08", 6) == 0) {
+        if (!dKy_darkworld_visual_check() || memcmp(dComIfGp_getStartStageName(), "D_MN08", 6) == 0) {
             return;
         }
 
@@ -11126,7 +11208,7 @@ BOOL dKy_TeachWind_existence_chk() {
 
 BOOL dKy_SunMoon_Light_Check() {
     BOOL check = false;
-    if (g_env_light.mSunInitialized && !dKy_darkworld_check()) {
+    if (g_env_light.mSunInitialized && !dKy_darkworld_visual_effect_check()) {
         // stage is not City in the Sky, Hyrule Castle, or Hidden Skill area
         if (memcmp(dComIfGp_getStartStageName(), "D_MN07", 6) &&
             memcmp(dComIfGp_getStartStageName(), "D_MN09", 6) &&
@@ -11220,6 +11302,14 @@ void dKy_depth_dist_set(void* process_p) {
     }
 }
 
+void dKy_visual_enemy_form_context_set(u8 enabled) {
+#if TARGET_PC
+    if (s_environment_hooks.actorContext) s_environment_hooks.actorContext(enabled);
+#else
+    UNUSED(enabled);
+#endif
+}
+
 u8 dKy_darkworld_check() {
     dScnKy_env_light_c* kankyo = dKy_getEnvlight();
     u8 check = FALSE;
@@ -11228,6 +11318,10 @@ u8 dKy_darkworld_check() {
     if (dComIfGp_world_dark_get() == TRUE) {
         check = TRUE;
     }
+
+#if TARGET_PC
+    if (s_environment_hooks.query) check = s_environment_hooks.query(DuskEnvironment_ActorTwilight, check);
+#endif
 
     return check;
 }
@@ -11240,8 +11334,31 @@ BOOL dKy_force_twilight_visuals_check() {
 #endif
 }
 
+u8 dKy_darkworld_visual_check() {
+    u8 check = dKy_darkworld_check() || dKy_force_twilight_visuals_check();
+#if TARGET_PC
+    if (s_environment_hooks.query) return s_environment_hooks.query(DuskEnvironment_VisualTwilight, check);
+#endif
+    return check;
+}
+
+u8 dKy_darkworld_visual_effect_check() {
+    u8 check = dKy_darkworld_check() || dKy_force_twilight_visuals_check();
+#if TARGET_PC
+    if (s_environment_hooks.query) return s_environment_hooks.query(DuskEnvironment_TwilightEffects, check);
+#endif
+    return check;
+}
+
+u8 dKy_visual_snow_storm_check() {
+#if TARGET_PC
+    if (s_environment_hooks.query) return s_environment_hooks.query(DuskEnvironment_SnowStorm, 0);
+#endif
+    return 0;
+}
+
 BOOL dKy_twilight_visuals_check() {
-    return dKy_darkworld_check() || dKy_force_twilight_visuals_check();
+    return dKy_darkworld_visual_check();
 }
 
 /**
@@ -11652,7 +11769,7 @@ void dKy_bg_MAxx_proc(void* bg_model_p) {
 
                 if (memcmp(&mat_name[3], "MA11", 4) == 0) {
                     GXColorS10 sp90;
-                    if (dKy_darkworld_check()) {
+                    if (dKy_darkworld_visual_effect_check()) {
                         dComIfGd_setListDarkBG();
 
                         sp90.r = 170;

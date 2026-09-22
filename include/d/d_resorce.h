@@ -14,6 +14,7 @@ public:
     ~dRes_info_c();
 
     int set(char const* i_arcName, char const* i_path, u8 i_mountDirection, JKRHeap* i_heap);
+    int setFile(char const* i_arcName, char const* i_filePath, u8 i_mountDirection, JKRHeap* i_heap);
     int loadResource();
     void deleteArchiveRes();
     int setRes(JKRArchive* i_archive, JKRHeap* i_heap);
@@ -51,7 +52,6 @@ public:
     static const int NAME_MAX = 9;
 #endif
 
-private:
     /* 0x00 */ char mArchiveName[11];
     /* 0x0C */ u16 mCount;
     /* 0x10 */ mDoDvdThd_mountArchive_c* mDMCommand;
