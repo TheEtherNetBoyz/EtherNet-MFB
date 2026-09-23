@@ -1852,7 +1852,8 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 }
             });
 
-        // TODO: Individual sliders for Sub Music, Sound Effects, and Fanfare.
+        // Background music is routed through the sequence/stream music buses in
+        // f_ap_game.cpp, so this does not change sound effects or voice volume.
         leftPane.add_section("Volume");
         config_int_select(leftPane, rightPane, getSettings().audio.masterVolume,
             "Master Volume", "Adjusts the volume of all sounds in the game.", 0, 100, 5, {},
@@ -1860,7 +1861,8 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 audio::SetMasterVolume(audio::MasterVolumeToLinear(value / 100.0f));
             }, "%");
         config_int_select(leftPane, rightPane, getSettings().audio.mainMusicVolume,
-            "Main Music Volume", "Adjusts the volume of all music in the game.",
+            "Background Music Volume",
+            "Adjusts background music without changing sound effects or voices.",
             0, 100, 5, {}, {}, "%");
 
         leftPane.add_section("Effects");
