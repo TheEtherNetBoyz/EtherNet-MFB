@@ -10,7 +10,7 @@
 
 #define WINDOW_SERVICE_ID DUSKLIGHT_SERVICE_ID_PREFIX "window"
 #define WINDOW_SERVICE_MAJOR 1u
-#define WINDOW_SERVICE_MINOR 1u
+#define WINDOW_SERVICE_MINOR 2u
 
 #define WINDOW_POSITION_UNDEFINED INT32_MIN
 
@@ -115,6 +115,8 @@ typedef struct WindowService {
     /* Minor version 1. Captures/releases relative mouse input for an auxiliary window. */
     ModResult (*set_relative_mouse_mode)(
         ModContext* ctx, WindowHandle window, bool enabled);
+    /* Minor version 2. Changes whether an auxiliary window stays above other windows. */
+    ModResult (*set_always_on_top)(ModContext* ctx, WindowHandle window, bool enabled);
 } WindowService;
 
 MOD_DECLARE_SERVICE(

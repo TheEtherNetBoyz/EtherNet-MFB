@@ -221,6 +221,19 @@ ModResult set_relative_mouse_mode_impl(
     return MOD_OK;
 }
 
+ModResult set_always_on_top_impl(ModContext* context, WindowHandle handle, const bool enabled) {
+    auto* mod = mod_from_context(context);
+    auto* slot = mod != nullptr ? resolve_window(*mod, handle) : nullptr;
+    if (slot == nullptr) {
+        return MOD_INVALID_ARGUMENT;
+    }
+    if (!SDL_SetWindowAlwaysOnTop(slot->window, enabled)) {
+        Log.error("[{}] set_always_on_top: {}", mod->metadata.id, SDL_GetError());
+        return MOD_ERROR;
+    }
+    return MOD_OK;
+}
+
 void remove_mod_windows(LoadedMod& mod) {
     auto entries = s_windows.take_all(mod);
     for (auto& entry : entries) {
@@ -239,6 +252,7 @@ constexpr WindowService s_windowService{
     .set_size = set_size_impl,
     .get_info = get_info_impl,
     .set_relative_mouse_mode = set_relative_mouse_mode_impl,
+    .set_always_on_top = set_always_on_top_impl,
 };
 
 }  // namespace

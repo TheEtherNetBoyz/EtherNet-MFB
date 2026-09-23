@@ -49,6 +49,7 @@ constexpr int32_t kScancodeLeftShift = 225;
 ConfigVarHandle g_controls = 0;
 ConfigVarHandle g_moveSpeed = 0;
 ConfigVarHandle g_fov = 0;
+ConfigVarHandle g_alwaysOnTop = 0;
 
 WindowHandle g_window = 0;
 UiWindowHandle g_settingsWindow = 0;
@@ -63,6 +64,7 @@ WGPUTextureFormat g_presentFormat = WGPUTextureFormat_Undefined;
 bool g_resetViewRequested = false;
 bool g_windowFocused = false;
 bool g_mouseCaptured = false;
+bool g_windowAlwaysOnTopApplied = false;
 
 struct InputState {
     bool forward = false;
@@ -438,6 +440,7 @@ ModResult closeWindow() {
         g_window = 0;
     }
     g_windowFocused = false;
+    g_windowAlwaysOnTopApplied = false;
     g_input = {};
     return MOD_OK;
 }
@@ -516,6 +519,22 @@ void syncMouseCapture() {
     }
 }
 
+void syncAlwaysOnTop() {
+    if (g_window == 0) {
+        return;
+    }
+
+    bool wanted = false;
+    svc_config->get_bool(mod_ctx, g_alwaysOnTop, &wanted);
+    if (wanted == g_windowAlwaysOnTopApplied) {
+        return;
+    }
+
+    if (svc_window->set_always_on_top(mod_ctx, g_window, wanted) == MOD_OK) {
+        g_windowAlwaysOnTopApplied = wanted;
+    }
+}
+
 ModResult openWindow() {
     if (g_window != 0) {
         return MOD_CONFLICT;
@@ -526,9 +545,15 @@ ModResult openWindow() {
     g_resetViewRequested = true;
 
     WindowDesc windowDesc = WINDOW_DESC_INIT;
-    windowDesc.title = "Camera 2";
+    windowDesc.title = "Freecam+";
     windowDesc.width = kRenderWidth;
     windowDesc.height = kRenderHeight;
+    bool alwaysOnTop = false;
+    svc_config->get_bool(mod_ctx, g_alwaysOnTop, &alwaysOnTop);
+    if (alwaysOnTop) {
+        windowDesc.flags |= WINDOW_FLAG_ALWAYS_ON_TOP;
+    }
+    g_windowAlwaysOnTopApplied = alwaysOnTop;
     windowDesc.on_event = onWindowEvent;
     ModResult result = svc_window->create_window(mod_ctx, &windowDesc, &g_window);
     if (result != MOD_OK) {
@@ -536,7 +561,7 @@ ModResult openWindow() {
     }
 
     GfxPresentTargetDesc presentDesc = GFX_PRESENT_TARGET_DESC_INIT;
-    presentDesc.label = "Camera 2 surface";
+    presentDesc.label = "Freecam+ surface";
     presentDesc.render = onPresent;
     result = svc_gfx->register_window_present_target(
         mod_ctx, g_window, &presentDesc, &g_presentTarget);
@@ -554,8 +579,8 @@ ModResult openWindow() {
 void onToggleWindow(ModContext*, void*) {
     const ModResult result = g_window == 0 ? openWindow() : closeWindow();
     if (result != MOD_OK) {
-        svc_log->error(mod_ctx, g_window == 0 ? "failed to open Camera 2 window" :
-                                                  "failed to close Camera 2 window");
+        svc_log->error(mod_ctx, g_window == 0 ? "failed to open Freecam+ window" :
+                                                  "failed to close Freecam+ window");
     }
 }
 
@@ -604,26 +629,29 @@ void addNumber(UiElementHandle pane, const char* label, ConfigVarHandle cvar, in
 }
 
 ModResult buildCameraControls(UiElementHandle pane) {
-    svc_ui->pane_add_section(mod_ctx, pane, "Camera 2 Window");
+    svc_ui->pane_add_section(mod_ctx, pane, "Freecam+ Window");
     UiControlDesc windowControl = UI_CONTROL_DESC_INIT;
     windowControl.kind = UI_CONTROL_BUTTON;
-    windowControl.label = "Open / Close Camera 2";
+    windowControl.label = "Open / Close Freecam+";
     windowControl.on_pressed = onToggleWindow;
     svc_ui->pane_add_control(mod_ctx, pane, &windowControl, nullptr);
 
     UiControlDesc resetControl = UI_CONTROL_DESC_INIT;
     resetControl.kind = UI_CONTROL_BUTTON;
-    resetControl.label = "Reset Free Camera";
+    resetControl.label = "Reset Freecam+";
     resetControl.help_rml =
-        "Spawns Camera 2 just above and behind Link once; it remains independent afterward.";
+        "Spawns Freecam+ just above and behind Link once; it remains independent afterward.";
     resetControl.on_pressed = onResetView;
     svc_ui->pane_add_control(mod_ctx, pane, &resetControl, nullptr);
-    addToggle(pane, "Control Camera 2", g_controls,
-        "Camera 2 is an independent free camera. Click its window to capture input. WASD moves, mouse looks, Space/Ctrl move vertically, Shift speeds up, and Escape releases the mouse.");
+    addToggle(pane, "Control Freecam+", g_controls,
+        "Freecam+ is an independent free camera. Click its window to capture input. WASD moves, "
+        "mouse looks, Space/Ctrl move vertically, Shift speeds up, and Escape releases the mouse.");
     addNumber(pane, "Move Speed", g_moveSpeed, 1, 10000, 50, nullptr,
-        "Camera 2 movement speed in world units per second.");
+        "Freecam+ movement speed in world units per second.");
     addNumber(pane, "Field of View", g_fov, 1, 179, 1, " degrees",
-        "Camera 2 vertical field of view.");
+        "Freecam+ vertical field of view.");
+    addToggle(pane, "Always on Top", g_alwaysOnTop,
+        "Keeps the Freecam+ window above other windows and updates while it is open.");
     return MOD_OK;
 }
 
@@ -646,7 +674,7 @@ void onCameraMenuSelected(ModContext*, void*) {
     }
 
     UiTabDesc tab = UI_TAB_DESC_INIT;
-    tab.title = "Camera 2";
+    tab.title = "Freecam+";
     tab.build = buildSettingsTab;
 
     UiWindowDesc window = UI_WINDOW_DESC_INIT;
@@ -654,7 +682,7 @@ void onCameraMenuSelected(ModContext*, void*) {
     window.tab_count = 1;
     window.on_closed = onSettingsWindowClosed;
     if (svc_ui->window_push(mod_ctx, &window, &g_settingsWindow) != MOD_OK) {
-        svc_log->error(mod_ctx, "failed to open Camera 2 settings");
+        svc_log->error(mod_ctx, "failed to open Freecam+ settings");
     }
 }
 
@@ -664,7 +692,7 @@ ModResult registerBool(const char* name, bool defaultValue, ConfigVarHandle& out
     desc.type = CONFIG_VAR_BOOL;
     desc.default_bool = defaultValue;
     if (svc_config->register_var(mod_ctx, &desc, &out) != MOD_OK) {
-        return mods::set_error(error, MOD_ERROR, "failed to register Camera 2 option");
+        return mods::set_error(error, MOD_ERROR, "failed to register Freecam+ option");
     }
     return MOD_OK;
 }
@@ -675,7 +703,7 @@ ModResult registerInt(const char* name, int64_t defaultValue, ConfigVarHandle& o
     desc.type = CONFIG_VAR_INT;
     desc.default_int = defaultValue;
     if (svc_config->register_var(mod_ctx, &desc, &out) != MOD_OK) {
-        return mods::set_error(error, MOD_ERROR, "failed to register Camera 2 option");
+        return mods::set_error(error, MOD_ERROR, "failed to register Freecam+ option");
     }
     return MOD_OK;
 }
@@ -691,35 +719,38 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     if (result != MOD_OK) return result;
     result = registerInt("fov", 60, g_fov, error);
     if (result != MOD_OK) return result;
+    result = registerBool("alwaysOnTop", false, g_alwaysOnTop, error);
+    if (result != MOD_OK) return result;
 
     GfxStageHookDesc stageDesc = GFX_STAGE_HOOK_DESC_INIT;
     stageDesc.callback = onSceneBegin;
     if (svc_gfx->register_stage_hook(
             mod_ctx, GFX_STAGE_SCENE_BEGIN, &stageDesc, &g_sceneBeginHook) != MOD_OK) {
-        return mods::set_error(error, MOD_ERROR, "failed to register Camera 2 scene hook");
+        return mods::set_error(error, MOD_ERROR, "failed to register Freecam+ scene hook");
     }
     stageDesc.callback = onFrameBeforeHud;
     if (svc_gfx->register_stage_hook(
             mod_ctx, GFX_STAGE_FRAME_BEFORE_HUD, &stageDesc, &g_frameBeforeHudHook) != MOD_OK) {
-        return mods::set_error(error, MOD_ERROR, "failed to register Camera 2 frame hook");
+        return mods::set_error(error, MOD_ERROR, "failed to register Freecam+ frame hook");
     }
 
     UiModsPanelDesc panelDesc = UI_MODS_PANEL_DESC_INIT;
     panelDesc.build = buildPanel;
     if (svc_ui->register_mods_panel(mod_ctx, &panelDesc) != MOD_OK) {
-        return mods::set_error(error, MOD_ERROR, "failed to register Camera 2 controls");
+        return mods::set_error(error, MOD_ERROR, "failed to register Freecam+ controls");
     }
 
     UiMenuTabDesc menuDesc = UI_MENU_TAB_DESC_INIT;
-    menuDesc.label = "Camera 2";
+    menuDesc.label = "Freecam+";
     menuDesc.on_selected = onCameraMenuSelected;
     if (svc_ui->register_menu_tab(mod_ctx, &menuDesc, &g_menuTab) != MOD_OK) {
-        return mods::set_error(error, MOD_ERROR, "failed to register Camera 2 menu tab");
+        return mods::set_error(error, MOD_ERROR, "failed to register Freecam+ menu tab");
     }
     return MOD_OK;
 }
 
 MOD_EXPORT ModResult mod_update(ModError*) {
+    syncAlwaysOnTop();
     syncMouseCapture();
     updateControls(1.0f / 60.0f);
     return MOD_OK;
@@ -744,7 +775,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     }
     closeWindow();
     releasePresentPipeline();
-    g_controls = g_moveSpeed = g_fov = 0;
+    g_controls = g_moveSpeed = g_fov = g_alwaysOnTop = 0;
     return MOD_OK;
 }
 
