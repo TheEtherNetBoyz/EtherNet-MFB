@@ -52,6 +52,7 @@
 #include "dusk/gfx.hpp"
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/load_position_overlay.hpp"
+#include "dusk/rupee_slide_tools.hpp"
 #include "dusk/interp/frame_interpolation.h"
 #include "dusk/logging.h"
 #include "dusk/settings.h"
@@ -2503,6 +2504,7 @@ int mDoGph_Painter() {
     }
 
 #if TARGET_PC
+    dusk::UpdateRupeeSlidePresentation();
     dusk::g_imguiConsole.PreDraw();
     drawDuskLoadPositionOverlay();
 #endif

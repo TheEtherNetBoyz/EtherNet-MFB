@@ -597,7 +597,7 @@ namespace dusk {
             }
         }
 
-        void updateRepeatableGreenRupeeShortcuts(daAlink_c* player) {
+        void updateRepeatableGreenRupeeInput(daAlink_c* player) {
             ensureSlideRecordingLoaded();
 
             constexpr u32 captureCombo = PAD_BUTTON_A | PAD_BUTTON_LEFT | PAD_TRIGGER_Z;
@@ -610,8 +610,6 @@ namespace dusk {
             s16 loggedAngle = 0;
             const bool hasLoggedPosition =
                 GetLoggedRupeeSlidePosition(loggedPosition, loggedAngle);
-
-            updateSlidePresentation(player, camera);
 
             if (!game_clock::is_sim_frame()) {
                 return;
@@ -631,10 +629,24 @@ namespace dusk {
         }
     }
 
-    void UpdateRupeeSlideTools() {
+    void UpdateRupeeSlideSimulation() {
         daAlink_c* player = static_cast<daAlink_c*>(dComIfGp_getPlayer(0));
         updateSupportPlatform(player);
-        updateRepeatableGreenRupeeShortcuts(player);
+        updateRepeatableGreenRupeeInput(player);
+        updateSlidePresentation(player, dCam_getBody());
+    }
+
+    void UpdateRupeeSlidePresentation() {
+        if (game_clock::is_sim_frame()) {
+            return;
+        }
+        daAlink_c* player = static_cast<daAlink_c*>(dComIfGp_getPlayer(0));
+        updateSlidePresentation(player, dCam_getBody());
+    }
+
+    void UpdateRupeeSlideTools() {
+        UpdateRupeeSlideSimulation();
+        UpdateRupeeSlidePresentation();
     }
 
 #if 0

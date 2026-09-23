@@ -61,6 +61,7 @@
 #include "dusk/mouse.h"
 #include "dusk/os.h"
 #include "dusk/presentation.hpp"
+#include "dusk/rupee_slide_tools.hpp"
 #include "dusk/settings.h"
 #include "dusk/speedrun.h"
 #include "dusk/texture_replacements.hpp"
@@ -315,6 +316,7 @@ void main01(void) {
                     dusk::tas_movie::restorePresentationCamera();
                     mDoAud_Execute();
                     dusk::UpdateLoadPositionDriftNative();
+                    dusk::UpdateRupeeSlideSimulation();
                     dusk::game_clock::commit_sim_tick();
                     ++completedSimTicks;
                     if (tasBatchActive &&
@@ -367,6 +369,7 @@ void main01(void) {
                 dusk::tas_movie::restorePresentationCamera();
                 mDoAud_Execute();
                 dusk::UpdateLoadPositionDriftNative();
+                dusk::UpdateRupeeSlideSimulation();
                 dusk::game_clock::commit_sim_tick();
                 if (tasBatchActive &&
                     (!dusk::tas_movie::active() || dusk::tas_movie::paused())) {

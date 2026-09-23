@@ -290,8 +290,6 @@ void UpdateCameraPlayback(dCamera_c* camera) {
 
 namespace dusk {
     void ImGuiMenuTools::ShowCameraOverlay() {
-        UpdateRupeeSlideTools();
-
         auto* cam = (camera_process_class*)dCam_getCamera();
         auto* dCam = cam != nullptr ? &cam->mCamera : nullptr;
         UpdateCameraPlayback(dCam);
