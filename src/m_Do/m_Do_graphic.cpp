@@ -51,7 +51,6 @@
 #include "dusk/game_clock.h"
 #include "dusk/gfx.hpp"
 #include "dusk/imgui/ImGuiConsole.hpp"
-#include "dusk/load_position_overlay.hpp"
 #include "dusk/rupee_slide_tools.hpp"
 #include "dusk/interp/frame_interpolation.h"
 #include "dusk/logging.h"
@@ -251,17 +250,6 @@ static void drawHeapMap() {
 }
 
 #endif
-
-class dDlst_duskLoadPositionOverlay_c : public dDlst_base_c {
-public:
-    void draw() override { dusk::DrawLoadPositionOverlayNative(); }
-};
-
-static dDlst_duskLoadPositionOverlay_c l_duskLoadPositionOverlay;
-
-static void drawDuskLoadPositionOverlay() {
-    dComIfGd_set2DXlu(&l_duskLoadPositionOverlay);
-}
 
 static ResTIMG* createTimg(u16 width, u16 height, u32 format) {
     u32 bufferSize = GXGetTexBufferSize(width, height, format, GX_FALSE, 0) + 0x20;
@@ -2506,7 +2494,6 @@ int mDoGph_Painter() {
 #if TARGET_PC
     dusk::UpdateRupeeSlidePresentation();
     dusk::g_imguiConsole.PreDraw();
-    drawDuskLoadPositionOverlay();
 #endif
 
     #if DEBUG

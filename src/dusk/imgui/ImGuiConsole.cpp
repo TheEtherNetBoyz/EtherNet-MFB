@@ -20,6 +20,7 @@
 #include "dusk/input_macro.h"
 #include "dusk/game_mode.hpp"
 #include "dusk/livesplit.h"
+#include "dusk/load_position_overlay.hpp"
 #include "dusk/main.h"
 #include "dusk/presentation.hpp"
 #include "dusk/settings.h"
@@ -542,6 +543,10 @@ namespace dusk {
         }
 
         m_menuTools.ShowInputViewer();
+
+        if (dusk::IsGameLaunched) {
+            dusk::DrawLoadPositionOverlayImGui();
+        }
 
         if (dusk::IsGameLaunched && !dusk::speedrun::isActive()) {
             m_menuTools.UpdateTasMovie();

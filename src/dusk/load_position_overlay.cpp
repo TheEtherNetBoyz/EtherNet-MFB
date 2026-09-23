@@ -8,10 +8,15 @@
 #include "d/actor/d_a_alink.h"
 #include "d/d_com_inf_game.h"
 #include "dusk/config.hpp"
+#include "dusk/game_clock.h"
 #include "dusk/settings.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_graphic.h"
+#include "dolphin/pad.h"
+#include <SDL3/SDL_gamepad.h>
+#include <imgui.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -70,9 +75,9 @@ void project_drift(float dx, float dz, s16 facingAngle, float& forward, float& r
     right = -dx * forwardZ + dz * forwardX;
 }
 
-// Drift is accumulated in Link-local space on every simulation tick. This ensures each
-// displacement uses the rendered orientation from the tick in which it actually happened.
-constexpr unsigned int kDriftSampleTicks = 5 * 60 * 30;
+// Drift is accumulated in Link-local space on every simulation tick. The published
+// forward/right result is refreshed every five minutes of simulation time.
+constexpr float kDriftSampleSeconds = 5.0f * 60.0f;
 constexpr unsigned int kSlidePositionSaveTicks = 20 * 60 * 30;
 bool s_havePreviousPosition = false;
 float s_previousX = 0.0f;
@@ -81,7 +86,7 @@ float s_accumulatedForward = 0.0f;
 float s_accumulatedRight = 0.0f;
 float s_publishedForward = 0.0f;
 float s_publishedRight = 0.0f;
-unsigned int s_ticksInWindow = 0;
+float s_driftWindowSeconds = 0.0f;
 unsigned int s_slidePositionTicks = 0;
 std::string s_slideTimerStage;
 s8 s_slideTimerRoom = -1;
@@ -94,6 +99,26 @@ s8 s_loggedSlideRoom = -1;
 s8 s_loggedSlideLayer = -1;
 bool s_loggedSlidePositionValid = false;
 bool s_loggedSlidePositionLoaded = false;
+bool s_overlayVisible = true;
+bool s_overlayToggleComboHeld = false;
+float s_overlayScale = 1.0f;
+enum class OverlaySnap { None, TopLeft, TopRight, BottomLeft, BottomRight };
+OverlaySnap s_overlaySnapRequest = OverlaySnap::None;
+
+bool overlayToggleComboHeld() {
+    const u32 physicalHold = mDoCPd_c::getUnfilteredHold(PAD_1);
+    const u32 hold = mDoCPd_c::getHold(PAD_1);
+    const SDL_Gamepad* gamepad = PADGetSDLGamepadForIndex(PAD_1);
+    const bool leftShoulderHeld =
+        gamepad != nullptr && SDL_GetGamepadButton(
+            const_cast<SDL_Gamepad*>(gamepad), SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+    const bool lHeld = (physicalHold & PAD_TRIGGER_L) != 0 ||
+                       (hold & PAD_TRIGGER_L) != 0 || leftShoulderHeld ||
+                       mDoCPd_c::getHoldLockL(PAD_1) || mDoCPd_c::getAnalogL(PAD_1) > 0.6f;
+    const bool startHeld = (physicalHold & PAD_BUTTON_START) != 0 ||
+                           (hold & PAD_BUTTON_START) != 0;
+    return lHeld && startHeld;
+}
 
 void loadLoggedSlidePosition() {
     if (s_loggedSlidePositionLoaded) {
@@ -177,7 +202,16 @@ void updateLoggedSlidePosition(const daAlink_c* link) {
 
 }  // namespace
 
+void UpdateLoadPositionOverlayInput() {
+    const bool comboHeld = overlayToggleComboHeld();
+    if (comboHeld && !s_overlayToggleComboHeld) {
+        s_overlayVisible = !s_overlayVisible;
+    }
+    s_overlayToggleComboHeld = comboHeld;
+}
+
 void UpdateLoadPositionDriftNative() {
+    UpdateLoadPositionOverlayInput();
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
     const daAlink_c* link = daAlink_getAlinkActorClass();
     if (player == nullptr || link == nullptr) {
@@ -208,13 +242,94 @@ void UpdateLoadPositionDriftNative() {
     s_previousX = xPos;
     s_previousZ = zPos;
 
-    if (++s_ticksInWindow >= kDriftSampleTicks) {
+    s_driftWindowSeconds += game_clock::sim_pace();
+    if (s_driftWindowSeconds >= kDriftSampleSeconds) {
         s_publishedForward = s_accumulatedForward;
         s_publishedRight = s_accumulatedRight;
         s_accumulatedForward = 0.0f;
         s_accumulatedRight = 0.0f;
-        s_ticksInWindow = 0;
+        s_driftWindowSeconds = 0.0f;
     }
+}
+
+void DrawLoadPositionOverlayImGui() {
+    if (!s_overlayVisible) {
+        return;
+    }
+
+    fopAc_ac_c* player = dComIfGp_getPlayer(0);
+    if (player == nullptr) {
+        return;
+    }
+
+    ImGui::SetNextWindowPos(ImVec2(8.0f, 12.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(330.0f, 92.0f), ImGuiCond_FirstUseEver);
+    constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar |
+                                       ImGuiWindowFlags_NoBackground |
+                                       ImGuiWindowFlags_NoFocusOnAppearing |
+                                       ImGuiWindowFlags_NoNav |
+                                       ImGuiWindowFlags_NoCollapse;
+    if (ImGui::Begin("Rupee Slide Position", nullptr, flags)) {
+        ImGui::SetWindowFontScale(s_overlayScale);
+
+        const float dragWidth = ImGui::GetContentRegionAvail().x;
+        ImGui::InvisibleButton("##RupeeSlideDrag", ImVec2(dragWidth, 7.0f),
+                               ImGuiButtonFlags_MouseButtonLeft);
+        if (ImGui::IsItemActive()) {
+            ImVec2 position = ImGui::GetWindowPos();
+            position.x += ImGui::GetIO().MouseDelta.x;
+            position.y += ImGui::GetIO().MouseDelta.y;
+            ImGui::SetWindowPos(position, ImGuiCond_Always);
+        }
+
+        if (ImGui::BeginPopupContextWindow("Rupee Slide Position Menu")) {
+            ImGui::TextUnformatted("Overlay layout");
+            ImGui::Separator();
+            ImGui::SliderFloat("Scale", &s_overlayScale, 0.75f, 2.0f, "%.2fx");
+            ImGui::Separator();
+            if (ImGui::MenuItem("Snap top-left")) {
+                s_overlaySnapRequest = OverlaySnap::TopLeft;
+            }
+            if (ImGui::MenuItem("Snap top-right")) {
+                s_overlaySnapRequest = OverlaySnap::TopRight;
+            }
+            if (ImGui::MenuItem("Snap bottom-left")) {
+                s_overlaySnapRequest = OverlaySnap::BottomLeft;
+            }
+            if (ImGui::MenuItem("Snap bottom-right")) {
+                s_overlaySnapRequest = OverlaySnap::BottomRight;
+            }
+            if (ImGui::MenuItem("Reset position")) {
+                s_overlaySnapRequest = OverlaySnap::TopLeft;
+            }
+            ImGui::EndPopup();
+        }
+
+        if (s_overlaySnapRequest != OverlaySnap::None) {
+            constexpr float margin = 12.0f;
+            const ImVec2 displaySize = ImGui::GetIO().DisplaySize;
+            const ImVec2 windowSize = ImGui::GetWindowSize();
+            ImVec2 position(margin, margin);
+            if (s_overlaySnapRequest == OverlaySnap::TopRight ||
+                s_overlaySnapRequest == OverlaySnap::BottomRight) {
+                position.x = std::max(margin, displaySize.x - windowSize.x - margin);
+            }
+            if (s_overlaySnapRequest == OverlaySnap::BottomLeft ||
+                s_overlaySnapRequest == OverlaySnap::BottomRight) {
+                position.y = std::max(margin, displaySize.y - windowSize.y - margin);
+            }
+            ImGui::SetWindowPos(position, ImGuiCond_Always);
+            s_overlaySnapRequest = OverlaySnap::None;
+        }
+
+        ImGui::Text("X Pos: %.3f | Z Pos: %.3f", player->current.pos.x, player->current.pos.z);
+        ImGui::Text("Y Pos: %.3f | Angle: %u", player->current.pos.y,
+                    static_cast<u16>(player->shape_angle.y));
+        ImGui::Text("Drift: %s  F:%+.6f R:%+.6f",
+                    drift_direction(s_publishedForward, s_publishedRight),
+                    s_publishedForward, s_publishedRight);
+    }
+    ImGui::End();
 }
 
 bool GetLoggedRupeeSlidePosition(cXyz& position, s16& angle) {
@@ -228,18 +343,6 @@ bool GetLoggedRupeeSlidePosition(cXyz& position, s16& angle) {
 }
 
 void DrawLoadPositionOverlayNative() {
-    static bool s_visible = true;
-    static bool s_toggleComboHeld = false;
-    const u32 hold = mDoCPd_c::getHold(PAD_1);
-    const bool lHeld = (hold & PAD_TRIGGER_L) != 0 || mDoCPd_c::getHoldLockL(PAD_1) ||
-                       mDoCPd_c::getAnalogL(PAD_1) > 0.6f;
-    const bool startHeld = (hold & PAD_BUTTON_START) != 0;
-    const bool toggleComboHeld = lHeld && startHeld;
-    if (toggleComboHeld && !s_toggleComboHeld) {
-        s_visible = !s_visible;
-    }
-    s_toggleComboHeld = toggleComboHeld;
-
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
     if (player == nullptr) {
         return;
@@ -248,7 +351,7 @@ void DrawLoadPositionOverlayNative() {
     const float xPos = player->current.pos.x;
     const float zPos = player->current.pos.z;
 
-    if (!s_visible) {
+    if (!s_overlayVisible) {
         return;
     }
 
