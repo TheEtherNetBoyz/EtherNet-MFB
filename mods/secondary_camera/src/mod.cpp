@@ -51,6 +51,8 @@ ConfigVarHandle g_moveSpeed = 0;
 ConfigVarHandle g_fov = 0;
 
 WindowHandle g_window = 0;
+UiWindowHandle g_settingsWindow = 0;
+UiMenuTabHandle g_menuTab = 0;
 GfxPresentTargetHandle g_presentTarget = 0;
 GfxStageHookHandle g_sceneBeginHook = 0;
 GfxStageHookHandle g_frameBeforeHudHook = 0;
@@ -113,7 +115,22 @@ fn vs_main(@builtin(vertex_index) index: u32) -> VertexOutput {
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     let size = vec2<i32>(textureDimensions(source_color));
     let texel = clamp(vec2<i32>(in.uv * vec2f(size)), vec2<i32>(0i), size - 1i);
-    return textureLoad(source_color, texel, 0i);
+    let base = textureLoad(source_color, texel, 0i).rgb;
+
+    // Apply Camera 2 bloom at presentation time. The game's native bloom
+    // routine opens nested GX framebuffers, which is unsafe while Camera 2's
+    // offscreen pass is active and can corrupt the main camera state.
+    let threshold = vec3f(0.70, 0.70, 0.70);
+    let glow = max(textureLoad(source_color, clamp(texel + vec2<i32>(-2i, -2i), vec2<i32>(0i), size - 1i), 0i).rgb - threshold, vec3f(0.0)) * 0.06
+        + max(textureLoad(source_color, clamp(texel + vec2<i32>( 0i, -2i), vec2<i32>(0i), size - 1i), 0i).rgb - threshold, vec3f(0.0)) * 0.10
+        + max(textureLoad(source_color, clamp(texel + vec2<i32>( 2i, -2i), vec2<i32>(0i), size - 1i), 0i).rgb - threshold, vec3f(0.0)) * 0.06
+        + max(textureLoad(source_color, clamp(texel + vec2<i32>(-2i,  0i), vec2<i32>(0i), size - 1i), 0i).rgb - threshold, vec3f(0.0)) * 0.10
+        + max(textureLoad(source_color, clamp(texel + vec2<i32>( 0i,  0i), vec2<i32>(0i), size - 1i), 0i).rgb - threshold, vec3f(0.0)) * 0.16
+        + max(textureLoad(source_color, clamp(texel + vec2<i32>( 2i,  0i), vec2<i32>(0i), size - 1i), 0i).rgb - threshold, vec3f(0.0)) * 0.10
+        + max(textureLoad(source_color, clamp(texel + vec2<i32>(-2i,  2i), vec2<i32>(0i), size - 1i), 0i).rgb - threshold, vec3f(0.0)) * 0.06
+        + max(textureLoad(source_color, clamp(texel + vec2<i32>( 0i,  2i), vec2<i32>(0i), size - 1i), 0i).rgb - threshold, vec3f(0.0)) * 0.10
+        + max(textureLoad(source_color, clamp(texel + vec2<i32>( 2i,  2i), vec2<i32>(0i), size - 1i), 0i).rgb - threshold, vec3f(0.0)) * 0.06;
+    return vec4f(base + glow * 1.35, 1.0);
 }
 )";
 
@@ -586,13 +603,13 @@ void addNumber(UiElementHandle pane, const char* label, ConfigVarHandle cvar, in
     svc_ui->pane_add_control(mod_ctx, pane, &control, nullptr);
 }
 
-ModResult buildPanel(ModContext*, UiElementHandle panel, void*, ModError*) {
-    svc_ui->pane_add_section(mod_ctx, panel, "Camera 2 Window");
+ModResult buildCameraControls(UiElementHandle pane) {
+    svc_ui->pane_add_section(mod_ctx, pane, "Camera 2 Window");
     UiControlDesc windowControl = UI_CONTROL_DESC_INIT;
     windowControl.kind = UI_CONTROL_BUTTON;
     windowControl.label = "Open / Close Camera 2";
     windowControl.on_pressed = onToggleWindow;
-    svc_ui->pane_add_control(mod_ctx, panel, &windowControl, nullptr);
+    svc_ui->pane_add_control(mod_ctx, pane, &windowControl, nullptr);
 
     UiControlDesc resetControl = UI_CONTROL_DESC_INIT;
     resetControl.kind = UI_CONTROL_BUTTON;
@@ -600,14 +617,45 @@ ModResult buildPanel(ModContext*, UiElementHandle panel, void*, ModError*) {
     resetControl.help_rml =
         "Spawns Camera 2 just above and behind Link once; it remains independent afterward.";
     resetControl.on_pressed = onResetView;
-    svc_ui->pane_add_control(mod_ctx, panel, &resetControl, nullptr);
-    addToggle(panel, "Control Camera 2", g_controls,
+    svc_ui->pane_add_control(mod_ctx, pane, &resetControl, nullptr);
+    addToggle(pane, "Control Camera 2", g_controls,
         "Camera 2 is an independent free camera. Click its window to capture input. WASD moves, mouse looks, Space/Ctrl move vertically, Shift speeds up, and Escape releases the mouse.");
-    addNumber(panel, "Move Speed", g_moveSpeed, 1, 10000, 50, nullptr,
+    addNumber(pane, "Move Speed", g_moveSpeed, 1, 10000, 50, nullptr,
         "Camera 2 movement speed in world units per second.");
-    addNumber(panel, "Field of View", g_fov, 1, 179, 1, " degrees",
+    addNumber(pane, "Field of View", g_fov, 1, 179, 1, " degrees",
         "Camera 2 vertical field of view.");
     return MOD_OK;
+}
+
+ModResult buildPanel(ModContext*, UiElementHandle panel, void*, ModError*) {
+    return buildCameraControls(panel);
+}
+
+ModResult buildSettingsTab(ModContext*, UiWindowHandle, UiElementHandle leftPane,
+    UiElementHandle, void*, ModError*) {
+    return buildCameraControls(leftPane);
+}
+
+void onSettingsWindowClosed(ModContext*, UiWindowHandle, void*) {
+    g_settingsWindow = 0;
+}
+
+void onCameraMenuSelected(ModContext*, void*) {
+    if (g_settingsWindow != 0) {
+        return;
+    }
+
+    UiTabDesc tab = UI_TAB_DESC_INIT;
+    tab.title = "Camera 2";
+    tab.build = buildSettingsTab;
+
+    UiWindowDesc window = UI_WINDOW_DESC_INIT;
+    window.tabs = &tab;
+    window.tab_count = 1;
+    window.on_closed = onSettingsWindowClosed;
+    if (svc_ui->window_push(mod_ctx, &window, &g_settingsWindow) != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to open Camera 2 settings");
+    }
 }
 
 ModResult registerBool(const char* name, bool defaultValue, ConfigVarHandle& out, ModError* error) {
@@ -661,6 +709,13 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     if (svc_ui->register_mods_panel(mod_ctx, &panelDesc) != MOD_OK) {
         return mods::set_error(error, MOD_ERROR, "failed to register Camera 2 controls");
     }
+
+    UiMenuTabDesc menuDesc = UI_MENU_TAB_DESC_INIT;
+    menuDesc.label = "Camera 2";
+    menuDesc.on_selected = onCameraMenuSelected;
+    if (svc_ui->register_menu_tab(mod_ctx, &menuDesc, &g_menuTab) != MOD_OK) {
+        return mods::set_error(error, MOD_ERROR, "failed to register Camera 2 menu tab");
+    }
     return MOD_OK;
 }
 
@@ -671,6 +726,14 @@ MOD_EXPORT ModResult mod_update(ModError*) {
 }
 
 MOD_EXPORT ModResult mod_shutdown(ModError*) {
+    if (g_menuTab != 0) {
+        svc_ui->unregister_menu_tab(mod_ctx, g_menuTab);
+        g_menuTab = 0;
+    }
+    if (g_settingsWindow != 0) {
+        svc_ui->window_close(mod_ctx, g_settingsWindow);
+        g_settingsWindow = 0;
+    }
     if (g_sceneBeginHook != 0) {
         svc_gfx->unregister_stage_hook(mod_ctx, g_sceneBeginHook);
         g_sceneBeginHook = 0;
