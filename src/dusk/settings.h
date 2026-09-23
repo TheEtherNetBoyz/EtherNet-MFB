@@ -107,6 +107,12 @@ enum class DiscLoadingDelayMode : u8 {
     Timed = 2,
 };
 
+enum class RupeeSlideOverlayMode : u8 {
+    ImGui = 0,
+    Native = 1,
+    Both = 2,
+};
+
 enum class AudioOutputMode : u8 {
     StereoSpeakers = 0,
     StereoHeadphones = 1,   // spatial audio
@@ -197,6 +203,12 @@ template <>
 struct ConfigEnumRange<DiscLoadingDelayMode> {
     static constexpr auto min = DiscLoadingDelayMode::Off;
     static constexpr auto max = DiscLoadingDelayMode::Timed;
+};
+
+template <>
+struct ConfigEnumRange<RupeeSlideOverlayMode> {
+    static constexpr auto min = RupeeSlideOverlayMode::ImGui;
+    static constexpr auto max = RupeeSlideOverlayMode::Both;
 };
 
 template <>
@@ -413,6 +425,7 @@ struct UserSettings {
         ConfigVar<int> rupeeSlideRoom;
         ConfigVar<int> rupeeSlideLayer;
         ConfigVar<bool> rupeeSlidePositionValid;
+        ConfigVar<RupeeSlideOverlayMode> rupeeSlideOverlayMode;
         ConfigVar<bool> enableMoveLinkCombo;
         ConfigVar<bool> enableTeleportCombo;
         ConfigVar<bool> areaReload;

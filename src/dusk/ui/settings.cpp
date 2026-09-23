@@ -110,6 +110,12 @@ constexpr std::array kGyroInputModeLabels = {
     "Mouse",
 };
 
+constexpr std::array kRupeeSlideOverlayModes = {
+    "ImGui",
+    "In-game",
+    "Both",
+};
+
 enum class HotkeyAction {
     ToggleImGuiMenu,
     ToggleThirtyFps,
@@ -2434,6 +2440,13 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Teleport (R+D-pad Up/Down)",
             "R+D-pad Up stores Link's current position.<br/>"
             "R+D-pad Down teleports Link back to it.");
+
+        leftPane.add_section("Rupee Slide");
+        config_enum_select(leftPane, rightPane, getSettings().game.rupeeSlideOverlayMode,
+            "Overlay Renderer",
+            "Choose whether the L+Start rupee slide position overlay is drawn with ImGui, the "
+            "original in-game renderer, or both.",
+            kRupeeSlideOverlayModes);
 #if DUSK_LEGACY_PRACTICE_TOOLS
         add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.areaReload,
             "Area Reload (L+R+Start+A)",

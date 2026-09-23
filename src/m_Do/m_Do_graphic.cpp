@@ -51,6 +51,7 @@
 #include "dusk/game_clock.h"
 #include "dusk/gfx.hpp"
 #include "dusk/imgui/ImGuiConsole.hpp"
+#include "dusk/load_position_overlay.hpp"
 #include "dusk/rupee_slide_tools.hpp"
 #include "dusk/interp/frame_interpolation.h"
 #include "dusk/logging.h"
@@ -3064,6 +3065,10 @@ int mDoGph_Painter() {
         GX_DEBUG_GROUP(dComIfGd_draw2DOpaTop);
         GX_DEBUG_GROUP(dComIfGd_draw2DXlu);
 
+#if TARGET_PC
+        dusk::DrawLoadPositionOverlayNative();
+#endif
+
         if (dComIfGp_isPauseFlag()) {
             GX_DEBUG_GROUP(dComIfGp_particle_draw2Dfore, &draw_info3);
         }
@@ -3092,6 +3097,9 @@ int mDoGph_Painter() {
         dComIfGd_draw2DOpa();
         dComIfGd_draw2DOpaTop();
         dComIfGd_draw2DXlu();
+#if TARGET_PC
+        dusk::DrawLoadPositionOverlayNative();
+#endif
     }
 
 #if TARGET_PC

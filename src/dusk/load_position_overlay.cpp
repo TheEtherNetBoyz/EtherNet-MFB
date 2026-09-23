@@ -105,6 +105,16 @@ float s_overlayScale = 1.0f;
 enum class OverlaySnap { None, TopLeft, TopRight, BottomLeft, BottomRight };
 OverlaySnap s_overlaySnapRequest = OverlaySnap::None;
 
+bool overlayUsesImGui() {
+    const auto mode = getSettings().game.rupeeSlideOverlayMode.getValue();
+    return mode == RupeeSlideOverlayMode::ImGui || mode == RupeeSlideOverlayMode::Both;
+}
+
+bool overlayUsesNative() {
+    const auto mode = getSettings().game.rupeeSlideOverlayMode.getValue();
+    return mode == RupeeSlideOverlayMode::Native || mode == RupeeSlideOverlayMode::Both;
+}
+
 bool overlayToggleComboHeld() {
     const u32 physicalHold = mDoCPd_c::getUnfilteredHold(PAD_1);
     const u32 hold = mDoCPd_c::getHold(PAD_1);
@@ -253,7 +263,7 @@ void UpdateLoadPositionDriftNative() {
 }
 
 void DrawLoadPositionOverlayImGui() {
-    if (!s_overlayVisible) {
+    if (!overlayUsesImGui() || !s_overlayVisible) {
         return;
     }
 
@@ -343,6 +353,10 @@ bool GetLoggedRupeeSlidePosition(cXyz& position, s16& angle) {
 }
 
 void DrawLoadPositionOverlayNative() {
+    if (!overlayUsesNative()) {
+        return;
+    }
+
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
     if (player == nullptr) {
         return;
