@@ -279,6 +279,14 @@ jobs:
           #   artifact_arch: x86_64
 
     steps:
+      # Use Git for Windows' bundled CA store when the runner's Schannel trust
+      # store rejects GitHub's certificate chain. Keep TLS verification enabled.
+      - name: Configure Git TLS backend
+        shell: pwsh
+        run: |
+          git config --global http.sslBackend openssl
+          git config --global http.sslVerify true
+
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
