@@ -17,6 +17,7 @@
 #include "mods/svc/window.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <webgpu/webgpu.h>
@@ -62,9 +63,16 @@ ConfigVarHandle g_moveSpeed = 0;
 ConfigVarHandle g_fov = 0;
 ConfigVarHandle g_alwaysOnTop = 0;
 ConfigVarHandle g_updateRate = 0;
+ConfigVarHandle g_shoulderFollow = 0;
+ConfigVarHandle g_shoulderDistance = 0;
+ConfigVarHandle g_shoulderSideOffset = 0;
+ConfigVarHandle g_shoulderHeight = 0;
+ConfigVarHandle g_shoulderAimHeight = 0;
+ConfigVarHandle g_shoulderAngle = 0;
 
 WindowHandle g_window = 0;
 UiWindowHandle g_settingsWindow = 0;
+UiWindowHandle g_shoulderSettingsWindow = 0;
 UiMenuTabHandle g_menuTab = 0;
 GfxPresentTargetHandle g_presentTarget = 0;
 GfxStageHookHandle g_sceneBeginHook = 0;
@@ -78,9 +86,10 @@ bool g_resetViewRequested = false;
 bool g_windowFocused = false;
 bool g_mouseCaptured = false;
 bool g_windowAlwaysOnTopApplied = false;
-uint32_t g_renderFrameCounter = 0;
 bool g_hasRenderedFrame = false;
 uint32_t g_stablePlayerModelFrames = 0;
+using CameraClock = std::chrono::steady_clock;
+CameraClock::time_point g_nextCameraRender;
 
 struct InputState {
     bool forward = false;
@@ -212,6 +221,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
 )";
 
 float getFov();
+float getShoulderDistance();
+float getShoulderSideOffset();
+float getShoulderHeight();
+float getShoulderAimHeight();
+float getShoulderAngle();
 
 void updateAngles() {
     const cXyz direction = g_camera.center - g_camera.eye;
@@ -227,6 +241,30 @@ void updateCenter() {
     g_camera.center.y = g_camera.eye.y + std::sin(g_camera.pitch) * kTargetDistance;
     g_camera.center.z =
         g_camera.eye.z + std::sin(g_camera.yaw) * horizontal * kTargetDistance;
+}
+
+void updateShoulderCamera(const daAlink_c* player) {
+    if (player == nullptr || !canRefreshPlayerModelsForCurrentView(player)) {
+        return;
+    }
+
+    // Twilight uses sin(angle) for X and cos(angle) for Z. Zero orbit angle is
+    // directly behind Link; the configurable angle orbits around him.
+    constexpr float kGameAngleToRadians = 3.14159265358979323846f / 32768.0f;
+    constexpr float kDegreesToRadians = 3.14159265358979323846f / 180.0f;
+    const float orbitAngle = static_cast<float>(player->shape_angle.y) *
+            kGameAngleToRadians + getShoulderAngle() * kDegreesToRadians;
+    const cXyz forward(std::sin(orbitAngle), 0.0f, std::cos(orbitAngle));
+    const cXyz right(std::cos(orbitAngle), 0.0f, -std::sin(orbitAngle));
+    const cXyz anchor = player->current.pos;
+
+    g_camera.eye = anchor - (forward * getShoulderDistance()) +
+        (right * getShoulderSideOffset()) + cXyz(0.0f, getShoulderHeight(), 0.0f);
+    g_camera.center = anchor + cXyz(0.0f, getShoulderAimHeight(), 0.0f);
+    g_camera.fovy = getFov();
+    g_camera.bank = 0;
+    g_camera.initialized = true;
+    updateAngles();
 }
 
 bool resetFreeCamera() {
@@ -264,23 +302,74 @@ float getFov() {
     return static_cast<float>(std::clamp<int64_t>(value, 1, 179));
 }
 
-uint32_t getRenderFrameInterval() {
+bool getShoulderFollow() {
+    bool value = false;
+    svc_config->get_bool(mod_ctx, g_shoulderFollow, &value);
+    return value;
+}
+
+float getShoulderDistance() {
+    int64_t value = 260;
+    svc_config->get_int(mod_ctx, g_shoulderDistance, &value);
+    return static_cast<float>(std::clamp<int64_t>(value, 50, 1000));
+}
+
+float getShoulderSideOffset() {
+    int64_t value = 70;
+    svc_config->get_int(mod_ctx, g_shoulderSideOffset, &value);
+    return static_cast<float>(std::clamp<int64_t>(value, -300, 300));
+}
+
+float getShoulderHeight() {
+    int64_t value = 110;
+    svc_config->get_int(mod_ctx, g_shoulderHeight, &value);
+    return static_cast<float>(std::clamp<int64_t>(value, 0, 600));
+}
+
+float getShoulderAimHeight() {
+    int64_t value = 70;
+    svc_config->get_int(mod_ctx, g_shoulderAimHeight, &value);
+    return static_cast<float>(std::clamp<int64_t>(value, 0, 400));
+}
+
+float getShoulderAngle() {
+    int64_t value = 0;
+    svc_config->get_int(mod_ctx, g_shoulderAngle, &value);
+    return static_cast<float>(std::clamp<int64_t>(value, -180, 180));
+}
+
+CameraClock::duration getCameraRenderPeriod() {
     int64_t value = 0;
     svc_config->get_int(mod_ctx, g_updateRate, &value);
     switch (std::clamp<int64_t>(value, 0, 3)) {
     case 1:
-        return 2;
+        return std::chrono::duration_cast<CameraClock::duration>(
+            std::chrono::duration<double>(1.0 / 30.0));
     case 2:
-        return 3;
+        return std::chrono::duration_cast<CameraClock::duration>(
+            std::chrono::duration<double>(1.0 / 20.0));
     case 3:
-        return 4;
+        return std::chrono::duration_cast<CameraClock::duration>(
+            std::chrono::duration<double>(1.0 / 15.0));
     default:
-        return 1;
+        return CameraClock::duration::zero();
     }
 }
 
+bool cameraRenderDue() {
+    const CameraClock::duration period = getCameraRenderPeriod();
+    if (period == CameraClock::duration::zero()) {
+        return true;
+    }
+
+    const CameraClock::time_point now = CameraClock::now();
+    return g_nextCameraRender.time_since_epoch().count() == 0 ||
+        now >= g_nextCameraRender;
+}
+
 void updateControls(float deltaSeconds) {
-    if (!getControlsEnabled() || !g_camera.initialized || !g_windowFocused) {
+    if (!getControlsEnabled() || !g_camera.initialized || !g_windowFocused ||
+        getShoulderFollow()) {
         g_input.mouseDeltaX = 0.0f;
         g_input.mouseDeltaY = 0.0f;
         return;
@@ -354,7 +443,7 @@ void renderCamera2() {
     if (g_presentTarget == 0 || !g_camera.initialized || !drawListsReady()) {
         return;
     }
-    if (g_hasRenderedFrame && g_renderFrameCounter % getRenderFrameInterval() != 0) {
+    if (g_hasRenderedFrame && !cameraRenderDue()) {
         return;
     }
 
@@ -371,6 +460,11 @@ void renderCamera2() {
         return;
     }
 
+    daAlink_c* player = daAlink_getAlinkActorClass();
+    if (getShoulderFollow()) {
+        updateShoulderCamera(player);
+    }
+
     Mtx cameraView;
     Mtx44 cameraProjection;
     cXyz up(0.0f, 1.0f, 0.0f);
@@ -378,7 +472,6 @@ void renderCamera2() {
     C_MTXPerspective(cameraProjection, getFov(),
         static_cast<float>(kRenderWidth) / static_cast<float>(kRenderHeight), 1.0f, 100000.0f);
 
-    daAlink_c* player = daAlink_getAlinkActorClass();
     const bool refreshPlayerModels = canRefreshPlayerModelsForCurrentView(player);
     if (refreshPlayerModels) {
         g_stablePlayerModelFrames = std::min(g_stablePlayerModelFrames + 1u, 8u);
@@ -432,6 +525,10 @@ void renderCamera2() {
     const PresentPayload payload{.color = resolved.color};
     if (svc_gfx->push_present(mod_ctx, g_presentTarget, &payload, sizeof(payload)) == MOD_OK) {
         g_hasRenderedFrame = true;
+        const CameraClock::duration period = getCameraRenderPeriod();
+        g_nextCameraRender = period == CameraClock::duration::zero()
+            ? CameraClock::time_point{}
+            : CameraClock::now() + period;
     }
 }
 
@@ -592,8 +689,8 @@ ModResult closeWindow() {
     }
     g_windowFocused = false;
     g_windowAlwaysOnTopApplied = false;
-    g_renderFrameCounter = 0;
     g_hasRenderedFrame = false;
+    g_nextCameraRender = CameraClock::time_point{};
     g_input = {};
     return MOD_OK;
 }
@@ -696,8 +793,8 @@ ModResult openWindow() {
     // Each newly enabled Camera 2 session starts near the current gameplay Link
     // instead of reusing a stale free-camera position from a previous window.
     g_resetViewRequested = true;
-    g_renderFrameCounter = 0;
     g_hasRenderedFrame = false;
+    g_nextCameraRender = CameraClock::time_point{};
 
     WindowDesc windowDesc = WINDOW_DESC_INIT;
     // Keep the title version-neutral; the loader's mod list is the authoritative version
@@ -757,7 +854,6 @@ void onSceneBegin(ModContext*, const GfxStageContext* stageCtx, void*) {
 }
 
 void onFrameBeforeHud(ModContext*, const GfxStageContext*, void*) {
-    ++g_renderFrameCounter;
     renderCamera2();
 }
 
@@ -799,6 +895,44 @@ void addSelect(UiElementHandle pane, const char* label, ConfigVarHandle cvar,
     svc_ui->pane_add_control(mod_ctx, pane, &control, nullptr);
 }
 
+ModResult buildShoulderSettingsTab(ModContext*, UiWindowHandle, UiElementHandle leftPane,
+    UiElementHandle, void*, ModError*) {
+    svc_ui->pane_add_section(mod_ctx, leftPane, "Over-the-Shoulder Camera");
+    addNumber(leftPane, "Shoulder Distance", g_shoulderDistance, 50, 1000, 10, " units",
+        "Distance behind Link in over-the-shoulder mode.");
+    addNumber(leftPane, "Shoulder Side Offset", g_shoulderSideOffset, -300, 300, 10, " units",
+        "Moves the camera left or right relative to Link. Positive values use Link's right shoulder.");
+    addNumber(leftPane, "Shoulder Height", g_shoulderHeight, 0, 600, 10, " units",
+        "Height of the over-the-shoulder camera above Link's position.");
+    addNumber(leftPane, "Shoulder Aim Height", g_shoulderAimHeight, 0, 400, 10, " units",
+        "Height on Link that Camera 2 looks toward.");
+    addNumber(leftPane, "Shoulder Orbit Angle", g_shoulderAngle, -180, 180, 5, " degrees",
+        "Orbits the camera around Link. Zero is behind him; 180 is in front.");
+    return MOD_OK;
+}
+
+void onShoulderSettingsWindowClosed(ModContext*, UiWindowHandle, void*) {
+    g_shoulderSettingsWindow = 0;
+}
+
+void onOpenShoulderSettings(ModContext*, void*) {
+    if (g_shoulderSettingsWindow != 0) {
+        return;
+    }
+
+    UiTabDesc tab = UI_TAB_DESC_INIT;
+    tab.title = "Over-the-Shoulder";
+    tab.build = buildShoulderSettingsTab;
+
+    UiWindowDesc window = UI_WINDOW_DESC_INIT;
+    window.tabs = &tab;
+    window.tab_count = 1;
+    window.on_closed = onShoulderSettingsWindowClosed;
+    if (svc_ui->window_push(mod_ctx, &window, &g_shoulderSettingsWindow) != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to open over-the-shoulder settings");
+    }
+}
+
 ModResult buildCameraControls(UiElementHandle pane) {
     svc_ui->pane_add_section(mod_ctx, pane, "Freecam+ Window");
     UiControlDesc windowControl = UI_CONTROL_DESC_INIT;
@@ -821,12 +955,22 @@ ModResult buildCameraControls(UiElementHandle pane) {
         "Freecam+ movement speed in world units per second.");
     addNumber(pane, "Field of View", g_fov, 1, 179, 1, " degrees",
         "Freecam+ vertical field of view.");
-    addSelect(pane, "Update Rate", g_updateRate, kUpdateRateOptions,
+    addSelect(pane, "Camera 2 Update Rate", g_updateRate, kUpdateRateOptions,
         std::size(kUpdateRateOptions),
-        "Controls how often Freecam+ redraws the scene. Lower rates reduce performance impact "
-        "while leaving the main game render rate unchanged.");
+        "Controls only how often Freecam+ captures a new Camera 2 scene. Lower rates reduce "
+        "performance impact while leaving the main game render rate unchanged.");
     addToggle(pane, "Always on Top", g_alwaysOnTop,
         "Keeps the Freecam+ window above other windows and updates while it is open.");
+    addToggle(pane, "Over-the-Shoulder Follow", g_shoulderFollow,
+        "Makes Camera 2 follow Link's world position and facing direction without changing the main camera.");
+
+    UiControlDesc shoulderSettingsControl = UI_CONTROL_DESC_INIT;
+    shoulderSettingsControl.kind = UI_CONTROL_BUTTON;
+    shoulderSettingsControl.label = "Open Over-the-Shoulder Settings";
+    shoulderSettingsControl.help_rml =
+        "Open the detailed follow-camera settings in a separate submenu.";
+    shoulderSettingsControl.on_pressed = onOpenShoulderSettings;
+    svc_ui->pane_add_control(mod_ctx, pane, &shoulderSettingsControl, nullptr);
     return MOD_OK;
 }
 
@@ -898,6 +1042,18 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     if (result != MOD_OK) return result;
     result = registerBool("alwaysOnTop", false, g_alwaysOnTop, error);
     if (result != MOD_OK) return result;
+    result = registerBool("shoulderFollow", false, g_shoulderFollow, error);
+    if (result != MOD_OK) return result;
+    result = registerInt("shoulderDistance", 260, g_shoulderDistance, error);
+    if (result != MOD_OK) return result;
+    result = registerInt("shoulderSideOffset", 70, g_shoulderSideOffset, error);
+    if (result != MOD_OK) return result;
+    result = registerInt("shoulderHeight", 110, g_shoulderHeight, error);
+    if (result != MOD_OK) return result;
+    result = registerInt("shoulderAimHeight", 70, g_shoulderAimHeight, error);
+    if (result != MOD_OK) return result;
+    result = registerInt("shoulderAngle", 0, g_shoulderAngle, error);
+    if (result != MOD_OK) return result;
 
     GfxStageHookDesc stageDesc = GFX_STAGE_HOOK_DESC_INIT;
     stageDesc.callback = onSceneBegin;
@@ -942,6 +1098,10 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
         svc_ui->window_close(mod_ctx, g_settingsWindow);
         g_settingsWindow = 0;
     }
+    if (g_shoulderSettingsWindow != 0) {
+        svc_ui->window_close(mod_ctx, g_shoulderSettingsWindow);
+        g_shoulderSettingsWindow = 0;
+    }
     if (g_sceneBeginHook != 0) {
         svc_gfx->unregister_stage_hook(mod_ctx, g_sceneBeginHook);
         g_sceneBeginHook = 0;
@@ -953,6 +1113,8 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     closeWindow();
     releasePresentPipeline();
     g_controls = g_moveSpeed = g_fov = g_updateRate = g_alwaysOnTop = 0;
+    g_shoulderFollow = g_shoulderDistance = g_shoulderSideOffset = 0;
+    g_shoulderHeight = g_shoulderAimHeight = g_shoulderAngle = 0;
     return MOD_OK;
 }
 
