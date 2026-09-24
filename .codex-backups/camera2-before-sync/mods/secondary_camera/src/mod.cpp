@@ -8,7 +8,6 @@
 #include "dolphin/gx/GXPixel.h"
 #include "dolphin/gx/GXTransform.h"
 #include "m_Do/m_Do_mtx.h"
-#include "m_Do/m_Do_graphic.h"
 #include "mods/service.hpp"
 #include "mods/svc/config.h"
 #include "mods/svc/gfx.h"
@@ -61,7 +60,6 @@ GfxStageHookHandle g_frameBeforeHudHook = 0;
 WGPURenderPipeline g_presentPipeline = nullptr;
 WGPUBindGroupLayout g_presentLayout = nullptr;
 WGPUTextureFormat g_presentFormat = WGPUTextureFormat_Undefined;
-WGPUBuffer g_bloomParamsBuffer = nullptr;
 
 bool g_resetViewRequested = false;
 bool g_windowFocused = false;
@@ -98,23 +96,8 @@ struct PresentPayload {
     WGPUTextureView color;
 };
 
-struct BloomParams {
-    float threshold;
-    float strength;
-    float padding[2];
-    float blendColor[4];
-};
-
 constexpr const char* kPresentShader = R"(
 @group(0) @binding(0) var source_color: texture_2d<f32>;
-struct BloomParams {
-    threshold: f32,
-    strength: f32,
-    padding0: f32,
-    padding1: f32,
-    blend_color: vec4f,
-};
-@group(0) @binding(2) var<uniform> bloom_params: BloomParams;
 
 struct VertexOutput {
     @builtin(position) position: vec4f,
@@ -130,40 +113,26 @@ fn vs_main(@builtin(vertex_index) index: u32) -> VertexOutput {
     return out;
 }
 
-fn bloomSample(coord: vec2<i32>, size: vec2<i32>) -> vec3f {
-    let sampleCoord = clamp(coord, vec2<i32>(0i), size - 1i);
-    let color = textureLoad(source_color, sampleCoord, 0i).rgb;
-    let peak = max(max(color.r, color.g), color.b);
-    let amount = max((peak - bloom_params.threshold) /
-        max(1.0 - bloom_params.threshold, 0.001), 0.0);
-    let tint = max(bloom_params.blend_color.rgb, vec3f(0.18));
-    return color * amount * tint;
-}
-
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     let size = vec2<i32>(textureDimensions(source_color));
     let texel = clamp(vec2<i32>(in.uv * vec2f(size)), vec2<i32>(0i), size - 1i);
     let base = textureLoad(source_color, texel, 0i).rgb;
-    let glow =
-        bloomSample(texel + vec2<i32>(-2i, -2i), size) * 0.06
-        + bloomSample(texel + vec2<i32>( 0i, -2i), size) * 0.10
-        + bloomSample(texel + vec2<i32>( 2i, -2i), size) * 0.06
-        + bloomSample(texel + vec2<i32>(-2i,  0i), size) * 0.10
-        + bloomSample(texel, size) * 0.16
-        + bloomSample(texel + vec2<i32>( 2i,  0i), size) * 0.10
-        + bloomSample(texel + vec2<i32>(-2i,  2i), size) * 0.06
-        + bloomSample(texel + vec2<i32>( 0i,  2i), size) * 0.10
-        + bloomSample(texel + vec2<i32>( 2i,  2i), size) * 0.06
-        + bloomSample(texel + vec2<i32>(-8i,  0i), size) * 0.08
-        + bloomSample(texel + vec2<i32>( 8i,  0i), size) * 0.08
-        + bloomSample(texel + vec2<i32>( 0i, -8i), size) * 0.08
-        + bloomSample(texel + vec2<i32>( 0i,  8i), size) * 0.08
-        + bloomSample(texel + vec2<i32>(-20i, 0i), size) * 0.04
-        + bloomSample(texel + vec2<i32>( 20i, 0i), size) * 0.04
-        + bloomSample(texel + vec2<i32>(0i, -20i), size) * 0.04
-        + bloomSample(texel + vec2<i32>(0i,  20i), size) * 0.04;
-    return vec4f(min(base + glow * bloom_params.strength, vec3f(1.0)), 1.0);
+
+    // Apply Camera 2 bloom at presentation time. The game's native bloom
+    // routine opens nested GX framebuffers, which is unsafe while Camera 2's
+    // offscreen pass is active and can corrupt the main camera state.
+    let threshold = vec3f(0.70, 0.70, 0.70);
+    let glow = max(textureLoad(source_color, clamp(texel + vec2<i32>(-2i, -2i), vec2<i32>(0i), size - 1i), 0i).rgb - threshold, vec3f(0.0)) * 0.06
+        + max(textureLoad(source_color, clamp(texel + vec2<i32>( 0i, -2i), vec2<i32>(0i), size - 1i), 0i).rgb - threshold, vec3f(0.0)) * 0.10
+        + max(textureLoad(source_color, clamp(texel + vec2<i32>( 2i, -2i), vec2<i32>(0i), size - 1i), 0i).rgb - threshold, vec3f(0.0)) * 0.06
+        + max(textureLoad(source_color, clamp(texel + vec2<i32>(-2i,  0i), vec2<i32>(0i), size - 1i), 0i).rgb - threshold, vec3f(0.0)) * 0.10
+        + max(textureLoad(source_color, clamp(texel + vec2<i32>( 0i,  0i), vec2<i32>(0i), size - 1i), 0i).rgb - threshold, vec3f(0.0)) * 0.16
+        + max(textureLoad(source_color, clamp(texel + vec2<i32>( 2i,  0i), vec2<i32>(0i), size - 1i), 0i).rgb - threshold, vec3f(0.0)) * 0.10
+        + max(textureLoad(source_color, clamp(texel + vec2<i32>(-2i,  2i), vec2<i32>(0i), size - 1i), 0i).rgb - threshold, vec3f(0.0)) * 0.06
+        + max(textureLoad(source_color, clamp(texel + vec2<i32>( 0i,  2i), vec2<i32>(0i), size - 1i), 0i).rgb - threshold, vec3f(0.0)) * 0.10
+        + max(textureLoad(source_color, clamp(texel + vec2<i32>( 2i,  2i), vec2<i32>(0i), size - 1i), 0i).rgb - threshold, vec3f(0.0)) * 0.06;
+    return vec4f(base + glow * 1.35, 1.0);
 }
 )";
 
@@ -366,16 +335,11 @@ void releasePresentPipeline() {
         wgpuBindGroupLayoutRelease(g_presentLayout);
         g_presentLayout = nullptr;
     }
-    if (g_bloomParamsBuffer != nullptr) {
-        wgpuBufferRelease(g_bloomParamsBuffer);
-        g_bloomParamsBuffer = nullptr;
-    }
     g_presentFormat = WGPUTextureFormat_Undefined;
 }
 
 bool ensurePresentPipeline(const GfxPresentContext& ctx) {
-    if (g_presentPipeline != nullptr && g_presentLayout != nullptr &&
-        g_bloomParamsBuffer != nullptr && g_presentFormat == ctx.target_format) {
+    if (g_presentPipeline != nullptr && g_presentFormat == ctx.target_format) {
         return true;
     }
     releasePresentPipeline();
@@ -414,15 +378,6 @@ bool ensurePresentPipeline(const GfxPresentContext& ctx) {
         releasePresentPipeline();
         return false;
     }
-    WGPUBufferDescriptor paramsDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
-    paramsDesc.label = {"camera 2 Twilight bloom parameters", WGPU_STRLEN};
-    paramsDesc.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
-    paramsDesc.size = sizeof(BloomParams);
-    g_bloomParamsBuffer = wgpuDeviceCreateBuffer(ctx.device, &paramsDesc);
-    if (g_bloomParamsBuffer == nullptr) {
-        releasePresentPipeline();
-        return false;
-    }
     g_presentFormat = ctx.target_format;
     return true;
 }
@@ -434,39 +389,13 @@ void onPresent(ModContext*, const GfxPresentContext* ctx, const void* payload,
         PresentPayload data;
         std::memcpy(&data, payload, sizeof(data));
         if (data.color != nullptr) {
-            auto* nativeBloom = mDoGph_gInf_c::getBloom();
-            const GXColor blendColor = *nativeBloom->getBlendColor();
-            const float threshold = std::clamp(
-                static_cast<float>(nativeBloom->getPoint()) / 255.0f, 0.08f, 0.45f);
-            const float density = static_cast<float>(nativeBloom->getBlureRatio()) / 255.0f;
-            const float strength = nativeBloom->getEnable() != 0
-                ? 0.9f + density * 3.6f
-                : 0.0f;
-            const BloomParams params{
-                .threshold = threshold,
-                .strength = strength,
-                .padding = {0.0f, 0.0f},
-                .blendColor = {
-                    static_cast<float>(blendColor.r) / 255.0f,
-                    static_cast<float>(blendColor.g) / 255.0f,
-                    static_cast<float>(blendColor.b) / 255.0f,
-                    static_cast<float>(blendColor.a) / 255.0f,
-                },
-            };
-            wgpuQueueWriteBuffer(ctx->queue, g_bloomParamsBuffer, 0, &params,
-                sizeof(params));
-
-            WGPUBindGroupEntry entries[2] = {
-                WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
-            entries[0].binding = 0;
-            entries[0].textureView = data.color;
-            entries[1].binding = 2;
-            entries[1].buffer = g_bloomParamsBuffer;
-            entries[1].size = sizeof(BloomParams);
+            WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
+            entry.binding = 0;
+            entry.textureView = data.color;
             WGPUBindGroupDescriptor bindGroupDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
             bindGroupDesc.layout = g_presentLayout;
-            bindGroupDesc.entryCount = 2;
-            bindGroupDesc.entries = entries;
+            bindGroupDesc.entryCount = 1;
+            bindGroupDesc.entries = &entry;
             bindGroup = wgpuDeviceCreateBindGroup(ctx->device, &bindGroupDesc);
         }
     }
@@ -616,7 +545,7 @@ ModResult openWindow() {
     g_resetViewRequested = true;
 
     WindowDesc windowDesc = WINDOW_DESC_INIT;
-    windowDesc.title = "Freecam+ v1.2.5";
+    windowDesc.title = "Freecam+";
     windowDesc.width = kRenderWidth;
     windowDesc.height = kRenderHeight;
     bool alwaysOnTop = false;
