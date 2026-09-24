@@ -80,6 +80,7 @@ bool g_mouseCaptured = false;
 bool g_windowAlwaysOnTopApplied = false;
 uint32_t g_renderFrameCounter = 0;
 bool g_hasRenderedFrame = false;
+uint32_t g_stablePlayerModelFrames = 0;
 
 struct InputState {
     bool forward = false;
@@ -106,6 +107,36 @@ struct CameraState {
 };
 
 CameraState g_camera;
+
+bool canRefreshPlayerModelsForCurrentView(const daAlink_c* player) {
+    if (player == nullptr) {
+        return false;
+    }
+
+    // Item-get events (including the rupee slide) keep Link's normal model resources
+    // alive and still need a Camera 2 view calculation. Only skip the refresh for
+    // procedures that replace or tear down those resources while the auxiliary
+    // camera is being rendered.
+    switch (player->mProcID) {
+    case daAlink_c::PROC_WARP:
+    case daAlink_c::PROC_DUNGEON_WARP_READY:
+    case daAlink_c::PROC_DUNGEON_WARP:
+    case daAlink_c::PROC_DUNGEON_WARP_SCN_START:
+    case daAlink_c::PROC_METAMORPHOSE:
+    case daAlink_c::PROC_METAMORPHOSE_ONLY:
+    case daAlink_c::PROC_TW_GATE:
+        return false;
+    default:
+        break;
+    }
+
+    const int roomNo = dComIfGp_roomControl_getStayNo();
+    if (roomNo < 0 || dComIfGp_roomControl_checkStatusFlag(roomNo, 0x02 | 0x04 | 0x20)) {
+        return false;
+    }
+
+    return true;
+}
 
 struct PresentPayload {
     WGPUTextureView color;
@@ -347,14 +378,18 @@ void renderCamera2() {
     C_MTXPerspective(cameraProjection, getFov(),
         static_cast<float>(kRenderWidth) / static_cast<float>(kRenderHeight), 1.0f, 100000.0f);
 
-    // Twilight visuals can replace or temporarily invalidate one of Link's
-    // auxiliary model pointers. Leave the engine-owned Twilight path alone.
-    const bool refreshPlayerModels = dKy_darkworld_visual_effect_check() == 0;
-    j3dSys.setViewMtx(cameraView);
+    daAlink_c* player = daAlink_getAlinkActorClass();
+    const bool refreshPlayerModels = canRefreshPlayerModelsForCurrentView(player);
     if (refreshPlayerModels) {
-        if (daAlink_c* player = daAlink_getAlinkActorClass()) {
-            player->refreshPlayerModelsForCurrentView();
-        }
+        g_stablePlayerModelFrames = std::min(g_stablePlayerModelFrames + 1u, 8u);
+    } else {
+        g_stablePlayerModelFrames = 0;
+    }
+    const bool refreshEquipment = refreshPlayerModels && g_stablePlayerModelFrames >= 3;
+
+    j3dSys.setViewMtx(cameraView);
+    if (refreshPlayerModels && player != nullptr) {
+        player->refreshPlayerModelsForCurrentView(refreshEquipment);
     }
     GXSetProjectionFull(cameraProjection);
     GXSetViewport(0.0f, 0.0f, static_cast<float>(kRenderWidth),
@@ -369,10 +404,13 @@ void renderCamera2() {
     J3DShape::resetVcdVatCache();
     drawSceneLists();
     j3dSys.setViewMtx(savedView);
-    if (refreshPlayerModels) {
-        if (daAlink_c* player = daAlink_getAlinkActorClass()) {
-            player->refreshPlayerModelsForCurrentView();
-        }
+    if (daAlink_c* restoredPlayer = daAlink_getAlinkActorClass();
+        refreshPlayerModels && restoredPlayer == player) {
+        // The actor can enter an event/transition while this pass is drawing. Do not
+        // re-run the safety filter here: the pass already refreshed this exact actor,
+        // and leaving its packets on Camera 2's view is what pins Link in front of
+        // the second camera during rupee slides.
+        restoredPlayer->refreshPlayerModelsForCurrentView(refreshEquipment);
     }
     j3dSys.reinitGX();
     J3DShape::resetVcdVatCache();
@@ -662,7 +700,9 @@ ModResult openWindow() {
     g_hasRenderedFrame = false;
 
     WindowDesc windowDesc = WINDOW_DESC_INIT;
-    windowDesc.title = "Freecam+ v1.3.0";
+    // Keep the title version-neutral; the loader's mod list is the authoritative version
+    // indicator, so this cannot become stale when the package is updated.
+    windowDesc.title = "Freecam+";
     windowDesc.width = kRenderWidth;
     windowDesc.height = kRenderHeight;
     bool alwaysOnTop = false;

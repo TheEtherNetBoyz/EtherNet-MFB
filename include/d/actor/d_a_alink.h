@@ -3928,21 +3928,29 @@ public:
 
     static u32 getOtherHeapSize() { return 0xF0A60; }
 
-    // Rebuild Link's model-view buffers against the currently active J3D view.
+    // Rebuild only Link's stable model-view buffers against the currently active J3D view.
     // Auxiliary camera passes call this once for their view and once after restoring it.
-    void refreshPlayerModelsForCurrentView() {
+    // Equipment and demo models are deliberately excluded because their storage can be
+    // replaced during warps and Twilight transitions. Equipment can be included after the
+    // caller has confirmed that the player has been stable for several frames.
+    void refreshPlayerModelsForCurrentView(bool includeEquipment = false) {
         J3DModel* models[] = {
             mpLinkModel, mpLinkFaceModel, mpLinkHatModel, mpLinkHandModel,
-            mpSwAModel, mpSwASheathModel, mpSwMModel, mpSwMSheathModel,
-            mWoodSwordModel, mpWlChangeModel, mShieldModel, mpDemoFCBlendModel,
-            mpDemoHLTmpModel, mpDemoHRTmpModel, mSwordModel, mSheathModel,
-            mpKanteraModel, mpKanteraGlowModel, mHeldItemModel, mpHookTipModel,
-            field_0x0710, field_0x0714, mpLinkBootModels[0], mpLinkBootModels[1],
-            mpWlChainModels[0], mpWlChainModels[1], mpWlChainModels[2], mpWlChainModels[3],
         };
         for (J3DModel* model : models) {
             if (model != nullptr) {
                 model->viewCalc();
+            }
+        }
+
+        if (includeEquipment) {
+            J3DModel* equipmentModels[] = {
+                mSwordModel, mSheathModel, mShieldModel,
+            };
+            for (J3DModel* model : equipmentModels) {
+                if (model != nullptr) {
+                    model->viewCalc();
+                }
             }
         }
     }
