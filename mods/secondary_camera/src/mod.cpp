@@ -35,6 +35,16 @@ constexpr uint32_t kRenderHeight = 360;
 constexpr float kTargetDistance = 100.0f;
 constexpr float kLookSensitivity = 0.004f;
 constexpr float kFastMultiplier = 4.0f;
+// The native bloom density is tuned for the game's Twilight presentation. The
+// same values are overly bright in ordinary areas, so keep Twilight unchanged
+// and use a softer scale everywhere else in Camera 2's presentation pass.
+constexpr float kAreaBloomStrengthScale = 0.45f;
+constexpr const char* kUpdateRateOptions[] = {
+    "Full speed",
+    "30 FPS",
+    "20 FPS",
+    "15 FPS",
+};
 
 // SDL scancodes use the USB HID keyboard-page values. Keeping the handful used here local lets
 // this mod consume WindowService input without depending on SDL headers or linking SDL itself.
@@ -51,6 +61,7 @@ ConfigVarHandle g_controls = 0;
 ConfigVarHandle g_moveSpeed = 0;
 ConfigVarHandle g_fov = 0;
 ConfigVarHandle g_alwaysOnTop = 0;
+ConfigVarHandle g_updateRate = 0;
 
 WindowHandle g_window = 0;
 UiWindowHandle g_settingsWindow = 0;
@@ -67,6 +78,8 @@ bool g_resetViewRequested = false;
 bool g_windowFocused = false;
 bool g_mouseCaptured = false;
 bool g_windowAlwaysOnTopApplied = false;
+uint32_t g_renderFrameCounter = 0;
+bool g_hasRenderedFrame = false;
 
 struct InputState {
     bool forward = false;
@@ -220,6 +233,21 @@ float getFov() {
     return static_cast<float>(std::clamp<int64_t>(value, 1, 179));
 }
 
+uint32_t getRenderFrameInterval() {
+    int64_t value = 0;
+    svc_config->get_int(mod_ctx, g_updateRate, &value);
+    switch (std::clamp<int64_t>(value, 0, 3)) {
+    case 1:
+        return 2;
+    case 2:
+        return 3;
+    case 3:
+        return 4;
+    default:
+        return 1;
+    }
+}
+
 void updateControls(float deltaSeconds) {
     if (!getControlsEnabled() || !g_camera.initialized || !g_windowFocused) {
         g_input.mouseDeltaX = 0.0f;
@@ -295,6 +323,9 @@ void renderCamera2() {
     if (g_presentTarget == 0 || !g_camera.initialized || !drawListsReady()) {
         return;
     }
+    if (g_hasRenderedFrame && g_renderFrameCounter % getRenderFrameInterval() != 0) {
+        return;
+    }
 
     f32 savedProjection[7];
     GXGetProjectionv(savedProjection);
@@ -316,9 +347,14 @@ void renderCamera2() {
     C_MTXPerspective(cameraProjection, getFov(),
         static_cast<float>(kRenderWidth) / static_cast<float>(kRenderHeight), 1.0f, 100000.0f);
 
+    // Twilight visuals can replace or temporarily invalidate one of Link's
+    // auxiliary model pointers. Leave the engine-owned Twilight path alone.
+    const bool refreshPlayerModels = dKy_darkworld_visual_effect_check() == 0;
     j3dSys.setViewMtx(cameraView);
-    if (daAlink_c* player = daAlink_getAlinkActorClass()) {
-        player->refreshPlayerModelsForCurrentView();
+    if (refreshPlayerModels) {
+        if (daAlink_c* player = daAlink_getAlinkActorClass()) {
+            player->refreshPlayerModelsForCurrentView();
+        }
     }
     GXSetProjectionFull(cameraProjection);
     GXSetViewport(0.0f, 0.0f, static_cast<float>(kRenderWidth),
@@ -333,8 +369,10 @@ void renderCamera2() {
     J3DShape::resetVcdVatCache();
     drawSceneLists();
     j3dSys.setViewMtx(savedView);
-    if (daAlink_c* player = daAlink_getAlinkActorClass()) {
-        player->refreshPlayerModelsForCurrentView();
+    if (refreshPlayerModels) {
+        if (daAlink_c* player = daAlink_getAlinkActorClass()) {
+            player->refreshPlayerModelsForCurrentView();
+        }
     }
     j3dSys.reinitGX();
     J3DShape::resetVcdVatCache();
@@ -354,7 +392,9 @@ void renderCamera2() {
     restoreGameRenderState(savedView, savedProjection, savedViewport, savedScissor);
 
     const PresentPayload payload{.color = resolved.color};
-    svc_gfx->push_present(mod_ctx, g_presentTarget, &payload, sizeof(payload));
+    if (svc_gfx->push_present(mod_ctx, g_presentTarget, &payload, sizeof(payload)) == MOD_OK) {
+        g_hasRenderedFrame = true;
+    }
 }
 
 void releasePresentPipeline() {
@@ -439,8 +479,10 @@ void onPresent(ModContext*, const GfxPresentContext* ctx, const void* payload,
             const float threshold = std::clamp(
                 static_cast<float>(nativeBloom->getPoint()) / 255.0f, 0.08f, 0.45f);
             const float density = static_cast<float>(nativeBloom->getBlureRatio()) / 255.0f;
+            const bool twilightVisuals = dKy_darkworld_visual_effect_check() != 0;
+            const float strengthScale = twilightVisuals ? 1.0f : kAreaBloomStrengthScale;
             const float strength = nativeBloom->getEnable() != 0
-                ? 0.9f + density * 3.6f
+                ? (0.9f + density * 3.6f) * strengthScale
                 : 0.0f;
             const BloomParams params{
                 .threshold = threshold,
@@ -512,6 +554,8 @@ ModResult closeWindow() {
     }
     g_windowFocused = false;
     g_windowAlwaysOnTopApplied = false;
+    g_renderFrameCounter = 0;
+    g_hasRenderedFrame = false;
     g_input = {};
     return MOD_OK;
 }
@@ -614,9 +658,11 @@ ModResult openWindow() {
     // Each newly enabled Camera 2 session starts near the current gameplay Link
     // instead of reusing a stale free-camera position from a previous window.
     g_resetViewRequested = true;
+    g_renderFrameCounter = 0;
+    g_hasRenderedFrame = false;
 
     WindowDesc windowDesc = WINDOW_DESC_INIT;
-    windowDesc.title = "Freecam+ v1.2.5";
+    windowDesc.title = "Freecam+ v1.3.0";
     windowDesc.width = kRenderWidth;
     windowDesc.height = kRenderHeight;
     bool alwaysOnTop = false;
@@ -671,6 +717,7 @@ void onSceneBegin(ModContext*, const GfxStageContext* stageCtx, void*) {
 }
 
 void onFrameBeforeHud(ModContext*, const GfxStageContext*, void*) {
+    ++g_renderFrameCounter;
     renderCamera2();
 }
 
@@ -699,6 +746,19 @@ void addNumber(UiElementHandle pane, const char* label, ConfigVarHandle cvar, in
     svc_ui->pane_add_control(mod_ctx, pane, &control, nullptr);
 }
 
+void addSelect(UiElementHandle pane, const char* label, ConfigVarHandle cvar,
+    const char* const* options, size_t optionCount, const char* help) {
+    UiControlDesc control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_SELECT;
+    control.label = label;
+    control.help_rml = help;
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = cvar;
+    control.options = options;
+    control.option_count = optionCount;
+    svc_ui->pane_add_control(mod_ctx, pane, &control, nullptr);
+}
+
 ModResult buildCameraControls(UiElementHandle pane) {
     svc_ui->pane_add_section(mod_ctx, pane, "Freecam+ Window");
     UiControlDesc windowControl = UI_CONTROL_DESC_INIT;
@@ -721,6 +781,10 @@ ModResult buildCameraControls(UiElementHandle pane) {
         "Freecam+ movement speed in world units per second.");
     addNumber(pane, "Field of View", g_fov, 1, 179, 1, " degrees",
         "Freecam+ vertical field of view.");
+    addSelect(pane, "Update Rate", g_updateRate, kUpdateRateOptions,
+        std::size(kUpdateRateOptions),
+        "Controls how often Freecam+ redraws the scene. Lower rates reduce performance impact "
+        "while leaving the main game render rate unchanged.");
     addToggle(pane, "Always on Top", g_alwaysOnTop,
         "Keeps the Freecam+ window above other windows and updates while it is open.");
     return MOD_OK;
@@ -790,6 +854,8 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     if (result != MOD_OK) return result;
     result = registerInt("fov", 60, g_fov, error);
     if (result != MOD_OK) return result;
+    result = registerInt("updateRate", 0, g_updateRate, error);
+    if (result != MOD_OK) return result;
     result = registerBool("alwaysOnTop", false, g_alwaysOnTop, error);
     if (result != MOD_OK) return result;
 
@@ -846,7 +912,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     }
     closeWindow();
     releasePresentPipeline();
-    g_controls = g_moveSpeed = g_fov = g_alwaysOnTop = 0;
+    g_controls = g_moveSpeed = g_fov = g_updateRate = g_alwaysOnTop = 0;
     return MOD_OK;
 }
 
