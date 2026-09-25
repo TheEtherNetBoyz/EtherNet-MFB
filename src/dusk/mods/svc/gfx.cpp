@@ -4,6 +4,7 @@
 
 #include <borealis/log.hpp>
 #include "dusk/gfx.hpp"
+#include "dusk/interp/frame_interpolation.h"
 #include "dusk/mods/loader/loader.hpp"
 #include "mods/svc/gfx.h"
 
@@ -970,6 +971,10 @@ void gfx_run_stage(
         .stage = stage,
         .game_view = gameView,
         .game_viewport = gameViewport,
+        .interpolation_step = dusk::interp::is_enabled()
+            ? std::clamp(dusk::interp::get_interpolation_step(), 0.0f, 1.0f)
+            : 1.0f,
+        .simulation_tick = dusk::interp::sim_tick_seq(),
     };
 
     AuroraGXSync();

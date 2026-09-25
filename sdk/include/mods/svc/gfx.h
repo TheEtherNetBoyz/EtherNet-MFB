@@ -181,6 +181,8 @@ typedef struct GfxStageContext {
     GfxStage stage;
     const void* game_view;     /* view_class* for world-camera stages; NULL otherwise */
     const void* game_viewport; /* view_port_class* for world-camera stages; NULL otherwise */
+    float interpolation_step;  /* presentation time between prior/current simulation frames */
+    uint64_t simulation_tick;  /* sequence number of the current simulation snapshot */
 } GfxStageContext;
 
 typedef void (*GfxStageFn)(ModContext* ctx, const GfxStageContext* stage_ctx, void* user_data);

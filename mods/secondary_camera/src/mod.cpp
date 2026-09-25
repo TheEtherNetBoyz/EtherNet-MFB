@@ -5,6 +5,7 @@
 #include "d/d_com_inf_game.h"
 #include "d/d_kankyo.h"
 #include "dolphin/gx/GXGet.h"
+#include "dolphin/gx/GXAurora.h"
 #include "dolphin/gx/GXPixel.h"
 #include "dolphin/gx/GXTransform.h"
 #include "m_Do/m_Do_mtx.h"
@@ -19,8 +20,16 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <webgpu/webgpu.h>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 DEFINE_MOD();
 IMPORT_SERVICE(ConfigService, svc_config);
@@ -45,7 +54,81 @@ constexpr const char* kUpdateRateOptions[] = {
     "30 FPS",
     "20 FPS",
     "15 FPS",
+    "60 FPS",
+    "120 FPS",
 };
+
+// WindowService is append-only, but the latest Dusklight main branch still publishes the
+// 1.0 header while newer hosts append input and always-on-top functions. Keep the compatibility
+// view local so this package can be compiled against 1.0 and take advantage of newer hosts at
+// runtime without importing newer fields from an older SDK header.
+using WindowCreateFn = decltype(((WindowService*)nullptr)->create_window);
+using WindowDestroyFn = decltype(((WindowService*)nullptr)->destroy_window);
+using WindowShowFn = decltype(((WindowService*)nullptr)->show_window);
+using WindowHideFn = decltype(((WindowService*)nullptr)->hide_window);
+using WindowSetTitleFn = decltype(((WindowService*)nullptr)->set_title);
+using WindowSetSizeFn = decltype(((WindowService*)nullptr)->set_size);
+using WindowGetInfoFn = decltype(((WindowService*)nullptr)->get_info);
+using WindowSetRelativeMouseModeFn = ModResult (*)(
+    ModContext* ctx, WindowHandle window, bool enabled);
+using WindowSetAlwaysOnTopFn = ModResult (*)(
+    ModContext* ctx, WindowHandle window, bool enabled);
+
+struct WindowServiceCompatibilityView {
+    ServiceHeader header;
+    WindowCreateFn create_window;
+    WindowDestroyFn destroy_window;
+    WindowShowFn show_window;
+    WindowHideFn hide_window;
+    WindowSetTitleFn set_title;
+    WindowSetSizeFn set_size;
+    WindowGetInfoFn get_info;
+    WindowSetRelativeMouseModeFn set_relative_mouse_mode;
+    WindowSetAlwaysOnTopFn set_always_on_top;
+};
+
+struct WindowEventCompatibilityView {
+    uint32_t struct_size;
+    WindowEventType type;
+    int32_t x;
+    int32_t y;
+    uint32_t width;
+    uint32_t height;
+    uint32_t pixel_width;
+    uint32_t pixel_height;
+    float display_scale;
+    int32_t keycode;
+    int32_t scancode;
+    uint32_t mouse_button;
+    float mouse_x;
+    float mouse_y;
+    float mouse_delta_x;
+    float mouse_delta_y;
+    bool repeat;
+};
+
+constexpr uint16_t kWindowInputMinor = 1;
+constexpr uint16_t kWindowAlwaysOnTopMinor = 2;
+constexpr auto kWindowEventKeyDown = static_cast<WindowEventType>(7);
+constexpr auto kWindowEventKeyUp = static_cast<WindowEventType>(8);
+constexpr auto kWindowEventMouseMotion = static_cast<WindowEventType>(9);
+constexpr auto kWindowEventMouseButtonDown = static_cast<WindowEventType>(10);
+
+const WindowServiceCompatibilityView* windowServiceCompatibility() {
+    return reinterpret_cast<const WindowServiceCompatibilityView*>(svc_window);
+}
+
+bool windowServiceSupports(uint16_t minor, size_t memberEnd) {
+    const auto* service = windowServiceCompatibility();
+    return service != nullptr && service->header.minor_version >= minor &&
+        service->header.struct_size >= memberEnd;
+}
+
+bool windowServiceHasInputEvents() {
+    return windowServiceSupports(kWindowInputMinor,
+        offsetof(WindowServiceCompatibilityView, set_relative_mouse_mode) +
+            sizeof(WindowSetRelativeMouseModeFn));
+}
 
 // SDL scancodes use the USB HID keyboard-page values. Keeping the handful used here local lets
 // this mod consume WindowService input without depending on SDL headers or linking SDL itself.
@@ -63,6 +146,9 @@ ConfigVarHandle g_moveSpeed = 0;
 ConfigVarHandle g_fov = 0;
 ConfigVarHandle g_alwaysOnTop = 0;
 ConfigVarHandle g_updateRate = 0;
+ConfigVarHandle g_startOnBoot = 0;
+ConfigVarHandle g_windowX = 0;
+ConfigVarHandle g_windowY = 0;
 ConfigVarHandle g_shoulderFollow = 0;
 ConfigVarHandle g_shoulderDistance = 0;
 ConfigVarHandle g_shoulderSideOffset = 0;
@@ -87,9 +173,17 @@ bool g_windowFocused = false;
 bool g_mouseCaptured = false;
 bool g_windowAlwaysOnTopApplied = false;
 bool g_hasRenderedFrame = false;
+bool g_closeWindowRequested = false;
+bool g_windowClosing = false;
+#if defined(_WIN32)
+bool g_windowsCursorCaptured = false;
+bool g_windowsEscapeDown = false;
+#endif
 uint32_t g_stablePlayerModelFrames = 0;
 using CameraClock = std::chrono::steady_clock;
 CameraClock::time_point g_nextCameraRender;
+bool g_bootWindowPending = false;
+bool g_bootWindowAttempted = false;
 
 struct InputState {
     bool forward = false;
@@ -116,6 +210,21 @@ struct CameraState {
 };
 
 CameraState g_camera;
+
+struct PlayerFollowSnapshot {
+    bool valid = false;
+    const daAlink_c* player = nullptr;
+    cXyz previousPosition;
+    cXyz currentPosition;
+    s16 previousAngle = 0;
+    s16 currentAngle = 0;
+    uint64_t simulationTick = 0;
+};
+
+PlayerFollowSnapshot g_playerFollow;
+float g_presentationStep = 1.0f;
+uint64_t g_presentationSimulationTick = 0;
+bool g_hasPresentationSimulationTick = false;
 
 bool canRefreshPlayerModelsForCurrentView(const daAlink_c* player) {
     if (player == nullptr) {
@@ -145,6 +254,37 @@ bool canRefreshPlayerModelsForCurrentView(const daAlink_c* player) {
     }
 
     return true;
+}
+
+// Keep this model refresh local to the mod so the standalone repository only
+// depends on the public Dusklight game headers. It intentionally mirrors the
+// stable-model list used by the in-tree build and excludes transition-sensitive
+// demo models.
+void refreshPlayerModelsForCurrentView(daAlink_c* player, bool includeEquipment) {
+    if (player == nullptr) {
+        return;
+    }
+
+    J3DModel* models[] = {
+        player->mpLinkModel, player->mpLinkFaceModel, player->mpLinkHatModel,
+        player->mpLinkHandModel,
+    };
+    for (J3DModel* model : models) {
+        if (model != nullptr) {
+            model->viewCalc();
+        }
+    }
+
+    if (includeEquipment) {
+        J3DModel* equipmentModels[] = {
+            player->mSwordModel, player->mSheathModel, player->mShieldModel,
+        };
+        for (J3DModel* model : equipmentModels) {
+            if (model != nullptr) {
+                model->viewCalc();
+            }
+        }
+    }
 }
 
 struct PresentPayload {
@@ -248,15 +388,50 @@ void updateShoulderCamera(const daAlink_c* player) {
         return;
     }
 
+    const cXyz rawPosition = player->current.pos;
+    const s16 rawAngle = player->shape_angle.y;
+    if (!g_playerFollow.valid || g_playerFollow.player != player) {
+        g_playerFollow.player = player;
+        g_playerFollow.previousPosition = rawPosition;
+        g_playerFollow.currentPosition = rawPosition;
+        g_playerFollow.previousAngle = rawAngle;
+        g_playerFollow.currentAngle = rawAngle;
+        g_playerFollow.simulationTick = g_presentationSimulationTick;
+        g_playerFollow.valid = true;
+    } else if ((g_hasPresentationSimulationTick &&
+                   g_presentationSimulationTick != g_playerFollow.simulationTick) ||
+               (!g_hasPresentationSimulationTick &&
+                   (rawPosition.x != g_playerFollow.currentPosition.x ||
+                    rawPosition.y != g_playerFollow.currentPosition.y ||
+                    rawPosition.z != g_playerFollow.currentPosition.z ||
+                    rawAngle != g_playerFollow.currentAngle))) {
+        g_playerFollow.previousPosition = g_playerFollow.currentPosition;
+        g_playerFollow.currentPosition = rawPosition;
+        g_playerFollow.previousAngle = g_playerFollow.currentAngle;
+        g_playerFollow.currentAngle = rawAngle;
+        g_playerFollow.simulationTick = g_presentationSimulationTick;
+    }
+
+    // Dusklight renders Link between simulation snapshots on presentation
+    // frames. Follow the same point in time; using player->current directly
+    // makes the camera advance at 30 Hz while Link's model advances smoothly.
+    const float step = g_presentationStep;
+    const cXyz anchor = g_playerFollow.previousPosition +
+        (g_playerFollow.currentPosition - g_playerFollow.previousPosition) * step;
+    const s16 angleDelta = static_cast<s16>(
+        static_cast<u16>(g_playerFollow.currentAngle) -
+        static_cast<u16>(g_playerFollow.previousAngle));
+    const float presentedAngle = static_cast<float>(g_playerFollow.previousAngle) +
+        static_cast<float>(angleDelta) * step;
+
     // Twilight uses sin(angle) for X and cos(angle) for Z. Zero orbit angle is
     // directly behind Link; the configurable angle orbits around him.
     constexpr float kGameAngleToRadians = 3.14159265358979323846f / 32768.0f;
     constexpr float kDegreesToRadians = 3.14159265358979323846f / 180.0f;
-    const float orbitAngle = static_cast<float>(player->shape_angle.y) *
-            kGameAngleToRadians + getShoulderAngle() * kDegreesToRadians;
+    const float orbitAngle = presentedAngle * kGameAngleToRadians +
+        getShoulderAngle() * kDegreesToRadians;
     const cXyz forward(std::sin(orbitAngle), 0.0f, std::cos(orbitAngle));
     const cXyz right(std::cos(orbitAngle), 0.0f, -std::sin(orbitAngle));
-    const cXyz anchor = player->current.pos;
 
     g_camera.eye = anchor - (forward * getShoulderDistance()) +
         (right * getShoulderSideOffset()) + cXyz(0.0f, getShoulderHeight(), 0.0f);
@@ -341,7 +516,7 @@ float getShoulderAngle() {
 CameraClock::duration getCameraRenderPeriod() {
     int64_t value = 0;
     svc_config->get_int(mod_ctx, g_updateRate, &value);
-    switch (std::clamp<int64_t>(value, 0, 3)) {
+    switch (std::clamp<int64_t>(value, 0, 5)) {
     case 1:
         return std::chrono::duration_cast<CameraClock::duration>(
             std::chrono::duration<double>(1.0 / 30.0));
@@ -351,6 +526,12 @@ CameraClock::duration getCameraRenderPeriod() {
     case 3:
         return std::chrono::duration_cast<CameraClock::duration>(
             std::chrono::duration<double>(1.0 / 15.0));
+    case 4:
+        return std::chrono::duration_cast<CameraClock::duration>(
+            std::chrono::duration<double>(1.0 / 60.0));
+    case 5:
+        return std::chrono::duration_cast<CameraClock::duration>(
+            std::chrono::duration<double>(1.0 / 120.0));
     default:
         return CameraClock::duration::zero();
     }
@@ -447,6 +628,16 @@ void renderCamera2() {
         return;
     }
 
+    // Start-on-boot can create the auxiliary window while the title scene or a
+    // room transition is still constructing display lists. Those pointers may
+    // be non-null before their FIFO data is safe to replay. Never submit the
+    // secondary scene pass until Link and the current room are fully stable.
+    daAlink_c* player = daAlink_getAlinkActorClass();
+    if (!canRefreshPlayerModelsForCurrentView(player)) {
+        g_stablePlayerModelFrames = 0;
+        return;
+    }
+
     f32 savedProjection[7];
     GXGetProjectionv(savedProjection);
     f32 savedViewport[6];
@@ -460,7 +651,6 @@ void renderCamera2() {
         return;
     }
 
-    daAlink_c* player = daAlink_getAlinkActorClass();
     if (getShoulderFollow()) {
         updateShoulderCamera(player);
     }
@@ -482,7 +672,7 @@ void renderCamera2() {
 
     j3dSys.setViewMtx(cameraView);
     if (refreshPlayerModels && player != nullptr) {
-        player->refreshPlayerModelsForCurrentView(refreshEquipment);
+        refreshPlayerModelsForCurrentView(player, refreshEquipment);
     }
     GXSetProjectionFull(cameraProjection);
     GXSetViewport(0.0f, 0.0f, static_cast<float>(kRenderWidth),
@@ -496,6 +686,14 @@ void renderCamera2() {
     GXSetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
     J3DShape::resetVcdVatCache();
     drawSceneLists();
+
+    // GX draw commands retain pointers into model-view buffers while Aurora's
+    // FIFO worker consumes the stream asynchronously. Do not rebuild Link's
+    // buffers for the main camera until every Camera 2 primitive has consumed
+    // the auxiliary-view data; otherwise high update rates can corrupt a
+    // primitive packet in the worker.
+    AuroraGXSync();
+
     j3dSys.setViewMtx(savedView);
     if (daAlink_c* restoredPlayer = daAlink_getAlinkActorClass();
         refreshPlayerModels && restoredPlayer == player) {
@@ -503,7 +701,7 @@ void renderCamera2() {
         // re-run the safety filter here: the pass already refreshed this exact actor,
         // and leaving its packets on Camera 2's view is what pins Link in front of
         // the second camera during rupee slides.
-        restoredPlayer->refreshPlayerModelsForCurrentView(refreshEquipment);
+        refreshPlayerModelsForCurrentView(restoredPlayer, refreshEquipment);
     }
     j3dSys.reinitGX();
     J3DShape::resetVcdVatCache();
@@ -526,13 +724,30 @@ void renderCamera2() {
     if (svc_gfx->push_present(mod_ctx, g_presentTarget, &payload, sizeof(payload)) == MOD_OK) {
         g_hasRenderedFrame = true;
         const CameraClock::duration period = getCameraRenderPeriod();
-        g_nextCameraRender = period == CameraClock::duration::zero()
-            ? CameraClock::time_point{}
-            : CameraClock::now() + period;
+        if (period == CameraClock::duration::zero()) {
+            g_nextCameraRender = CameraClock::time_point{};
+        } else {
+            const CameraClock::time_point now = CameraClock::now();
+            if (g_nextCameraRender.time_since_epoch().count() == 0 ||
+                now > g_nextCameraRender + period * 8) {
+                g_nextCameraRender = now + period;
+            } else {
+                // Keep the schedule anchored to the requested cadence. Scheduling from
+                // `now` after every frame turns a single late/early hook into a skipped
+                // Camera 2 frame and makes fast follow motion visibly uneven.
+                do {
+                    g_nextCameraRender += period;
+                } while (g_nextCameraRender <= now);
+            }
+        }
     }
 }
 
 void releasePresentPipeline() {
+    if (g_bloomParamsBuffer != nullptr) {
+        wgpuBufferRelease(g_bloomParamsBuffer);
+        g_bloomParamsBuffer = nullptr;
+    }
     if (g_presentPipeline != nullptr) {
         wgpuRenderPipelineRelease(g_presentPipeline);
         g_presentPipeline = nullptr;
@@ -540,10 +755,6 @@ void releasePresentPipeline() {
     if (g_presentLayout != nullptr) {
         wgpuBindGroupLayoutRelease(g_presentLayout);
         g_presentLayout = nullptr;
-    }
-    if (g_bloomParamsBuffer != nullptr) {
-        wgpuBufferRelease(g_bloomParamsBuffer);
-        g_bloomParamsBuffer = nullptr;
     }
     g_presentFormat = WGPUTextureFormat_Undefined;
 }
@@ -614,7 +825,7 @@ void onPresent(ModContext*, const GfxPresentContext* ctx, const void* payload,
             const float threshold = std::clamp(
                 static_cast<float>(nativeBloom->getPoint()) / 255.0f, 0.08f, 0.45f);
             const float density = static_cast<float>(nativeBloom->getBlureRatio()) / 255.0f;
-            const bool twilightVisuals = dKy_darkworld_visual_effect_check() != 0;
+            const bool twilightVisuals = dKy_darkworld_check() != 0;
             const float strengthScale = twilightVisuals ? 1.0f : kAreaBloomStrengthScale;
             const float strength = nativeBloom->getEnable() != 0
                 ? (0.9f + density * 3.6f) * strengthScale
@@ -630,8 +841,7 @@ void onPresent(ModContext*, const GfxPresentContext* ctx, const void* payload,
                     static_cast<float>(blendColor.a) / 255.0f,
                 },
             };
-            wgpuQueueWriteBuffer(ctx->queue, g_bloomParamsBuffer, 0, &params,
-                sizeof(params));
+            wgpuQueueWriteBuffer(ctx->queue, g_bloomParamsBuffer, 0, &params, sizeof(params));
 
             WGPUBindGroupEntry entries[2] = {
                 WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
@@ -668,14 +878,32 @@ void onPresent(ModContext*, const GfxPresentContext* ctx, const void* payload,
     wgpuRenderPassEncoderRelease(pass);
 }
 
+void saveWindowPosition();
+
 ModResult closeWindow() {
+    if (g_window == 0 && g_presentTarget == 0) {
+        g_closeWindowRequested = false;
+        return MOD_OK;
+    }
+    if (g_windowClosing) {
+        return MOD_CONFLICT;
+    }
+    g_windowClosing = true;
+    saveWindowPosition();
     if (g_window != 0 && g_mouseCaptured) {
-        svc_window->set_relative_mouse_mode(mod_ctx, g_window, false);
+        const auto* service = windowServiceCompatibility();
+        if (windowServiceSupports(kWindowInputMinor,
+                offsetof(WindowServiceCompatibilityView, set_relative_mouse_mode) +
+                    sizeof(WindowSetRelativeMouseModeFn)) &&
+            service->set_relative_mouse_mode != nullptr) {
+            service->set_relative_mouse_mode(mod_ctx, g_window, false);
+        }
         g_mouseCaptured = false;
     }
     if (g_presentTarget != 0) {
         const ModResult result = svc_gfx->unregister_present_target(mod_ctx, g_presentTarget);
         if (result != MOD_OK) {
+            g_windowClosing = false;
             return result;
         }
         g_presentTarget = 0;
@@ -683,6 +911,7 @@ ModResult closeWindow() {
     if (g_window != 0) {
         const ModResult result = svc_window->destroy_window(mod_ctx, g_window);
         if (result != MOD_OK) {
+            g_windowClosing = false;
             return result;
         }
         g_window = 0;
@@ -690,8 +919,14 @@ ModResult closeWindow() {
     g_windowFocused = false;
     g_windowAlwaysOnTopApplied = false;
     g_hasRenderedFrame = false;
+#if defined(_WIN32)
+    g_windowsCursorCaptured = false;
+    g_windowsEscapeDown = false;
+#endif
     g_nextCameraRender = CameraClock::time_point{};
     g_input = {};
+    g_closeWindowRequested = false;
+    g_windowClosing = false;
     return MOD_OK;
 }
 
@@ -729,42 +964,140 @@ void activateFreeCameraControls() {
 }
 
 void onWindowEvent(ModContext*, WindowHandle, const WindowEvent* event, void*) {
+    if (event == nullptr) {
+        return;
+    }
+
     if (event->type == WINDOW_EVENT_CLOSE_REQUESTED) {
-        closeWindow();
+        // Do not unregister the graphics target from inside SDL's event dispatch. The
+        // graphics service synchronizes its worker there, which can deadlock while the
+        // host is closing or while the auxiliary surface is being torn down.
+        g_closeWindowRequested = true;
+        return;
+    } else if (event->type == WINDOW_EVENT_MOVED) {
+        saveWindowPosition();
     } else if (event->type == WINDOW_EVENT_FOCUS_GAINED) {
         activateFreeCameraControls();
     } else if (event->type == WINDOW_EVENT_FOCUS_LOST) {
         g_windowFocused = false;
         g_input = {};
-    } else if (event->type == WINDOW_EVENT_KEY_DOWN) {
-        if (event->scancode == kScancodeEscape) {
-            svc_config->set_bool(mod_ctx, g_controls, false);
-            g_input = {};
-        } else {
-            setKeyState(event->scancode, true);
+
+    } else if (windowServiceHasInputEvents() &&
+               event->struct_size >= offsetof(WindowEventCompatibilityView, keycode) +
+                   sizeof(int32_t)) {
+        const auto* inputEvent = reinterpret_cast<const WindowEventCompatibilityView*>(event);
+        if (inputEvent->type == kWindowEventKeyDown) {
+            if (inputEvent->scancode == kScancodeEscape) {
+                svc_config->set_bool(mod_ctx, g_controls, false);
+                g_input = {};
+            } else {
+                setKeyState(inputEvent->scancode, true);
+            }
+        } else if (inputEvent->type == kWindowEventKeyUp) {
+            setKeyState(inputEvent->scancode, false);
+        } else if (inputEvent->type == kWindowEventMouseButtonDown) {
+            // A click should recapture controls even if Escape released them while this
+            // window remained focused (which does not generate another focus event).
+            activateFreeCameraControls();
+        } else if (inputEvent->type == kWindowEventMouseMotion && g_mouseCaptured &&
+                   event->struct_size >= offsetof(WindowEventCompatibilityView, repeat) +
+                       sizeof(bool)) {
+            g_input.mouseDeltaX += inputEvent->mouse_delta_x;
+            g_input.mouseDeltaY += inputEvent->mouse_delta_y;
         }
-    } else if (event->type == WINDOW_EVENT_KEY_UP) {
-        setKeyState(event->scancode, false);
-    } else if (event->type == WINDOW_EVENT_MOUSE_BUTTON_DOWN) {
-        // A click should recapture controls even if Escape released them while this
-        // window remained focused (which does not generate another focus event).
-        activateFreeCameraControls();
-    } else if (event->type == WINDOW_EVENT_MOUSE_MOTION && g_mouseCaptured) {
-        g_input.mouseDeltaX += event->mouse_delta_x;
-        g_input.mouseDeltaY += event->mouse_delta_y;
     }
 }
+
+#if defined(_WIN32)
+bool windowsKeyDown(int virtualKey) {
+    return (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
+}
+
+void pollWindowsInput() {
+    if (windowServiceHasInputEvents() || g_window == 0 || !g_windowFocused ||
+        !g_mouseCaptured || !getControlsEnabled()) {
+        g_windowsCursorCaptured = false;
+        g_windowsEscapeDown = false;
+        return;
+    }
+
+    const bool escapeDown = windowsKeyDown(VK_ESCAPE);
+    if (escapeDown && !g_windowsEscapeDown) {
+        svc_config->set_bool(mod_ctx, g_controls, false);
+        g_input = {};
+    }
+    g_windowsEscapeDown = escapeDown;
+    if (!getControlsEnabled()) {
+        g_windowsCursorCaptured = false;
+        return;
+    }
+
+    setKeyState(kScancodeW, windowsKeyDown('W'));
+    setKeyState(kScancodeA, windowsKeyDown('A'));
+    setKeyState(kScancodeS, windowsKeyDown('S'));
+    setKeyState(kScancodeD, windowsKeyDown('D'));
+    setKeyState(kScancodeSpace, windowsKeyDown(VK_SPACE));
+    setKeyState(kScancodeLeftCtrl, windowsKeyDown(VK_LCONTROL));
+    setKeyState(kScancodeLeftShift, windowsKeyDown(VK_LSHIFT));
+
+    WindowInfo info = WINDOW_INFO_INIT;
+    if (svc_window->get_info(mod_ctx, g_window, &info) != MOD_OK || info.width == 0 ||
+        info.height == 0) {
+        g_windowsCursorCaptured = false;
+        return;
+    }
+
+    POINT center{
+        static_cast<LONG>(info.x + static_cast<int32_t>(info.width / 2)),
+        static_cast<LONG>(info.y + static_cast<int32_t>(info.height / 2)),
+    };
+    if (!g_windowsCursorCaptured) {
+        SetCursorPos(center.x, center.y);
+        g_windowsCursorCaptured = true;
+        return;
+    }
+
+    POINT cursor{};
+    if (GetCursorPos(&cursor)) {
+        g_input.mouseDeltaX += static_cast<float>(cursor.x - center.x);
+        g_input.mouseDeltaY += static_cast<float>(cursor.y - center.y);
+        if (cursor.x != center.x || cursor.y != center.y) {
+            SetCursorPos(center.x, center.y);
+        }
+    }
+}
+#else
+void pollWindowsInput() {}
+#endif
 
 void syncMouseCapture() {
     if (g_window == 0) {
         g_mouseCaptured = false;
         return;
     }
+
+    const auto* service = windowServiceCompatibility();
+#if defined(_WIN32)
+    if (!windowServiceHasInputEvents() || service->set_relative_mouse_mode == nullptr) {
+        WindowInfo info = WINDOW_INFO_INIT;
+        if (svc_window->get_info(mod_ctx, g_window, &info) == MOD_OK) {
+            g_windowFocused = info.focused;
+        }
+        g_mouseCaptured = g_windowFocused && getControlsEnabled();
+        return;
+    }
+#else
+    if (!windowServiceHasInputEvents() || service->set_relative_mouse_mode == nullptr) {
+        g_mouseCaptured = false;
+        return;
+    }
+#endif
+
     const bool wanted = g_windowFocused && getControlsEnabled();
     if (wanted == g_mouseCaptured) {
         return;
     }
-    if (svc_window->set_relative_mouse_mode(mod_ctx, g_window, wanted) == MOD_OK) {
+    if (service->set_relative_mouse_mode(mod_ctx, g_window, wanted) == MOD_OK) {
         g_mouseCaptured = wanted;
     }
 }
@@ -774,14 +1107,56 @@ void syncAlwaysOnTop() {
         return;
     }
 
+    const auto* service = windowServiceCompatibility();
+    if (!windowServiceSupports(kWindowAlwaysOnTopMinor,
+            offsetof(WindowServiceCompatibilityView, set_always_on_top) +
+                sizeof(WindowSetAlwaysOnTopFn)) ||
+        service->set_always_on_top == nullptr) {
+        return;
+    }
+
     bool wanted = false;
     svc_config->get_bool(mod_ctx, g_alwaysOnTop, &wanted);
     if (wanted == g_windowAlwaysOnTopApplied) {
         return;
     }
 
-    if (svc_window->set_always_on_top(mod_ctx, g_window, wanted) == MOD_OK) {
+    if (service->set_always_on_top(mod_ctx, g_window, wanted) == MOD_OK) {
         g_windowAlwaysOnTopApplied = wanted;
+    }
+}
+
+bool getSavedWindowPosition(int32_t& x, int32_t& y) {
+    int64_t savedX = WINDOW_POSITION_UNDEFINED;
+    int64_t savedY = WINDOW_POSITION_UNDEFINED;
+    if (svc_config->get_int(mod_ctx, g_windowX, &savedX) != MOD_OK ||
+        svc_config->get_int(mod_ctx, g_windowY, &savedY) != MOD_OK ||
+        savedX == WINDOW_POSITION_UNDEFINED || savedY == WINDOW_POSITION_UNDEFINED ||
+        savedX < INT32_MIN || savedX > INT32_MAX || savedY < INT32_MIN || savedY > INT32_MAX) {
+        return false;
+    }
+    x = static_cast<int32_t>(savedX);
+    y = static_cast<int32_t>(savedY);
+    return true;
+}
+
+void saveWindowPosition() {
+    if (g_window == 0 || g_windowX == 0 || g_windowY == 0) {
+        return;
+    }
+
+    WindowInfo info = WINDOW_INFO_INIT;
+    if (svc_window->get_info(mod_ctx, g_window, &info) == MOD_OK &&
+        info.x != WINDOW_POSITION_UNDEFINED && info.y != WINDOW_POSITION_UNDEFINED) {
+        svc_config->set_int(mod_ctx, g_windowX, info.x);
+        svc_config->set_int(mod_ctx, g_windowY, info.y);
+    }
+}
+
+void clearSavedWindowPosition() {
+    if (g_windowX != 0 && g_windowY != 0) {
+        svc_config->set_int(mod_ctx, g_windowX, WINDOW_POSITION_UNDEFINED);
+        svc_config->set_int(mod_ctx, g_windowY, WINDOW_POSITION_UNDEFINED);
     }
 }
 
@@ -802,6 +1177,12 @@ ModResult openWindow() {
     windowDesc.title = "Freecam+";
     windowDesc.width = kRenderWidth;
     windowDesc.height = kRenderHeight;
+    int32_t savedX = WINDOW_POSITION_UNDEFINED;
+    int32_t savedY = WINDOW_POSITION_UNDEFINED;
+    if (getSavedWindowPosition(savedX, savedY)) {
+        windowDesc.x = savedX;
+        windowDesc.y = savedY;
+    }
     bool alwaysOnTop = false;
     svc_config->get_bool(mod_ctx, g_alwaysOnTop, &alwaysOnTop);
     if (alwaysOnTop) {
@@ -842,6 +1223,20 @@ void onResetView(ModContext*, void*) {
     g_resetViewRequested = true;
 }
 
+void onResetWindowPosition(ModContext*, void*) {
+    const bool wasOpen = g_window != 0;
+    if (wasOpen) {
+        closeWindow();
+    }
+    clearSavedWindowPosition();
+    if (wasOpen) {
+        const ModResult result = openWindow();
+        if (result != MOD_OK) {
+            svc_log->error(mod_ctx, "failed to reopen Freecam+ after resetting window position");
+        }
+    }
+}
+
 void onSceneBegin(ModContext*, const GfxStageContext* stageCtx, void*) {
     if (stageCtx == nullptr || stageCtx->game_view == nullptr) {
         return;
@@ -853,7 +1248,19 @@ void onSceneBegin(ModContext*, const GfxStageContext* stageCtx, void*) {
     }
 }
 
-void onFrameBeforeHud(ModContext*, const GfxStageContext*, void*) {
+void onFrameBeforeHud(ModContext*, const GfxStageContext* stageCtx, void*) {
+    constexpr size_t kInterpolationStepEnd =
+        offsetof(GfxStageContext, interpolation_step) + sizeof(float);
+    g_presentationStep = stageCtx != nullptr && stageCtx->struct_size >= kInterpolationStepEnd
+        ? std::clamp(stageCtx->interpolation_step, 0.0f, 1.0f)
+        : 1.0f;
+    constexpr size_t kSimulationTickEnd =
+        offsetof(GfxStageContext, simulation_tick) + sizeof(uint64_t);
+    g_hasPresentationSimulationTick =
+        stageCtx != nullptr && stageCtx->struct_size >= kSimulationTickEnd;
+    if (g_hasPresentationSimulationTick) {
+        g_presentationSimulationTick = stageCtx->simulation_tick;
+    }
     renderCamera2();
 }
 
@@ -948,6 +1355,13 @@ ModResult buildCameraControls(UiElementHandle pane) {
         "Spawns Freecam+ just above and behind Link once; it remains independent afterward.";
     resetControl.on_pressed = onResetView;
     svc_ui->pane_add_control(mod_ctx, pane, &resetControl, nullptr);
+    UiControlDesc resetWindowPositionControl = UI_CONTROL_DESC_INIT;
+    resetWindowPositionControl.kind = UI_CONTROL_BUTTON;
+    resetWindowPositionControl.label = "Reset Window Position";
+    resetWindowPositionControl.help_rml =
+        "Clears the saved Freecam+ position and returns the window to the host default.";
+    resetWindowPositionControl.on_pressed = onResetWindowPosition;
+    svc_ui->pane_add_control(mod_ctx, pane, &resetWindowPositionControl, nullptr);
     addToggle(pane, "Control Freecam+", g_controls,
         "Freecam+ is an independent free camera. Click its window to capture input. WASD moves, "
         "mouse looks, Space/Ctrl move vertically, Shift speeds up, and Escape releases the mouse.");
@@ -961,6 +1375,8 @@ ModResult buildCameraControls(UiElementHandle pane) {
         "performance impact while leaving the main game render rate unchanged.");
     addToggle(pane, "Always on Top", g_alwaysOnTop,
         "Keeps the Freecam+ window above other windows and updates while it is open.");
+    addToggle(pane, "Start Freecam+ on Boot", g_startOnBoot,
+        "Opens Freecam+ automatically when Dusklight starts, restoring the last saved settings and window position.");
     addToggle(pane, "Over-the-Shoulder Follow", g_shoulderFollow,
         "Makes Camera 2 follow Link's world position and facing direction without changing the main camera.");
 
@@ -1040,6 +1456,12 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     if (result != MOD_OK) return result;
     result = registerInt("updateRate", 0, g_updateRate, error);
     if (result != MOD_OK) return result;
+    result = registerBool("startOnBoot", false, g_startOnBoot, error);
+    if (result != MOD_OK) return result;
+    result = registerInt("windowX", WINDOW_POSITION_UNDEFINED, g_windowX, error);
+    if (result != MOD_OK) return result;
+    result = registerInt("windowY", WINDOW_POSITION_UNDEFINED, g_windowY, error);
+    if (result != MOD_OK) return result;
     result = registerBool("alwaysOnTop", false, g_alwaysOnTop, error);
     if (result != MOD_OK) return result;
     result = registerBool("shoulderFollow", false, g_shoulderFollow, error);
@@ -1054,6 +1476,11 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     if (result != MOD_OK) return result;
     result = registerInt("shoulderAngle", 0, g_shoulderAngle, error);
     if (result != MOD_OK) return result;
+
+    bool startOnBoot = false;
+    svc_config->get_bool(mod_ctx, g_startOnBoot, &startOnBoot);
+    g_bootWindowPending = startOnBoot;
+    g_bootWindowAttempted = false;
 
     GfxStageHookDesc stageDesc = GFX_STAGE_HOOK_DESC_INIT;
     stageDesc.callback = onSceneBegin;
@@ -1083,13 +1510,30 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
 }
 
 MOD_EXPORT ModResult mod_update(ModError*) {
+    if (g_bootWindowPending && !g_bootWindowAttempted && g_window == 0) {
+        g_bootWindowAttempted = true;
+        const ModResult result = openWindow();
+        if (result == MOD_OK) {
+            g_bootWindowPending = false;
+        } else {
+            svc_log->error(mod_ctx, "failed to start Freecam+ automatically on boot");
+        }
+    }
+    if (g_closeWindowRequested && !g_windowClosing) {
+        const ModResult result = closeWindow();
+        if (result != MOD_OK) {
+            svc_log->error(mod_ctx, "failed to close Freecam+ window after close request");
+        }
+    }
     syncAlwaysOnTop();
     syncMouseCapture();
+    pollWindowsInput();
     updateControls(1.0f / 60.0f);
     return MOD_OK;
 }
 
 MOD_EXPORT ModResult mod_shutdown(ModError*) {
+    g_closeWindowRequested = false;
     if (g_menuTab != 0) {
         svc_ui->unregister_menu_tab(mod_ctx, g_menuTab);
         g_menuTab = 0;
@@ -1110,7 +1554,17 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
         svc_gfx->unregister_stage_hook(mod_ctx, g_frameBeforeHudHook);
         g_frameBeforeHudHook = 0;
     }
-    closeWindow();
+    // Dusklight's deactivation sequence has already synchronized and detached the
+    // graphics task before calling mod_shutdown, then removes this mod's windows and
+    // present targets immediately afterward. Do not unregister the same target again
+    // here; doing so can wait forever during host shutdown. Save the position while
+    // the window handle is still valid and let the services own final teardown.
+    saveWindowPosition();
+    g_presentTarget = 0;
+    g_window = 0;
+    g_mouseCaptured = false;
+    g_windowFocused = false;
+    g_windowClosing = false;
     releasePresentPipeline();
     g_controls = g_moveSpeed = g_fov = g_updateRate = g_alwaysOnTop = 0;
     g_shoulderFollow = g_shoulderDistance = g_shoulderSideOffset = 0;
