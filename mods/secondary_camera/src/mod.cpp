@@ -8,6 +8,7 @@
 #include "dolphin/gx/GXAurora.h"
 #include "dolphin/gx/GXPixel.h"
 #include "dolphin/gx/GXTransform.h"
+#include "f_op/f_op_overlap_mng.h"
 #include "m_Do/m_Do_mtx.h"
 #include "m_Do/m_Do_graphic.h"
 #include "mods/service.hpp"
@@ -275,6 +276,24 @@ bool canRefreshPlayerModelsForCurrentView(const daAlink_c* player) {
     return true;
 }
 
+bool canRenderSecondaryPassThisFrame(const daAlink_c* player) {
+    if (!canRefreshPlayerModelsForCurrentView(player)) {
+        return false;
+    }
+
+    // Keep the last completed Camera 2 image during event/cutscene and room
+    // transition frames. Replaying the world while the main camera is being
+    // reassigned causes intermittent half-old/half-new frames in cutscenes.
+    // Item-get is intentionally allowed so rupee slides keep rendering Link.
+    const bool itemGet = player->mProcID == daAlink_c::PROC_GET_ITEM;
+    if ((!itemGet && (dComIfGp_event_runCheck() || player->checkEventRun())) ||
+        dComIfGp_isEnableNextStage() || fopOvlpM_IsDoingReq() || fopOvlpM_IsPeek()) {
+        return false;
+    }
+
+    return true;
+}
+
 // Keep this model refresh local to the mod so the standalone repository only
 // depends on the public Dusklight game headers. It intentionally mirrors the
 // stable-model list used by the in-tree build and excludes transition-sensitive
@@ -306,16 +325,39 @@ void refreshPlayerModelsForCurrentView(daAlink_c* player, bool includeEquipment)
     }
 }
 
-struct PresentPayload {
-    WGPUTextureView color;
-};
-
 struct BloomParams {
     float threshold;
     float strength;
     float padding[2];
     float blendColor[4];
 };
+
+struct PresentPayload {
+    WGPUTextureView color;
+    BloomParams bloom;
+};
+
+BloomParams captureBloomParams() {
+    auto* nativeBloom = mDoGph_gInf_c::getBloom();
+    const GXColor blendColor = *nativeBloom->getBlendColor();
+    const float threshold = std::clamp(
+        static_cast<float>(nativeBloom->getPoint()) / 255.0f, 0.08f, 0.45f);
+    const float density = static_cast<float>(nativeBloom->getBlureRatio()) / 255.0f;
+    const float strengthScale = dKy_darkworld_check() != 0
+        ? 1.0f : kAreaBloomStrengthScale;
+    return BloomParams{
+        .threshold = threshold,
+        .strength = nativeBloom->getEnable() != 0
+            ? (0.9f + density * 3.6f) * strengthScale : 0.0f,
+        .padding = {0.0f, 0.0f},
+        .blendColor = {
+            static_cast<float>(blendColor.r) / 255.0f,
+            static_cast<float>(blendColor.g) / 255.0f,
+            static_cast<float>(blendColor.b) / 255.0f,
+            static_cast<float>(blendColor.a) / 255.0f,
+        },
+    };
+}
 
 constexpr const char* kPresentShader = R"(
 @group(0) @binding(0) var source_color: texture_2d<f32>;
@@ -652,11 +694,10 @@ void renderCamera2() {
     // be non-null before their FIFO data is safe to replay. Never submit the
     // secondary scene pass until Link and the current room are fully stable.
     daAlink_c* player = daAlink_getAlinkActorClass();
-    if (!canRefreshPlayerModelsForCurrentView(player)) {
+    if (!canRenderSecondaryPassThisFrame(player)) {
         g_stablePlayerModelFrames = 0;
         return;
     }
-
     f32 savedProjection[7];
     GXGetProjectionv(savedProjection);
     f32 savedViewport[6];
@@ -739,7 +780,7 @@ void renderCamera2() {
     J3DShape::resetVcdVatCache();
     restoreGameRenderState(savedView, savedProjection, savedViewport, savedScissor);
 
-    const PresentPayload payload{.color = resolved.color};
+    const PresentPayload payload{.color = resolved.color, .bloom = captureBloomParams()};
     if (svc_gfx->push_present(mod_ctx, g_presentTarget, &payload, sizeof(payload)) == MOD_OK) {
         g_hasRenderedFrame = true;
         const CameraClock::duration period = getCameraRenderPeriod();
@@ -839,28 +880,8 @@ void onPresent(ModContext*, const GfxPresentContext* ctx, const void* payload,
         PresentPayload data;
         std::memcpy(&data, payload, sizeof(data));
         if (data.color != nullptr) {
-            auto* nativeBloom = mDoGph_gInf_c::getBloom();
-            const GXColor blendColor = *nativeBloom->getBlendColor();
-            const float threshold = std::clamp(
-                static_cast<float>(nativeBloom->getPoint()) / 255.0f, 0.08f, 0.45f);
-            const float density = static_cast<float>(nativeBloom->getBlureRatio()) / 255.0f;
-            const bool twilightVisuals = dKy_darkworld_check() != 0;
-            const float strengthScale = twilightVisuals ? 1.0f : kAreaBloomStrengthScale;
-            const float strength = nativeBloom->getEnable() != 0
-                ? (0.9f + density * 3.6f) * strengthScale
-                : 0.0f;
-            const BloomParams params{
-                .threshold = threshold,
-                .strength = strength,
-                .padding = {0.0f, 0.0f},
-                .blendColor = {
-                    static_cast<float>(blendColor.r) / 255.0f,
-                    static_cast<float>(blendColor.g) / 255.0f,
-                    static_cast<float>(blendColor.b) / 255.0f,
-                    static_cast<float>(blendColor.a) / 255.0f,
-                },
-            };
-            wgpuQueueWriteBuffer(ctx->queue, g_bloomParamsBuffer, 0, &params, sizeof(params));
+            wgpuQueueWriteBuffer(ctx->queue, g_bloomParamsBuffer, 0,
+                &data.bloom, sizeof(data.bloom));
 
             WGPUBindGroupEntry entries[2] = {
                 WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
