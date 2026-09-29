@@ -51,11 +51,11 @@ constexpr float kFastMultiplier = 4.0f;
 constexpr float kAreaBloomStrengthScale = 0.45f;
 constexpr const char* kUpdateRateOptions[] = {
     "Full speed",
+    "120 FPS",
+    "60 FPS",
     "30 FPS",
     "20 FPS",
     "15 FPS",
-    "60 FPS",
-    "120 FPS",
 };
 
 // WindowService is append-only, but the latest Dusklight main branch still publishes the
@@ -107,12 +107,27 @@ struct WindowEventCompatibilityView {
     bool repeat;
 };
 
+// GfxStageContext is append-only. The standalone Freecam+ build supports SDKs
+// that may predate presentation timing fields, while newer Dusklight hosts
+// append them at runtime. Keep the extended layout local so both ABI versions
+// can read the fields safely when struct_size says they are present.
+struct GfxStageContextInterpolationView {
+    uint32_t struct_size;
+    GfxStage stage;
+    const void* game_view;
+    const void* game_viewport;
+    float interpolation_step;
+    uint64_t simulation_tick;
+};
+
 constexpr uint16_t kWindowInputMinor = 1;
 constexpr uint16_t kWindowAlwaysOnTopMinor = 2;
-constexpr auto kWindowEventKeyDown = static_cast<WindowEventType>(7);
-constexpr auto kWindowEventKeyUp = static_cast<WindowEventType>(8);
-constexpr auto kWindowEventMouseMotion = static_cast<WindowEventType>(9);
-constexpr auto kWindowEventMouseButtonDown = static_cast<WindowEventType>(10);
+// Keep appended event kinds as integers. Older SDK headers do not declare
+// these newer enum values even though compatible hosts dispatch them.
+constexpr uint32_t kWindowEventKeyDown = 7;
+constexpr uint32_t kWindowEventKeyUp = 8;
+constexpr uint32_t kWindowEventMouseMotion = 9;
+constexpr uint32_t kWindowEventMouseButtonDown = 10;
 
 const WindowServiceCompatibilityView* windowServiceCompatibility() {
     return reinterpret_cast<const WindowServiceCompatibilityView*>(svc_window);
@@ -184,6 +199,10 @@ using CameraClock = std::chrono::steady_clock;
 CameraClock::time_point g_nextCameraRender;
 bool g_bootWindowPending = false;
 bool g_bootWindowAttempted = false;
+// FRAME_BEFORE_HUD is intentionally invoked without a game-view pointer by
+// Dusklight. Keep the scene validity learned from SCENE_BEGIN instead of using
+// the frame-hook context as a title-screen test.
+bool g_gameSceneReady = false;
 
 struct InputState {
     bool forward = false;
@@ -519,19 +538,19 @@ CameraClock::duration getCameraRenderPeriod() {
     switch (std::clamp<int64_t>(value, 0, 5)) {
     case 1:
         return std::chrono::duration_cast<CameraClock::duration>(
-            std::chrono::duration<double>(1.0 / 30.0));
+            std::chrono::duration<double>(1.0 / 120.0));
     case 2:
         return std::chrono::duration_cast<CameraClock::duration>(
-            std::chrono::duration<double>(1.0 / 20.0));
+            std::chrono::duration<double>(1.0 / 60.0));
     case 3:
         return std::chrono::duration_cast<CameraClock::duration>(
-            std::chrono::duration<double>(1.0 / 15.0));
+            std::chrono::duration<double>(1.0 / 30.0));
     case 4:
         return std::chrono::duration_cast<CameraClock::duration>(
-            std::chrono::duration<double>(1.0 / 60.0));
+            std::chrono::duration<double>(1.0 / 20.0));
     case 5:
         return std::chrono::duration_cast<CameraClock::duration>(
-            std::chrono::duration<double>(1.0 / 120.0));
+            std::chrono::duration<double>(1.0 / 15.0));
     default:
         return CameraClock::duration::zero();
     }
@@ -986,20 +1005,21 @@ void onWindowEvent(ModContext*, WindowHandle, const WindowEvent* event, void*) {
                event->struct_size >= offsetof(WindowEventCompatibilityView, keycode) +
                    sizeof(int32_t)) {
         const auto* inputEvent = reinterpret_cast<const WindowEventCompatibilityView*>(event);
-        if (inputEvent->type == kWindowEventKeyDown) {
+        const uint32_t eventType = static_cast<uint32_t>(inputEvent->type);
+        if (eventType == kWindowEventKeyDown) {
             if (inputEvent->scancode == kScancodeEscape) {
                 svc_config->set_bool(mod_ctx, g_controls, false);
                 g_input = {};
             } else {
                 setKeyState(inputEvent->scancode, true);
             }
-        } else if (inputEvent->type == kWindowEventKeyUp) {
+        } else if (eventType == kWindowEventKeyUp) {
             setKeyState(inputEvent->scancode, false);
-        } else if (inputEvent->type == kWindowEventMouseButtonDown) {
+        } else if (eventType == kWindowEventMouseButtonDown) {
             // A click should recapture controls even if Escape released them while this
             // window remained focused (which does not generate another focus event).
             activateFreeCameraControls();
-        } else if (inputEvent->type == kWindowEventMouseMotion && g_mouseCaptured &&
+        } else if (eventType == kWindowEventMouseMotion && g_mouseCaptured &&
                    event->struct_size >= offsetof(WindowEventCompatibilityView, repeat) +
                        sizeof(bool)) {
             g_input.mouseDeltaX += inputEvent->mouse_delta_x;
@@ -1239,8 +1259,19 @@ void onResetWindowPosition(ModContext*, void*) {
 
 void onSceneBegin(ModContext*, const GfxStageContext* stageCtx, void*) {
     if (stageCtx == nullptr || stageCtx->game_view == nullptr) {
+        g_gameSceneReady = false;
         return;
     }
+
+    daAlink_c* player = daAlink_getAlinkActorClass();
+    // Display lists may still be filling in at SCENE_BEGIN. renderCamera2()
+    // performs that per-frame check; the latch only establishes that we are in
+    // a live gameplay scene with a valid Link actor and room state.
+    g_gameSceneReady = player != nullptr && canRefreshPlayerModelsForCurrentView(player);
+    if (!g_gameSceneReady) {
+        return;
+    }
+
     if (!g_camera.initialized || g_resetViewRequested) {
         if (resetFreeCamera()) {
             g_resetViewRequested = false;
@@ -1249,17 +1280,26 @@ void onSceneBegin(ModContext*, const GfxStageContext* stageCtx, void*) {
 }
 
 void onFrameBeforeHud(ModContext*, const GfxStageContext* stageCtx, void*) {
+    // FRAME_BEFORE_HUD is called with no game_view by the host. Only render
+    // after SCENE_BEGIN has confirmed a live gameplay scene; this keeps the
+    // normal Camera 2 path working while avoiding title-screen display lists.
+    if (!g_gameSceneReady) {
+        return;
+    }
+
+    const auto* extended =
+        reinterpret_cast<const GfxStageContextInterpolationView*>(stageCtx);
     constexpr size_t kInterpolationStepEnd =
-        offsetof(GfxStageContext, interpolation_step) + sizeof(float);
+        offsetof(GfxStageContextInterpolationView, interpolation_step) + sizeof(float);
     g_presentationStep = stageCtx != nullptr && stageCtx->struct_size >= kInterpolationStepEnd
-        ? std::clamp(stageCtx->interpolation_step, 0.0f, 1.0f)
+        ? std::clamp(extended->interpolation_step, 0.0f, 1.0f)
         : 1.0f;
     constexpr size_t kSimulationTickEnd =
-        offsetof(GfxStageContext, simulation_tick) + sizeof(uint64_t);
+        offsetof(GfxStageContextInterpolationView, simulation_tick) + sizeof(uint64_t);
     g_hasPresentationSimulationTick =
         stageCtx != nullptr && stageCtx->struct_size >= kSimulationTickEnd;
     if (g_hasPresentationSimulationTick) {
-        g_presentationSimulationTick = stageCtx->simulation_tick;
+        g_presentationSimulationTick = extended->simulation_tick;
     }
     renderCamera2();
 }
@@ -1510,7 +1550,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
 }
 
 MOD_EXPORT ModResult mod_update(ModError*) {
-    if (g_bootWindowPending && !g_bootWindowAttempted && g_window == 0) {
+    if (g_bootWindowPending && !g_bootWindowAttempted && g_window == 0 && g_gameSceneReady) {
         g_bootWindowAttempted = true;
         const ModResult result = openWindow();
         if (result == MOD_OK) {
