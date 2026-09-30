@@ -17,6 +17,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 
@@ -75,6 +76,108 @@ void project_drift(float dx, float dz, s16 facingAngle, float& forward, float& r
     right = -dx * forwardZ + dz * forwardX;
 }
 
+// This is the calculator's 30-frame GETAWAIT root-motion loop. The game applies
+// these deltas with float32 rounding once per frame; keeping the table here makes
+// the in-game prediction match the standalone calculator without embedding Python.
+constexpr std::array<float, 30> kPickupSlideRootDeltas = {
+    0.0315151215f,  0.0292396545f,  0.0239086151f,  0.0187950134f,
+    0.0139045715f,  0.0092277527f,  0.0047760010f,  0.0005416870f,
+   -0.0034751892f, -0.0072689056f, -0.0108432769f, -0.0142002106f,
+   -0.0173377991f, -0.0202541351f, -0.0229530334f, -0.0254306793f,
+   -0.0276889801f, -0.0297279358f, -0.0315475464f, -0.0274848938f,
+   -0.0182037354f, -0.0097084045f, -0.0019969940f,  0.0049362183f,
+    0.0110778809f,  0.0164451599f,  0.0210266113f,  0.0248203278f,
+    0.0278377533f,  0.0300693512f,
+};
+
+float pickup_slide_add(float a, float b) {
+    volatile float result = a + b;
+    return result;
+}
+
+float pickup_slide_sub(float a, float b) {
+    volatile float result = a - b;
+    return result;
+}
+
+float pickup_slide_mul(float a, float b) {
+    volatile float result = a * b;
+    return result;
+}
+
+void pickup_slide_trig(u16 unsignedAngle, float& sine, float& cosine) {
+    const unsigned int index = (unsignedAngle & 0xFFFFu) >> 3;
+    const double radians = static_cast<double>(index) * static_cast<double>(6.2831855f) /
+                           8192.0;
+    sine = static_cast<float>(std::sin(radians));
+    cosine = static_cast<float>(std::cos(radians));
+}
+
+struct PickupSlidePrediction {
+    float deltaX = 0.0f;
+    float deltaZ = 0.0f;
+    float endX = 0.0f;
+    float endZ = 0.0f;
+    float forward = 0.0f;
+    float right = 0.0f;
+    float speed = 0.0f;
+    float worldAngle = 0.0f;
+};
+
+PickupSlidePrediction predict_pickup_slide(float x, float z, u16 unsignedAngle) {
+    PickupSlidePrediction prediction;
+    float sine = 0.0f;
+    float cosine = 1.0f;
+    pickup_slide_trig(unsignedAngle, sine, cosine);
+
+    const float startX = x;
+    const float startZ = z;
+    float currentX = startX;
+    float currentZ = startZ;
+    for (const float rootDelta : kPickupSlideRootDeltas) {
+        currentX = pickup_slide_add(currentX, pickup_slide_mul(rootDelta, sine));
+        currentZ = pickup_slide_add(currentZ, pickup_slide_mul(rootDelta, cosine));
+    }
+
+    prediction.endX = currentX;
+    prediction.endZ = currentZ;
+    prediction.deltaX = pickup_slide_sub(currentX, startX);
+    prediction.deltaZ = pickup_slide_sub(currentZ, startZ);
+    prediction.forward = pickup_slide_add(
+        pickup_slide_mul(prediction.deltaX, sine),
+        pickup_slide_mul(prediction.deltaZ, cosine));
+    prediction.right = pickup_slide_add(
+        -pickup_slide_mul(prediction.deltaX, cosine),
+        pickup_slide_mul(prediction.deltaZ, sine));
+    prediction.speed = std::sqrt(
+        prediction.deltaX * prediction.deltaX + prediction.deltaZ * prediction.deltaZ);
+    if (prediction.speed > 0.0f) {
+        prediction.worldAngle = std::atan2(prediction.deltaX, prediction.deltaZ) *
+                                (180.0f / 3.14159265358979323846f);
+        if (prediction.worldAngle < 0.0f) {
+            prediction.worldAngle += 360.0f;
+        }
+    }
+    return prediction;
+}
+
+const char* pickup_slide_world_direction(float dx, float dz) {
+    constexpr float threshold = 0.000001f;
+    static char direction[24];
+    const bool hasX = std::fabs(dx) >= threshold;
+    const bool hasZ = std::fabs(dz) >= threshold;
+    if (!hasX && !hasZ) {
+        return "none";
+    }
+    const char* xDirection = dx >= 0.0f ? "+X" : "-X";
+    const char* zDirection = dz >= 0.0f ? "+Z" : "-Z";
+    if (hasX && hasZ) {
+        std::snprintf(direction, sizeof(direction), "%s/%s", xDirection, zDirection);
+        return direction;
+    }
+    return hasX ? xDirection : zDirection;
+}
+
 // Drift is accumulated in Link-local space on every simulation tick. The published
 // forward/right result is refreshed every five minutes of simulation time.
 constexpr float kDriftSampleSeconds = 5.0f * 60.0f;
@@ -101,6 +204,16 @@ bool s_loggedSlidePositionValid = false;
 bool s_loggedSlidePositionLoaded = false;
 bool s_overlayVisible = true;
 bool s_overlayToggleComboHeld = false;
+bool s_calculatorOverlayVisible = false;
+bool s_calculatorOverlayVisibilityLoaded = false;
+bool s_calculatorOverlayToggleComboHeld = false;
+bool s_calculatorCutsceneActive = false;
+bool s_liveCalculatorPredictionValid = false;
+bool s_calculatorSnapshotValid = false;
+u16 s_liveCalculatorAngle = 0;
+u16 s_calculatorSnapshotAngle = 0;
+PickupSlidePrediction s_liveCalculatorPrediction;
+PickupSlidePrediction s_calculatorSnapshot;
 float s_overlayScale = 1.0f;
 enum class OverlaySnap { None, TopLeft, TopRight, BottomLeft, BottomRight };
 OverlaySnap s_overlaySnapRequest = OverlaySnap::None;
@@ -112,6 +225,16 @@ bool overlayUsesImGui() {
 
 bool overlayUsesNative() {
     const auto mode = getSettings().game.rupeeSlideOverlayMode.getValue();
+    return mode == RupeeSlideOverlayMode::Native || mode == RupeeSlideOverlayMode::Both;
+}
+
+bool calculatorOverlayUsesImGui() {
+    const auto mode = getSettings().game.rupeeSlideCalculatorOverlayMode.getValue();
+    return mode == RupeeSlideOverlayMode::ImGui || mode == RupeeSlideOverlayMode::Both;
+}
+
+bool calculatorOverlayUsesNative() {
+    const auto mode = getSettings().game.rupeeSlideCalculatorOverlayMode.getValue();
     return mode == RupeeSlideOverlayMode::Native || mode == RupeeSlideOverlayMode::Both;
 }
 
@@ -128,6 +251,68 @@ bool overlayToggleComboHeld() {
     const bool startHeld = (physicalHold & PAD_BUTTON_START) != 0 ||
                            (hold & PAD_BUTTON_START) != 0;
     return lHeld && startHeld;
+}
+
+bool calculatorOverlayToggleComboHeld() {
+    const u32 physicalHold = mDoCPd_c::getUnfilteredHold(PAD_1);
+    const u32 hold = mDoCPd_c::getHold(PAD_1);
+    const u32 combinedHold = physicalHold | hold;
+    return (combinedHold & PAD_BUTTON_START) != 0 &&
+           (combinedHold & PAD_BUTTON_Y) != 0;
+}
+
+void updateCalculatorCutsceneSnapshot(fopAc_ac_c* player) {
+    const daAlink_c* link = daAlink_getAlinkActorClass();
+    const bool cutsceneActive = link != nullptr && dComIfGp_event_runCheck() &&
+                                link->checkGetItemMode();
+
+    if (!cutsceneActive) {
+        if (player != nullptr) {
+            s_liveCalculatorAngle = static_cast<u16>(player->shape_angle.y);
+            s_liveCalculatorPrediction = predict_pickup_slide(
+                player->current.pos.x, player->current.pos.z, s_liveCalculatorAngle);
+            s_liveCalculatorPredictionValid = true;
+        }
+        s_calculatorSnapshotValid = false;
+    } else if (!s_calculatorCutsceneActive) {
+        // Preserve the last live result at the exact transition into the rupee
+        // item-get cutscene. The displayed values remain internally consistent.
+        if (s_liveCalculatorPredictionValid) {
+            s_calculatorSnapshotAngle = s_liveCalculatorAngle;
+            s_calculatorSnapshot = s_liveCalculatorPrediction;
+            s_calculatorSnapshotValid = true;
+        } else if (player != nullptr) {
+            s_calculatorSnapshotAngle = static_cast<u16>(player->shape_angle.y);
+            s_calculatorSnapshot = predict_pickup_slide(
+                player->current.pos.x, player->current.pos.z, s_calculatorSnapshotAngle);
+            s_calculatorSnapshotValid = true;
+        }
+    }
+
+    s_calculatorCutsceneActive = cutsceneActive;
+}
+
+void loadCalculatorOverlayVisibility() {
+    if (s_calculatorOverlayVisibilityLoaded) {
+        return;
+    }
+    s_calculatorOverlayVisible =
+        getSettings().game.rupeeSlideCalculatorOverlayVisible.getValue();
+    s_calculatorOverlayVisibilityLoaded = true;
+}
+
+struct CalculatorOverlayValues {
+    u16 angle = 0;
+    PickupSlidePrediction prediction;
+};
+
+CalculatorOverlayValues getCalculatorOverlayValues(const fopAc_ac_c* player) {
+    if (s_calculatorCutsceneActive && s_calculatorSnapshotValid) {
+        return {s_calculatorSnapshotAngle, s_calculatorSnapshot};
+    }
+
+    const u16 angle = static_cast<u16>(player->shape_angle.y);
+    return {angle, predict_pickup_slide(player->current.pos.x, player->current.pos.z, angle)};
 }
 
 void loadLoggedSlidePosition() {
@@ -213,11 +398,23 @@ void updateLoggedSlidePosition(const daAlink_c* link) {
 }  // namespace
 
 void UpdateLoadPositionOverlayInput() {
+    loadCalculatorOverlayVisibility();
+    updateCalculatorCutsceneSnapshot(dComIfGp_getPlayer(0));
+
     const bool comboHeld = overlayToggleComboHeld();
     if (comboHeld && !s_overlayToggleComboHeld) {
         s_overlayVisible = !s_overlayVisible;
     }
     s_overlayToggleComboHeld = comboHeld;
+
+    const bool calculatorComboHeld = calculatorOverlayToggleComboHeld();
+    if (calculatorComboHeld && !s_calculatorOverlayToggleComboHeld) {
+        s_calculatorOverlayVisible = !s_calculatorOverlayVisible;
+        getSettings().game.rupeeSlideCalculatorOverlayVisible.setValue(
+            s_calculatorOverlayVisible);
+        config::save();
+    }
+    s_calculatorOverlayToggleComboHeld = calculatorComboHeld;
 }
 
 void UpdateLoadPositionDriftNative() {
@@ -263,83 +460,111 @@ void UpdateLoadPositionDriftNative() {
 }
 
 void DrawLoadPositionOverlayImGui() {
-    if (!overlayUsesImGui() || !s_overlayVisible) {
-        return;
-    }
-
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
     if (player == nullptr) {
         return;
     }
 
-    ImGui::SetNextWindowPos(ImVec2(8.0f, 12.0f), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(330.0f, 92.0f), ImGuiCond_FirstUseEver);
-    constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar |
-                                       ImGuiWindowFlags_NoBackground |
-                                       ImGuiWindowFlags_NoFocusOnAppearing |
-                                       ImGuiWindowFlags_NoNav |
-                                       ImGuiWindowFlags_NoCollapse;
-    if (ImGui::Begin("Rupee Slide Position", nullptr, flags)) {
-        ImGui::SetWindowFontScale(s_overlayScale);
+    if (overlayUsesImGui() && s_overlayVisible) {
+        ImGui::SetNextWindowPos(ImVec2(8.0f, 12.0f), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(330.0f, 92.0f), ImGuiCond_FirstUseEver);
+        constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar |
+                                           ImGuiWindowFlags_NoBackground |
+                                           ImGuiWindowFlags_NoFocusOnAppearing |
+                                           ImGuiWindowFlags_NoNav |
+                                           ImGuiWindowFlags_NoCollapse;
+        if (ImGui::Begin("Rupee Slide Position", nullptr, flags)) {
+            ImGui::SetWindowFontScale(s_overlayScale);
 
-        const float dragWidth = ImGui::GetContentRegionAvail().x;
-        ImGui::InvisibleButton("##RupeeSlideDrag", ImVec2(dragWidth, 7.0f),
-                               ImGuiButtonFlags_MouseButtonLeft);
-        if (ImGui::IsItemActive()) {
-            ImVec2 position = ImGui::GetWindowPos();
-            position.x += ImGui::GetIO().MouseDelta.x;
-            position.y += ImGui::GetIO().MouseDelta.y;
-            ImGui::SetWindowPos(position, ImGuiCond_Always);
+            const float dragWidth = ImGui::GetContentRegionAvail().x;
+            ImGui::InvisibleButton("##RupeeSlideDrag", ImVec2(dragWidth, 7.0f),
+                                   ImGuiButtonFlags_MouseButtonLeft);
+            if (ImGui::IsItemActive()) {
+                ImVec2 position = ImGui::GetWindowPos();
+                position.x += ImGui::GetIO().MouseDelta.x;
+                position.y += ImGui::GetIO().MouseDelta.y;
+                ImGui::SetWindowPos(position, ImGuiCond_Always);
+            }
+
+            if (ImGui::BeginPopupContextWindow("Rupee Slide Position Menu")) {
+                ImGui::TextUnformatted("Overlay layout");
+                ImGui::Separator();
+                ImGui::SliderFloat("Scale", &s_overlayScale, 0.75f, 2.0f, "%.2fx");
+                ImGui::Separator();
+                if (ImGui::MenuItem("Snap top-left")) {
+                    s_overlaySnapRequest = OverlaySnap::TopLeft;
+                }
+                if (ImGui::MenuItem("Snap top-right")) {
+                    s_overlaySnapRequest = OverlaySnap::TopRight;
+                }
+                if (ImGui::MenuItem("Snap bottom-left")) {
+                    s_overlaySnapRequest = OverlaySnap::BottomLeft;
+                }
+                if (ImGui::MenuItem("Snap bottom-right")) {
+                    s_overlaySnapRequest = OverlaySnap::BottomRight;
+                }
+                if (ImGui::MenuItem("Reset position")) {
+                    s_overlaySnapRequest = OverlaySnap::TopLeft;
+                }
+                ImGui::EndPopup();
+            }
+
+            if (s_overlaySnapRequest != OverlaySnap::None) {
+                constexpr float margin = 12.0f;
+                const ImVec2 displaySize = ImGui::GetIO().DisplaySize;
+                const ImVec2 windowSize = ImGui::GetWindowSize();
+                ImVec2 position(margin, margin);
+                if (s_overlaySnapRequest == OverlaySnap::TopRight ||
+                    s_overlaySnapRequest == OverlaySnap::BottomRight) {
+                    position.x = std::max(margin, displaySize.x - windowSize.x - margin);
+                }
+                if (s_overlaySnapRequest == OverlaySnap::BottomLeft ||
+                    s_overlaySnapRequest == OverlaySnap::BottomRight) {
+                    position.y = std::max(margin, displaySize.y - windowSize.y - margin);
+                }
+                ImGui::SetWindowPos(position, ImGuiCond_Always);
+                s_overlaySnapRequest = OverlaySnap::None;
+            }
+
+            ImGui::Text("X Pos: %.3f | Z Pos: %.3f", player->current.pos.x,
+                        player->current.pos.z);
+            ImGui::Text("Y Pos: %.3f | Angle: %u", player->current.pos.y,
+                        static_cast<u16>(player->shape_angle.y));
+            ImGui::Text("Drift: %s  F:%+.6f R:%+.6f",
+                        drift_direction(s_publishedForward, s_publishedRight),
+                        s_publishedForward, s_publishedRight);
         }
-
-        if (ImGui::BeginPopupContextWindow("Rupee Slide Position Menu")) {
-            ImGui::TextUnformatted("Overlay layout");
-            ImGui::Separator();
-            ImGui::SliderFloat("Scale", &s_overlayScale, 0.75f, 2.0f, "%.2fx");
-            ImGui::Separator();
-            if (ImGui::MenuItem("Snap top-left")) {
-                s_overlaySnapRequest = OverlaySnap::TopLeft;
-            }
-            if (ImGui::MenuItem("Snap top-right")) {
-                s_overlaySnapRequest = OverlaySnap::TopRight;
-            }
-            if (ImGui::MenuItem("Snap bottom-left")) {
-                s_overlaySnapRequest = OverlaySnap::BottomLeft;
-            }
-            if (ImGui::MenuItem("Snap bottom-right")) {
-                s_overlaySnapRequest = OverlaySnap::BottomRight;
-            }
-            if (ImGui::MenuItem("Reset position")) {
-                s_overlaySnapRequest = OverlaySnap::TopLeft;
-            }
-            ImGui::EndPopup();
-        }
-
-        if (s_overlaySnapRequest != OverlaySnap::None) {
-            constexpr float margin = 12.0f;
-            const ImVec2 displaySize = ImGui::GetIO().DisplaySize;
-            const ImVec2 windowSize = ImGui::GetWindowSize();
-            ImVec2 position(margin, margin);
-            if (s_overlaySnapRequest == OverlaySnap::TopRight ||
-                s_overlaySnapRequest == OverlaySnap::BottomRight) {
-                position.x = std::max(margin, displaySize.x - windowSize.x - margin);
-            }
-            if (s_overlaySnapRequest == OverlaySnap::BottomLeft ||
-                s_overlaySnapRequest == OverlaySnap::BottomRight) {
-                position.y = std::max(margin, displaySize.y - windowSize.y - margin);
-            }
-            ImGui::SetWindowPos(position, ImGuiCond_Always);
-            s_overlaySnapRequest = OverlaySnap::None;
-        }
-
-        ImGui::Text("X Pos: %.3f | Z Pos: %.3f", player->current.pos.x, player->current.pos.z);
-        ImGui::Text("Y Pos: %.3f | Angle: %u", player->current.pos.y,
-                    static_cast<u16>(player->shape_angle.y));
-        ImGui::Text("Drift: %s  F:%+.6f R:%+.6f",
-                    drift_direction(s_publishedForward, s_publishedRight),
-                    s_publishedForward, s_publishedRight);
+        ImGui::End();
     }
-    ImGui::End();
+
+    if (calculatorOverlayUsesImGui() && s_calculatorOverlayVisible) {
+        const auto calculatorValues = getCalculatorOverlayValues(player);
+        const u16 unsignedAngle = calculatorValues.angle;
+        const auto& prediction = calculatorValues.prediction;
+        const ImVec2 displaySize = ImGui::GetIO().DisplaySize;
+        ImGui::SetNextWindowPos(ImVec2(std::max(8.0f, displaySize.x - 430.0f), 12.0f),
+                                ImGuiCond_Always);
+        constexpr ImGuiWindowFlags calculatorFlags = ImGuiWindowFlags_NoTitleBar |
+                                                     ImGuiWindowFlags_NoBackground |
+                                                     ImGuiWindowFlags_NoFocusOnAppearing |
+                                                     ImGuiWindowFlags_NoNav |
+                                                     ImGuiWindowFlags_NoCollapse |
+                                                     ImGuiWindowFlags_NoMove |
+                                                     ImGuiWindowFlags_AlwaysAutoResize;
+        if (ImGui::Begin("Rupee Slide Calculator", nullptr, calculatorFlags)) {
+            ImGui::SetWindowFontScale(s_overlayScale);
+            ImGui::Text("Yaw: %u (%u-%u) dX:%+.6f dZ:%+.6f", unsignedAngle,
+                        unsignedAngle & 0xFFF8u, (unsignedAngle & 0xFFF8u) + 7,
+                        prediction.deltaX, prediction.deltaZ);
+            ImGui::Text("World: %s %.2f deg  speed:%.6f",
+                        pickup_slide_world_direction(prediction.deltaX, prediction.deltaZ),
+                        prediction.worldAngle, prediction.speed);
+            ImGui::Text("Link: %s  F:%+.6f R:%+.6f",
+                        drift_direction(prediction.forward, prediction.right),
+                        prediction.forward, prediction.right);
+        }
+        ImGui::End();
+    }
 }
 
 bool GetLoggedRupeeSlidePosition(cXyz& position, s16& angle) {
@@ -353,7 +578,8 @@ bool GetLoggedRupeeSlidePosition(cXyz& position, s16& angle) {
 }
 
 void DrawLoadPositionOverlayNative() {
-    if (!overlayUsesNative()) {
+    if ((!overlayUsesNative() || !s_overlayVisible) &&
+        (!calculatorOverlayUsesNative() || !s_calculatorOverlayVisible)) {
         return;
     }
 
@@ -365,10 +591,6 @@ void DrawLoadPositionOverlayNative() {
     const float xPos = player->current.pos.x;
     const float zPos = player->current.pos.z;
 
-    if (!s_overlayVisible) {
-        return;
-    }
-
     J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
     if (port == nullptr) {
         return;
@@ -376,25 +598,51 @@ void DrawLoadPositionOverlayNative() {
     port->setPort();
 
     JUTFont* font = get_debug_font();
-    char line[96];
-    constexpr float left = 8.0f;
-    constexpr float top = 12.0f;
+    char line[128];
     constexpr float size = 7.0f;
     constexpr float lineHeight = 9.0f;
-    const float x = mDoGph_gInf_c::ScaleHUDXLeft(left);
-    const float y = mDoGph_gInf_c::getSafeMinYF() + top;
+    if (overlayUsesNative() && s_overlayVisible) {
+        constexpr float left = 8.0f;
+        constexpr float top = 12.0f;
+        const float x = mDoGph_gInf_c::ScaleHUDXLeft(left);
+        const float y = mDoGph_gInf_c::getSafeMinYF() + top;
 
-    std::snprintf(line, sizeof(line), "X Pos: %f | Z Pos:%f", xPos, zPos);
-    draw_text(font, x, y, size, line);
+        std::snprintf(line, sizeof(line), "X Pos: %f | Z Pos:%f", xPos, zPos);
+        draw_text(font, x, y, size, line);
 
-    const float nextLineY = y + lineHeight;
-    std::snprintf(line, sizeof(line), "Y Pos: %f | Angle:%u", player->current.pos.y,
-                  static_cast<u16>(player->shape_angle.y));
-    draw_text(font, x, nextLineY, size, line);
-    std::snprintf(line, sizeof(line), "Drift: %s  F:%+.6f R:%+.6f",
-                  drift_direction(s_publishedForward, s_publishedRight), s_publishedForward,
-                  s_publishedRight);
-    draw_text(font, x, nextLineY + lineHeight, size, line);
+        const u16 unsignedAngle = static_cast<u16>(player->shape_angle.y);
+        const float nextLineY = y + lineHeight;
+        std::snprintf(line, sizeof(line), "Y Pos: %f | Angle:%u", player->current.pos.y,
+                      unsignedAngle);
+        draw_text(font, x, nextLineY, size, line);
+        std::snprintf(line, sizeof(line), "Drift: %s  F:%+.6f R:%+.6f",
+                      drift_direction(s_publishedForward, s_publishedRight),
+                      s_publishedForward, s_publishedRight);
+        draw_text(font, x, nextLineY + lineHeight, size, line);
+    }
+
+    if (calculatorOverlayUsesNative() && s_calculatorOverlayVisible) {
+        constexpr float right = 350.0f;
+        constexpr float top = 12.0f;
+        const float x = mDoGph_gInf_c::ScaleHUDXRight(right);
+        const float y = mDoGph_gInf_c::getSafeMinYF() + top;
+        const auto calculatorValues = getCalculatorOverlayValues(player);
+        const u16 unsignedAngle = calculatorValues.angle;
+        const auto& prediction = calculatorValues.prediction;
+
+        std::snprintf(line, sizeof(line), "Yaw:%u (%u-%u) dX:%+.6f dZ:%+.6f", unsignedAngle,
+                      unsignedAngle & 0xFFF8u, (unsignedAngle & 0xFFF8u) + 7,
+                      prediction.deltaX, prediction.deltaZ);
+        draw_text(font, x, y, size, line);
+        std::snprintf(line, sizeof(line), "World:%s %.2f deg v:%.6f",
+                      pickup_slide_world_direction(prediction.deltaX, prediction.deltaZ),
+                      prediction.worldAngle, prediction.speed);
+        draw_text(font, x, y + lineHeight, size, line);
+        std::snprintf(line, sizeof(line), "Link:%s F:%+.6f R:%+.6f",
+                      drift_direction(prediction.forward, prediction.right), prediction.forward,
+                      prediction.right);
+        draw_text(font, x, y + lineHeight * 2.0f, size, line);
+    }
 }
 
 }

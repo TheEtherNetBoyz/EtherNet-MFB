@@ -2449,6 +2449,12 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Choose whether the L+Start rupee slide position overlay is drawn with ImGui, the "
             "original in-game renderer, or both.",
             kRupeeSlideOverlayModes);
+        config_enum_select(leftPane, rightPane,
+            getSettings().game.rupeeSlideCalculatorOverlayMode,
+            "Calculator Overlay Renderer",
+            "Choose whether the Start+Y rupee slide calculation overlay is drawn with ImGui, "
+            "the original in-game renderer, or both.",
+            kRupeeSlideOverlayModes);
 #if DUSK_LEGACY_PRACTICE_TOOLS
         add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.areaReload,
             "Area Reload (L+R+Start+A)",

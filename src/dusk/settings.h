@@ -426,6 +426,8 @@ struct UserSettings {
         ConfigVar<int> rupeeSlideLayer;
         ConfigVar<bool> rupeeSlidePositionValid;
         ConfigVar<RupeeSlideOverlayMode> rupeeSlideOverlayMode;
+        ConfigVar<RupeeSlideOverlayMode> rupeeSlideCalculatorOverlayMode;
+        ConfigVar<bool> rupeeSlideCalculatorOverlayVisible;
         ConfigVar<bool> enableMoveLinkCombo;
         ConfigVar<bool> enableTeleportCombo;
         ConfigVar<bool> areaReload;
