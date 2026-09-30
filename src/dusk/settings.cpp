@@ -192,6 +192,7 @@ UserSettings g_userSettings = {
 
         // Controls
         .enableTurboKeybind {"game.enableTurboKeybind", false},
+        .turboToggleMode {"game.turboToggleMode", false},
         .enableResetKeybind {"game.enableResetKeybind", false},
 
         // Tools
@@ -517,6 +518,7 @@ void registerSettings() {
     Register(g_userSettings.game.noLowHpSound);
     Register(g_userSettings.game.midnasLamentNonStop);
     Register(g_userSettings.game.enableTurboKeybind);
+    Register(g_userSettings.game.turboToggleMode);
     Register(g_userSettings.game.enableResetKeybind);
     Register(g_userSettings.game.speedrunMode);
     Register(g_userSettings.game.liveSplitEnabled);

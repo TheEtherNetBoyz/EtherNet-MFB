@@ -58,6 +58,7 @@ using namespace std::string_view_literals;
 
 namespace {
 constexpr float kTurboTimeScale = 4.f;
+bool sTurboToggleActive = false;
 
 ImGuiWindow* FindDragScrollWindow(ImGuiWindow* window) {
     while (window != nullptr) {
@@ -344,6 +345,13 @@ namespace dusk {
 
     void ImGuiConsole::HandleSDLEvent(const SDL_Event& event) {
         const auto& hotkeys = getSettings().hotkeys;
+        if (getSettings().game.enableTurboKeybind.getValue() &&
+            getSettings().game.turboToggleMode.getValue() &&
+            hotkey_event_pressed(event, hotkeys.turboSpeed)) {
+            sTurboToggleActive = !sTurboToggleActive;
+            DuskToast(sTurboToggleActive ? "Turbo speed enabled" : "Turbo speed disabled", 1.5f);
+        }
+
         if (hotkey_event_pressed(event, hotkeys.toggleImGuiMenu)) {
             m_isHidden = !m_isHidden;
         }
@@ -408,8 +416,12 @@ namespace dusk {
         static bool previousSlowActive = false;
         static float previousTimeScale = 1.0f;
 
+        const bool turboToggleMode = getSettings().game.turboToggleMode.getValue();
+        if (!getSettings().game.enableTurboKeybind.getValue() || !turboToggleMode) {
+            sTurboToggleActive = false;
+        }
         const bool turboActive = getSettings().game.enableTurboKeybind &&
-            (hotkey_down(getSettings().hotkeys.turboSpeed) ||
+            ((turboToggleMode ? sTurboToggleActive : hotkey_down(getSettings().hotkeys.turboSpeed)) ||
              getActionBindHoldAnyPort(ActionBinds::TURBO_SPEED_BUTTON));
         const bool slowDown = turboActive && ImGui::GetIO().KeyShift;
         getTransientSettings().skipFrameRateLimit = turboActive;

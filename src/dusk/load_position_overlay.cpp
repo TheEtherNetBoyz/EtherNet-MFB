@@ -135,6 +135,8 @@ PickupSlidePrediction predict_pickup_slide(float x, float z, u16 unsignedAngle) 
     float currentX = startX;
     float currentZ = startZ;
     for (const float rootDelta : kPickupSlideRootDeltas) {
+        // These are the already signed world-position root deltas used by the
+        // standalone pickup-slide calculator, not raw BCK translations.
         currentX = pickup_slide_add(currentX, pickup_slide_mul(rootDelta, sine));
         currentZ = pickup_slide_add(currentZ, pickup_slide_mul(rootDelta, cosine));
     }
@@ -210,10 +212,21 @@ bool s_calculatorOverlayToggleComboHeld = false;
 bool s_calculatorCutsceneActive = false;
 bool s_liveCalculatorPredictionValid = false;
 bool s_calculatorSnapshotValid = false;
+bool s_actualSlideStartValid = false;
+bool s_actualSlideResultValid = false;
+bool s_actualGetAwaitActive = false;
+bool s_actualLoopArmed = false;
+bool s_actualAnimationFrameValid = false;
 u16 s_liveCalculatorAngle = 0;
 u16 s_calculatorSnapshotAngle = 0;
 PickupSlidePrediction s_liveCalculatorPrediction;
 PickupSlidePrediction s_calculatorSnapshot;
+float s_actualSlideStartX = 0.0f;
+float s_actualSlideStartZ = 0.0f;
+u16 s_actualSlideStartAngle = 0;
+float s_actualSlideForward = 0.0f;
+float s_actualSlideRight = 0.0f;
+float s_actualPreviousAnimationFrame = 0.0f;
 float s_overlayScale = 1.0f;
 enum class OverlaySnap { None, TopLeft, TopRight, BottomLeft, BottomRight };
 OverlaySnap s_overlaySnapRequest = OverlaySnap::None;
@@ -265,6 +278,46 @@ void updateCalculatorCutsceneSnapshot(fopAc_ac_c* player) {
     const daAlink_c* link = daAlink_getAlinkActorClass();
     const bool cutsceneActive = link != nullptr && dComIfGp_event_runCheck() &&
                                 link->checkGetItemMode();
+    const bool getAwaitActive = cutsceneActive &&
+                                link->checkAnyUnderAnime(dRes_ID_ALANM_BCK_GETAWAIT_e);
+
+    const auto publishActualSlide = [player]() {
+        const float deltaX = player->current.pos.x - s_actualSlideStartX;
+        const float deltaZ = player->current.pos.z - s_actualSlideStartZ;
+        float sine = 0.0f;
+        float cosine = 1.0f;
+        pickup_slide_trig(s_actualSlideStartAngle, sine, cosine);
+        s_actualSlideForward = deltaX * sine + deltaZ * cosine;
+        s_actualSlideRight = -deltaX * cosine + deltaZ * sine;
+        s_actualSlideResultValid = true;
+        s_actualSlideStartValid = false;
+    };
+
+    if (getAwaitActive && player != nullptr) {
+        const float animationFrame = link->getBaseAnimeFrame();
+        if (!s_actualGetAwaitActive || !s_actualAnimationFrameValid) {
+            // Ignore the initial transition/morph into GETAWAIT. The predictor
+            // models one steady loop, so arm measurement at the first wrap.
+            s_actualLoopArmed = false;
+            s_actualSlideStartValid = false;
+            s_actualAnimationFrameValid = true;
+        } else if (animationFrame < s_actualPreviousAnimationFrame) {
+            if (s_actualLoopArmed && s_actualSlideStartValid) {
+                publishActualSlide();
+            }
+            s_actualSlideStartX = player->current.pos.x;
+            s_actualSlideStartZ = player->current.pos.z;
+            s_actualSlideStartAngle = static_cast<u16>(player->shape_angle.y);
+            s_actualSlideStartValid = true;
+            s_actualLoopArmed = true;
+        }
+        s_actualPreviousAnimationFrame = animationFrame;
+    } else {
+        s_actualLoopArmed = false;
+        s_actualSlideStartValid = false;
+        s_actualAnimationFrameValid = false;
+    }
+    s_actualGetAwaitActive = getAwaitActive;
 
     if (!cutsceneActive) {
         if (player != nullptr) {
@@ -559,9 +612,13 @@ void DrawLoadPositionOverlayImGui() {
             ImGui::Text("World: %s %.2f deg  speed:%.6f",
                         pickup_slide_world_direction(prediction.deltaX, prediction.deltaZ),
                         prediction.worldAngle, prediction.speed);
-            ImGui::Text("Link: %s  F:%+.6f R:%+.6f",
-                        drift_direction(prediction.forward, prediction.right),
-                        prediction.forward, prediction.right);
+            const std::string predictedDirection =
+                drift_direction(prediction.forward, prediction.right);
+            const std::string actualDirection = s_actualSlideResultValid
+                ? drift_direction(s_actualSlideForward, s_actualSlideRight)
+                : "pending";
+            ImGui::Text("Pred: %s | Actual: %s", predictedDirection.c_str(),
+                        actualDirection.c_str());
         }
         ImGui::End();
     }
@@ -638,9 +695,13 @@ void DrawLoadPositionOverlayNative() {
                       pickup_slide_world_direction(prediction.deltaX, prediction.deltaZ),
                       prediction.worldAngle, prediction.speed);
         draw_text(font, x, y + lineHeight, size, line);
-        std::snprintf(line, sizeof(line), "Link:%s F:%+.6f R:%+.6f",
-                      drift_direction(prediction.forward, prediction.right), prediction.forward,
-                      prediction.right);
+        const std::string predictedDirection =
+            drift_direction(prediction.forward, prediction.right);
+        const std::string actualDirection = s_actualSlideResultValid
+            ? drift_direction(s_actualSlideForward, s_actualSlideRight)
+            : "pending";
+        std::snprintf(line, sizeof(line), "Pred:%s | Actual:%s",
+                      predictedDirection.c_str(), actualDirection.c_str());
         draw_text(font, x, y + lineHeight * 2.0f, size, line);
     }
 }

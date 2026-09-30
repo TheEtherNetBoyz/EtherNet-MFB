@@ -1812,8 +1812,11 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
 
         leftPane.add_section("Tools");
         addOption("Turbo Key", getSettings().game.enableTurboKeybind,
-            "Hold Tab to increase game speed by up to 4x.",
+            "Enable Tab to increase game speed by up to 4x.",
             [] { return speedrun::isActive(); });
+        addOption("Turbo Toggle Mode", getSettings().game.turboToggleMode,
+            "Press Tab to toggle turbo speed instead of holding it.",
+            [] { return speedrun::isActive() || !getSettings().game.enableTurboKeybind.getValue(); });
         addOption("Reset Key (" + Rml::String{hotkeys::DO_RESET} + ")",
             getSettings().game.enableResetKeybind,
             "Press " + Rml::String{hotkeys::DO_RESET} + " to reset the game.");

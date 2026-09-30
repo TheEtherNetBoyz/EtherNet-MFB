@@ -3490,6 +3490,11 @@ public:
 
     bool checkUpperAnime(u16 i_resIdx) const { return mUpperAnmHeap[UPPER_2].getIdx() == i_resIdx; }
     bool checkUnderAnime(u16 i_resIdx) const { return mUnderAnmHeap[UNDER_2].getIdx() == i_resIdx; }
+    bool checkAnyUnderAnime(u16 i_resIdx) const {
+        return mUnderAnmHeap[UNDER_0].getIdx() == i_resIdx ||
+               mUnderAnmHeap[UNDER_1].getIdx() == i_resIdx ||
+               mUnderAnmHeap[UNDER_2].getIdx() == i_resIdx;
+    }
 
     bool checkNoSetUpperAnime() const { return mUpperAnmHeap[UPPER_2].checkNoSetIdx(); }
     bool checkSwimMoveHandAnime() const { return checkUpperAnime(dRes_ID_ALANM_BCK_SWIMINGB_e); }
