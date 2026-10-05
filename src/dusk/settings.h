@@ -448,6 +448,9 @@ struct UserSettings {
         ConfigVar<RupeeSlideOverlayMode> rupeeSlideCalculatorOverlayMode;
         ConfigVar<bool> rupeeSlideCalculatorOverlayVisible;
         ConfigVar<RupeeSlideDriftOverride> rupeeSlideDriftOverride;
+        ConfigVar<bool> showRupeeSlideDriftArrow;
+        ConfigVar<int> rupeeSlideDriftArrowThickness;
+        ConfigVar<std::string> rupeeSlideDriftArrowColor;
         ConfigVar<bool> enableMoveLinkCombo;
         ConfigVar<bool> enableTeleportCombo;
         ConfigVar<bool> areaReload;

@@ -6,7 +6,9 @@
 #include "JSystem/JUtility/TColor.h"
 #include "SSystem/SComponent/c_math.h"
 #include "d/actor/d_a_alink.h"
+#include "d/d_camera.h"
 #include "d/d_com_inf_game.h"
+#include "d/d_debug_viewer.h"
 #include "dusk/config.hpp"
 #include "dusk/game_clock.h"
 #include "dusk/settings.h"
@@ -161,6 +163,153 @@ PickupSlidePrediction predict_pickup_slide(float x, float z, u16 unsignedAngle) 
         }
     }
     return prediction;
+}
+
+bool get_override_direction(RupeeSlideDriftOverride mode, float& x, float& z) {
+    if (mode == RupeeSlideDriftOverride::Off) {
+        return false;
+    }
+
+    s16 cameraBackAngle = 0;
+    if (dCamera_c* camera = dCam_getBody()) {
+        const cXyz eye = camera->Eye();
+        const cXyz center = camera->Center();
+        const float cameraDx = center.x - eye.x;
+        const float cameraDz = center.z - eye.z;
+        if (std::fabs(cameraDx) > 0.000001f || std::fabs(cameraDz) > 0.000001f) {
+            cameraBackAngle = cM_atan2s(cameraDx, cameraDz);
+        }
+    }
+
+    s16 targetAngle = cameraBackAngle;
+    switch (mode) {
+    case RupeeSlideDriftOverride::Backward:
+        break;
+    case RupeeSlideDriftOverride::Forward:
+        targetAngle = static_cast<s16>(targetAngle + 0x8000);
+        break;
+    case RupeeSlideDriftOverride::Left:
+        targetAngle = static_cast<s16>(targetAngle + 0x4000);
+        break;
+    case RupeeSlideDriftOverride::Right:
+        targetAngle = static_cast<s16>(targetAngle - 0x4000);
+        break;
+    case RupeeSlideDriftOverride::ForwardLeft:
+        targetAngle = static_cast<s16>(targetAngle + 0x6000);
+        break;
+    case RupeeSlideDriftOverride::ForwardRight:
+        targetAngle = static_cast<s16>(targetAngle - 0x6000);
+        break;
+    case RupeeSlideDriftOverride::BackwardLeft:
+        targetAngle = static_cast<s16>(targetAngle + 0x2000);
+        break;
+    case RupeeSlideDriftOverride::BackwardRight:
+        targetAngle = static_cast<s16>(targetAngle - 0x2000);
+        break;
+    case RupeeSlideDriftOverride::Off:
+        return false;
+    }
+
+    x = cM_ssin(targetAngle);
+    z = cM_scos(targetAngle);
+    return true;
+}
+
+void draw_drift_direction_arrow(fopAc_ac_c* player) {
+    if (player == nullptr || !getSettings().game.showRupeeSlideDriftArrow.getValue()) {
+        return;
+    }
+
+    float directionX = 0.0f;
+    float directionZ = 0.0f;
+    const auto overrideMode = getSettings().game.rupeeSlideDriftOverride.getValue();
+    if (!get_override_direction(overrideMode, directionX, directionZ)) {
+        const auto prediction = predict_pickup_slide(
+            player->current.pos.x, player->current.pos.z,
+            static_cast<u16>(player->shape_angle.y));
+        const float length = std::sqrt(prediction.deltaX * prediction.deltaX +
+                                       prediction.deltaZ * prediction.deltaZ);
+        if (length <= 0.000001f) {
+            return;
+        }
+        directionX = prediction.deltaX / length;
+        directionZ = prediction.deltaZ / length;
+    }
+
+    constexpr float kArrowHeight = 210.0f;
+    constexpr float kArrowLength = 140.0f;
+    constexpr float kMaxReadabilityTilt = 55.0f;
+
+    // A world-horizontal arrow becomes nearly end-on when the drift points toward
+    // or away from the camera, collapsing the shaft into a diamond on screen.
+    // Tilt only those end-on arrows upward while preserving their exact X/Z
+    // projection. Sideways arrows remain flat.
+    float readabilityTilt = 0.0f;
+    float cameraAlignment = 0.0f;
+    float cameraX = 0.0f;
+    float cameraZ = 1.0f;
+    if (dCamera_c* camera = dCam_getBody()) {
+        const cXyz eye = camera->Eye();
+        const cXyz center = camera->Center();
+        cameraX = center.x - eye.x;
+        cameraZ = center.z - eye.z;
+        const float cameraLength = std::sqrt(cameraX * cameraX + cameraZ * cameraZ);
+        if (cameraLength > 0.000001f) {
+            cameraX /= cameraLength;
+            cameraZ /= cameraLength;
+            cameraAlignment = std::fabs(directionX * cameraX + directionZ * cameraZ);
+            readabilityTilt = kMaxReadabilityTilt * cameraAlignment * cameraAlignment;
+        }
+    }
+
+    cXyz start(player->current.pos.x, player->current.pos.y + kArrowHeight,
+               player->current.pos.z);
+    cXyz end(start.x + directionX * kArrowLength, start.y + readabilityTilt,
+             start.z + directionZ * kArrowLength);
+
+    constexpr float kArrowHeadLength = 38.0f;
+    constexpr float kArrowHeadSpread = 22.0f;
+    const float arrowLength3D = std::sqrt(kArrowLength * kArrowLength +
+                                          readabilityTilt * readabilityTilt);
+    const float backX = -directionX * kArrowHeadLength * kArrowLength / arrowLength3D;
+    const float backY = -readabilityTilt * kArrowHeadLength / arrowLength3D;
+    const float backZ = -directionZ * kArrowHeadLength * kArrowLength / arrowLength3D;
+
+    // Keep the open arrowhead facing the camera. For an end-on shaft its wings
+    // spread horizontally across the screen; for a sideways shaft they spread
+    // vertically. Blending between those bases keeps the V readable at every
+    // intermediate camera angle without changing the represented direction.
+    float wingX = -cameraZ * cameraAlignment;
+    float wingY = 1.0f - cameraAlignment;
+    float wingZ = cameraX * cameraAlignment;
+    const float wingLength = std::sqrt(wingX * wingX + wingY * wingY + wingZ * wingZ);
+    if (wingLength > 0.000001f) {
+        wingX = wingX * kArrowHeadSpread / wingLength;
+        wingY = wingY * kArrowHeadSpread / wingLength;
+        wingZ = wingZ * kArrowHeadSpread / wingLength;
+    }
+    cXyz headLeft(end.x + backX + wingX, end.y + backY + wingY,
+                  end.z + backZ + wingZ);
+    cXyz headRight(end.x + backX - wingX, end.y + backY - wingY,
+                   end.z + backZ - wingZ);
+
+    unsigned int red = 0x00;
+    unsigned int green = 0xFF;
+    unsigned int blue = 0xFF;
+    const std::string& colorValue = getSettings().game.rupeeSlideDriftArrowColor.getValue();
+    if (colorValue.size() != 6 ||
+        std::sscanf(colorValue.c_str(), "%02x%02x%02x", &red, &green, &blue) != 3) {
+        red = 0x00;
+        green = 0xFF;
+        blue = 0xFF;
+    }
+    const GXColor color = {
+        static_cast<u8>(red), static_cast<u8>(green), static_cast<u8>(blue), 0xE0};
+    const u8 thickness = static_cast<u8>(std::clamp(
+        getSettings().game.rupeeSlideDriftArrowThickness.getValue(), 1, 20));
+    dDbVw_drawLineXlu(start, end, color, TRUE, thickness);
+    dDbVw_drawLineXlu(end, headLeft, color, TRUE, thickness);
+    dDbVw_drawLineXlu(end, headRight, color, TRUE, thickness);
 }
 
 const char* pickup_slide_world_direction(float dx, float dz) {
@@ -472,6 +621,7 @@ void UpdateLoadPositionOverlayInput() {
 
 void UpdateLoadPositionDriftNative() {
     UpdateLoadPositionOverlayInput();
+    draw_drift_direction_arrow(dComIfGp_getPlayer(0));
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
     const daAlink_c* link = daAlink_getAlinkActorClass();
     if (player == nullptr || link == nullptr) {

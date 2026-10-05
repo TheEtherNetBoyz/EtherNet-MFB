@@ -2,6 +2,7 @@
 #include "settings.hpp"
 
 #include "bool_button.hpp"
+#include "color_input.hpp"
 #include "controller_config.hpp"
 #include "dusk/io.hpp"
 #include "dusk/main.h"
@@ -2478,6 +2479,34 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "screen; Forward moves toward the front/bottom. Off preserves the original game "
             "behavior.",
             kRupeeSlideDriftOverrideModes);
+        add_speedrun_disabled_option(leftPane, rightPane,
+            getSettings().game.showRupeeSlideDriftArrow,
+            "Show Drift Direction Arrow",
+            "Draws a non-interactive 3D arrow above Link showing the predicted natural drift or "
+            "the selected camera-relative override direction.");
+        config_int_select(leftPane, rightPane,
+            getSettings().game.rupeeSlideDriftArrowThickness,
+            "Drift Arrow Thickness",
+            "Adjusts the line thickness of the 3D drift direction arrow.",
+            1, 20, 1, [] { return speedrun::isActive(); });
+        auto& driftArrowColor = leftPane.add_child<ColorInput>(ColorInput::Props{
+            .key = "Drift Arrow Color",
+            .getValue = [] { return getSettings().game.rupeeSlideDriftArrowColor.getValue(); },
+            .setValue = [](Rml::String value) {
+                getSettings().game.rupeeSlideDriftArrowColor.setValue(std::move(value));
+                config::save();
+            },
+            .isDisabled = [] { return speedrun::isActive(); },
+            .isModified = [] {
+                const auto& setting = getSettings().game.rupeeSlideDriftArrowColor;
+                return setting.getValue() != setting.getDefaultValue();
+            },
+            .presets = {"00ffff", "ffffff", "ff4040", "40ff40", "ffff40", "ff40ff"},
+        });
+        leftPane.register_control(driftArrowColor, rightPane, [](Pane& pane) {
+            pane.clear();
+            pane.add_text("Chooses the color of the 3D drift direction arrow.");
+        });
 #if DUSK_LEGACY_PRACTICE_TOOLS
         add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.areaReload,
             "Area Reload (L+R+Start+A)",
