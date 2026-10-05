@@ -113,6 +113,18 @@ enum class RupeeSlideOverlayMode : u8 {
     Both = 2,
 };
 
+enum class RupeeSlideDriftOverride : u8 {
+    Off = 0,
+    Forward = 1,
+    Backward = 2,
+    Left = 3,
+    Right = 4,
+    ForwardLeft = 5,
+    ForwardRight = 6,
+    BackwardLeft = 7,
+    BackwardRight = 8,
+};
+
 enum class AudioOutputMode : u8 {
     StereoSpeakers = 0,
     StereoHeadphones = 1,   // spatial audio
@@ -209,6 +221,12 @@ template <>
 struct ConfigEnumRange<RupeeSlideOverlayMode> {
     static constexpr auto min = RupeeSlideOverlayMode::ImGui;
     static constexpr auto max = RupeeSlideOverlayMode::Both;
+};
+
+template <>
+struct ConfigEnumRange<RupeeSlideDriftOverride> {
+    static constexpr auto min = RupeeSlideDriftOverride::Off;
+    static constexpr auto max = RupeeSlideDriftOverride::BackwardRight;
 };
 
 template <>
@@ -429,6 +447,7 @@ struct UserSettings {
         ConfigVar<RupeeSlideOverlayMode> rupeeSlideOverlayMode;
         ConfigVar<RupeeSlideOverlayMode> rupeeSlideCalculatorOverlayMode;
         ConfigVar<bool> rupeeSlideCalculatorOverlayVisible;
+        ConfigVar<RupeeSlideDriftOverride> rupeeSlideDriftOverride;
         ConfigVar<bool> enableMoveLinkCombo;
         ConfigVar<bool> enableTeleportCombo;
         ConfigVar<bool> areaReload;

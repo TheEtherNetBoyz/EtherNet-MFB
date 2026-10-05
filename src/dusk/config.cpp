@@ -318,6 +318,7 @@ template class ConfigImpl<GyroMode>;
 template class ConfigImpl<AspectRatioMode>;
 template class ConfigImpl<DiscLoadingDelayMode>;
 template class ConfigImpl<RupeeSlideOverlayMode>;
+template class ConfigImpl<RupeeSlideDriftOverride>;
 template class ConfigImpl<AudioOutputMode>;
 template class ConfigImpl<LetterboxMode>;
 

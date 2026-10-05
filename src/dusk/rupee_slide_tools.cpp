@@ -93,6 +93,100 @@ namespace dusk {
         dBgW* s_supportPlatformBg = nullptr;
         RupeeSlideState s_rupeeSlide;
 
+        struct DriftOverrideState {
+            bool getAwaitActive = false;
+            bool frameValid = false;
+            bool loopArmed = false;
+            float previousFrame = 0.0f;
+            cXyz loopStart;
+        };
+
+        DriftOverrideState s_driftOverride;
+
+        void updateDriftDirectionOverride(daAlink_c* player) {
+            const auto mode = getSettings().game.rupeeSlideDriftOverride.getValue();
+            const bool getAwaitActive = mode != RupeeSlideDriftOverride::Off &&
+                                        player != nullptr && dComIfGp_event_runCheck() &&
+                                        player->checkGetItemMode() &&
+                                        player->checkAnyUnderAnime(dRes_ID_ALANM_BCK_GETAWAIT_e);
+
+            if (!getAwaitActive) {
+                s_driftOverride = {};
+                return;
+            }
+
+            const float animationFrame = player->getBaseAnimeFrame();
+            if (!s_driftOverride.getAwaitActive || !s_driftOverride.frameValid) {
+                // The first GETAWAIT cycle includes the transition into the pose.
+                // Start redirecting only after its first complete wrap.
+                s_driftOverride.loopArmed = false;
+                s_driftOverride.frameValid = true;
+            } else if (animationFrame < s_driftOverride.previousFrame) {
+                if (s_driftOverride.loopArmed) {
+                    const float dx = player->current.pos.x - s_driftOverride.loopStart.x;
+                    const float dz = player->current.pos.z - s_driftOverride.loopStart.z;
+                    const float distance = std::sqrt(dx * dx + dz * dz);
+                    if (distance > 0.0f) {
+                        dCamera_c* camera = dCam_getBody();
+                        s16 cameraBackAngle = player->shape_angle.y;
+                        if (camera != nullptr) {
+                            const cXyz eye = camera->Eye();
+                            const cXyz center = camera->Center();
+                            const float cameraDx = center.x - eye.x;
+                            const float cameraDz = center.z - eye.z;
+                            if (std::fabs(cameraDx) > 0.000001f ||
+                                std::fabs(cameraDz) > 0.000001f) {
+                                // The camera's horizontal look direction points toward the
+                                // back/top of the screen.
+                                cameraBackAngle = cM_atan2s(cameraDx, cameraDz);
+                            }
+                        }
+
+                        s16 targetAngle = cameraBackAngle;
+                        switch (mode) {
+                        case RupeeSlideDriftOverride::Backward:
+                            break;
+                        case RupeeSlideDriftOverride::Left:
+                            targetAngle = static_cast<s16>(targetAngle + 0x4000);
+                            break;
+                        case RupeeSlideDriftOverride::Right:
+                            targetAngle = static_cast<s16>(targetAngle - 0x4000);
+                            break;
+                        case RupeeSlideDriftOverride::ForwardLeft:
+                            targetAngle = static_cast<s16>(targetAngle + 0x6000);
+                            break;
+                        case RupeeSlideDriftOverride::ForwardRight:
+                            targetAngle = static_cast<s16>(targetAngle - 0x6000);
+                            break;
+                        case RupeeSlideDriftOverride::BackwardLeft:
+                            targetAngle = static_cast<s16>(targetAngle + 0x2000);
+                            break;
+                        case RupeeSlideDriftOverride::BackwardRight:
+                            targetAngle = static_cast<s16>(targetAngle - 0x2000);
+                            break;
+                        case RupeeSlideDriftOverride::Forward:
+                            targetAngle = static_cast<s16>(targetAngle + 0x8000);
+                            break;
+                        case RupeeSlideDriftOverride::Off:
+                            break;
+                        }
+
+                        cXyz redirected = s_driftOverride.loopStart;
+                        redirected.x += distance * cM_ssin(targetAngle);
+                        redirected.z += distance * cM_scos(targetAngle);
+                        const cXyz velocity = player->speed;
+                        player->setPlayerPosAndAngle(&redirected, player->shape_angle.y, TRUE);
+                        player->speed = velocity;
+                    }
+                }
+                s_driftOverride.loopStart = player->current.pos;
+                s_driftOverride.loopArmed = true;
+            }
+
+            s_driftOverride.previousFrame = animationFrame;
+            s_driftOverride.getAwaitActive = true;
+        }
+
         bool nearlyEqual(float a, float b, float epsilon = 0.01f) {
             return std::fabs(a - b) <= epsilon;
         }
@@ -631,6 +725,7 @@ namespace dusk {
 
     void UpdateRupeeSlideSimulation() {
         daAlink_c* player = static_cast<daAlink_c*>(dComIfGp_getPlayer(0));
+        updateDriftDirectionOverride(player);
         updateSupportPlatform(player);
         updateRepeatableGreenRupeeInput(player);
         updateSlidePresentation(player, dCam_getBody());

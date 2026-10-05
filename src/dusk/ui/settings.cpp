@@ -116,6 +116,18 @@ constexpr std::array kRupeeSlideOverlayModes = {
     "Both",
 };
 
+constexpr std::array kRupeeSlideDriftOverrideModes = {
+    "Off",
+    "Forward",
+    "Backward",
+    "Left",
+    "Right",
+    "Forward-left",
+    "Forward-right",
+    "Backward-left",
+    "Backward-right",
+};
+
 enum class HotkeyAction {
     ToggleImGuiMenu,
     ToggleThirtyFps,
@@ -2458,6 +2470,14 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Choose whether the Start+Y rupee slide calculation overlay is drawn with ImGui, "
             "the original in-game renderer, or both.",
             kRupeeSlideOverlayModes);
+        config_enum_select(leftPane, rightPane,
+            getSettings().game.rupeeSlideDriftOverride,
+            "Drift Direction Override",
+            "Redirects each completed rupee-pickup slide loop relative to the gameplay camera "
+            "without changing Link's facing angle. Backward moves toward the back/top of the "
+            "screen; Forward moves toward the front/bottom. Off preserves the original game "
+            "behavior.",
+            kRupeeSlideDriftOverrideModes);
 #if DUSK_LEGACY_PRACTICE_TOOLS
         add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.areaReload,
             "Area Reload (L+R+Start+A)",

@@ -212,6 +212,7 @@ UserSettings g_userSettings = {
         .rupeeSlideOverlayMode {"game.rupeeSlideOverlayMode", RupeeSlideOverlayMode::ImGui},
         .rupeeSlideCalculatorOverlayMode {"game.rupeeSlideCalculatorOverlayMode", RupeeSlideOverlayMode::ImGui},
         .rupeeSlideCalculatorOverlayVisible {"game.rupeeSlideCalculatorOverlayVisible", false},
+        .rupeeSlideDriftOverride {"game.rupeeSlideDriftOverride", RupeeSlideDriftOverride::Off},
         .enableMoveLinkCombo {"game.enableMoveLinkCombo", false},
         .enableTeleportCombo {"game.enableTeleportCombo", false},
         .areaReload {"game.areaReload", false},
@@ -536,6 +537,7 @@ void registerSettings() {
     Register(g_userSettings.game.rupeeSlideOverlayMode);
     Register(g_userSettings.game.rupeeSlideCalculatorOverlayMode);
     Register(g_userSettings.game.rupeeSlideCalculatorOverlayVisible);
+    Register(g_userSettings.game.rupeeSlideDriftOverride);
     Register(g_userSettings.game.enableMoveLinkCombo);
     Register(g_userSettings.game.enableTeleportCombo);
 #if DUSK_LEGACY_PRACTICE_TOOLS
