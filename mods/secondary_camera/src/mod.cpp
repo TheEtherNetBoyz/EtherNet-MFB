@@ -449,7 +449,31 @@ void updateShoulderCamera(const daAlink_c* player) {
         return;
     }
 
-    const cXyz rawPosition = player->current.pos;
+    cXyz rawPosition = player->current.pos;
+    bool usePresentedPosition = false;
+    if (player->mProcID == daAlink_c::PROC_GET_ITEM) {
+        // Item-get animations can move Link through root motion without moving
+        // actor::current.pos.  That is especially visible on Windows during a
+        // rupee slide: Link moves in the main presentation while an OTS camera
+        // anchored to current.pos remains behind.  The backbone matrix has
+        // already been evaluated for the current presentation frame, so use its
+        // horizontal world position while retaining the actor's stable ground Y.
+        MtxP presentedModel = const_cast<daAlink_c*>(player)->getLinkBackBone1Matrix();
+        if (presentedModel != nullptr) {
+            const float presentedX = presentedModel[0][3];
+            const float presentedZ = presentedModel[2][3];
+            const float offsetX = presentedX - rawPosition.x;
+            const float offsetZ = presentedZ - rawPosition.z;
+            constexpr float kMaxPlausibleRootOffset = 2000.0f;
+            if (std::isfinite(presentedX) && std::isfinite(presentedZ) &&
+                std::abs(offsetX) <= kMaxPlausibleRootOffset &&
+                std::abs(offsetZ) <= kMaxPlausibleRootOffset) {
+                rawPosition.x = presentedX;
+                rawPosition.z = presentedZ;
+                usePresentedPosition = true;
+            }
+        }
+    }
     const s16 rawAngle = player->shape_angle.y;
     if (!g_playerFollow.valid || g_playerFollow.player != player) {
         g_playerFollow.player = player;
@@ -477,8 +501,13 @@ void updateShoulderCamera(const daAlink_c* player) {
     // frames. Follow the same point in time; using player->current directly
     // makes the camera advance at 30 Hz while Link's model advances smoothly.
     const float step = g_presentationStep;
-    const cXyz anchor = g_playerFollow.previousPosition +
-        (g_playerFollow.currentPosition - g_playerFollow.previousPosition) * step;
+    // The skeleton position above is already evaluated at presentation time.
+    // Interpolating it again would make the Windows camera lag by another sim
+    // frame and can look like the follow mode stopped during the pickup.
+    const cXyz anchor = usePresentedPosition
+        ? rawPosition
+        : g_playerFollow.previousPosition +
+            (g_playerFollow.currentPosition - g_playerFollow.previousPosition) * step;
     const s16 angleDelta = static_cast<s16>(
         static_cast<u16>(g_playerFollow.currentAngle) -
         static_cast<u16>(g_playerFollow.previousAngle));
