@@ -24,6 +24,7 @@
 #include "d/d_s_menu.h"
 #include "d/d_s_play.h"
 #include "d/d_debug_pad.h"
+#include "d/d_menu_window.h"
 #include "f_ap/f_ap_game.h"
 #include "f_op/f_op_msg.h"
 #include "m_Do/m_Do_MemCard.h"
@@ -303,6 +304,10 @@ void main01(void) {
             if (tasSimTicks > 0) {
                 dusk::interp::begin_simulation_frame();
                 for (int i = 0; i < tasSimTicks; ++i) {
+                    // When a capture is pending, it has to be painted before the next sim tick.
+                    if (dMw_isCapturePending()) {
+                        break;
+                    }
                     if (timing.interpolating) {
                         dusk::interp::begin_sim_tick();
                     }
