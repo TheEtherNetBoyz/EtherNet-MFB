@@ -621,7 +621,6 @@ void UpdateLoadPositionOverlayInput() {
 
 void UpdateLoadPositionDriftNative() {
     UpdateLoadPositionOverlayInput();
-    draw_drift_direction_arrow(dComIfGp_getPlayer(0));
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
     const daAlink_c* link = daAlink_getAlinkActorClass();
     if (player == nullptr || link == nullptr) {
@@ -660,6 +659,10 @@ void UpdateLoadPositionDriftNative() {
         s_accumulatedRight = 0.0f;
         s_driftWindowSeconds = 0.0f;
     }
+}
+
+void QueueRupeeSlideDriftArrow() {
+    draw_drift_direction_arrow(dComIfGp_getPlayer(0));
 }
 
 void DrawLoadPositionOverlayImGui() {

@@ -900,6 +900,12 @@ static void dScnPly_BeforeOfPaint() {
     dComIfGd_reset();
 
     dDbVw_deleteDrawPacketList();
+#if TARGET_PC
+    // Queue frame-local debug geometry after the draw buffers are reset. Doing
+    // this from the simulation update works with a separate presentation pass,
+    // but the combined Windows path clears the packet before it can be drawn.
+    dusk::QueueRupeeSlideDriftArrow();
+#endif
 }
 
 int mDoGph_BeforeOfDraw() {
