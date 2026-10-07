@@ -446,6 +446,8 @@ struct UserSettings {
         ConfigVar<int> rupeeSlideLayer;
         ConfigVar<bool> rupeeSlidePositionValid;
         ConfigVar<RupeeSlideOverlayMode> rupeeSlideOverlayMode;
+        ConfigVar<int> rupeeSlideOverlayOffsetX;
+        ConfigVar<int> rupeeSlideOverlayOffsetY;
         ConfigVar<RupeeSlideOverlayMode> rupeeSlideCalculatorOverlayMode;
         ConfigVar<bool> rupeeSlideCalculatorOverlayVisible;
         ConfigVar<RupeeSlideDriftOverride> rupeeSlideDriftOverride;

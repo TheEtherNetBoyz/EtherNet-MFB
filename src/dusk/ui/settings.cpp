@@ -2466,6 +2466,18 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Choose whether the L+Start rupee slide position overlay is drawn with ImGui, the "
             "original in-game renderer, or both.",
             kRupeeSlideOverlayModes);
+        config_int_select(leftPane, rightPane,
+            getSettings().game.rupeeSlideOverlayOffsetX,
+            "Left Overlay X Offset",
+            "Moves the left position/drift overlay horizontally. Positive values move it right; "
+            "negative values move it left.",
+            -1000, 2000, 5, [] { return speedrun::isActive(); }, {}, " px");
+        config_int_select(leftPane, rightPane,
+            getSettings().game.rupeeSlideOverlayOffsetY,
+            "Left Overlay Y Offset",
+            "Moves the left position/drift overlay vertically. Positive values move it down; "
+            "negative values move it up.",
+            -1000, 2000, 5, [] { return speedrun::isActive(); }, {}, " px");
         config_enum_select(leftPane, rightPane,
             getSettings().game.rupeeSlideCalculatorOverlayMode,
             "Calculator Overlay Renderer",

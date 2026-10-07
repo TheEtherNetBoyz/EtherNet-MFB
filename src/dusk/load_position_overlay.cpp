@@ -678,7 +678,13 @@ void DrawLoadPositionOverlayImGui() {
     }
 
     if (overlayUsesImGui() && s_overlayVisible) {
-        ImGui::SetNextWindowPos(ImVec2(8.0f, 12.0f), ImGuiCond_FirstUseEver);
+        constexpr float baseX = 8.0f;
+        constexpr float baseY = 12.0f;
+        const float offsetX = static_cast<float>(
+            getSettings().game.rupeeSlideOverlayOffsetX.getValue());
+        const float offsetY = static_cast<float>(
+            getSettings().game.rupeeSlideOverlayOffsetY.getValue());
+        ImGui::SetNextWindowPos(ImVec2(baseX + offsetX, baseY + offsetY), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(330.0f, 92.0f), ImGuiCond_FirstUseEver);
         constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar |
                                            ImGuiWindowFlags_NoBackground |
@@ -696,6 +702,13 @@ void DrawLoadPositionOverlayImGui() {
                 position.x += ImGui::GetIO().MouseDelta.x;
                 position.y += ImGui::GetIO().MouseDelta.y;
                 ImGui::SetWindowPos(position, ImGuiCond_Always);
+                getSettings().game.rupeeSlideOverlayOffsetX.setValue(
+                    static_cast<int>(std::lround(position.x - baseX)));
+                getSettings().game.rupeeSlideOverlayOffsetY.setValue(
+                    static_cast<int>(std::lround(position.y - baseY)));
+            }
+            if (ImGui::IsItemDeactivated()) {
+                config::save();
             }
 
             if (ImGui::BeginPopupContextWindow("Rupee Slide Position Menu")) {
@@ -735,6 +748,11 @@ void DrawLoadPositionOverlayImGui() {
                     position.y = std::max(margin, displaySize.y - windowSize.y - margin);
                 }
                 ImGui::SetWindowPos(position, ImGuiCond_Always);
+                getSettings().game.rupeeSlideOverlayOffsetX.setValue(
+                    static_cast<int>(std::lround(position.x - baseX)));
+                getSettings().game.rupeeSlideOverlayOffsetY.setValue(
+                    static_cast<int>(std::lround(position.y - baseY)));
+                config::save();
                 s_overlaySnapRequest = OverlaySnap::None;
             }
 
@@ -820,8 +838,10 @@ void DrawLoadPositionOverlayNative() {
     if (overlayUsesNative() && s_overlayVisible) {
         constexpr float left = 8.0f;
         constexpr float top = 12.0f;
-        const float x = mDoGph_gInf_c::ScaleHUDXLeft(left);
-        const float y = mDoGph_gInf_c::getSafeMinYF() + top;
+        const float x = mDoGph_gInf_c::ScaleHUDXLeft(
+            left + static_cast<float>(getSettings().game.rupeeSlideOverlayOffsetX.getValue()));
+        const float y = mDoGph_gInf_c::getSafeMinYF() + top +
+            static_cast<float>(getSettings().game.rupeeSlideOverlayOffsetY.getValue());
 
         std::snprintf(line, sizeof(line), "X Pos: %f | Z Pos:%f", xPos, zPos);
         draw_text(font, x, y, size, line);

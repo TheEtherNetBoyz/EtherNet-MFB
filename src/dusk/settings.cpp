@@ -210,6 +210,8 @@ UserSettings g_userSettings = {
         .rupeeSlideLayer {"game.rupeeSlideLayer", -1},
         .rupeeSlidePositionValid {"game.rupeeSlidePositionValid", false},
         .rupeeSlideOverlayMode {"game.rupeeSlideOverlayMode", RupeeSlideOverlayMode::ImGui},
+        .rupeeSlideOverlayOffsetX {"game.rupeeSlideOverlayOffsetX", 0},
+        .rupeeSlideOverlayOffsetY {"game.rupeeSlideOverlayOffsetY", 0},
         .rupeeSlideCalculatorOverlayMode {"game.rupeeSlideCalculatorOverlayMode", RupeeSlideOverlayMode::ImGui},
         .rupeeSlideCalculatorOverlayVisible {"game.rupeeSlideCalculatorOverlayVisible", false},
         .rupeeSlideDriftOverride {"game.rupeeSlideDriftOverride", RupeeSlideDriftOverride::Off},
@@ -540,6 +542,8 @@ void registerSettings() {
     Register(g_userSettings.game.rupeeSlideLayer);
     Register(g_userSettings.game.rupeeSlidePositionValid);
     Register(g_userSettings.game.rupeeSlideOverlayMode);
+    Register(g_userSettings.game.rupeeSlideOverlayOffsetX);
+    Register(g_userSettings.game.rupeeSlideOverlayOffsetY);
     Register(g_userSettings.game.rupeeSlideCalculatorOverlayMode);
     Register(g_userSettings.game.rupeeSlideCalculatorOverlayVisible);
     Register(g_userSettings.game.rupeeSlideDriftOverride);
