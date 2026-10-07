@@ -15,4 +15,9 @@ protected:
     bool mPrelaunch;
 };
 
+class RupeeSlideWindow : public Window {
+public:
+    RupeeSlideWindow();
+};
+
 }  // namespace dusk::ui

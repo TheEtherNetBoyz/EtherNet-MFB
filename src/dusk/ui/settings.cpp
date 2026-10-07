@@ -2246,19 +2246,11 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .key = "Notifications",
                 .getValue = [] {
                     const bool ach = getSettings().game.enableAchievementToasts.getValue();
-                    const bool ctl = getSettings().game.enableControllerToasts.getValue();
-                    if (!ach && !ctl) {
-                        return Rml::String{"Off"};
-                    }
-                    if (ach && ctl) {
-                        return Rml::String{"All"};
-                    }
-                    return Rml::String{"Some"};
+                    return Rml::String{ach ? "On" : "Off"};
                 },
                 .isModified = [] {
                     const auto& ach = getSettings().game.enableAchievementToasts;
-                    const auto& ctl = getSettings().game.enableControllerToasts;
-                    return ach.getValue() != ach.getDefaultValue() || ctl.getValue() != ctl.getDefaultValue();
+                    return ach.getValue() != ach.getDefaultValue();
                 },
             }),
             rightPane, [](Pane& pane) {
@@ -2266,13 +2258,11 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 pane.add_button("Select All").on_pressed([] {
                     mDoAud_seStartMenu(kSoundItemChange);
                     getSettings().game.enableAchievementToasts.setValue(true);
-                    getSettings().game.enableControllerToasts.setValue(true);
                     config::save();
                 });
                 pane.add_button("Select None").on_pressed([] {
                     mDoAud_seStartMenu(kSoundItemChange);
                     getSettings().game.enableAchievementToasts.setValue(false);
-                    getSettings().game.enableControllerToasts.setValue(false);
                     config::save();
                 });
 
@@ -2288,18 +2278,6 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                     .on_pressed([] {
                         mDoAud_seStartMenu(kSoundItemChange);
                         auto& v = getSettings().game.enableAchievementToasts;
-                        v.setValue(!v.getValue());
-                        config::save();
-                    });
-                pane.add_button(
-                    {
-                        .text = "Missing Device",
-                        .isSelected =
-                            [] { return getSettings().game.enableControllerToasts.getValue(); },
-                    })
-                    .on_pressed([] {
-                        mDoAud_seStartMenu(kSoundItemChange);
-                        auto& v = getSettings().game.enableControllerToasts;
                         v.setValue(!v.getValue());
                         config::save();
                     });
@@ -2557,6 +2535,104 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
     // Favorite entries are registered while their tabs are built. Build every tab once so the
     // Favorites tab has the complete list the first time it opens.
     mTabBar->initialize_callbacks();
+}
+
+RupeeSlideWindow::RupeeSlideWindow() : Window(Window::Props{.tabBar = false}) {
+    set_content([this](Rml::Element* content) {
+        auto& leftPane = add_child<Pane>(content, Pane::Type::Controlled);
+        auto& rightPane = add_child<Pane>(content, Pane::Type::Uncontrolled);
+
+        leftPane.add_section("Quick Tools");
+        add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.enableTurboKeybind,
+            "Turbo Key (Tab)", "Enables the Tab key used to speed up rupee-slide testing.");
+        config_bool_select(leftPane, rightPane, getSettings().game.turboToggleMode,
+            {.key = "Turbo Toggle Mode",
+                .helpText = "Press Tab to toggle turbo speed instead of holding it.",
+                .isDisabled = [] {
+                    return speedrun::isActive() ||
+                           !getSettings().game.enableTurboKeybind.getValue();
+                }});
+        add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.enableMoveLinkCombo,
+            "Move Link (L+R+Y)",
+            "Enables the L+R+Y button combo to toggle freely repositioning Link.");
+        add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.enableTeleportCombo,
+            "Teleport (R+D-pad Up/Down)",
+            "R+D-pad Up stores Link's current position.<br/>"
+            "R+D-pad Down teleports Link back to it.");
+        config_bool_select(leftPane, rightPane,
+            getSettings().game.rupeeSlideCalculatorOverlayVisible,
+            {.key = "Calculator Overlay",
+                .helpText = "Shows or hides the rupee-slide calculator overlay. Start+Y also "
+                            "toggles it."});
+
+        leftPane.add_section("Overlays");
+        config_enum_select(leftPane, rightPane, getSettings().game.rupeeSlideOverlayMode,
+            "Left Overlay Renderer",
+            "Choose whether the L+Start position/drift overlay is drawn with ImGui, the original "
+            "in-game renderer, or both.",
+            kRupeeSlideOverlayModes);
+        config_int_select(leftPane, rightPane, getSettings().game.rupeeSlideOverlayOffsetX,
+            "Left Overlay X Offset",
+            "Moves the left position/drift overlay horizontally. Positive values move it right; "
+            "negative values move it left.",
+            -1000, 2000, 5, [] { return speedrun::isActive(); }, {}, " px");
+        config_int_select(leftPane, rightPane, getSettings().game.rupeeSlideOverlayOffsetY,
+            "Left Overlay Y Offset",
+            "Moves the left position/drift overlay vertically. Positive values move it down; "
+            "negative values move it up.",
+            -1000, 2000, 5, [] { return speedrun::isActive(); }, {}, " px");
+        config_enum_select(leftPane, rightPane,
+            getSettings().game.rupeeSlideCalculatorOverlayMode,
+            "Calculator Overlay Renderer",
+            "Choose whether the rupee-slide calculator is drawn with ImGui, the original in-game "
+            "renderer, or both.",
+            kRupeeSlideOverlayModes);
+
+        leftPane.add_section("Drift Override");
+        config_enum_select(leftPane, rightPane, getSettings().game.rupeeSlideDriftOverride,
+            "Drift Direction Override",
+            "Redirects each completed rupee-pickup slide loop relative to the gameplay camera "
+            "without changing Link's facing angle. Backward moves toward the back/top of the "
+            "screen; Forward moves toward the front/bottom. Off preserves original behavior.",
+            kRupeeSlideDriftOverrideModes);
+        config_int_select(leftPane, rightPane, getSettings().game.rupeeSlideDriftAngle,
+            "Custom Slide Angle",
+            "Used for Custom angle: 0° backward, 90° left, 180° forward, 270° right.", 0, 359,
+            5, {}, {}, "°");
+        config_int_select(leftPane, rightPane, getSettings().game.rupeeSlideDriftSpeedPercent,
+            "Slide Speed",
+            "Scales redirected movement distance for testing. 0% is neutral/default and 100% is "
+            "normal speed.",
+            0, 50000, 1000, {}, {}, "%");
+
+        leftPane.add_section("Direction Arrow");
+        add_speedrun_disabled_option(leftPane, rightPane,
+            getSettings().game.showRupeeSlideDriftArrow, "Show Drift Direction Arrow",
+            "Draws a 3D arrow above Link showing the predicted natural drift or selected override "
+            "direction.");
+        config_int_select(leftPane, rightPane,
+            getSettings().game.rupeeSlideDriftArrowThickness, "Drift Arrow Thickness",
+            "Adjusts the line thickness of the 3D drift direction arrow.", 1, 20, 1,
+            [] { return speedrun::isActive(); });
+        auto& driftArrowColor = leftPane.add_child<ColorInput>(ColorInput::Props{
+            .key = "Drift Arrow Color",
+            .getValue = [] { return getSettings().game.rupeeSlideDriftArrowColor.getValue(); },
+            .setValue = [](Rml::String value) {
+                getSettings().game.rupeeSlideDriftArrowColor.setValue(std::move(value));
+                config::save();
+            },
+            .isDisabled = [] { return speedrun::isActive(); },
+            .isModified = [] {
+                const auto& setting = getSettings().game.rupeeSlideDriftArrowColor;
+                return setting.getValue() != setting.getDefaultValue();
+            },
+            .presets = {"00ffff", "ffffff", "ff4040", "40ff40", "ffff40", "ff40ff"},
+        });
+        leftPane.register_control(driftArrowColor, rightPane, [](Pane& pane) {
+            pane.clear();
+            pane.add_text("Chooses the color of the 3D drift direction arrow.");
+        });
+    });
 }
 
 SettingsWindow::~SettingsWindow() {

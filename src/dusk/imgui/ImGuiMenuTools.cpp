@@ -286,7 +286,6 @@ namespace dusk {
                 MenuCheckbox("Mirror Mode", s.game.enableMirrorMode);
                 MenuCheckbox("Minimal HUD", s.game.minimalHUD);
                 MenuCheckbox("Achievement Notifications", s.game.enableAchievementToasts);
-                MenuCheckbox("Controller Notifications", s.game.enableControllerToasts);
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Quality of Life")) {

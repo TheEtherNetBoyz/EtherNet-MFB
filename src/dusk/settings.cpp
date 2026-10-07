@@ -91,7 +91,7 @@ UserSettings g_userSettings = {
         .pauseOnFocusLost {"game.pauseOnFocusLost", false},
         .enableLinkDollRotation {"game.enableLinkDollRotation", false},
         .enableAchievementToasts {"game.enableAchievementToasts", true},
-        .enableControllerToasts {"game.enableControllerToasts", true},
+        .enableControllerToasts {"game.enableControllerToasts", false},
         .enableDiscordPresence {"game.enableDiscordPresence", true},
         .menuScalingMode {"game.menuScalingMode", MenuScaling::Wii},
 

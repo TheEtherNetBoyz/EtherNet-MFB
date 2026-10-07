@@ -71,6 +71,7 @@ MenuBar::MenuBar()
 }
 
 void MenuBar::build_tabs() {
+    mTabBar->add_tab("Rupee Slide", [this] { push(std::make_unique<RupeeSlideWindow>()); });
     mTabBar->add_tab("Settings", [this] { push(std::make_unique<SettingsWindow>()); });
 
     if (getSettings().backend.enableAdvancedSettings) {

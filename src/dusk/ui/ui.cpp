@@ -238,49 +238,11 @@ void handle_event(const SDL_Event& event) noexcept {
     } else if (event.type == SDL_EVENT_GAMEPAD_ADDED) {
         auto* gamepad = SDL_GetGamepadFromID(event.gdevice.which);
         if (SDL_GamepadConnected(gamepad)) {
-            if (getSettings().game.enableControllerToasts) {
-                const char* name = SDL_GetGamepadName(gamepad);
-                Rml::String content = fmt::format("<span>{}</span>", name ? name : "[Unknown]");
-                Rml::String title = "Device Connected";
-                if (const char* icon =
-                        connection_state_icon(SDL_GetGamepadConnectionState(gamepad)))
-                {
-                    title = fmt::format(
-                        "<row><span>{}</span> <icon class=\"connection\">&#x{};</icon></row>",
-                        title, icon);
-                }
-                int batteryLevel = -1;
-                const auto powerState = SDL_GetGamepadPowerInfo(gamepad, &batteryLevel);
-                if (powerState != SDL_POWERSTATE_UNKNOWN) {
-                    content = fmt::format(
-                        "<row>{}</row><row class=\"muted\"><icon class=\"battery\">&#x{};</icon>",
-                        content, battery_icon(powerState, batteryLevel));
-                    if (batteryLevel > -1) {
-                        content = fmt::format("{}&nbsp;<span>{}%</span>", content, batteryLevel);
-                    }
-                    content += "</row>";
-                }
-                push_toast({
-                    .type = "controller",
-                    .title = title,
-                    .content = content,
-                    .duration = std::chrono::seconds(4),
-                });
-            }
             sConnectedGamepads.insert(event.gdevice.which);
         }
     } else if (event.type == SDL_EVENT_GAMEPAD_REMOVED &&
                sConnectedGamepads.contains(event.gdevice.which))
     {
-        if (getSettings().game.enableControllerToasts) {
-            const char* name = SDL_GetGamepadNameForID(event.gdevice.which);
-            push_toast({
-                .type = "controller",
-                .title = "Device Disconnected",
-                .content = name ? name : "[Unknown]",
-                .duration = std::chrono::seconds(4),
-            });
-        }
         sConnectedGamepads.erase(event.gdevice.which);
     } else if (event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED) {
         apply_scale();
