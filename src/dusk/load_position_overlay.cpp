@@ -188,6 +188,12 @@ bool get_override_direction(RupeeSlideDriftOverride mode, float& x, float& z) {
     case RupeeSlideDriftOverride::Forward:
         targetAngle = static_cast<s16>(targetAngle + 0x8000);
         break;
+    case RupeeSlideDriftOverride::CustomAngle: {
+        const int degrees = std::clamp(
+            getSettings().game.rupeeSlideDriftAngle.getValue(), 0, 359);
+        targetAngle = static_cast<s16>(targetAngle + (degrees * 0x10000) / 360);
+        break;
+    }
     case RupeeSlideDriftOverride::Left:
         targetAngle = static_cast<s16>(targetAngle + 0x4000);
         break;

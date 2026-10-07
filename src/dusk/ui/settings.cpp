@@ -127,6 +127,7 @@ constexpr std::array kRupeeSlideDriftOverrideModes = {
     "Forward-right",
     "Backward-left",
     "Backward-right",
+    "Custom angle",
 };
 
 enum class HotkeyAction {
@@ -2477,8 +2478,15 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Redirects each completed rupee-pickup slide loop relative to the gameplay camera "
             "without changing Link's facing angle. Backward moves toward the back/top of the "
             "screen; Forward moves toward the front/bottom. Off preserves the original game "
-            "behavior.",
+            "behavior. Custom angle uses the numeric angle below relative to the camera: 0° is "
+            "backward, 180° is forward, and 90° is left.",
             kRupeeSlideDriftOverrideModes);
+        config_int_select(leftPane, rightPane,
+            getSettings().game.rupeeSlideDriftAngle,
+            "Custom Slide Angle",
+            "Used when Drift Direction Override is Custom angle. The angle is camera-relative: "
+            "0° backward, 90° left, 180° forward, 270° right.",
+            0, 359, 5, {}, {}, "°");
         add_speedrun_disabled_option(leftPane, rightPane,
             getSettings().game.showRupeeSlideDriftArrow,
             "Show Drift Direction Arrow",

@@ -123,6 +123,7 @@ enum class RupeeSlideDriftOverride : u8 {
     ForwardRight = 6,
     BackwardLeft = 7,
     BackwardRight = 8,
+    CustomAngle = 9,
 };
 
 enum class AudioOutputMode : u8 {
@@ -226,7 +227,7 @@ struct ConfigEnumRange<RupeeSlideOverlayMode> {
 template <>
 struct ConfigEnumRange<RupeeSlideDriftOverride> {
     static constexpr auto min = RupeeSlideDriftOverride::Off;
-    static constexpr auto max = RupeeSlideDriftOverride::BackwardRight;
+    static constexpr auto max = RupeeSlideDriftOverride::CustomAngle;
 };
 
 template <>
@@ -448,6 +449,7 @@ struct UserSettings {
         ConfigVar<RupeeSlideOverlayMode> rupeeSlideCalculatorOverlayMode;
         ConfigVar<bool> rupeeSlideCalculatorOverlayVisible;
         ConfigVar<RupeeSlideDriftOverride> rupeeSlideDriftOverride;
+        ConfigVar<int> rupeeSlideDriftAngle;
         ConfigVar<bool> showRupeeSlideDriftArrow;
         ConfigVar<int> rupeeSlideDriftArrowThickness;
         ConfigVar<std::string> rupeeSlideDriftArrowColor;
