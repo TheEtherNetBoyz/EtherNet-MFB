@@ -178,9 +178,15 @@ namespace dusk {
                             break;
                         }
 
+                        const int speedPercent = std::clamp(
+                            getSettings().game.rupeeSlideDriftSpeedPercent.getValue(), 0, 50000);
+                        const float speedMultiplier = speedPercent == 0
+                            ? 1.0f
+                            : static_cast<float>(speedPercent) / 100.0f;
+                        const float redirectedDistance = distance * speedMultiplier;
                         cXyz redirected = s_driftOverride.loopStart;
-                        redirected.x += distance * cM_ssin(targetAngle);
-                        redirected.z += distance * cM_scos(targetAngle);
+                        redirected.x += redirectedDistance * cM_ssin(targetAngle);
+                        redirected.z += redirectedDistance * cM_scos(targetAngle);
                         const cXyz velocity = player->speed;
                         player->setPlayerPosAndAngle(&redirected, player->shape_angle.y, TRUE);
                         player->speed = velocity;

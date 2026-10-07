@@ -214,6 +214,7 @@ UserSettings g_userSettings = {
         .rupeeSlideCalculatorOverlayVisible {"game.rupeeSlideCalculatorOverlayVisible", false},
         .rupeeSlideDriftOverride {"game.rupeeSlideDriftOverride", RupeeSlideDriftOverride::Off},
         .rupeeSlideDriftAngle {"game.rupeeSlideDriftAngle", 0},
+        .rupeeSlideDriftSpeedPercent {"game.rupeeSlideDriftSpeedPercent", 0},
         .showRupeeSlideDriftArrow {"game.showRupeeSlideDriftArrow", false},
         .rupeeSlideDriftArrowThickness {"game.rupeeSlideDriftArrowThickness", 7},
         .rupeeSlideDriftArrowColor {"game.rupeeSlideDriftArrowColor", "00ffff"},
@@ -543,6 +544,7 @@ void registerSettings() {
     Register(g_userSettings.game.rupeeSlideCalculatorOverlayVisible);
     Register(g_userSettings.game.rupeeSlideDriftOverride);
     Register(g_userSettings.game.rupeeSlideDriftAngle);
+    Register(g_userSettings.game.rupeeSlideDriftSpeedPercent);
     Register(g_userSettings.game.showRupeeSlideDriftArrow);
     Register(g_userSettings.game.rupeeSlideDriftArrowThickness);
     Register(g_userSettings.game.rupeeSlideDriftArrowColor);

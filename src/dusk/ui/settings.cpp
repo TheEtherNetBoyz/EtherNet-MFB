@@ -2487,6 +2487,13 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Used when Drift Direction Override is Custom angle. The angle is camera-relative: "
             "0° backward, 90° left, 180° forward, 270° right.",
             0, 359, 5, {}, {}, "°");
+        config_int_select(leftPane, rightPane,
+            getSettings().game.rupeeSlideDriftSpeedPercent,
+            "Slide Speed",
+            "Scales the redirected movement distance during each pickup-slide loop for testing. "
+            "0% is the neutral/default setting; 100% is normal speed, and values above 100% "
+            "move Link farther per loop.",
+            0, 50000, 1000, {}, {}, "%");
         add_speedrun_disabled_option(leftPane, rightPane,
             getSettings().game.showRupeeSlideDriftArrow,
             "Show Drift Direction Arrow",

@@ -485,11 +485,10 @@ void updateShoulderCamera(const daAlink_c* player) {
         g_playerFollow.valid = true;
     } else if ((g_hasPresentationSimulationTick &&
                    g_presentationSimulationTick != g_playerFollow.simulationTick) ||
-               (!g_hasPresentationSimulationTick &&
-                   (rawPosition.x != g_playerFollow.currentPosition.x ||
-                    rawPosition.y != g_playerFollow.currentPosition.y ||
-                    rawPosition.z != g_playerFollow.currentPosition.z ||
-                    rawAngle != g_playerFollow.currentAngle))) {
+               rawPosition.x != g_playerFollow.currentPosition.x ||
+               rawPosition.y != g_playerFollow.currentPosition.y ||
+               rawPosition.z != g_playerFollow.currentPosition.z ||
+               rawAngle != g_playerFollow.currentAngle) {
         g_playerFollow.previousPosition = g_playerFollow.currentPosition;
         g_playerFollow.currentPosition = rawPosition;
         g_playerFollow.previousAngle = g_playerFollow.currentAngle;
