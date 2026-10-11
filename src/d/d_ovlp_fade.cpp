@@ -182,6 +182,13 @@ static int dOvlpFd_FadeIn(overlap1_class* i_this) {
                 var_r30 = dComIfGp_getNextStageWipeSpeed();
             }
 
+            // A zero-duration wipe would be decremented to -1 below and never
+            // reach the completion condition, leaving OVERLAP0 on a black
+            // screen forever. Treat it as the shortest possible transition.
+            if (var_r30 == 0) {
+                var_r30 = 1;
+            }
+
             if (!JFWDisplay::getManager()->startFadeOut(var_r30)) {
                 return 1;
             }
