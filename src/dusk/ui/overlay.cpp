@@ -122,24 +122,6 @@ Rml::Element* create_toast(Rml::Element* parent, const Toast& toast) {
     return elem;
 }
 
-Rml::Element* create_controller_warning(Rml::Element* parent) {
-    auto* elem = append(parent, "toast");
-    elem->SetClass("controller-warning", true);
-
-    auto* heading = append(elem, "heading");
-    append_text(append(heading, "toast-title"), "No Device Assigned");
-    auto* icon = append(heading, "icon");
-    icon->SetClass("warning", true);
-
-    auto* message = append(elem, "message");
-    auto* content = append(message, "toast-message-text");
-    append_text(content, "Configure ");
-    append_text(append(content, "b"), "Port 1");
-    append_text(content, " in Settings.");
-
-    return elem;
-}
-
 SDL_Gamepad* gamepad_for_port(u32 port) noexcept {
     const s32 index = PADGetIndexForPort(port);
     if (index < 0) {
@@ -248,11 +230,6 @@ Overlay::Overlay() : Document(kDocumentSource, true, DocumentScope::Overlay) {
             {
                 mCurrentToast->SetPseudoClass("done", true);
             }
-        } else if (mControllerWarning != nullptr &&
-                   event.GetTargetElement() == mControllerWarning &&
-                   !mControllerWarning->HasAttribute("open"))
-        {
-            mControllerWarning->SetPseudoClass("done", true);
         } else if (mMenuNotification != nullptr && event.GetTargetElement() == mMenuNotification &&
                    !mMenuNotification->HasAttribute("open"))
         {
@@ -388,29 +365,6 @@ void Overlay::update() {
             set_text_content(mModsDisplay, fmt::format("Enabled Mods:\n{}", enabled_mods_list));
         } else {
             mModsDisplay->RemoveAttribute("open");
-        }
-    }
-
-    u32 count = 0;
-    const bool showControllerWarning = PADGetIndexForPort(PAD_CHAN0) < 0 &&
-                                       PADGetKeyButtonBindings(PAD_CHAN0, &count) == nullptr &&
-                                       !getSettings().game.enableTouchControls &&
-                                       dynamic_cast<Window*>(top_document()) == nullptr &&
-                                       dynamic_cast<WindowSmall*>(top_document()) == nullptr &&
-                                       dynamic_cast<Popover*>(top_document()) == nullptr;
-    if (showControllerWarning && mControllerWarning == nullptr) {
-        mControllerWarning = create_controller_warning(mDocument);
-    } else if (showControllerWarning && mControllerWarning != nullptr) {
-        mControllerWarning->SetAttribute("open", "");
-        mControllerWarning->SetPseudoClass("opened", true);
-        mControllerWarning->SetPseudoClass("done", false);
-    } else if (!showControllerWarning && mControllerWarning != nullptr) {
-        if (mControllerWarning->IsPseudoClassSet("done") ||
-            !mControllerWarning->IsPseudoClassSet("opened"))
-        {
-            remove_element(mControllerWarning);
-        } else {
-            mControllerWarning->RemoveAttribute("open");
         }
     }
 

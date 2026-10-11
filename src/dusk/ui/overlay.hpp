@@ -24,7 +24,6 @@ private:
     Rml::Element* mPipelineProgressLabel = nullptr;
     Rml::Element* mPipelineProgressBar = nullptr;
     Rml::Element* mCurrentToast = nullptr;
-    Rml::Element* mControllerWarning = nullptr;
     Rml::Element* mMenuNotification = nullptr;
     Rml::Element* mSpeedrunTimer = nullptr;
     Rml::Element* mSpeedrunRta = nullptr;
