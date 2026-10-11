@@ -710,8 +710,9 @@ namespace dusk {
             constexpr u32 captureCombo = PAD_BUTTON_A | PAD_BUTTON_LEFT | PAD_TRIGGER_Z;
             constexpr u32 replayCombo = PAD_BUTTON_B | PAD_BUTTON_LEFT | PAD_TRIGGER_Z;
             const u32 physicalHold = mDoCPd_c::getUnfilteredHold(PAD_1);
-            const bool captureHeld = (physicalHold & captureCombo) == captureCombo;
-            const bool replayHeld = (physicalHold & replayCombo) == replayCombo;
+            const u32 combinedHold = physicalHold | mDoCPd_c::getHold(PAD_1);
+            const bool captureHeld = (combinedHold & captureCombo) == captureCombo;
+            const bool replayHeld = (combinedHold & replayCombo) == replayCombo;
             dCamera_c* camera = dCam_getBody();
             cXyz loggedPosition;
             s16 loggedAngle = 0;
@@ -724,7 +725,11 @@ namespace dusk {
 
             if (captureHeld && !s_rupeeSlide.aComboLatched &&
                 canStartRupeeSlide(player)) {
-                beginSlideCapture(player, camera);
+                // The replay location belongs to this recording. Save it now instead
+                // of waiting for the periodic position logger, which can take 20 minutes.
+                if (SaveCurrentRupeeSlidePosition()) {
+                    beginSlideCapture(player, camera);
+                }
             } else if (replayHeld && !s_rupeeSlide.bComboLatched &&
                        s_rupeeSlide.snapshotValid && hasLoggedPosition &&
                        canStartRupeeSlide(player)) {

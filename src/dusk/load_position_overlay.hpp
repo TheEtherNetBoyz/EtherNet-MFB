@@ -7,6 +7,7 @@ namespace dusk {
 void UpdateLoadPositionOverlayInput();
 void UpdateLoadPositionDriftNative();
 void QueueRupeeSlideDriftArrow();
+bool SaveCurrentRupeeSlidePosition();
 bool GetLoggedRupeeSlidePosition(cXyz& position, s16& angle);
 void DrawLoadPositionOverlayImGui();
 void DrawLoadPositionOverlayNative();

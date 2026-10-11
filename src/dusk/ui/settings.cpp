@@ -2456,6 +2456,15 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Moves the left position/drift overlay vertically. Positive values move it down; "
             "negative values move it up.",
             -1000, 2000, 5, [] { return speedrun::isActive(); }, {}, " px");
+        config_int_select(leftPane, rightPane,
+            getSettings().game.rupeeSlideDriftDecimalPlaces,
+            "Drift F/R Decimals",
+            "Controls the number of decimal places shown for the F and R drift values.",
+            0, 6, 1);
+        add_speedrun_disabled_option(leftPane, rightPane,
+            getSettings().game.rupeeSlideShowDriftComponents,
+            "Show Drift F/R Values",
+            "Shows the numeric F and R components beside the drift direction.");
         config_enum_select(leftPane, rightPane,
             getSettings().game.rupeeSlideCalculatorOverlayMode,
             "Calculator Overlay Renderer",
@@ -2581,6 +2590,13 @@ RupeeSlideWindow::RupeeSlideWindow() : Window(Window::Props{.tabBar = false}) {
             "Moves the left position/drift overlay vertically. Positive values move it down; "
             "negative values move it up.",
             -1000, 2000, 5, [] { return speedrun::isActive(); }, {}, " px");
+        config_int_select(leftPane, rightPane,
+            getSettings().game.rupeeSlideDriftDecimalPlaces, "Drift F/R Decimals",
+            "Controls the number of decimal places shown for the F and R drift values.", 0, 6,
+            1);
+        add_speedrun_disabled_option(leftPane, rightPane,
+            getSettings().game.rupeeSlideShowDriftComponents, "Show Drift F/R Values",
+            "Shows the numeric F and R components beside the drift direction.");
         config_enum_select(leftPane, rightPane,
             getSettings().game.rupeeSlideCalculatorOverlayMode,
             "Calculator Overlay Renderer",

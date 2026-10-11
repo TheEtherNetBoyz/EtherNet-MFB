@@ -448,6 +448,8 @@ struct UserSettings {
         ConfigVar<RupeeSlideOverlayMode> rupeeSlideOverlayMode;
         ConfigVar<int> rupeeSlideOverlayOffsetX;
         ConfigVar<int> rupeeSlideOverlayOffsetY;
+        ConfigVar<int> rupeeSlideDriftDecimalPlaces;
+        ConfigVar<bool> rupeeSlideShowDriftComponents;
         ConfigVar<RupeeSlideOverlayMode> rupeeSlideCalculatorOverlayMode;
         ConfigVar<bool> rupeeSlideCalculatorOverlayVisible;
         ConfigVar<RupeeSlideDriftOverride> rupeeSlideDriftOverride;

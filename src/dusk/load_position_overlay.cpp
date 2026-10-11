@@ -760,9 +760,15 @@ void DrawLoadPositionOverlayImGui() {
                         player->current.pos.z);
             ImGui::Text("Y Pos: %.3f | Angle: %u", player->current.pos.y,
                         static_cast<u16>(player->shape_angle.y));
-            ImGui::Text("Drift: %s  F:%+.6f R:%+.6f",
-                        drift_direction(s_publishedForward, s_publishedRight),
-                        s_publishedForward, s_publishedRight);
+            const char* direction = drift_direction(s_publishedForward, s_publishedRight);
+            if (getSettings().game.rupeeSlideShowDriftComponents.getValue()) {
+                const int precision = std::clamp(
+                    getSettings().game.rupeeSlideDriftDecimalPlaces.getValue(), 0, 6);
+                ImGui::Text("Drift: %s  F:%+.*f R:%+.*f", direction, precision,
+                            s_publishedForward, precision, s_publishedRight);
+            } else {
+                ImGui::Text("Drift: %s", direction);
+            }
         }
         ImGui::End();
     }
@@ -811,6 +817,17 @@ bool GetLoggedRupeeSlidePosition(cXyz& position, s16& angle) {
     return true;
 }
 
+bool SaveCurrentRupeeSlidePosition() {
+    const daAlink_c* link = daAlink_getAlinkActorClass();
+    const char* stageName = dComIfGp_getStartStageName();
+    if (link == nullptr || stageName == nullptr || dComIfGp_isEnableNextStage()) {
+        return false;
+    }
+
+    persistCurrentSlidePosition(link);
+    return true;
+}
+
 void DrawLoadPositionOverlayNative() {
     if ((!overlayUsesNative() || !s_overlayVisible) &&
         (!calculatorOverlayUsesNative() || !s_calculatorOverlayVisible)) {
@@ -851,9 +868,15 @@ void DrawLoadPositionOverlayNative() {
         std::snprintf(line, sizeof(line), "Y Pos: %f | Angle:%u", player->current.pos.y,
                       unsignedAngle);
         draw_text(font, x, nextLineY, size, line);
-        std::snprintf(line, sizeof(line), "Drift: %s  F:%+.6f R:%+.6f",
-                      drift_direction(s_publishedForward, s_publishedRight),
-                      s_publishedForward, s_publishedRight);
+        const char* direction = drift_direction(s_publishedForward, s_publishedRight);
+        if (getSettings().game.rupeeSlideShowDriftComponents.getValue()) {
+            const int precision = std::clamp(
+                getSettings().game.rupeeSlideDriftDecimalPlaces.getValue(), 0, 6);
+            std::snprintf(line, sizeof(line), "Drift: %s  F:%+.*f R:%+.*f", direction,
+                          precision, s_publishedForward, precision, s_publishedRight);
+        } else {
+            std::snprintf(line, sizeof(line), "Drift: %s", direction);
+        }
         draw_text(font, x, nextLineY + lineHeight, size, line);
     }
 
