@@ -99,6 +99,7 @@ namespace dusk {
             bool loopArmed = false;
             float previousFrame = 0.0f;
             cXyz loopStart;
+            cXyz previousPosition;
         };
 
         DriftOverrideState s_driftOverride;
@@ -121,10 +122,31 @@ namespace dusk {
                 // Start redirecting only after its first complete wrap.
                 s_driftOverride.loopArmed = false;
                 s_driftOverride.frameValid = true;
-            } else if (animationFrame < s_driftOverride.previousFrame) {
-                if (s_driftOverride.loopArmed) {
-                    const float dx = player->current.pos.x - s_driftOverride.loopStart.x;
-                    const float dz = player->current.pos.z - s_driftOverride.loopStart.z;
+                s_driftOverride.loopStart = player->current.pos;
+                s_driftOverride.previousPosition = player->current.pos;
+            } else {
+                const bool animationWrapped = animationFrame < s_driftOverride.previousFrame;
+                const bool hopMovement =
+                    getSettings().game.rupeeSlideDriftHop.getValue();
+                bool redirectThisFrame = false;
+                cXyz movementStart = s_driftOverride.previousPosition;
+
+                if (hopMovement) {
+                    if (animationWrapped) {
+                        redirectThisFrame = s_driftOverride.loopArmed;
+                        movementStart = s_driftOverride.loopStart;
+                        s_driftOverride.loopArmed = true;
+                    }
+                } else if (s_driftOverride.loopArmed) {
+                    redirectThisFrame = true;
+                } else if (animationWrapped) {
+                    // Arm smooth movement after the first complete animation loop.
+                    s_driftOverride.loopArmed = true;
+                }
+
+                if (redirectThisFrame) {
+                    const float dx = player->current.pos.x - movementStart.x;
+                    const float dz = player->current.pos.z - movementStart.z;
                     const float distance = std::sqrt(dx * dx + dz * dz);
                     if (distance > 0.0f) {
                         dCamera_c* camera = dCam_getBody();
@@ -136,8 +158,6 @@ namespace dusk {
                             const float cameraDz = center.z - eye.z;
                             if (std::fabs(cameraDx) > 0.000001f ||
                                 std::fabs(cameraDz) > 0.000001f) {
-                                // The camera's horizontal look direction points toward the
-                                // back/top of the screen.
                                 cameraBackAngle = cM_atan2s(cameraDx, cameraDz);
                             }
                         }
@@ -184,7 +204,12 @@ namespace dusk {
                             ? 1.0f
                             : static_cast<float>(speedPercent) / 100.0f;
                         const float redirectedDistance = distance * speedMultiplier;
-                        cXyz redirected = s_driftOverride.loopStart;
+                        cXyz redirected = movementStart;
+                        // Smooth movement keeps the Y value produced by the game this frame so
+                        // floor/slope correction is not replayed as a vertical hop.
+                        if (!hopMovement) {
+                            redirected.y = player->current.pos.y;
+                        }
                         redirected.x += redirectedDistance * cM_ssin(targetAngle);
                         redirected.z += redirectedDistance * cM_scos(targetAngle);
                         const cXyz velocity = player->speed;
@@ -192,8 +217,11 @@ namespace dusk {
                         player->speed = velocity;
                     }
                 }
-                s_driftOverride.loopStart = player->current.pos;
-                s_driftOverride.loopArmed = true;
+
+                if (hopMovement && animationWrapped) {
+                    s_driftOverride.loopStart = player->current.pos;
+                }
+                s_driftOverride.previousPosition = player->current.pos;
             }
 
             s_driftOverride.previousFrame = animationFrame;

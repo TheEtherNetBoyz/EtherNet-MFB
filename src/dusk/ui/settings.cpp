@@ -2489,10 +2489,15 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         config_int_select(leftPane, rightPane,
             getSettings().game.rupeeSlideDriftSpeedPercent,
             "Slide Speed",
-            "Scales the redirected movement distance during each pickup-slide loop for testing. "
+            "Scales the redirected movement distance during the pickup slide for testing. "
             "0% is the neutral/default setting; 100% is normal speed, and values above 100% "
-            "move Link farther per loop.",
+            "move Link faster.",
             0, 50000, 1000, {}, {}, "%");
+        add_speedrun_disabled_option(leftPane, rightPane,
+            getSettings().game.rupeeSlideDriftHop,
+            "Loop Hop Movement",
+            "Applies redirected movement once per pickup-animation loop, reproducing the old "
+            "hop behavior. Off applies movement smoothly every frame.");
         add_speedrun_disabled_option(leftPane, rightPane,
             getSettings().game.showRupeeSlideDriftArrow,
             "Show Drift Direction Arrow",
@@ -2620,6 +2625,9 @@ RupeeSlideWindow::RupeeSlideWindow() : Window(Window::Props{.tabBar = false}) {
             "Scales redirected movement distance for testing. 0% is neutral/default and 100% is "
             "normal speed.",
             0, 50000, 1000, {}, {}, "%");
+        add_speedrun_disabled_option(leftPane, rightPane,
+            getSettings().game.rupeeSlideDriftHop, "Loop Hop Movement",
+            "Reproduces the old once-per-animation-loop hop. Off redirects movement smoothly.");
 
         leftPane.add_section("Direction Arrow");
         add_speedrun_disabled_option(leftPane, rightPane,
