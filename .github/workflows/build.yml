@@ -117,6 +117,17 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
+      - name: Select active Xcode toolchain
+        if: matrix.platform == 'macos'
+        run: |
+          sudo xcode-select --switch "$DEVELOPER_DIR"
+          echo "CC=$(xcrun --find clang)" >> "$GITHUB_ENV"
+          echo "CXX=$(xcrun --find clang++)" >> "$GITHUB_ENV"
+          echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+          xcode-select --print-path
+          xcrun --find clang
+          xcrun --sdk macosx --show-sdk-path
+
       - name: Install dependencies
         run: brew install cmake ninja
 
