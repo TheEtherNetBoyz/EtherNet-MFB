@@ -120,7 +120,11 @@ jobs:
       - name: Select active Xcode toolchain
         if: matrix.platform == 'macos'
         run: |
-          sudo xcode-select --switch "$DEVELOPER_DIR"
+          XCODE_DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+          test -d "$XCODE_DEVELOPER_DIR"
+          sudo xcode-select --switch "$XCODE_DEVELOPER_DIR"
+          export DEVELOPER_DIR="$XCODE_DEVELOPER_DIR"
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
           echo "CC=$(xcrun --find clang)" >> "$GITHUB_ENV"
           echo "CXX=$(xcrun --find clang++)" >> "$GITHUB_ENV"
           echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
@@ -154,6 +158,15 @@ jobs:
 
       - name: Configure CMake
         run: cmake --preset ${{matrix.preset}}
+
+      - name: Verify macOS linker SDK paths
+        if: matrix.platform == 'macos'
+        run: |
+          if grep -Fq "/Library/Developer/CommandLineTools/SDKs" "build/${{matrix.preset}}/build.ninja"; then
+            echo "CMake included an incompatible Command Line Tools SDK path:"
+            grep -Fn "/Library/Developer/CommandLineTools/SDKs" "build/${{matrix.preset}}/build.ninja" | head -20
+            exit 1
+          fi
 
       - name: Build
         run: cmake --build --preset ${{matrix.preset}}
