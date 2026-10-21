@@ -1,5 +1,6 @@
 #include "f_op/f_op_camera_mng.h"
 #include "SSystem/SComponent/c_xyz.h"
+#include "d/actor/d_a_alink.h"
 #include "d/d_com_inf_game.h"
 
 #include "imgui.h"
@@ -7,6 +8,7 @@
 #include "ImGuiConfig.hpp"
 #include "ImGuiConsole.hpp"
 #include "ImGuiMenuTools.hpp"
+#include "dusk/detached_camera.h"
 #include "dusk/io.hpp"
 #include "dusk/main.h"
 #include "dusk/rupee_slide_tools.hpp"
@@ -292,6 +294,7 @@ namespace dusk {
     void ImGuiMenuTools::ShowCameraOverlay() {
         auto* cam = (camera_process_class*)dCam_getCamera();
         auto* dCam = cam != nullptr ? &cam->mCamera : nullptr;
+        detached_camera::updateControls(std::max(ImGui::GetIO().DeltaTime, 0.0f));
         UpdateCameraPlayback(dCam);
 
         static bool captureHotkeyToggle = false;
@@ -377,6 +380,79 @@ namespace dusk {
             }
         }
         if (!getSettings().game.debugFlyCam) {
+            ImGui::EndDisabled();
+        }
+
+        ImGui::SeparatorText("Detached Presentation Camera");
+
+        bool detachedEnabled = detached_camera::isEnabled();
+        if (ImGui::Checkbox("Enable render-only camera", &detachedEnabled)) {
+            if (detachedEnabled && cam != nullptr) {
+                detached_camera::copyFromView(&cam->view);
+            }
+            detached_camera::setEnabled(detachedEnabled);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Moves only the rendered viewpoint. Gameplay and the normal camera continue.\n"
+                "Turning this off immediately restores the normal gameplay camera.");
+        }
+
+        if (!detached_camera::isEnabled()) {
+            ImGui::BeginDisabled();
+        }
+
+        bool controlsEnabled = detached_camera::areControlsEnabled();
+        if (ImGui::Checkbox("Control detached camera", &controlsEnabled)) {
+            detached_camera::setControlsEnabled(controlsEnabled);
+        }
+
+        bool mouseLook = detached_camera::isMouseLookEnabled();
+        if (ImGui::Checkbox("Mouse look (P)", &mouseLook)) {
+            detached_camera::setMouseLookEnabled(mouseLook);
+        }
+
+        float moveSpeed = detached_camera::getMoveSpeed();
+        if (ImGui::SliderFloat("Move speed", &moveSpeed, 10.0f, 5000.0f, "%.0f")) {
+            detached_camera::setMoveSpeed(moveSpeed);
+        }
+
+        float detachedFov = detached_camera::getFov();
+        if (ImGui::SliderFloat("Detached FOV", &detachedFov, 10.0f, 150.0f, "%.1f")) {
+            detached_camera::setFov(detachedFov);
+        }
+
+        float detachedBank = detached_camera::getBankDegrees();
+        if (ImGui::SliderFloat("Detached bank", &detachedBank, -180.0f, 180.0f, "%.1f deg")) {
+            detached_camera::setBankDegrees(detachedBank);
+        }
+
+        if (ImGui::Button("Copy Gameplay Camera") && cam != nullptr) {
+            detached_camera::copyFromView(&cam->view);
+        }
+
+        ImGui::SameLine();
+        daAlink_c* player = static_cast<daAlink_c*>(dComIfGp_getPlayer(0));
+        if (player == nullptr) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button("Find Link") && player != nullptr) {
+            cXyz target = player->current.pos;
+            target.y += 90.0f;
+            detached_camera::focusOn(target);
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Frames Link using only the detached presentation camera.");
+        }
+        if (player == nullptr) {
+            ImGui::EndDisabled();
+        }
+
+        ImGui::TextDisabled(
+            "WASD: move  Space/Ctrl: up/down  Shift: fast\n"
+            "Mouse: look  Q/E: bank  P: toggle mouse look");
+
+        if (!detached_camera::isEnabled()) {
             ImGui::EndDisabled();
         }
 
