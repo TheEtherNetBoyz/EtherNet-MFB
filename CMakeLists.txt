@@ -23,6 +23,19 @@ project(dusklight LANGUAGES C CXX VERSION ${BOREALIS_APP_VERSION})
 
 if (APPLE)
     enable_language(OBJC OBJCXX)
+
+    # Some GitHub macOS images pair the active Xcode SDK with a newer
+    # standalone Command Line Tools installation. Apple Clang can report the
+    # latter as an implicit link directory even while compiling against the
+    # former, causing CMake to add an incompatible SDK via -L and rpath.
+    if(NOT CMAKE_OSX_SYSROOT MATCHES "^/Library/Developer/CommandLineTools/")
+        foreach(_language C CXX OBJC OBJCXX)
+            list(FILTER CMAKE_${_language}_IMPLICIT_LINK_DIRECTORIES EXCLUDE
+                    REGEX "^/Library/Developer/CommandLineTools/SDKs/")
+        endforeach()
+        list(FILTER CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES EXCLUDE
+                REGEX "^/Library/Developer/CommandLineTools/SDKs/")
+    endif()
 endif ()
 # Adjust CMAKE_SYSTEM_PROCESSOR on Windows to match compiler target
 include(cmake/WindowsTargetProcessor.cmake)
