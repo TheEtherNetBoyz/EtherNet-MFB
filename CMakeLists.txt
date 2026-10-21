@@ -8,6 +8,17 @@ endif ()
 include(extern/borealis/cmake/DetectVersion.cmake)
 borealis_detect_version()
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+
+# Select the active Xcode SDK before project() performs compiler detection.
+# GitHub's macOS images can also contain a newer standalone Command Line Tools
+# SDK. If compiler detection runs first, CMake records that incompatible SDK's
+# implicit library directory and later mixes it with the selected Xcode SDK.
+if(CMAKE_HOST_APPLE AND NOT CMAKE_OSX_SYSROOT)
+    execute_process(COMMAND xcrun --sdk macosx --show-sdk-path
+            OUTPUT_VARIABLE CMAKE_OSX_SYSROOT
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
+endif()
+
 project(dusklight LANGUAGES C CXX VERSION ${BOREALIS_APP_VERSION})
 
 if (APPLE)
@@ -20,13 +31,6 @@ if (APPLE AND NOT TVOS AND CMAKE_SYSTEM_NAME STREQUAL tvOS)
     set(TVOS ON)
     set(IOS OFF)
 endif ()
-
-if(APPLE AND NOT CMAKE_OSX_SYSROOT)
-    # If the Xcode SDK is lagging behind system version, CMake needs this done first
-    execute_process(COMMAND xcrun --sdk macosx --show-sdk-path
-            OUTPUT_VARIABLE CMAKE_OSX_SYSROOT
-            OUTPUT_STRIP_TRAILING_WHITESPACE)
-endif()
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
