@@ -2486,13 +2486,6 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Used when Drift Direction Override is Custom angle. The angle is camera-relative: "
             "0° backward, 90° left, 180° forward, 270° right.",
             0, 359, 5, {}, {}, "°");
-        config_int_select(leftPane, rightPane,
-            getSettings().game.rupeeSlideDriftSpeedPercent,
-            "Slide Speed",
-            "Scales the redirected movement distance during the pickup slide for testing. "
-            "0% is the neutral/default setting; 100% is normal speed, and values above 100% "
-            "move Link faster.",
-            0, 50000, 1000, {}, {}, "%");
         add_speedrun_disabled_option(leftPane, rightPane,
             getSettings().game.rupeeSlideDriftHop,
             "Loop Hop Movement",
@@ -2620,11 +2613,6 @@ RupeeSlideWindow::RupeeSlideWindow() : Window(Window::Props{.tabBar = false}) {
             "Custom Slide Angle",
             "Used for Custom angle: 0° backward, 90° left, 180° forward, 270° right.", 0, 359,
             5, {}, {}, "°");
-        config_int_select(leftPane, rightPane, getSettings().game.rupeeSlideDriftSpeedPercent,
-            "Slide Speed",
-            "Scales redirected movement distance for testing. 0% is neutral/default and 100% is "
-            "normal speed.",
-            0, 50000, 1000, {}, {}, "%");
         add_speedrun_disabled_option(leftPane, rightPane,
             getSettings().game.rupeeSlideDriftHop, "Loop Hop Movement",
             "Reproduces the old once-per-animation-loop hop. Off redirects movement smoothly.");

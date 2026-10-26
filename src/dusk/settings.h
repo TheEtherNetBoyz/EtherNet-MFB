@@ -454,7 +454,6 @@ struct UserSettings {
         ConfigVar<bool> rupeeSlideCalculatorOverlayVisible;
         ConfigVar<RupeeSlideDriftOverride> rupeeSlideDriftOverride;
         ConfigVar<int> rupeeSlideDriftAngle;
-        ConfigVar<int> rupeeSlideDriftSpeedPercent;
         ConfigVar<bool> rupeeSlideDriftHop;
         ConfigVar<bool> showRupeeSlideDriftArrow;
         ConfigVar<int> rupeeSlideDriftArrowThickness;
