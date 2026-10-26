@@ -140,7 +140,8 @@ namespace dusk {
                 } else if (s_driftOverride.loopArmed) {
                     redirectThisFrame = true;
                 } else if (animationWrapped) {
-                    // Arm smooth movement after the first complete animation loop.
+                    // Do not redirect the transition into GETAWAIT. It contains movement that is
+                    // not part of the repeating vanilla pickup-slide root-motion loop.
                     s_driftOverride.loopArmed = true;
                 }
 
@@ -199,16 +200,29 @@ namespace dusk {
                         }
 
                         cXyz redirected = movementStart;
-                        // Smooth movement keeps the Y value produced by the game this frame so
-                        // floor/slope correction is not replayed as a vertical hop.
-                        if (!hopMovement) {
+                        if (hopMovement) {
+                            redirected.x += distance * cM_ssin(targetAngle);
+                            redirected.z += distance * cM_scos(targetAngle);
+                            const cXyz velocity = player->speed;
+                            player->setPlayerPosAndAngle(
+                                &redirected, player->shape_angle.y, TRUE);
+                            player->speed = velocity;
+                        } else {
+                            // Rotate the exact signed displacement produced by vanilla this tick.
+                            // Using its absolute length would turn the backward half of GETAWAIT's
+                            // oscillating root motion into extra forward travel. Also avoid
+                            // setPlayerPosAndAngle(): it overwrites current.angle and old.pos,
+                            // changing the animation's movement state instead of only its direction.
+                            const s16 sourceAngle = player->current.angle.y;
+                            const s16 rotation = static_cast<s16>(targetAngle - sourceAngle);
+                            const float rotationSin = cM_ssin(rotation);
+                            const float rotationCos = cM_scos(rotation);
                             redirected.y = player->current.pos.y;
+                            redirected.x += dx * rotationCos + dz * rotationSin;
+                            redirected.z += dz * rotationCos - dx * rotationSin;
+                            player->current.pos.x = redirected.x;
+                            player->current.pos.z = redirected.z;
                         }
-                        redirected.x += distance * cM_ssin(targetAngle);
-                        redirected.z += distance * cM_scos(targetAngle);
-                        const cXyz velocity = player->speed;
-                        player->setPlayerPosAndAngle(&redirected, player->shape_angle.y, TRUE);
-                        player->speed = velocity;
                     }
                 }
 
