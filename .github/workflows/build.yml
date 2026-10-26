@@ -179,12 +179,23 @@ jobs:
           python3 ci/verify-gz-bundle.py build/install/Dusklight.app/mods/dev.dusklight.gz --native-library build/install/Dusklight.app/Frameworks/dev.dusklight.gz.so
           python3 ci/verify-online-bundle.py build/install/Dusklight.app/mods/io.github.mdra5000.dusklight_online --native-library build/install/Dusklight.app/Frameworks/io.github.mdra5000.dusklight_online.so
 
+      - name: Package iOS IPA
+        if: matrix.platform == 'ios'
+        run: |
+          cmake -E rm -rf build/ipa
+          cmake -E make_directory build/ipa/Payload
+          ditto build/install/Dusklight.app build/ipa/Payload/Dusklight.app
+          cd build/ipa
+          /usr/bin/zip -qry ../install/Dusklight.ipa Payload
+          /usr/bin/unzip -l ../install/Dusklight.ipa | grep -F "Payload/Dusklight.app/Info.plist"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: dusklight-${{env.APP_VERSION}}-${{matrix.artifact_name}}
           path: |
             build/install/Dusklight.app
+            build/install/Dusklight.ipa
             build/install/debug.tar.*
             build/install/sdk/
 
