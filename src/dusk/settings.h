@@ -455,6 +455,7 @@ struct UserSettings {
         ConfigVar<RupeeSlideDriftOverride> rupeeSlideDriftOverride;
         ConfigVar<int> rupeeSlideDriftAngle;
         ConfigVar<bool> rupeeSlideDriftHop;
+        ConfigVar<bool> rupeeSlideVanillaAngleCorrection;
         ConfigVar<bool> showRupeeSlideDriftArrow;
         ConfigVar<int> rupeeSlideDriftArrowThickness;
         ConfigVar<std::string> rupeeSlideDriftArrowColor;

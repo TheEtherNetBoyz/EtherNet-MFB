@@ -2492,6 +2492,11 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "Applies redirected movement once per pickup-animation loop, reproducing the old "
             "hop behavior. Off applies movement smoothly every frame.");
         add_speedrun_disabled_option(leftPane, rightPane,
+            getSettings().game.rupeeSlideVanillaAngleCorrection,
+            "Vanilla Angle Correction (Debug)",
+            "Uses Link's visual shape angle as the source of pickup-slide root motion, matching "
+            "the vanilla position code. Disable to compare against the previous override logic.");
+        add_speedrun_disabled_option(leftPane, rightPane,
             getSettings().game.showRupeeSlideDriftArrow,
             "Show Drift Direction Arrow",
             "Draws a non-interactive 3D arrow above Link showing the predicted natural drift or "
@@ -2616,6 +2621,11 @@ RupeeSlideWindow::RupeeSlideWindow() : Window(Window::Props{.tabBar = false}) {
         add_speedrun_disabled_option(leftPane, rightPane,
             getSettings().game.rupeeSlideDriftHop, "Loop Hop Movement",
             "Reproduces the old once-per-animation-loop hop. Off redirects movement smoothly.");
+        add_speedrun_disabled_option(leftPane, rightPane,
+            getSettings().game.rupeeSlideVanillaAngleCorrection,
+            "Vanilla Angle Correction (Debug)",
+            "Uses Link's visual shape angle for vanilla-matched root-motion redirection. Disable "
+            "to compare against the previous override logic.");
 
         leftPane.add_section("Direction Arrow");
         add_speedrun_disabled_option(leftPane, rightPane,

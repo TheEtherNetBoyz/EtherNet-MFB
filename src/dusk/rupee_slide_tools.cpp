@@ -213,7 +213,11 @@ namespace dusk {
                             // oscillating root motion into extra forward travel. Also avoid
                             // setPlayerPosAndAngle(): it overwrites current.angle and old.pos,
                             // changing the animation's movement state instead of only its direction.
-                            const s16 sourceAngle = player->current.angle.y;
+                            const bool useVanillaSourceAngle = getSettings()
+                                .game.rupeeSlideVanillaAngleCorrection.getValue();
+                            const s16 sourceAngle = useVanillaSourceAngle
+                                ? player->shape_angle.y
+                                : player->current.angle.y;
                             const s16 rotation = static_cast<s16>(targetAngle - sourceAngle);
                             const float rotationSin = cM_ssin(rotation);
                             const float rotationCos = cM_scos(rotation);
