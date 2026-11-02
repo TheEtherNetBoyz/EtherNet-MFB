@@ -218,6 +218,8 @@ UserSettings g_userSettings = {
         .rupeeSlideCalculatorOverlayVisible {"game.rupeeSlideCalculatorOverlayVisible", false},
         .rupeeSlideDriftOverride {"game.rupeeSlideDriftOverride", RupeeSlideDriftOverride::Off},
         .rupeeSlideDriftAngle {"game.rupeeSlideDriftAngle", 0},
+        .rupeeSlideCustomDriftSpeedEnabled {"game.rupeeSlideCustomDriftSpeedEnabled", false},
+        .rupeeSlideDriftDistance {"game.rupeeSlideDriftDistancePreset", RupeeSlideDriftDistance::D01},
         .rupeeSlideDriftHop {"game.rupeeSlideDriftHop", false},
         .rupeeSlideVanillaAngleCorrection {"game.rupeeSlideVanillaAngleCorrection", false},
         .showRupeeSlideDriftArrow {"game.showRupeeSlideDriftArrow", false},
@@ -553,6 +555,8 @@ void registerSettings() {
     Register(g_userSettings.game.rupeeSlideCalculatorOverlayVisible);
     Register(g_userSettings.game.rupeeSlideDriftOverride);
     Register(g_userSettings.game.rupeeSlideDriftAngle);
+    Register(g_userSettings.game.rupeeSlideCustomDriftSpeedEnabled);
+    Register(g_userSettings.game.rupeeSlideDriftDistance);
     Register(g_userSettings.game.rupeeSlideDriftHop);
     Register(g_userSettings.game.rupeeSlideVanillaAngleCorrection);
     Register(g_userSettings.game.showRupeeSlideDriftArrow);

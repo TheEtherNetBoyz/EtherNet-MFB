@@ -335,8 +335,9 @@ const char* pickup_slide_world_direction(float dx, float dz) {
     return hasX ? xDirection : zDirection;
 }
 
-// Drift is accumulated in Link-local space on every simulation tick. The published
-// forward/right result is refreshed every five minutes of simulation time.
+// Drift is accumulated in Link-local space on every simulation tick. Outside a pickup
+// slide, the published result is refreshed every five minutes of simulation time. During
+// GETAWAIT, the completed-loop measurement publishes once per animation cycle instead.
 constexpr float kDriftSampleSeconds = 5.0f * 60.0f;
 constexpr unsigned int kSlidePositionSaveTicks = 20 * 60 * 30;
 bool s_havePreviousPosition = false;
@@ -445,6 +446,8 @@ void updateCalculatorCutsceneSnapshot(fopAc_ac_c* player) {
         s_actualSlideForward = deltaX * sine + deltaZ * cosine;
         s_actualSlideRight = -deltaX * cosine + deltaZ * sine;
         s_actualSlideResultValid = true;
+        s_publishedForward = s_actualSlideForward;
+        s_publishedRight = s_actualSlideRight;
         s_actualSlideStartValid = false;
     };
 
@@ -656,6 +659,15 @@ void UpdateLoadPositionDriftNative() {
     s_accumulatedRight += tickRight;
     s_previousX = xPos;
     s_previousZ = zPos;
+
+    if (s_actualGetAwaitActive) {
+        // The exact completed-loop snapshot updates the visible drift once per GETAWAIT
+        // animation cycle. Keep the long-running sampler out of that measurement.
+        s_accumulatedForward = 0.0f;
+        s_accumulatedRight = 0.0f;
+        s_driftWindowSeconds = 0.0f;
+        return;
+    }
 
     s_driftWindowSeconds += game_clock::sim_pace();
     if (s_driftWindowSeconds >= kDriftSampleSeconds) {

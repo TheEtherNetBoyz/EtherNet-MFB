@@ -126,6 +126,22 @@ enum class RupeeSlideDriftOverride : u8 {
     CustomAngle = 9,
 };
 
+enum class RupeeSlideDriftDistance : u8 {
+    Stopped = 0,
+    D0001 = 1,
+    D0005 = 2,
+    D001 = 3,
+    D0025 = 4,
+    D005 = 5,
+    D01 = 6,
+    D025 = 7,
+    D05 = 8,
+    D1 = 9,
+    D25 = 10,
+    D5 = 11,
+    D1Unit = 12,
+};
+
 enum class AudioOutputMode : u8 {
     StereoSpeakers = 0,
     StereoHeadphones = 1,   // spatial audio
@@ -228,6 +244,12 @@ template <>
 struct ConfigEnumRange<RupeeSlideDriftOverride> {
     static constexpr auto min = RupeeSlideDriftOverride::Off;
     static constexpr auto max = RupeeSlideDriftOverride::CustomAngle;
+};
+
+template <>
+struct ConfigEnumRange<RupeeSlideDriftDistance> {
+    static constexpr auto min = RupeeSlideDriftDistance::Stopped;
+    static constexpr auto max = RupeeSlideDriftDistance::D1Unit;
 };
 
 template <>
@@ -454,6 +476,8 @@ struct UserSettings {
         ConfigVar<bool> rupeeSlideCalculatorOverlayVisible;
         ConfigVar<RupeeSlideDriftOverride> rupeeSlideDriftOverride;
         ConfigVar<int> rupeeSlideDriftAngle;
+        ConfigVar<bool> rupeeSlideCustomDriftSpeedEnabled;
+        ConfigVar<RupeeSlideDriftDistance> rupeeSlideDriftDistance;
         ConfigVar<bool> rupeeSlideDriftHop;
         ConfigVar<bool> rupeeSlideVanillaAngleCorrection;
         ConfigVar<bool> showRupeeSlideDriftArrow;

@@ -104,9 +104,77 @@ namespace dusk {
 
         DriftOverrideState s_driftOverride;
 
+        float customDriftDistance(RupeeSlideDriftDistance distance) {
+            switch (distance) {
+            case RupeeSlideDriftDistance::Stopped: return 0.0f;
+            case RupeeSlideDriftDistance::D0001: return 0.0001f;
+            case RupeeSlideDriftDistance::D0005: return 0.0005f;
+            case RupeeSlideDriftDistance::D001: return 0.001f;
+            case RupeeSlideDriftDistance::D0025: return 0.0025f;
+            case RupeeSlideDriftDistance::D005: return 0.005f;
+            case RupeeSlideDriftDistance::D01: return 0.01f;
+            case RupeeSlideDriftDistance::D025: return 0.025f;
+            case RupeeSlideDriftDistance::D05: return 0.05f;
+            case RupeeSlideDriftDistance::D1: return 0.1f;
+            case RupeeSlideDriftDistance::D25: return 0.25f;
+            case RupeeSlideDriftDistance::D5: return 0.5f;
+            case RupeeSlideDriftDistance::D1Unit: return 1.0f;
+            }
+            return 0.01f;
+        }
+
+        s16 getDriftTargetAngle(daAlink_c* player, RupeeSlideDriftOverride mode) {
+            s16 targetAngle = player != nullptr ? player->shape_angle.y : 0;
+            if (dCamera_c* camera = dCam_getBody(); camera != nullptr) {
+                const cXyz eye = camera->Eye();
+                const cXyz center = camera->Center();
+                const float cameraDx = center.x - eye.x;
+                const float cameraDz = center.z - eye.z;
+                if (std::fabs(cameraDx) > 0.000001f || std::fabs(cameraDz) > 0.000001f) {
+                    targetAngle = cM_atan2s(cameraDx, cameraDz);
+                }
+            }
+
+            switch (mode) {
+            case RupeeSlideDriftOverride::Backward: break;
+            case RupeeSlideDriftOverride::Left:
+                targetAngle = static_cast<s16>(targetAngle + 0x4000);
+                break;
+            case RupeeSlideDriftOverride::Right:
+                targetAngle = static_cast<s16>(targetAngle - 0x4000);
+                break;
+            case RupeeSlideDriftOverride::ForwardLeft:
+                targetAngle = static_cast<s16>(targetAngle + 0x6000);
+                break;
+            case RupeeSlideDriftOverride::ForwardRight:
+                targetAngle = static_cast<s16>(targetAngle - 0x6000);
+                break;
+            case RupeeSlideDriftOverride::BackwardLeft:
+                targetAngle = static_cast<s16>(targetAngle + 0x2000);
+                break;
+            case RupeeSlideDriftOverride::BackwardRight:
+                targetAngle = static_cast<s16>(targetAngle - 0x2000);
+                break;
+            case RupeeSlideDriftOverride::Forward:
+                targetAngle = static_cast<s16>(targetAngle + 0x8000);
+                break;
+            case RupeeSlideDriftOverride::CustomAngle: {
+                const int degrees =
+                    std::clamp(getSettings().game.rupeeSlideDriftAngle.getValue(), 0, 359);
+                targetAngle = static_cast<s16>(targetAngle + (degrees * 0x10000) / 360);
+                break;
+            }
+            case RupeeSlideDriftOverride::Off: break;
+            }
+            return targetAngle;
+        }
+
         void updateDriftDirectionOverride(daAlink_c* player) {
             const auto mode = getSettings().game.rupeeSlideDriftOverride.getValue();
-            const bool getAwaitActive = mode != RupeeSlideDriftOverride::Off &&
+            const bool directionOverrideEnabled = mode != RupeeSlideDriftOverride::Off;
+            const bool customSpeedEnabled =
+                getSettings().game.rupeeSlideCustomDriftSpeedEnabled.getValue();
+            const bool getAwaitActive = (directionOverrideEnabled || customSpeedEnabled) &&
                                         player != nullptr && dComIfGp_event_runCheck() &&
                                         player->checkGetItemMode() &&
                                         player->checkAnyUnderAnime(dRes_ID_ALANM_BCK_GETAWAIT_e);
@@ -126,6 +194,7 @@ namespace dusk {
                 s_driftOverride.previousPosition = player->current.pos;
             } else {
                 const bool animationWrapped = animationFrame < s_driftOverride.previousFrame;
+                const bool completedLoop = animationWrapped && s_driftOverride.loopArmed;
                 const bool hopMovement =
                     getSettings().game.rupeeSlideDriftHop.getValue();
                 bool redirectThisFrame = false;
@@ -150,59 +219,17 @@ namespace dusk {
                     const float dz = player->current.pos.z - movementStart.z;
                     const float distance = std::sqrt(dx * dx + dz * dz);
                     if (distance > 0.0f) {
-                        dCamera_c* camera = dCam_getBody();
-                        s16 cameraBackAngle = player->shape_angle.y;
-                        if (camera != nullptr) {
-                            const cXyz eye = camera->Eye();
-                            const cXyz center = camera->Center();
-                            const float cameraDx = center.x - eye.x;
-                            const float cameraDz = center.z - eye.z;
-                            if (std::fabs(cameraDx) > 0.000001f ||
-                                std::fabs(cameraDz) > 0.000001f) {
-                                cameraBackAngle = cM_atan2s(cameraDx, cameraDz);
-                            }
-                        }
-
-                        s16 targetAngle = cameraBackAngle;
-                        switch (mode) {
-                        case RupeeSlideDriftOverride::Backward:
-                            break;
-                        case RupeeSlideDriftOverride::Left:
-                            targetAngle = static_cast<s16>(targetAngle + 0x4000);
-                            break;
-                        case RupeeSlideDriftOverride::Right:
-                            targetAngle = static_cast<s16>(targetAngle - 0x4000);
-                            break;
-                        case RupeeSlideDriftOverride::ForwardLeft:
-                            targetAngle = static_cast<s16>(targetAngle + 0x6000);
-                            break;
-                        case RupeeSlideDriftOverride::ForwardRight:
-                            targetAngle = static_cast<s16>(targetAngle - 0x6000);
-                            break;
-                        case RupeeSlideDriftOverride::BackwardLeft:
-                            targetAngle = static_cast<s16>(targetAngle + 0x2000);
-                            break;
-                        case RupeeSlideDriftOverride::BackwardRight:
-                            targetAngle = static_cast<s16>(targetAngle - 0x2000);
-                            break;
-                        case RupeeSlideDriftOverride::Forward:
-                            targetAngle = static_cast<s16>(targetAngle + 0x8000);
-                            break;
-                        case RupeeSlideDriftOverride::CustomAngle: {
-                            const int degrees = std::clamp(
-                                getSettings().game.rupeeSlideDriftAngle.getValue(), 0, 359);
-                            targetAngle = static_cast<s16>(
-                                targetAngle + (degrees * 0x10000) / 360);
-                            break;
-                        }
-                        case RupeeSlideDriftOverride::Off:
-                            break;
-                        }
+                        const s16 targetAngle = getDriftTargetAngle(player, mode);
 
                         cXyz redirected = movementStart;
                         if (hopMovement) {
-                            redirected.x += distance * cM_ssin(targetAngle);
-                            redirected.z += distance * cM_scos(targetAngle);
+                            if (directionOverrideEnabled) {
+                                redirected.x += distance * cM_ssin(targetAngle);
+                                redirected.z += distance * cM_scos(targetAngle);
+                            } else {
+                                redirected.x += dx;
+                                redirected.z += dz;
+                            }
                             const cXyz velocity = player->speed;
                             player->setPlayerPosAndAngle(
                                 &redirected, player->shape_angle.y, TRUE);
@@ -218,19 +245,56 @@ namespace dusk {
                             const s16 sourceAngle = useVanillaSourceAngle
                                 ? player->shape_angle.y
                                 : player->current.angle.y;
-                            const s16 rotation = static_cast<s16>(targetAngle - sourceAngle);
-                            const float rotationSin = cM_ssin(rotation);
-                            const float rotationCos = cM_scos(rotation);
                             redirected.y = player->current.pos.y;
-                            redirected.x += dx * rotationCos + dz * rotationSin;
-                            redirected.z += dz * rotationCos - dx * rotationSin;
+                            if (directionOverrideEnabled) {
+                                const float sourceSin = cM_ssin(sourceAngle);
+                                const float sourceCos = cM_scos(sourceAngle);
+                                const float sourceProjection =
+                                    dx * sourceSin + dz * sourceCos;
+                                // Preserve the exact vanilla movement magnitude and only use the
+                                // source direction to determine which half of GETAWAIT's
+                                // oscillating root motion this frame belongs to. The selected
+                                // override owns the final world direction, matching the arrow.
+                                const float signedDistance = std::copysign(
+                                    distance,
+                                    std::fabs(sourceProjection) > 0.000001f
+                                        ? sourceProjection
+                                        : 1.0f);
+                                redirected.x += signedDistance * cM_ssin(targetAngle);
+                                redirected.z += signedDistance * cM_scos(targetAngle);
+                            } else {
+                                redirected.x += dx;
+                                redirected.z += dz;
+                            }
                             player->current.pos.x = redirected.x;
                             player->current.pos.z = redirected.z;
                         }
                     }
                 }
 
-                if (hopMovement && animationWrapped) {
+                if (completedLoop && customSpeedEnabled) {
+                    const float loopDx = player->current.pos.x - s_driftOverride.loopStart.x;
+                    const float loopDz = player->current.pos.z - s_driftOverride.loopStart.z;
+                    const float loopLength = std::sqrt(loopDx * loopDx + loopDz * loopDz);
+                    const float distance = customDriftDistance(
+                        getSettings().game.rupeeSlideDriftDistance.getValue());
+                    float directionX = 0.0f;
+                    float directionZ = 0.0f;
+                    if (directionOverrideEnabled || loopLength <= 0.000001f) {
+                        const s16 targetAngle = getDriftTargetAngle(player, mode);
+                        directionX = cM_ssin(targetAngle);
+                        directionZ = cM_scos(targetAngle);
+                    } else {
+                        directionX = loopDx / loopLength;
+                        directionZ = loopDz / loopLength;
+                    }
+                    // Replace the completed loop's net movement with an exact distance. Unlike a
+                    // multiplier, this also creates useful movement when vanilla drift is zero.
+                    player->current.pos.x = s_driftOverride.loopStart.x + directionX * distance;
+                    player->current.pos.z = s_driftOverride.loopStart.z + directionZ * distance;
+                }
+
+                if (animationWrapped) {
                     s_driftOverride.loopStart = player->current.pos;
                 }
                 s_driftOverride.previousPosition = player->current.pos;

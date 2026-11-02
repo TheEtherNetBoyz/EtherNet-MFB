@@ -130,6 +130,22 @@ constexpr std::array kRupeeSlideDriftOverrideModes = {
     "Custom angle",
 };
 
+constexpr std::array kRupeeSlideDriftDistanceModes = {
+    "0 (stopped)",
+    "0.0001 units / cycle",
+    "0.0005 units / cycle",
+    "0.001 units / cycle",
+    "0.0025 units / cycle",
+    "0.005 units / cycle",
+    "0.01 units / cycle",
+    "0.025 units / cycle",
+    "0.05 units / cycle",
+    "0.1 units / cycle",
+    "0.25 units / cycle",
+    "0.5 units / cycle",
+    "1 unit / cycle",
+};
+
 enum class HotkeyAction {
     ToggleImGuiMenu,
     ToggleThirtyFps,
@@ -2487,6 +2503,21 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "0° backward, 90° left, 180° forward, 270° right.",
             0, 359, 5, {}, {}, "°");
         add_speedrun_disabled_option(leftPane, rightPane,
+            getSettings().game.rupeeSlideCustomDriftSpeedEnabled,
+            "Enable Custom Drift Speed",
+            "Enables exact pickup-slide movement per animation cycle. Turning this off restores "
+            "vanilla movement without changing the selected direction override.");
+        config_enum_select(leftPane, rightPane,
+            getSettings().game.rupeeSlideDriftDistance,
+            "Custom Drift Speed",
+            "Sets the exact distance moved per completed pickup animation cycle. This creates "
+            "movement even when vanilla drift is zero. Disable Custom Drift Speed for vanilla.",
+            kRupeeSlideDriftDistanceModes, {},
+            [] {
+                return speedrun::isActive() ||
+                       !getSettings().game.rupeeSlideCustomDriftSpeedEnabled.getValue();
+            });
+        add_speedrun_disabled_option(leftPane, rightPane,
             getSettings().game.rupeeSlideDriftHop,
             "Loop Hop Movement",
             "Applies redirected movement once per pickup-animation loop, reproducing the old "
@@ -2618,6 +2649,19 @@ RupeeSlideWindow::RupeeSlideWindow() : Window(Window::Props{.tabBar = false}) {
             "Custom Slide Angle",
             "Used for Custom angle: 0° backward, 90° left, 180° forward, 270° right.", 0, 359,
             5, {}, {}, "°");
+        add_speedrun_disabled_option(leftPane, rightPane,
+            getSettings().game.rupeeSlideCustomDriftSpeedEnabled,
+            "Enable Custom Drift Speed",
+            "Enables exact movement per animation cycle. Off always restores vanilla movement.");
+        config_enum_select(leftPane, rightPane,
+            getSettings().game.rupeeSlideDriftDistance, "Custom Drift Speed",
+            "Sets exact movement per animation cycle, including when vanilla drift is zero. "
+            "Disable the toggle for vanilla movement.",
+            kRupeeSlideDriftDistanceModes, {},
+            [] {
+                return speedrun::isActive() ||
+                       !getSettings().game.rupeeSlideCustomDriftSpeedEnabled.getValue();
+            });
         add_speedrun_disabled_option(leftPane, rightPane,
             getSettings().game.rupeeSlideDriftHop, "Loop Hop Movement",
             "Reproduces the old once-per-animation-loop hop. Off redirects movement smoothly.");
