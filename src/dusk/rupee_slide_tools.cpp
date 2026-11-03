@@ -16,6 +16,7 @@
 #include "dusk/io.hpp"
 #include "dusk/load_position_overlay.hpp"
 #include "dusk/main.h"
+#include "dusk/rupee_slide_tools.hpp"
 #include "dusk/settings.h"
 #include "m_Do/m_Do_controller_pad.h"
 
@@ -104,6 +105,100 @@ namespace dusk {
 
         DriftOverrideState s_driftOverride;
 
+        struct PickupAnimationSwapState {
+            int anchorFrames = 0;
+            cXyz position;
+            cXyz velocity;
+        };
+
+        PickupAnimationSwapState s_pickupAnimationSwap;
+
+        daAlink_c::daAlink_ANM getRupeeSlidePickupAnimation(
+            RupeeSlidePickupAnimation animation) {
+            switch (animation) {
+            case RupeeSlidePickupAnimation::Idle:
+                return daAlink_c::ANM_WAIT;
+            case RupeeSlidePickupAnimation::AttentionLeft:
+                return daAlink_c::ANM_ATN_WAIT_LEFT;
+            case RupeeSlidePickupAnimation::AttentionRight:
+                return daAlink_c::ANM_ATN_WAIT_RIGHT;
+            case RupeeSlidePickupAnimation::AlternateGetItem:
+                return daAlink_c::ANM_GET_A_WAIT2;
+            case RupeeSlidePickupAnimation::SixSeven:
+                return daAlink_c::ANM_GET_A_WAIT;
+            case RupeeSlidePickupAnimation::Vanilla:
+                return daAlink_c::ANM_GET_A_WAIT;
+            }
+            return daAlink_c::ANM_GET_A_WAIT;
+        }
+
+        void updatePickupAnimationHotSwap(daAlink_c* player) {
+            static bool initialized = false;
+            static RupeeSlidePickupAnimation previous = RupeeSlidePickupAnimation::Vanilla;
+            const auto selected = getSettings().game.rupeeSlidePickupAnimation.getValue();
+            if (!initialized) {
+                previous = selected;
+                initialized = true;
+                return;
+            }
+            if (s_pickupAnimationSwap.anchorFrames > 0 && player != nullptr) {
+                // The newly selected animation applies its root transform on the simulation ticks
+                // after setSingleAnimeBase(). Hold Link at the pre-swap coordinates through that
+                // handoff, then release him before normal drift resumes.
+                player->current.pos = s_pickupAnimationSwap.position;
+                player->old.pos = s_pickupAnimationSwap.position;
+                player->speed = s_pickupAnimationSwap.velocity;
+                --s_pickupAnimationSwap.anchorFrames;
+                s_driftOverride = {};
+            }
+
+            if (selected == previous) {
+                return;
+            }
+            previous = selected;
+
+            if (player == nullptr || !dComIfGp_event_runCheck() ||
+                !player->checkGetItemMode() || player->checkWolf()) {
+                return;
+            }
+
+            const cXyz currentPosition = player->current.pos;
+            const cXyz velocity = player->speed;
+            player->setSingleAnimeBase(getRupeeSlidePickupAnimation(selected));
+            // Some Link animations carry a different root transform. A live pose swap should
+            // change only the rendered pose, never relocate Link or disturb the active slide.
+            player->current.pos = currentPosition;
+            player->old.pos = currentPosition;
+            player->speed = velocity;
+            s_pickupAnimationSwap.anchorFrames = 2;
+            s_pickupAnimationSwap.position = currentPosition;
+            s_pickupAnimationSwap.velocity = velocity;
+            // A pose swap restarts the animation frame controller. Do not treat that restart as a
+            // completed drift cycle or include a partial old-pose cycle in the next measurement.
+            s_driftOverride = {};
+        }
+
+        bool isRupeeSlideHoldAnimationActive(const daAlink_c* player) {
+            if (player == nullptr) {
+                return false;
+            }
+            switch (getSettings().game.rupeeSlidePickupAnimation.getValue()) {
+            case RupeeSlidePickupAnimation::Idle:
+                return player->checkUnderMove0BckNoArc(daAlink_c::ANM_WAIT);
+            case RupeeSlidePickupAnimation::AttentionLeft:
+                return player->checkUnderMove0BckNoArc(daAlink_c::ANM_ATN_WAIT_LEFT);
+            case RupeeSlidePickupAnimation::AttentionRight:
+                return player->checkUnderMove0BckNoArc(daAlink_c::ANM_ATN_WAIT_RIGHT);
+            case RupeeSlidePickupAnimation::AlternateGetItem:
+                return player->checkUnderMove0BckNoArc(daAlink_c::ANM_GET_A_WAIT2);
+            case RupeeSlidePickupAnimation::SixSeven:
+                return player->checkAnyUnderAnime(dRes_ID_ALANM_BCK_GETAWAIT_e);
+            case RupeeSlidePickupAnimation::Vanilla:
+                return player->checkAnyUnderAnime(dRes_ID_ALANM_BCK_GETAWAIT_e);
+            }
+            return false;
+        }
+
         float customDriftDistance(RupeeSlideDriftDistance distance) {
             switch (distance) {
             case RupeeSlideDriftDistance::Stopped: return 0.0f;
@@ -177,7 +272,7 @@ namespace dusk {
             const bool getAwaitActive = (directionOverrideEnabled || customSpeedEnabled) &&
                                         player != nullptr && dComIfGp_event_runCheck() &&
                                         player->checkGetItemMode() &&
-                                        player->checkAnyUnderAnime(dRes_ID_ALANM_BCK_GETAWAIT_e);
+                                        isRupeeSlideHoldAnimationActive(player);
 
             if (!getAwaitActive) {
                 s_driftOverride = {};
@@ -845,8 +940,13 @@ namespace dusk {
         }
     }
 
+    bool IsRupeeSlideHoldAnimationActive(const daAlink_c* player) {
+        return isRupeeSlideHoldAnimationActive(player);
+    }
+
     void UpdateRupeeSlideSimulation() {
         daAlink_c* player = static_cast<daAlink_c*>(dComIfGp_getPlayer(0));
+        updatePickupAnimationHotSwap(player);
         updateDriftDirectionOverride(player);
         updateSupportPlatform(player);
         updateRepeatableGreenRupeeInput(player);

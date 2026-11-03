@@ -11,6 +11,7 @@
 #include "d/d_debug_viewer.h"
 #include "dusk/config.hpp"
 #include "dusk/game_clock.h"
+#include "dusk/rupee_slide_tools.hpp"
 #include "dusk/settings.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_graphic.h"
@@ -431,11 +432,23 @@ bool calculatorOverlayToggleComboHeld() {
 }
 
 void updateCalculatorCutsceneSnapshot(fopAc_ac_c* player) {
+    static bool pickupAnimationInitialized = false;
+    static RupeeSlidePickupAnimation previousPickupAnimation =
+        RupeeSlidePickupAnimation::Vanilla;
+    const auto pickupAnimation = getSettings().game.rupeeSlidePickupAnimation.getValue();
+    if (!pickupAnimationInitialized || pickupAnimation != previousPickupAnimation) {
+        previousPickupAnimation = pickupAnimation;
+        pickupAnimationInitialized = true;
+        s_actualGetAwaitActive = false;
+        s_actualAnimationFrameValid = false;
+        s_actualLoopArmed = false;
+        s_actualSlideStartValid = false;
+    }
+
     const daAlink_c* link = daAlink_getAlinkActorClass();
     const bool cutsceneActive = link != nullptr && dComIfGp_event_runCheck() &&
                                 link->checkGetItemMode();
-    const bool getAwaitActive = cutsceneActive &&
-                                link->checkAnyUnderAnime(dRes_ID_ALANM_BCK_GETAWAIT_e);
+    const bool getAwaitActive = cutsceneActive && IsRupeeSlideHoldAnimationActive(link);
 
     const auto publishActualSlide = [player]() {
         const float deltaX = player->current.pos.x - s_actualSlideStartX;

@@ -2266,6 +2266,26 @@ BOOL daAlink_c::checkTreasureRupeeReturn(int i_itemNo) const {
     return dComIfGs_getRupeeMax() < rupeeCount[i_itemNo] + dComIfGs_getRupee();
 }
 
+#if TARGET_PC
+static daAlink_c::daAlink_ANM duskRupeeSlidePickupAnimation() {
+    switch (dusk::getSettings().game.rupeeSlidePickupAnimation.getValue()) {
+    case dusk::RupeeSlidePickupAnimation::Idle:
+        return daAlink_c::ANM_WAIT;
+    case dusk::RupeeSlidePickupAnimation::AttentionLeft:
+        return daAlink_c::ANM_ATN_WAIT_LEFT;
+    case dusk::RupeeSlidePickupAnimation::AttentionRight:
+        return daAlink_c::ANM_ATN_WAIT_RIGHT;
+    case dusk::RupeeSlidePickupAnimation::AlternateGetItem:
+        return daAlink_c::ANM_GET_A_WAIT2;
+    case dusk::RupeeSlidePickupAnimation::SixSeven:
+        return daAlink_c::ANM_GET_A_WAIT;
+    case dusk::RupeeSlidePickupAnimation::Vanilla:
+        return daAlink_c::ANM_GET_A_WAIT;
+    }
+    return daAlink_c::ANM_GET_A_WAIT;
+}
+#endif
+
 int daAlink_c::procCoGetItemInit() {
     s16 var_r22 = 0;
     BOOL var_r31 = FALSE;
@@ -2367,7 +2387,7 @@ int daAlink_c::procCoGetItemInit() {
         if (var_r30 != 0) {
             setSingleAnimeBase(ANM_GET_A);
         } else {
-            setSingleAnimeBase(ANM_GET_A_WAIT);
+            setSingleAnimeBase(DUSK_IF_ELSE(duskRupeeSlidePickupAnimation(), ANM_GET_A_WAIT));
 
             if (mProcVar2.field_0x300c != -1) {
                 setGetItemFace(mProcVar2.field_0x300c);
@@ -2508,7 +2528,7 @@ int daAlink_c::procCoGetItem() {
         if (checkWolf()) {
             setSingleAnimeWolfBase(WANM_GET);
         } else {
-            setSingleAnimeBase(ANM_GET_A_WAIT);
+            setSingleAnimeBase(DUSK_IF_ELSE(duskRupeeSlidePickupAnimation(), ANM_GET_A_WAIT));
             setGetItemFace(mProcVar2.field_0x300c);
         }
 

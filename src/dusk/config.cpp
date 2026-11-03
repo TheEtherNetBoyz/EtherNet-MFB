@@ -320,6 +320,7 @@ template class ConfigImpl<DiscLoadingDelayMode>;
 template class ConfigImpl<RupeeSlideOverlayMode>;
 template class ConfigImpl<RupeeSlideDriftOverride>;
 template class ConfigImpl<RupeeSlideDriftDistance>;
+template class ConfigImpl<RupeeSlidePickupAnimation>;
 template class ConfigImpl<AudioOutputMode>;
 template class ConfigImpl<LetterboxMode>;
 

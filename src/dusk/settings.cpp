@@ -220,6 +220,8 @@ UserSettings g_userSettings = {
         .rupeeSlideDriftAngle {"game.rupeeSlideDriftAngle", 0},
         .rupeeSlideCustomDriftSpeedEnabled {"game.rupeeSlideCustomDriftSpeedEnabled", false},
         .rupeeSlideDriftDistance {"game.rupeeSlideDriftDistancePreset", RupeeSlideDriftDistance::D01},
+        .rupeeSlidePickupAnimation {"game.rupeeSlidePickupAnimation", RupeeSlidePickupAnimation::Vanilla},
+        .rupeeSlideSixSevenSpeed {"game.rupeeSlideSixSevenSpeed", 100},
         .rupeeSlideDriftHop {"game.rupeeSlideDriftHop", false},
         .rupeeSlideVanillaAngleCorrection {"game.rupeeSlideVanillaAngleCorrection", false},
         .showRupeeSlideDriftArrow {"game.showRupeeSlideDriftArrow", false},
@@ -557,6 +559,8 @@ void registerSettings() {
     Register(g_userSettings.game.rupeeSlideDriftAngle);
     Register(g_userSettings.game.rupeeSlideCustomDriftSpeedEnabled);
     Register(g_userSettings.game.rupeeSlideDriftDistance);
+    Register(g_userSettings.game.rupeeSlidePickupAnimation);
+    Register(g_userSettings.game.rupeeSlideSixSevenSpeed);
     Register(g_userSettings.game.rupeeSlideDriftHop);
     Register(g_userSettings.game.rupeeSlideVanillaAngleCorrection);
     Register(g_userSettings.game.showRupeeSlideDriftArrow);

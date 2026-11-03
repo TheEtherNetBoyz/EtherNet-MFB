@@ -66,6 +66,7 @@
 #include "helpers/string.hpp"
 #include "res/Object/Alink.h"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 
@@ -3729,6 +3730,24 @@ int daAlink_c::setArmMatrix() {
     static Vec const arm1Vec = {29.0f, 0.0f, 0.0f};
     static Vec const arm2Vec = {26.5f, 0.0f, 0.0f};
 
+#if TARGET_PC
+    const bool sixSevenGesture =
+        dusk::getSettings().game.rupeeSlidePickupAnimation.getValue() ==
+            dusk::RupeeSlidePickupAnimation::SixSeven &&
+        dComIfGp_event_runCheck() && checkGetItemMode();
+    // Use a continuous cycle so the gesture stays smooth across GETAWAIT loops. This setting
+    // affects only the procedural arm motion, never Link's animation or root displacement.
+    const double sixSevenSpeed = std::clamp(
+        dusk::getSettings().game.rupeeSlideSixSevenSpeed.getValue(), 25, 300) / 100.0;
+    const double kSixSevenCycleSeconds = (112.0 / 30.0) / sixSevenSpeed;
+    const double sixSevenCycle =
+        std::fmod(dusk::game_clock::sample_time(), kSixSevenCycleSeconds);
+    const s16 sixSevenPhase = static_cast<s16>(
+        (sixSevenCycle / kSixSevenCycleSeconds) * 65536.0);
+    const f32 sixSevenArmHeight =
+        sixSevenGesture ? cM_ssin(sixSevenPhase) * 7.0f : 0.0f;
+#endif
+
     daAlink_footData_c* var_r29 = mFootData2;
 
     int i;
@@ -3786,6 +3805,19 @@ int daAlink_c::setArmMatrix() {
 
         setMatrixWorldAxisRot(mpLinkModel->getAnmMtx(temp_r28), spA, sp8, var_r29->field_0x2, 0, &sp2C);
     }
+
+#if TARGET_PC
+    if (sixSevenGesture) {
+        // Move each complete arm chain vertically in opposite directions. Translating the chain
+        // avoids the forward/back swing caused by rotating Link's shoulder axes.
+        for (int arm = 0; arm < 2; ++arm) {
+            const f32 height = arm == 0 ? sixSevenArmHeight : -sixSevenArmHeight;
+            for (int joint = 0; joint < 3; ++joint) {
+                mpLinkModel->getAnmMtx(armJointTable[arm] + joint)[1][3] += height;
+            }
+        }
+    }
+#endif
 
     return 1;
 }

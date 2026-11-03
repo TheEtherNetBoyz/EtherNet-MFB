@@ -146,6 +146,15 @@ constexpr std::array kRupeeSlideDriftDistanceModes = {
     "1 unit / cycle",
 };
 
+constexpr std::array kRupeeSlidePickupAnimationModes = {
+    "Vanilla rupee hold",
+    "Idle",
+    "Attention left",
+    "Attention right",
+    "Alternate get-item hold",
+    "6-7 gesture",
+};
+
 enum class HotkeyAction {
     ToggleImGuiMenu,
     ToggleThirtyFps,
@@ -2517,6 +2526,23 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 return speedrun::isActive() ||
                        !getSettings().game.rupeeSlideCustomDriftSpeedEnabled.getValue();
             });
+        config_enum_select(leftPane, rightPane,
+            getSettings().game.rupeeSlidePickupAnimation,
+            "Pickup Slide Animation",
+            "Changes Link's holding pose during the pickup slide only. Vanilla preserves the "
+            "original rupee-holding animation.",
+            kRupeeSlidePickupAnimationModes);
+        config_int_select(leftPane, rightPane,
+            getSettings().game.rupeeSlideSixSevenSpeed,
+            "6-7 Gesture Speed",
+            "Adjusts only the procedural 6-7 arm motion. It does not change animation playback, "
+            "root motion, or slide displacement.",
+            25, 300, 5,
+            [] {
+                return speedrun::isActive() ||
+                       getSettings().game.rupeeSlidePickupAnimation.getValue() !=
+                           RupeeSlidePickupAnimation::SixSeven;
+            }, {}, "%");
         add_speedrun_disabled_option(leftPane, rightPane,
             getSettings().game.rupeeSlideDriftHop,
             "Loop Hop Movement",
@@ -2662,6 +2688,19 @@ RupeeSlideWindow::RupeeSlideWindow() : Window(Window::Props{.tabBar = false}) {
                 return speedrun::isActive() ||
                        !getSettings().game.rupeeSlideCustomDriftSpeedEnabled.getValue();
             });
+        config_enum_select(leftPane, rightPane,
+            getSettings().game.rupeeSlidePickupAnimation, "Pickup Slide Animation",
+            "Selects Link's pose during pickup slides. Vanilla keeps the original animation.",
+            kRupeeSlidePickupAnimationModes);
+        config_int_select(leftPane, rightPane,
+            getSettings().game.rupeeSlideSixSevenSpeed, "6-7 Gesture Speed",
+            "Changes only the 6-7 arm-cycle speed and never changes slide displacement.",
+            25, 300, 5,
+            [] {
+                return speedrun::isActive() ||
+                       getSettings().game.rupeeSlidePickupAnimation.getValue() !=
+                           RupeeSlidePickupAnimation::SixSeven;
+            }, {}, "%");
         add_speedrun_disabled_option(leftPane, rightPane,
             getSettings().game.rupeeSlideDriftHop, "Loop Hop Movement",
             "Reproduces the old once-per-animation-loop hop. Off redirects movement smoothly.");

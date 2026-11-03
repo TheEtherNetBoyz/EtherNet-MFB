@@ -142,6 +142,15 @@ enum class RupeeSlideDriftDistance : u8 {
     D1Unit = 12,
 };
 
+enum class RupeeSlidePickupAnimation : u8 {
+    Vanilla = 0,
+    Idle = 1,
+    AttentionLeft = 2,
+    AttentionRight = 3,
+    AlternateGetItem = 4,
+    SixSeven = 5,
+};
+
 enum class AudioOutputMode : u8 {
     StereoSpeakers = 0,
     StereoHeadphones = 1,   // spatial audio
@@ -250,6 +259,12 @@ template <>
 struct ConfigEnumRange<RupeeSlideDriftDistance> {
     static constexpr auto min = RupeeSlideDriftDistance::Stopped;
     static constexpr auto max = RupeeSlideDriftDistance::D1Unit;
+};
+
+template <>
+struct ConfigEnumRange<RupeeSlidePickupAnimation> {
+    static constexpr auto min = RupeeSlidePickupAnimation::Vanilla;
+    static constexpr auto max = RupeeSlidePickupAnimation::SixSeven;
 };
 
 template <>
@@ -478,6 +493,8 @@ struct UserSettings {
         ConfigVar<int> rupeeSlideDriftAngle;
         ConfigVar<bool> rupeeSlideCustomDriftSpeedEnabled;
         ConfigVar<RupeeSlideDriftDistance> rupeeSlideDriftDistance;
+        ConfigVar<RupeeSlidePickupAnimation> rupeeSlidePickupAnimation;
+        ConfigVar<int> rupeeSlideSixSevenSpeed;
         ConfigVar<bool> rupeeSlideDriftHop;
         ConfigVar<bool> rupeeSlideVanillaAngleCorrection;
         ConfigVar<bool> showRupeeSlideDriftArrow;
