@@ -231,6 +231,11 @@ UserSettings g_userSettings = {
         .rupeeSlideRupeeRotationY {"game.rupeeSlideRupeeRotationY", 0},
         .rupeeSlideRupeeRotationZ {"game.rupeeSlideRupeeRotationZ", 0},
         .rupeeSlideRupeeScale {"game.rupeeSlideRupeeScale", 100},
+        .rupeeSlideRupeeDuplicateEnabled {"game.rupeeSlideRupeeDuplicateEnabled", false},
+        .rupeeSlideRupeeDuplicateAttachment {"game.rupeeSlideRupeeDuplicateAttachment", RupeeSlideRupeeAttachment::Vanilla},
+        .rupeeSlideRupeeDuplicateOffsetX {"game.rupeeSlideRupeeDuplicateOffsetX", 100},
+        .rupeeSlideRupeeDuplicateOffsetY {"game.rupeeSlideRupeeDuplicateOffsetY", 0},
+        .rupeeSlideRupeeDuplicateOffsetZ {"game.rupeeSlideRupeeDuplicateOffsetZ", 0},
         .rupeeSlideDriftHop {"game.rupeeSlideDriftHop", false},
         .rupeeSlideVanillaAngleCorrection {"game.rupeeSlideVanillaAngleCorrection", false},
         .showRupeeSlideDriftArrow {"game.showRupeeSlideDriftArrow", false},
@@ -579,6 +584,11 @@ void registerSettings() {
     Register(g_userSettings.game.rupeeSlideRupeeRotationY);
     Register(g_userSettings.game.rupeeSlideRupeeRotationZ);
     Register(g_userSettings.game.rupeeSlideRupeeScale);
+    Register(g_userSettings.game.rupeeSlideRupeeDuplicateEnabled);
+    Register(g_userSettings.game.rupeeSlideRupeeDuplicateAttachment);
+    Register(g_userSettings.game.rupeeSlideRupeeDuplicateOffsetX);
+    Register(g_userSettings.game.rupeeSlideRupeeDuplicateOffsetY);
+    Register(g_userSettings.game.rupeeSlideRupeeDuplicateOffsetZ);
     Register(g_userSettings.game.rupeeSlideDriftHop);
     Register(g_userSettings.game.rupeeSlideVanillaAngleCorrection);
     Register(g_userSettings.game.showRupeeSlideDriftArrow);

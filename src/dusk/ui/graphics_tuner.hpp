@@ -124,6 +124,10 @@ enum class RupeeSlideRupeeOption {
     RotationY,
     RotationZ,
     Scale,
+    DuplicateAttachment,
+    DuplicateOffsetX,
+    DuplicateOffsetY,
+    DuplicateOffsetZ,
 };
 
 class RupeeSlideRupeeTuner final : public GraphicsTuner {

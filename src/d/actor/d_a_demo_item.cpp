@@ -26,30 +26,52 @@ namespace {
 daDitem_c* s_worldRupeeActor = nullptr;
 dusk::RupeeSlideRupeeAttachment s_worldRupeeMode = dusk::RupeeSlideRupeeAttachment::Vanilla;
 cXyz s_worldRupeeAnchor;
+daDitem_c* s_vanillaRupeeActor = nullptr;
+cXyz s_vanillaRupeePosition;
+daDitem_c* s_duplicateWorldRupeeActor = nullptr;
+dusk::RupeeSlideRupeeAttachment s_duplicateWorldRupeeMode =
+    dusk::RupeeSlideRupeeAttachment::Vanilla;
+cXyz s_duplicateWorldRupeeAnchor;
+
+cXyz getRupeeAttachmentPosition(daDitem_c* item, daPy_py_c* player,
+                               dusk::RupeeSlideRupeeAttachment attachment,
+                               bool duplicate) {
+    cXyz position = s_vanillaRupeeActor == item ? s_vanillaRupeePosition : item->current.pos;
+    switch (attachment) {
+    case dusk::RupeeSlideRupeeAttachment::LeftHand:
+        return player->getLeftHandPos();
+    case dusk::RupeeSlideRupeeAttachment::RightHand:
+        return player->getRightHandPos();
+    case dusk::RupeeSlideRupeeAttachment::Head:
+        return player->getHeadTopPos();
+    case dusk::RupeeSlideRupeeAttachment::World:
+        if (duplicate) {
+            if (s_duplicateWorldRupeeActor != item ||
+                s_duplicateWorldRupeeMode != attachment) {
+                s_duplicateWorldRupeeAnchor = position;
+            }
+            s_duplicateWorldRupeeActor = item;
+            s_duplicateWorldRupeeMode = attachment;
+            return s_duplicateWorldRupeeAnchor;
+        }
+        if (s_worldRupeeActor != item || s_worldRupeeMode != attachment) {
+            s_worldRupeeAnchor = position;
+        }
+        s_worldRupeeActor = item;
+        s_worldRupeeMode = attachment;
+        return s_worldRupeeAnchor;
+    case dusk::RupeeSlideRupeeAttachment::Vanilla:
+    default:
+        return position;
+    }
+}
+
 void applyCustomRupeePosition(daDitem_c* item, daPy_py_c* player) {
     auto& settings = dusk::getSettings().game;
     if (!settings.rupeeSlideRupeeTransformEnabled.getValue()) return;
 
     const auto attachment = settings.rupeeSlideRupeeAttachment.getValue();
-    switch (attachment) {
-    case dusk::RupeeSlideRupeeAttachment::LeftHand:
-        item->current.pos = player->getLeftHandPos();
-        break;
-    case dusk::RupeeSlideRupeeAttachment::RightHand:
-        item->current.pos = player->getRightHandPos();
-        break;
-    case dusk::RupeeSlideRupeeAttachment::Head:
-        item->current.pos = player->getHeadTopPos();
-        break;
-    case dusk::RupeeSlideRupeeAttachment::World:
-        if (s_worldRupeeActor != item || s_worldRupeeMode != attachment) {
-            s_worldRupeeAnchor = item->current.pos;
-        }
-        item->current.pos = s_worldRupeeAnchor;
-        break;
-    case dusk::RupeeSlideRupeeAttachment::Vanilla:
-        break;
-    }
+    item->current.pos = getRupeeAttachmentPosition(item, player, attachment, false);
     s_worldRupeeActor = item;
     s_worldRupeeMode = attachment;
     item->current.pos.x += settings.rupeeSlideRupeeOffsetX.getValue();
@@ -99,6 +121,21 @@ public:
 #endif
 
 int daDitem_c::__CreateHeap() {
+#if TARGET_PC
+    const u8 itemNo = getDisplayItemNo();
+    u32 duplicateFlags = 0x11000084;
+    if (dItem_data::getBtkName(itemNo) > 0) {
+        duplicateFlags |= 0x200;
+    }
+    if (dItem_data::getBpkName(itemNo) > 0) {
+        duplicateFlags |= 0x1;
+    }
+    if (dItem_data::getBtpName(itemNo) > 0) {
+        duplicateFlags |= 0x20000;
+    }
+    mpDuplicateModel =
+        mDoExt_J3DModel__create(mpModel->getModelData(), 0x80000, duplicateFlags);
+#endif
     return 1;
 }
 
@@ -400,6 +437,8 @@ void daDitem_c::set_pos() {
     if (chkArgFlag(0x8)) {
         current.pos = mOffsetPos;
 #if TARGET_PC
+        s_vanillaRupeeActor = this;
+        s_vanillaRupeePosition = current.pos;
         applyCustomRupeePosition(this, player);
 #endif
         return;
@@ -427,6 +466,8 @@ void daDitem_c::set_pos() {
     current.pos = pos;
 
 #if TARGET_PC
+    s_vanillaRupeeActor = this;
+    s_vanillaRupeePosition = current.pos;
     applyCustomRupeePosition(this, player);
 #endif
 }
@@ -450,7 +491,7 @@ void daDitem_c::settingEffectLight() {
     mLightStrength = 8.0f;
 }
 
-void daDitem_c::set_mtx() {
+void daDitem_c::set_mtx_at(J3DModel* model, const cXyz& position) {
     cXyz modelScale = scale;
 #if TARGET_PC
     const auto& settings = dusk::getSettings().game;
@@ -459,14 +500,9 @@ void daDitem_c::set_mtx() {
         modelScale *= settings.rupeeSlideRupeeScale.getValue() / 100.0f;
     }
 #endif
-    mpModel->setBaseScale(modelScale);
+    model->setBaseScale(modelScale);
 
-    if (m_itemNo != dItemNo_DUNGEON_EXIT_e && m_itemNo != dItemNo_DUNGEON_BACK_e && m_itemNo != dItemNo_LV7_DUNGEON_EXIT_e && m_itemNo != dItemNo_DUNGEON_EXIT_2_e) {
-        s16 var_r28 = 0xFFFF / 250;
-        fopAcM_addAngleY(this, current.angle.y + var_r28, var_r28);
-    }
-
-    mDoMtx_stack_c::transS(current.pos.x, current.pos.y, current.pos.z);
+    mDoMtx_stack_c::transS(position.x, position.y, position.z);
 #if TARGET_PC
     if (customize) {
         mDoMtx_stack_c::XrotM(degreesToAngle(settings.rupeeSlideRupeeRotationX.getValue()));
@@ -479,7 +515,16 @@ void daDitem_c::set_mtx() {
         mDoMtx_stack_c::ZrotM(degreesToAngle(settings.rupeeSlideRupeeRotationZ.getValue()));
     }
 #endif
-    mpModel->setBaseTRMtx(mDoMtx_stack_c::get());
+    model->setBaseTRMtx(mDoMtx_stack_c::get());
+}
+
+void daDitem_c::set_mtx() {
+    if (m_itemNo != dItemNo_DUNGEON_EXIT_e && m_itemNo != dItemNo_DUNGEON_BACK_e &&
+        m_itemNo != dItemNo_LV7_DUNGEON_EXIT_e && m_itemNo != dItemNo_DUNGEON_EXIT_2_e) {
+        s16 var_r28 = 0xFFFF / 250;
+        fopAcM_addAngleY(this, current.angle.y + var_r28, var_r28);
+    }
+    set_mtx_at(mpModel, current.pos);
 }
 
 void daDitem_c::setTevStr() {
@@ -561,7 +606,8 @@ int daDitem_c::create() {
     int phase_state = dComIfG_resLoad(
         &mPhase, dItem_data::getArcName(DUSK_IF_ELSE(getDisplayItemNo(), m_itemNo)));
     if (phase_state == cPhs_COMPLEATE_e) {
-        if (!fopAcM_entrySolidHeap(this, CheckItemCreateHeap, 0x80003390)) {
+        const u32 heapSize = DUSK_IF_ELSE(0x80005000, 0x80003390);
+        if (!fopAcM_entrySolidHeap(this, CheckItemCreateHeap, heapSize)) {
             return cPhs_ERROR_e;
         }
 
@@ -626,6 +672,27 @@ int daDitem_c::draw() {
     }
 
     DrawBase();
+#if TARGET_PC
+    const auto& settings = dusk::getSettings().game;
+    if (mpDuplicateModel != nullptr && settings.rupeeSlideRupeeDuplicateEnabled.getValue()) {
+        daPy_py_c* player = static_cast<daPy_py_c*>(dComIfGp_getPlayer(0));
+        cXyz duplicatePosition = getRupeeAttachmentPosition(
+            this, player, settings.rupeeSlideRupeeDuplicateAttachment.getValue(), true);
+        s_duplicateWorldRupeeActor = this;
+        s_duplicateWorldRupeeMode =
+            settings.rupeeSlideRupeeDuplicateAttachment.getValue();
+        duplicatePosition.x += settings.rupeeSlideRupeeDuplicateOffsetX.getValue();
+        duplicatePosition.y += settings.rupeeSlideRupeeDuplicateOffsetY.getValue();
+        duplicatePosition.z += settings.rupeeSlideRupeeDuplicateOffsetZ.getValue();
+
+        g_env_light.settingTevStruct(14, &duplicatePosition, &tevStr);
+        g_env_light.setLightTevColorType_MAJI(mpDuplicateModel, &tevStr);
+        setListStart();
+        set_mtx_at(mpDuplicateModel, duplicatePosition);
+        mDoExt_modelUpdateDL(mpDuplicateModel);
+        setListEnd();
+    }
+#endif
     return 1;
 }
 

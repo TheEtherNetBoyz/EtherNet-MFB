@@ -196,6 +196,10 @@ const char* rupee_slide_rupee_title(RupeeSlideRupeeOption option) {
     case RupeeSlideRupeeOption::RotationY: return "Rupee Y Rotation";
     case RupeeSlideRupeeOption::RotationZ: return "Rupee Z Rotation";
     case RupeeSlideRupeeOption::Scale: return "Rupee Scale";
+    case RupeeSlideRupeeOption::DuplicateAttachment: return "Duplicate Rupee Attachment";
+    case RupeeSlideRupeeOption::DuplicateOffsetX: return "Duplicate Rupee X Offset";
+    case RupeeSlideRupeeOption::DuplicateOffsetY: return "Duplicate Rupee Y Offset";
+    case RupeeSlideRupeeOption::DuplicateOffsetZ: return "Duplicate Rupee Z Offset";
     default: return "Pickup Rupee";
     }
 }
@@ -218,6 +222,14 @@ const char* rupee_slide_rupee_help(RupeeSlideRupeeOption option) {
         return "Adds rotation around the pickup rupee's Z axis.";
     case RupeeSlideRupeeOption::Scale:
         return "Scales the pickup rupee without changing Link or slide displacement.";
+    case RupeeSlideRupeeOption::DuplicateAttachment:
+        return "Chooses an anchor for the duplicate independently of the original rupee.";
+    case RupeeSlideRupeeOption::DuplicateOffsetX:
+        return "Moves the visual duplicate on the world X axis.";
+    case RupeeSlideRupeeOption::DuplicateOffsetY:
+        return "Moves the visual duplicate vertically.";
+    case RupeeSlideRupeeOption::DuplicateOffsetZ:
+        return "Moves the visual duplicate on the world Z axis.";
     default:
         return "Adjusts the pickup rupee during the rupee slide.";
     }
@@ -369,6 +381,93 @@ GraphicsSetting rupee_slide_rupee_setting(RupeeSlideRupeeOption option) {
             },
             .isModified = []() -> bool {
                 const auto& setting = getSettings().game.rupeeSlideRupeeScale;
+                return setting.getValue() != setting.getDefaultValue();
+            },
+        };
+    case RupeeSlideRupeeOption::DuplicateAttachment:
+        return GraphicsSetting{
+            .min = static_cast<int>(RupeeSlideRupeeAttachment::Vanilla),
+            .max = static_cast<int>(RupeeSlideRupeeAttachment::World),
+            .defaultValue = static_cast<int>(RupeeSlideRupeeAttachment::Vanilla),
+            .step = 1,
+            .read = []() -> int {
+                return static_cast<int>(
+                    getSettings().game.rupeeSlideRupeeDuplicateAttachment.getValue());
+            },
+            .write = [](int value) {
+                getSettings().game.rupeeSlideRupeeDuplicateAttachment.setValue(
+                    static_cast<RupeeSlideRupeeAttachment>(value));
+            },
+            .label = format_rupee_slide_attachment,
+            .cvarName = []() -> const char* {
+                return getSettings().game.rupeeSlideRupeeDuplicateAttachment.getName();
+            },
+            .isModified = []() -> bool {
+                const auto& setting =
+                    getSettings().game.rupeeSlideRupeeDuplicateAttachment;
+                return setting.getValue() != setting.getDefaultValue();
+            },
+        };
+    case RupeeSlideRupeeOption::DuplicateOffsetX:
+        return GraphicsSetting{
+            .min = -500,
+            .max = 500,
+            .defaultValue = 100,
+            .step = 1,
+            .read = []() -> int {
+                return getSettings().game.rupeeSlideRupeeDuplicateOffsetX.getValue();
+            },
+            .write = [](int value) {
+                getSettings().game.rupeeSlideRupeeDuplicateOffsetX.setValue(value);
+            },
+            .label = format_rupee_slide_units,
+            .cvarName = []() -> const char* {
+                return getSettings().game.rupeeSlideRupeeDuplicateOffsetX.getName();
+            },
+            .isModified = []() -> bool {
+                const auto& setting = getSettings().game.rupeeSlideRupeeDuplicateOffsetX;
+                return setting.getValue() != setting.getDefaultValue();
+            },
+        };
+    case RupeeSlideRupeeOption::DuplicateOffsetY:
+        return GraphicsSetting{
+            .min = -500,
+            .max = 500,
+            .defaultValue = 0,
+            .step = 1,
+            .read = []() -> int {
+                return getSettings().game.rupeeSlideRupeeDuplicateOffsetY.getValue();
+            },
+            .write = [](int value) {
+                getSettings().game.rupeeSlideRupeeDuplicateOffsetY.setValue(value);
+            },
+            .label = format_rupee_slide_units,
+            .cvarName = []() -> const char* {
+                return getSettings().game.rupeeSlideRupeeDuplicateOffsetY.getName();
+            },
+            .isModified = []() -> bool {
+                const auto& setting = getSettings().game.rupeeSlideRupeeDuplicateOffsetY;
+                return setting.getValue() != setting.getDefaultValue();
+            },
+        };
+    case RupeeSlideRupeeOption::DuplicateOffsetZ:
+        return GraphicsSetting{
+            .min = -500,
+            .max = 500,
+            .defaultValue = 0,
+            .step = 1,
+            .read = []() -> int {
+                return getSettings().game.rupeeSlideRupeeDuplicateOffsetZ.getValue();
+            },
+            .write = [](int value) {
+                getSettings().game.rupeeSlideRupeeDuplicateOffsetZ.setValue(value);
+            },
+            .label = format_rupee_slide_units,
+            .cvarName = []() -> const char* {
+                return getSettings().game.rupeeSlideRupeeDuplicateOffsetZ.getName();
+            },
+            .isModified = []() -> bool {
+                const auto& setting = getSettings().game.rupeeSlideRupeeDuplicateOffsetZ;
                 return setting.getValue() != setting.getDefaultValue();
             },
         };

@@ -594,6 +594,11 @@ struct UserSettings {
         ConfigVar<int> rupeeSlideRupeeRotationY;
         ConfigVar<int> rupeeSlideRupeeRotationZ;
         ConfigVar<int> rupeeSlideRupeeScale;
+        ConfigVar<bool> rupeeSlideRupeeDuplicateEnabled;
+        ConfigVar<RupeeSlideRupeeAttachment> rupeeSlideRupeeDuplicateAttachment;
+        ConfigVar<int> rupeeSlideRupeeDuplicateOffsetX;
+        ConfigVar<int> rupeeSlideRupeeDuplicateOffsetY;
+        ConfigVar<int> rupeeSlideRupeeDuplicateOffsetZ;
         ConfigVar<bool> rupeeSlideDriftHop;
         ConfigVar<bool> rupeeSlideVanillaAngleCorrection;
         ConfigVar<bool> showRupeeSlideDriftArrow;

@@ -37,6 +37,7 @@ public:
     void initEffectLight();
     void settingEffectLight();
     void set_mtx();
+    void set_mtx_at(J3DModel* model, const cXyz& position);
     void draw_WOOD_STICK();
 
     virtual void setListStart();
@@ -73,6 +74,9 @@ public:
     /* 0x998 */ JPABaseEmitter* field_0x998;
     /* 0x99C */ cXyz field_0x99c;
     /* 0x9A8 */ Z2SoundObjSimple mSound;
+#if TARGET_PC
+    J3DModel* mpDuplicateModel = nullptr;
+#endif
 };
 
 STATIC_ASSERT(sizeof(daDitem_c) == 0x9c8);
