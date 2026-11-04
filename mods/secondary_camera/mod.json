@@ -1,7 +1,7 @@
 {
   "id": "dev.twilitrealm.secondary_camera",
   "name": "Freecam+",
-  "version": "1.3.5",
+  "version": "1.3.6",
   "author": "Twilit Realm",
-  "description": "Renders an independent free-camera view in an auxiliary window, with optional always-on-top and over-the-shoulder Link-follow modes."
+  "description": "Renders an independent free-camera view in an auxiliary window, with optional always-on-top, over-the-shoulder, and front-facing Link face-camera follow modes."
 }

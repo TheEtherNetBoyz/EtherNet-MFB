@@ -171,10 +171,17 @@ ConfigVarHandle g_shoulderSideOffset = 0;
 ConfigVarHandle g_shoulderHeight = 0;
 ConfigVarHandle g_shoulderAimHeight = 0;
 ConfigVarHandle g_shoulderAngle = 0;
+ConfigVarHandle g_faceFollow = 0;
+ConfigVarHandle g_faceDistance = 0;
+ConfigVarHandle g_faceSideOffset = 0;
+ConfigVarHandle g_faceHeight = 0;
+ConfigVarHandle g_faceAimHeight = 0;
+ConfigVarHandle g_faceAngle = 0;
 
 WindowHandle g_window = 0;
 UiWindowHandle g_settingsWindow = 0;
 UiWindowHandle g_shoulderSettingsWindow = 0;
+UiWindowHandle g_faceSettingsWindow = 0;
 UiMenuTabHandle g_menuTab = 0;
 GfxPresentTargetHandle g_presentTarget = 0;
 GfxStageHookHandle g_sceneBeginHook = 0;
@@ -427,6 +434,12 @@ float getShoulderSideOffset();
 float getShoulderHeight();
 float getShoulderAimHeight();
 float getShoulderAngle();
+bool getFaceFollow();
+float getFaceDistance();
+float getFaceSideOffset();
+float getFaceHeight();
+float getFaceAimHeight();
+float getFaceAngle();
 
 void updateAngles() {
     const cXyz direction = g_camera.center - g_camera.eye;
@@ -444,9 +457,10 @@ void updateCenter() {
         g_camera.eye.z + std::sin(g_camera.yaw) * horizontal * kTargetDistance;
 }
 
-void updateShoulderCamera(const daAlink_c* player) {
+bool getPresentedPlayerTransform(const daAlink_c* player, cXyz& anchor,
+    float& presentedAngle) {
     if (player == nullptr || !canRefreshPlayerModelsForCurrentView(player)) {
-        return;
+        return false;
     }
 
     cXyz rawPosition = player->current.pos;
@@ -503,15 +517,25 @@ void updateShoulderCamera(const daAlink_c* player) {
     // The skeleton position above is already evaluated at presentation time.
     // Interpolating it again would make the Windows camera lag by another sim
     // frame and can look like the follow mode stopped during the pickup.
-    const cXyz anchor = usePresentedPosition
+    anchor = usePresentedPosition
         ? rawPosition
         : g_playerFollow.previousPosition +
             (g_playerFollow.currentPosition - g_playerFollow.previousPosition) * step;
     const s16 angleDelta = static_cast<s16>(
         static_cast<u16>(g_playerFollow.currentAngle) -
         static_cast<u16>(g_playerFollow.previousAngle));
-    const float presentedAngle = static_cast<float>(g_playerFollow.previousAngle) +
+    presentedAngle = static_cast<float>(g_playerFollow.previousAngle) +
         static_cast<float>(angleDelta) * step;
+
+    return true;
+}
+
+void updateShoulderCamera(const daAlink_c* player) {
+    cXyz anchor;
+    float presentedAngle;
+    if (!getPresentedPlayerTransform(player, anchor, presentedAngle)) {
+        return;
+    }
 
     // Twilight uses sin(angle) for X and cos(angle) for Z. Zero orbit angle is
     // directly behind Link; the configurable angle orbits around him.
@@ -525,6 +549,32 @@ void updateShoulderCamera(const daAlink_c* player) {
     g_camera.eye = anchor - (forward * getShoulderDistance()) +
         (right * getShoulderSideOffset()) + cXyz(0.0f, getShoulderHeight(), 0.0f);
     g_camera.center = anchor + cXyz(0.0f, getShoulderAimHeight(), 0.0f);
+    g_camera.fovy = getFov();
+    g_camera.bank = 0;
+    g_camera.initialized = true;
+    updateAngles();
+}
+
+void updateFaceCamera(const daAlink_c* player) {
+    cXyz anchor;
+    float presentedAngle;
+    if (!getPresentedPlayerTransform(player, anchor, presentedAngle)) {
+        return;
+    }
+
+    // Face mode uses the same Link-facing basis as shoulder mode, but places the
+    // camera in front of Link. A zero face angle looks straight at his face;
+    // positive/negative values provide a small orbit around him.
+    constexpr float kGameAngleToRadians = 3.14159265358979323846f / 32768.0f;
+    constexpr float kDegreesToRadians = 3.14159265358979323846f / 180.0f;
+    const float orbitAngle = presentedAngle * kGameAngleToRadians +
+        180.0f * kDegreesToRadians + getFaceAngle() * kDegreesToRadians;
+    const cXyz forward(std::sin(orbitAngle), 0.0f, std::cos(orbitAngle));
+    const cXyz right(std::cos(orbitAngle), 0.0f, -std::sin(orbitAngle));
+
+    g_camera.eye = anchor + (forward * getFaceDistance()) +
+        (right * getFaceSideOffset()) + cXyz(0.0f, getFaceHeight(), 0.0f);
+    g_camera.center = anchor + cXyz(0.0f, getFaceAimHeight(), 0.0f);
     g_camera.fovy = getFov();
     g_camera.bank = 0;
     g_camera.initialized = true;
@@ -602,6 +652,42 @@ float getShoulderAngle() {
     return static_cast<float>(std::clamp<int64_t>(value, -180, 180));
 }
 
+bool getFaceFollow() {
+    bool value = false;
+    svc_config->get_bool(mod_ctx, g_faceFollow, &value);
+    return value;
+}
+
+float getFaceDistance() {
+    int64_t value = 260;
+    svc_config->get_int(mod_ctx, g_faceDistance, &value);
+    return static_cast<float>(std::clamp<int64_t>(value, 50, 1000));
+}
+
+float getFaceSideOffset() {
+    int64_t value = 0;
+    svc_config->get_int(mod_ctx, g_faceSideOffset, &value);
+    return static_cast<float>(std::clamp<int64_t>(value, -300, 300));
+}
+
+float getFaceHeight() {
+    int64_t value = 120;
+    svc_config->get_int(mod_ctx, g_faceHeight, &value);
+    return static_cast<float>(std::clamp<int64_t>(value, 0, 600));
+}
+
+float getFaceAimHeight() {
+    int64_t value = 100;
+    svc_config->get_int(mod_ctx, g_faceAimHeight, &value);
+    return static_cast<float>(std::clamp<int64_t>(value, 0, 400));
+}
+
+float getFaceAngle() {
+    int64_t value = 0;
+    svc_config->get_int(mod_ctx, g_faceAngle, &value);
+    return static_cast<float>(std::clamp<int64_t>(value, -180, 180));
+}
+
 CameraClock::duration getCameraRenderPeriod() {
     int64_t value = 0;
     svc_config->get_int(mod_ctx, g_updateRate, &value);
@@ -639,7 +725,7 @@ bool cameraRenderDue() {
 
 void updateControls(float deltaSeconds) {
     if (!getControlsEnabled() || !g_camera.initialized || !g_windowFocused ||
-        getShoulderFollow()) {
+        getShoulderFollow() || getFaceFollow()) {
         g_input.mouseDeltaX = 0.0f;
         g_input.mouseDeltaY = 0.0f;
         return;
@@ -739,7 +825,9 @@ void renderCamera2() {
         return;
     }
 
-    if (getShoulderFollow()) {
+    if (getFaceFollow()) {
+        updateFaceCamera(player);
+    } else if (getShoulderFollow()) {
         updateShoulderCamera(player);
     }
 
@@ -1429,6 +1517,44 @@ void onOpenShoulderSettings(ModContext*, void*) {
     }
 }
 
+ModResult buildFaceSettingsTab(ModContext*, UiWindowHandle, UiElementHandle leftPane,
+    UiElementHandle, void*, ModError*) {
+    svc_ui->pane_add_section(mod_ctx, leftPane, "Face Camera");
+    addNumber(leftPane, "Face Distance", g_faceDistance, 50, 1000, 10, " units",
+        "Distance in front of Link when Face Camera Follow is enabled.");
+    addNumber(leftPane, "Face Side Offset", g_faceSideOffset, -300, 300, 10, " units",
+        "Moves the camera left or right relative to Link. Positive values use Link's right side.");
+    addNumber(leftPane, "Face Height", g_faceHeight, 0, 600, 10, " units",
+        "Height of the camera above Link's position.");
+    addNumber(leftPane, "Face Aim Height", g_faceAimHeight, 0, 400, 10, " units",
+        "Height on Link that the camera looks toward; use this to center on his face.");
+    addNumber(leftPane, "Face Orbit Angle", g_faceAngle, -180, 180, 5, " degrees",
+        "Orbits around Link while keeping the camera on his front side. Zero looks straight at his face.");
+    return MOD_OK;
+}
+
+void onFaceSettingsWindowClosed(ModContext*, UiWindowHandle, void*) {
+    g_faceSettingsWindow = 0;
+}
+
+void onOpenFaceSettings(ModContext*, void*) {
+    if (g_faceSettingsWindow != 0) {
+        return;
+    }
+
+    UiTabDesc tab = UI_TAB_DESC_INIT;
+    tab.title = "Face Camera";
+    tab.build = buildFaceSettingsTab;
+
+    UiWindowDesc window = UI_WINDOW_DESC_INIT;
+    window.tabs = &tab;
+    window.tab_count = 1;
+    window.on_closed = onFaceSettingsWindowClosed;
+    if (svc_ui->window_push(mod_ctx, &window, &g_faceSettingsWindow) != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to open face-camera settings");
+    }
+}
+
 ModResult buildCameraControls(UiElementHandle pane) {
     svc_ui->pane_add_section(mod_ctx, pane, "Freecam+ Window");
     UiControlDesc windowControl = UI_CONTROL_DESC_INIT;
@@ -1476,6 +1602,16 @@ ModResult buildCameraControls(UiElementHandle pane) {
         "Open the detailed follow-camera settings in a separate submenu.";
     shoulderSettingsControl.on_pressed = onOpenShoulderSettings;
     svc_ui->pane_add_control(mod_ctx, pane, &shoulderSettingsControl, nullptr);
+
+    addToggle(pane, "Face Camera Follow", g_faceFollow,
+        "Makes Camera 2 follow Link from the front, keeping his face in view without changing the main camera.");
+    UiControlDesc faceSettingsControl = UI_CONTROL_DESC_INIT;
+    faceSettingsControl.kind = UI_CONTROL_BUTTON;
+    faceSettingsControl.label = "Open Face Camera Settings";
+    faceSettingsControl.help_rml =
+        "Open distance, height, aim, side-offset, and orbit controls for Face Camera Follow.";
+    faceSettingsControl.on_pressed = onOpenFaceSettings;
+    svc_ui->pane_add_control(mod_ctx, pane, &faceSettingsControl, nullptr);
     return MOD_OK;
 }
 
@@ -1565,6 +1701,18 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     if (result != MOD_OK) return result;
     result = registerInt("shoulderAngle", 0, g_shoulderAngle, error);
     if (result != MOD_OK) return result;
+    result = registerBool("faceFollow", false, g_faceFollow, error);
+    if (result != MOD_OK) return result;
+    result = registerInt("faceDistance", 260, g_faceDistance, error);
+    if (result != MOD_OK) return result;
+    result = registerInt("faceSideOffset", 0, g_faceSideOffset, error);
+    if (result != MOD_OK) return result;
+    result = registerInt("faceHeight", 120, g_faceHeight, error);
+    if (result != MOD_OK) return result;
+    result = registerInt("faceAimHeight", 100, g_faceAimHeight, error);
+    if (result != MOD_OK) return result;
+    result = registerInt("faceAngle", 0, g_faceAngle, error);
+    if (result != MOD_OK) return result;
 
     bool startOnBoot = false;
     svc_config->get_bool(mod_ctx, g_startOnBoot, &startOnBoot);
@@ -1635,6 +1783,10 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
         svc_ui->window_close(mod_ctx, g_shoulderSettingsWindow);
         g_shoulderSettingsWindow = 0;
     }
+    if (g_faceSettingsWindow != 0) {
+        svc_ui->window_close(mod_ctx, g_faceSettingsWindow);
+        g_faceSettingsWindow = 0;
+    }
     if (g_sceneBeginHook != 0) {
         svc_gfx->unregister_stage_hook(mod_ctx, g_sceneBeginHook);
         g_sceneBeginHook = 0;
@@ -1658,6 +1810,8 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     g_controls = g_moveSpeed = g_fov = g_updateRate = g_alwaysOnTop = 0;
     g_shoulderFollow = g_shoulderDistance = g_shoulderSideOffset = 0;
     g_shoulderHeight = g_shoulderAimHeight = g_shoulderAngle = 0;
+    g_faceFollow = g_faceDistance = g_faceSideOffset = 0;
+    g_faceHeight = g_faceAimHeight = g_faceAngle = 0;
     return MOD_OK;
 }
 
