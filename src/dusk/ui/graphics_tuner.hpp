@@ -86,6 +86,8 @@ public:
     bool visible() const override;
 
 protected:
+    GraphicsTuner(Rml::String tunerTitle, Rml::String helpText, GraphicsSetting setting,
+        DocumentScope scope);
     bool handle_nav_command(Rml::Event& event, NavCommand cmd) override;
 
 private:
@@ -106,6 +108,27 @@ private:
     u64 mSubscription = 0;
     u32 mLastRenderWidth = 0;
     u32 mLastRenderHeight = 0;
+};
+
+class RupeeSlideAnimationTuner final : public GraphicsTuner {
+public:
+    RupeeSlideAnimationTuner();
+};
+
+enum class RupeeSlideRupeeOption {
+    Attachment,
+    OffsetX,
+    OffsetY,
+    OffsetZ,
+    RotationX,
+    RotationY,
+    RotationZ,
+    Scale,
+};
+
+class RupeeSlideRupeeTuner final : public GraphicsTuner {
+public:
+    explicit RupeeSlideRupeeTuner(RupeeSlideRupeeOption option);
 };
 
 }  // namespace dusk::ui

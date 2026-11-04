@@ -81,6 +81,302 @@ Rml::String format_percent(int value) { return fmt::format("{}%", value); }
 
 Rml::String format_bool(int value) { return value ? "On" : "Off"; }
 
+Rml::String format_rupee_slide_pickup_animation(int value) {
+    switch (static_cast<RupeeSlidePickupAnimation>(value)) {
+    case RupeeSlidePickupAnimation::Vanilla: return "Vanilla rupee hold";
+    case RupeeSlidePickupAnimation::Idle: return "Idle";
+    case RupeeSlidePickupAnimation::AttentionLeft: return "Attention left";
+    case RupeeSlidePickupAnimation::AttentionRight: return "Attention right";
+    case RupeeSlidePickupAnimation::AlternateGetItem: return "Alternate get-item hold";
+    case RupeeSlidePickupAnimation::SixSeven: return "6-7 gesture";
+    case RupeeSlidePickupAnimation::AlternateIdle: return "Alternate idle";
+    case RupeeSlidePickupAnimation::Tired: return "Tired stance";
+    case RupeeSlidePickupAnimation::Crouch: return "Crouch";
+    case RupeeSlidePickupAnimation::GuardLeft: return "Guard left";
+    case RupeeSlidePickupAnimation::GuardRight: return "Guard right";
+    case RupeeSlidePickupAnimation::SmallGuard: return "Small guard";
+    case RupeeSlidePickupAnimation::TiredGuard: return "Tired guard";
+    case RupeeSlidePickupAnimation::DefensiveCrouch: return "Defensive crouch";
+    case RupeeSlidePickupAnimation::PushPullReady: return "Push/pull ready";
+    case RupeeSlidePickupAnimation::Crawl: return "Crawl";
+    case RupeeSlidePickupAnimation::ServiceWait: return "Service wait";
+    case RupeeSlidePickupAnimation::Carry: return "Carry pose";
+    case RupeeSlidePickupAnimation::Talk: return "Talk";
+    case RupeeSlidePickupAnimation::Holdout: return "Holdout";
+    case RupeeSlidePickupAnimation::Sit: return "Sit";
+    case RupeeSlidePickupAnimation::Walk: return "Walk";
+    case RupeeSlidePickupAnimation::Run: return "Run";
+    case RupeeSlidePickupAnimation::StepTurn: return "Step turn";
+    case RupeeSlidePickupAnimation::FrontRoll: return "Front roll";
+    case RupeeSlidePickupAnimation::Backflip: return "Backflip";
+    case RupeeSlidePickupAnimation::Jump: return "Jump";
+    case RupeeSlidePickupAnimation::JumpLand: return "Jump land";
+    case RupeeSlidePickupAnimation::ShieldAttack: return "Shield attack";
+    case RupeeSlidePickupAnimation::GuardBreak: return "Guard break";
+    case RupeeSlidePickupAnimation::Push: return "Push";
+    case RupeeSlidePickupAnimation::Pull: return "Pull";
+    case RupeeSlidePickupAnimation::Throw: return "Throw";
+    case RupeeSlidePickupAnimation::HeavyThrow: return "Heavy throw";
+    case RupeeSlidePickupAnimation::LargePickup: return "Large pickup";
+    case RupeeSlidePickupAnimation::BoomerangCatch: return "Boomerang catch";
+    case RupeeSlidePickupAnimation::SlideForward: return "Slide forward";
+    case RupeeSlidePickupAnimation::SlideBackward: return "Slide backward";
+    case RupeeSlidePickupAnimation::GetItemStart: return "Get-item start";
+    case RupeeSlidePickupAnimation::TurnBack: return "Turn back";
+    case RupeeSlidePickupAnimation::PickUp: return "Pick up";
+    case RupeeSlidePickupAnimation::RollJump: return "Roll jump";
+    case RupeeSlidePickupAnimation::WaitWind: return "Wind idle";
+    case RupeeSlidePickupAnimation::BottleDrink: return "Bottle drink";
+    case RupeeSlidePickupAnimation::BottlePour: return "Bottle pour";
+    case RupeeSlidePickupAnimation::GrassWhistle: return "Grass whistle";
+    case RupeeSlidePickupAnimation::HawkWait: return "Hawk wait";
+    case RupeeSlidePickupAnimation::CowStroke: return "Goat stroke";
+    case RupeeSlidePickupAnimation::Fall: return "Fall";
+    case RupeeSlidePickupAnimation::HeavyBoots: return "Heavy boots";
+    case RupeeSlidePickupAnimation::SumoWait: return "Sumo stance";
+    case RupeeSlidePickupAnimation::SumoWin: return "Sumo win";
+    case RupeeSlidePickupAnimation::SumoShiko: return "Sumo shiko";
+    case RupeeSlidePickupAnimation::IronBallWait: return "Ball and chain idle";
+    case RupeeSlidePickupAnimation::CopyRodSwing: return "Dominion Rod swing";
+    case RupeeSlidePickupAnimation::AlternateWait: return "Alternate wait";
+    case RupeeSlidePickupAnimation::GroundStun: return "Electric stun";
+    case RupeeSlidePickupAnimation::KeyCatch: return "Key catch";
+    case RupeeSlidePickupAnimation::InsectWait: return "Insect wait";
+    case RupeeSlidePickupAnimation::TradeItemWait: return "Trade-item wait";
+    case RupeeSlidePickupAnimation::DemoKamae: return "Demo stance";
+    case RupeeSlidePickupAnimation::Dive: return "Dive";
+    case RupeeSlidePickupAnimation::Surprised: return "Surprised";
+    case RupeeSlidePickupAnimation::LookDown: return "Look down";
+    case RupeeSlidePickupAnimation::SwimWait: return "Swim idle";
+    case RupeeSlidePickupAnimation::SideJumpLeft: return "Side jump left";
+    case RupeeSlidePickupAnimation::SideJumpRight: return "Side jump right";
+    case RupeeSlidePickupAnimation::BackJump: return "Back jump";
+    case RupeeSlidePickupAnimation::RollCrash: return "Roll crash";
+    case RupeeSlidePickupAnimation::CrouchStart: return "Crouch start";
+    case RupeeSlidePickupAnimation::JumpStart: return "Jump start";
+    case RupeeSlidePickupAnimation::CrawlStart: return "Crawl start";
+    case RupeeSlidePickupAnimation::PushLight: return "Light push";
+    case RupeeSlidePickupAnimation::PullLight: return "Light pull";
+    case RupeeSlidePickupAnimation::SideRollLeft: return "Side roll left";
+    case RupeeSlidePickupAnimation::SideRollRight: return "Side roll right";
+    case RupeeSlidePickupAnimation::BottleOpen: return "Bottle open";
+    case RupeeSlidePickupAnimation::LanternSwing: return "Lantern swing";
+    case RupeeSlidePickupAnimation::GrassWhistleStart: return "Grass whistle start";
+    case RupeeSlidePickupAnimation::HawkCatch: return "Hawk catch";
+    case RupeeSlidePickupAnimation::Entrance: return "Entrance";
+    case RupeeSlidePickupAnimation::Appearance: return "Appearance";
+    default: return "Unknown";
+    }
+}
+
+Rml::String format_rupee_slide_attachment(int value) {
+    switch (static_cast<RupeeSlideRupeeAttachment>(value)) {
+    case RupeeSlideRupeeAttachment::Vanilla: return "Vanilla position";
+    case RupeeSlideRupeeAttachment::LeftHand: return "Link's left hand";
+    case RupeeSlideRupeeAttachment::RightHand: return "Link's right hand";
+    case RupeeSlideRupeeAttachment::Head: return "Above Link's head";
+    case RupeeSlideRupeeAttachment::World: return "Fixed world position";
+    default: return "Unknown";
+    }
+}
+
+Rml::String format_rupee_slide_units(int value) { return fmt::format("{} units", value); }
+
+Rml::String format_rupee_slide_degrees(int value) { return fmt::format("{}°", value); }
+
+Rml::String format_rupee_slide_scale(int value) { return fmt::format("{}%", value); }
+
+const char* rupee_slide_rupee_title(RupeeSlideRupeeOption option) {
+    switch (option) {
+    case RupeeSlideRupeeOption::Attachment: return "Rupee Attachment";
+    case RupeeSlideRupeeOption::OffsetX: return "Rupee X Offset";
+    case RupeeSlideRupeeOption::OffsetY: return "Rupee Y Offset";
+    case RupeeSlideRupeeOption::OffsetZ: return "Rupee Z Offset";
+    case RupeeSlideRupeeOption::RotationX: return "Rupee X Rotation";
+    case RupeeSlideRupeeOption::RotationY: return "Rupee Y Rotation";
+    case RupeeSlideRupeeOption::RotationZ: return "Rupee Z Rotation";
+    case RupeeSlideRupeeOption::Scale: return "Rupee Scale";
+    default: return "Pickup Rupee";
+    }
+}
+
+const char* rupee_slide_rupee_help(RupeeSlideRupeeOption option) {
+    switch (option) {
+    case RupeeSlideRupeeOption::Attachment:
+        return "Chooses the pickup rupee's anchor. Vanilla preserves the original game position.";
+    case RupeeSlideRupeeOption::OffsetX:
+        return "Moves the pickup rupee on the world X axis.";
+    case RupeeSlideRupeeOption::OffsetY:
+        return "Moves the pickup rupee vertically.";
+    case RupeeSlideRupeeOption::OffsetZ:
+        return "Moves the pickup rupee on the world Z axis.";
+    case RupeeSlideRupeeOption::RotationX:
+        return "Adds rotation around the pickup rupee's X axis.";
+    case RupeeSlideRupeeOption::RotationY:
+        return "Adds rotation around the pickup rupee's spinning Y axis.";
+    case RupeeSlideRupeeOption::RotationZ:
+        return "Adds rotation around the pickup rupee's Z axis.";
+    case RupeeSlideRupeeOption::Scale:
+        return "Scales the pickup rupee without changing Link or slide displacement.";
+    default:
+        return "Adjusts the pickup rupee during the rupee slide.";
+    }
+}
+
+GraphicsSetting rupee_slide_rupee_setting(RupeeSlideRupeeOption option) {
+    switch (option) {
+    case RupeeSlideRupeeOption::Attachment:
+        return GraphicsSetting{
+            .min = static_cast<int>(RupeeSlideRupeeAttachment::Vanilla),
+            .max = static_cast<int>(RupeeSlideRupeeAttachment::World),
+            .defaultValue = static_cast<int>(RupeeSlideRupeeAttachment::Vanilla),
+            .step = 1,
+            .read = []() -> int {
+                return static_cast<int>(getSettings().game.rupeeSlideRupeeAttachment.getValue());
+            },
+            .write = [](int value) {
+                getSettings().game.rupeeSlideRupeeAttachment.setValue(
+                    static_cast<RupeeSlideRupeeAttachment>(value));
+            },
+            .label = format_rupee_slide_attachment,
+            .cvarName = []() -> const char* {
+                return getSettings().game.rupeeSlideRupeeAttachment.getName();
+            },
+            .isModified = []() -> bool {
+                const auto& setting = getSettings().game.rupeeSlideRupeeAttachment;
+                return setting.getValue() != setting.getDefaultValue();
+            },
+        };
+    case RupeeSlideRupeeOption::OffsetX:
+        return GraphicsSetting{
+            .min = -500,
+            .max = 500,
+            .defaultValue = 0,
+            .step = 1,
+            .read = []() -> int { return getSettings().game.rupeeSlideRupeeOffsetX.getValue(); },
+            .write = [](int value) { getSettings().game.rupeeSlideRupeeOffsetX.setValue(value); },
+            .label = format_rupee_slide_units,
+            .cvarName = []() -> const char* {
+                return getSettings().game.rupeeSlideRupeeOffsetX.getName();
+            },
+            .isModified = []() -> bool {
+                const auto& setting = getSettings().game.rupeeSlideRupeeOffsetX;
+                return setting.getValue() != setting.getDefaultValue();
+            },
+        };
+    case RupeeSlideRupeeOption::OffsetY:
+        return GraphicsSetting{
+            .min = -500,
+            .max = 500,
+            .defaultValue = 0,
+            .step = 1,
+            .read = []() -> int { return getSettings().game.rupeeSlideRupeeOffsetY.getValue(); },
+            .write = [](int value) { getSettings().game.rupeeSlideRupeeOffsetY.setValue(value); },
+            .label = format_rupee_slide_units,
+            .cvarName = []() -> const char* {
+                return getSettings().game.rupeeSlideRupeeOffsetY.getName();
+            },
+            .isModified = []() -> bool {
+                const auto& setting = getSettings().game.rupeeSlideRupeeOffsetY;
+                return setting.getValue() != setting.getDefaultValue();
+            },
+        };
+    case RupeeSlideRupeeOption::OffsetZ:
+        return GraphicsSetting{
+            .min = -500,
+            .max = 500,
+            .defaultValue = 0,
+            .step = 1,
+            .read = []() -> int { return getSettings().game.rupeeSlideRupeeOffsetZ.getValue(); },
+            .write = [](int value) { getSettings().game.rupeeSlideRupeeOffsetZ.setValue(value); },
+            .label = format_rupee_slide_units,
+            .cvarName = []() -> const char* {
+                return getSettings().game.rupeeSlideRupeeOffsetZ.getName();
+            },
+            .isModified = []() -> bool {
+                const auto& setting = getSettings().game.rupeeSlideRupeeOffsetZ;
+                return setting.getValue() != setting.getDefaultValue();
+            },
+        };
+    case RupeeSlideRupeeOption::RotationX:
+        return GraphicsSetting{
+            .min = 0,
+            .max = 359,
+            .defaultValue = 0,
+            .step = 5,
+            .read = []() -> int { return getSettings().game.rupeeSlideRupeeRotationX.getValue(); },
+            .write = [](int value) {
+                getSettings().game.rupeeSlideRupeeRotationX.setValue(value);
+            },
+            .label = format_rupee_slide_degrees,
+            .cvarName = []() -> const char* {
+                return getSettings().game.rupeeSlideRupeeRotationX.getName();
+            },
+            .isModified = []() -> bool {
+                const auto& setting = getSettings().game.rupeeSlideRupeeRotationX;
+                return setting.getValue() != setting.getDefaultValue();
+            },
+        };
+    case RupeeSlideRupeeOption::RotationY:
+        return GraphicsSetting{
+            .min = 0,
+            .max = 359,
+            .defaultValue = 0,
+            .step = 5,
+            .read = []() -> int { return getSettings().game.rupeeSlideRupeeRotationY.getValue(); },
+            .write = [](int value) {
+                getSettings().game.rupeeSlideRupeeRotationY.setValue(value);
+            },
+            .label = format_rupee_slide_degrees,
+            .cvarName = []() -> const char* {
+                return getSettings().game.rupeeSlideRupeeRotationY.getName();
+            },
+            .isModified = []() -> bool {
+                const auto& setting = getSettings().game.rupeeSlideRupeeRotationY;
+                return setting.getValue() != setting.getDefaultValue();
+            },
+        };
+    case RupeeSlideRupeeOption::RotationZ:
+        return GraphicsSetting{
+            .min = 0,
+            .max = 359,
+            .defaultValue = 0,
+            .step = 5,
+            .read = []() -> int { return getSettings().game.rupeeSlideRupeeRotationZ.getValue(); },
+            .write = [](int value) {
+                getSettings().game.rupeeSlideRupeeRotationZ.setValue(value);
+            },
+            .label = format_rupee_slide_degrees,
+            .cvarName = []() -> const char* {
+                return getSettings().game.rupeeSlideRupeeRotationZ.getName();
+            },
+            .isModified = []() -> bool {
+                const auto& setting = getSettings().game.rupeeSlideRupeeRotationZ;
+                return setting.getValue() != setting.getDefaultValue();
+            },
+        };
+    case RupeeSlideRupeeOption::Scale:
+        return GraphicsSetting{
+            .min = 10,
+            .max = 500,
+            .defaultValue = 100,
+            .step = 5,
+            .read = []() -> int { return getSettings().game.rupeeSlideRupeeScale.getValue(); },
+            .write = [](int value) { getSettings().game.rupeeSlideRupeeScale.setValue(value); },
+            .label = format_rupee_slide_scale,
+            .cvarName = []() -> const char* {
+                return getSettings().game.rupeeSlideRupeeScale.getName();
+            },
+            .isModified = []() -> bool {
+                const auto& setting = getSettings().game.rupeeSlideRupeeScale;
+                return setting.getValue() != setting.getDefaultValue();
+            },
+        };
+    }
+
+    return {};
+}
+
 template <typename T>
 int read_cvar(const ConfigVar<T>& var) {
     if constexpr (std::is_same_v<T, float>) {
@@ -238,17 +534,21 @@ void SteppedCarousel::apply(int value) {
 }
 
 GraphicsTuner::GraphicsTuner(GraphicsTunerProps props)
-    : Document(kDocumentSource, false, DocumentScope::GraphicsTuner),
-      mSetting(GraphicsSetting::of(props.option)) {
+    : GraphicsTuner(std::move(props.title), std::move(props.helpText),
+          GraphicsSetting::of(props.option), DocumentScope::GraphicsTuner) {}
+
+GraphicsTuner::GraphicsTuner(Rml::String tunerTitle, Rml::String helpText,
+    GraphicsSetting setting, DocumentScope scope)
+    : Document(kDocumentSource, false, scope), mSetting(setting) {
     if (mDocument == nullptr) {
         return;
     }
 
     if (auto* title = mDocument->GetElementById("title")) {
-        append_text(title, props.title);
+        append_text(title, tunerTitle);
     }
     if (auto* description = mDocument->GetElementById("description")) {
-        append_text(description, props.helpText);
+        append_text(description, helpText);
     }
     if (auto* carouselParent = mDocument->GetElementById("carousel-container")) {
         mCarousel = &add_component<SteppedCarousel>(carouselParent,
@@ -363,5 +663,38 @@ bool GraphicsTuner::handle_nav_command(Rml::Event& event, NavCommand cmd) {
 void GraphicsTuner::reset_default() {
     mSetting.set(mSetting.defaultValue);
 }
+
+RupeeSlideAnimationTuner::RupeeSlideAnimationTuner()
+    : GraphicsTuner("Pickup Slide Animation",
+          "Changes Link's holding pose during the pickup slide only. Vanilla preserves the "
+          "original rupee-holding animation.",
+          GraphicsSetting{
+              .min = static_cast<int>(RupeeSlidePickupAnimation::Vanilla),
+              .max = static_cast<int>(RupeeSlidePickupAnimation::Appearance),
+              .defaultValue = static_cast<int>(RupeeSlidePickupAnimation::Vanilla),
+              .step = 1,
+              .watchesRenderSize = false,
+              .read = []() -> int {
+                  return static_cast<int>(
+                      getSettings().game.rupeeSlidePickupAnimation.getValue());
+              },
+              .write = [](int value) {
+                  getSettings().game.rupeeSlidePickupAnimation.setValue(
+                      static_cast<RupeeSlidePickupAnimation>(value));
+              },
+              .label = format_rupee_slide_pickup_animation,
+              .cvarName = []() -> const char* {
+                  return getSettings().game.rupeeSlidePickupAnimation.getName();
+              },
+              .isModified = []() -> bool {
+                  const auto& setting = getSettings().game.rupeeSlidePickupAnimation;
+                  return setting.getValue() != setting.getDefaultValue();
+              },
+          },
+          DocumentScope::RupeeSlideAnimationTuner) {}
+
+RupeeSlideRupeeTuner::RupeeSlideRupeeTuner(RupeeSlideRupeeOption option)
+    : GraphicsTuner(rupee_slide_rupee_title(option), rupee_slide_rupee_help(option),
+          rupee_slide_rupee_setting(option), DocumentScope::RupeeSlideRupeeTuner) {}
 
 }  // namespace dusk::ui

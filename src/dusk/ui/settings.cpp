@@ -146,6 +146,14 @@ constexpr std::array kRupeeSlideDriftDistanceModes = {
     "1 unit / cycle",
 };
 
+constexpr std::array kRupeeSlideRupeeAttachmentModes = {
+    "Vanilla position",
+    "Link's left hand",
+    "Link's right hand",
+    "Above Link's head",
+    "Fixed world position",
+};
+
 constexpr std::array kRupeeSlidePickupAnimationModes = {
     "Vanilla rupee hold",
     "Idle",
@@ -153,6 +161,82 @@ constexpr std::array kRupeeSlidePickupAnimationModes = {
     "Attention right",
     "Alternate get-item hold",
     "6-7 gesture",
+    "Alternate idle",
+    "Tired stance",
+    "Crouch",
+    "Guard left",
+    "Guard right",
+    "Small guard",
+    "Tired guard",
+    "Defensive crouch",
+    "Push/pull ready",
+    "Crawl",
+    "Service wait",
+    "Carry pose",
+    "Talk",
+    "Holdout",
+    "Sit",
+    "Walk",
+    "Run",
+    "Step turn",
+    "Front roll",
+    "Backflip",
+    "Jump",
+    "Jump land",
+    "Shield attack",
+    "Guard break",
+    "Push",
+    "Pull",
+    "Throw",
+    "Heavy throw",
+    "Large pickup",
+    "Boomerang catch",
+    "Slide forward",
+    "Slide backward",
+    "Get-item start",
+    "Turn back",
+    "Pick up",
+    "Roll jump",
+    "Wind idle",
+    "Bottle drink",
+    "Bottle pour",
+    "Grass whistle",
+    "Hawk wait",
+    "Goat stroke",
+    "Fall",
+    "Heavy boots",
+    "Sumo stance",
+    "Sumo win",
+    "Sumo shiko",
+    "Ball and chain idle",
+    "Dominion Rod swing",
+    "Alternate wait",
+    "Electric stun",
+    "Key catch",
+    "Insect wait",
+    "Trade-item wait",
+    "Demo stance",
+    "Dive",
+    "Surprised",
+    "Look down",
+    "Swim idle",
+    "Side jump left",
+    "Side jump right",
+    "Back jump",
+    "Roll crash",
+    "Crouch start",
+    "Jump start",
+    "Crawl start",
+    "Light push",
+    "Light pull",
+    "Side roll left",
+    "Side roll right",
+    "Bottle open",
+    "Lantern swing",
+    "Grass whistle start",
+    "Hawk catch",
+    "Entrance",
+    "Appearance",
 };
 
 enum class HotkeyAction {
@@ -1141,6 +1225,126 @@ void graphics_tuner_control(Window& window, Pane& leftPane, Pane& rightPane,
             pane.clear();
             pane.add_text(helpText);
         });
+}
+
+void rupee_slide_animation_tuner_control(Window& window, Pane& leftPane, Pane& rightPane) {
+    auto& var = getSettings().game.rupeeSlidePickupAnimation;
+    auto& button = leftPane.add_select_button({
+        .key = "Pickup Slide Animation",
+        .getValue = [&var] {
+            const int index = static_cast<int>(var.getValue());
+            return Rml::String{index >= 0 &&
+                                       index < static_cast<int>(kRupeeSlidePickupAnimationModes.size())
+                                   ? kRupeeSlidePickupAnimationModes[index]
+                                   : "Unknown"};
+        },
+        .isModified = [&var] { return var.getValue() != var.getDefaultValue(); },
+        .submit = false,
+    });
+    leftPane.register_control(
+        button.on_nav_command([&window](Rml::Event&, NavCommand cmd) {
+            if (cmd == NavCommand::Confirm || cmd == NavCommand::Left ||
+                cmd == NavCommand::Right)
+            {
+                window.push(std::make_unique<RupeeSlideAnimationTuner>());
+                return true;
+            }
+            return false;
+        }),
+        rightPane, [](Pane& pane) {
+            pane.clear();
+            pane.add_text("Changes Link's holding pose during the pickup slide only. Vanilla "
+                          "preserves the original rupee-holding animation.");
+        });
+}
+
+Rml::String rupee_slide_rupee_value(RupeeSlideRupeeOption option) {
+    switch (option) {
+    case RupeeSlideRupeeOption::Attachment: {
+        const auto value = getSettings().game.rupeeSlideRupeeAttachment.getValue();
+        return kRupeeSlideRupeeAttachmentModes[static_cast<int>(value)];
+    }
+    case RupeeSlideRupeeOption::OffsetX:
+        return fmt::format("{} units", getSettings().game.rupeeSlideRupeeOffsetX.getValue());
+    case RupeeSlideRupeeOption::OffsetY:
+        return fmt::format("{} units", getSettings().game.rupeeSlideRupeeOffsetY.getValue());
+    case RupeeSlideRupeeOption::OffsetZ:
+        return fmt::format("{} units", getSettings().game.rupeeSlideRupeeOffsetZ.getValue());
+    case RupeeSlideRupeeOption::RotationX:
+        return fmt::format("{}°", getSettings().game.rupeeSlideRupeeRotationX.getValue());
+    case RupeeSlideRupeeOption::RotationY:
+        return fmt::format("{}°", getSettings().game.rupeeSlideRupeeRotationY.getValue());
+    case RupeeSlideRupeeOption::RotationZ:
+        return fmt::format("{}°", getSettings().game.rupeeSlideRupeeRotationZ.getValue());
+    case RupeeSlideRupeeOption::Scale:
+        return fmt::format("{}%", getSettings().game.rupeeSlideRupeeScale.getValue());
+    default:
+        return "Unknown";
+    }
+}
+
+template <typename T>
+void rupee_slide_rupee_tuner_control(Window& window, Pane& leftPane, Pane& rightPane,
+    ConfigVar<T>& var, RupeeSlideRupeeOption option, const char* key, const char* helpText) {
+    auto disabled = [] {
+        return speedrun::isActive() ||
+               !getSettings().game.rupeeSlideRupeeTransformEnabled.getValue();
+    };
+    auto& button = leftPane.add_select_button({
+        .key = key,
+        .getValue = [option] { return rupee_slide_rupee_value(option); },
+        .isDisabled = disabled,
+        .isModified = [&var] { return var.getValue() != var.getDefaultValue(); },
+        .submit = false,
+    });
+    leftPane.register_control(
+        button.on_nav_command([&window, option, disabled](Rml::Event&, NavCommand cmd) {
+            if ((cmd == NavCommand::Confirm || cmd == NavCommand::Left ||
+                    cmd == NavCommand::Right) &&
+                !disabled()) {
+                window.push(std::make_unique<RupeeSlideRupeeTuner>(option));
+                return true;
+            }
+            return false;
+        }),
+        rightPane, [helpText](Pane& pane) {
+            pane.clear();
+            pane.add_text(helpText);
+        });
+}
+
+void rupee_slide_rupee_controls(Window& window, Pane& leftPane, Pane& rightPane) {
+    add_speedrun_disabled_option(leftPane, rightPane,
+        getSettings().game.rupeeSlideRupeeTransformEnabled, "Enable Rupee Transform",
+        "Enables custom placement, rotation, and scale for the pickup rupee only. Off restores "
+        "the original game behavior.");
+    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
+        getSettings().game.rupeeSlideRupeeAttachment, RupeeSlideRupeeOption::Attachment,
+        "Rupee Attachment",
+        "Chooses the rupee's anchor. Fixed world position captures its current location when "
+        "selected. Vanilla preserves the original pickup placement.");
+    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
+        getSettings().game.rupeeSlideRupeeOffsetX, RupeeSlideRupeeOption::OffsetX,
+        "Rupee X Offset", "Moves the pickup rupee on the world X axis.");
+    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
+        getSettings().game.rupeeSlideRupeeOffsetY, RupeeSlideRupeeOption::OffsetY,
+        "Rupee Y Offset", "Moves the pickup rupee vertically.");
+    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
+        getSettings().game.rupeeSlideRupeeOffsetZ, RupeeSlideRupeeOption::OffsetZ,
+        "Rupee Z Offset", "Moves the pickup rupee on the world Z axis.");
+    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
+        getSettings().game.rupeeSlideRupeeRotationX, RupeeSlideRupeeOption::RotationX,
+        "Rupee X Rotation", "Adds rotation around the rupee's X axis.");
+    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
+        getSettings().game.rupeeSlideRupeeRotationY, RupeeSlideRupeeOption::RotationY,
+        "Rupee Y Rotation", "Adds rotation around the rupee's spinning Y axis.");
+    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
+        getSettings().game.rupeeSlideRupeeRotationZ, RupeeSlideRupeeOption::RotationZ,
+        "Rupee Z Rotation", "Adds rotation around the rupee's Z axis.");
+    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
+        getSettings().game.rupeeSlideRupeeScale, RupeeSlideRupeeOption::Scale,
+        "Rupee Scale", "Scales the pickup rupee without changing Link or slide displacement.");
+
 }
 
 void confirm_return_to_startup() {
@@ -2543,6 +2747,8 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                        getSettings().game.rupeeSlidePickupAnimation.getValue() !=
                            RupeeSlidePickupAnimation::SixSeven;
             }, {}, "%");
+        leftPane.add_section("Pickup Rupee");
+        rupee_slide_rupee_controls(*this, leftPane, rightPane);
         add_speedrun_disabled_option(leftPane, rightPane,
             getSettings().game.rupeeSlideDriftHop,
             "Loop Hop Movement",
@@ -2688,10 +2894,7 @@ RupeeSlideWindow::RupeeSlideWindow() : Window(Window::Props{.tabBar = false}) {
                 return speedrun::isActive() ||
                        !getSettings().game.rupeeSlideCustomDriftSpeedEnabled.getValue();
             });
-        config_enum_select(leftPane, rightPane,
-            getSettings().game.rupeeSlidePickupAnimation, "Pickup Slide Animation",
-            "Selects Link's pose during pickup slides. Vanilla keeps the original animation.",
-            kRupeeSlidePickupAnimationModes);
+        rupee_slide_animation_tuner_control(*this, leftPane, rightPane);
         config_int_select(leftPane, rightPane,
             getSettings().game.rupeeSlideSixSevenSpeed, "6-7 Gesture Speed",
             "Changes only the 6-7 arm-cycle speed and never changes slide displacement.",
@@ -2701,6 +2904,9 @@ RupeeSlideWindow::RupeeSlideWindow() : Window(Window::Props{.tabBar = false}) {
                        getSettings().game.rupeeSlidePickupAnimation.getValue() !=
                            RupeeSlidePickupAnimation::SixSeven;
             }, {}, "%");
+
+        leftPane.add_section("Pickup Rupee");
+        rupee_slide_rupee_controls(*this, leftPane, rightPane);
         add_speedrun_disabled_option(leftPane, rightPane,
             getSettings().game.rupeeSlideDriftHop, "Loop Hop Movement",
             "Reproduces the old once-per-animation-loop hop. Off redirects movement smoothly.");

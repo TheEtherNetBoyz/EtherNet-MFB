@@ -222,6 +222,15 @@ UserSettings g_userSettings = {
         .rupeeSlideDriftDistance {"game.rupeeSlideDriftDistancePreset", RupeeSlideDriftDistance::D01},
         .rupeeSlidePickupAnimation {"game.rupeeSlidePickupAnimation", RupeeSlidePickupAnimation::Vanilla},
         .rupeeSlideSixSevenSpeed {"game.rupeeSlideSixSevenSpeed", 100},
+        .rupeeSlideRupeeTransformEnabled {"game.rupeeSlideRupeeTransformEnabled", false},
+        .rupeeSlideRupeeAttachment {"game.rupeeSlideRupeeAttachment", RupeeSlideRupeeAttachment::Vanilla},
+        .rupeeSlideRupeeOffsetX {"game.rupeeSlideRupeeOffsetX", 0},
+        .rupeeSlideRupeeOffsetY {"game.rupeeSlideRupeeOffsetY", 0},
+        .rupeeSlideRupeeOffsetZ {"game.rupeeSlideRupeeOffsetZ", 0},
+        .rupeeSlideRupeeRotationX {"game.rupeeSlideRupeeRotationX", 0},
+        .rupeeSlideRupeeRotationY {"game.rupeeSlideRupeeRotationY", 0},
+        .rupeeSlideRupeeRotationZ {"game.rupeeSlideRupeeRotationZ", 0},
+        .rupeeSlideRupeeScale {"game.rupeeSlideRupeeScale", 100},
         .rupeeSlideDriftHop {"game.rupeeSlideDriftHop", false},
         .rupeeSlideVanillaAngleCorrection {"game.rupeeSlideVanillaAngleCorrection", false},
         .showRupeeSlideDriftArrow {"game.showRupeeSlideDriftArrow", false},
@@ -561,6 +570,15 @@ void registerSettings() {
     Register(g_userSettings.game.rupeeSlideDriftDistance);
     Register(g_userSettings.game.rupeeSlidePickupAnimation);
     Register(g_userSettings.game.rupeeSlideSixSevenSpeed);
+    Register(g_userSettings.game.rupeeSlideRupeeTransformEnabled);
+    Register(g_userSettings.game.rupeeSlideRupeeAttachment);
+    Register(g_userSettings.game.rupeeSlideRupeeOffsetX);
+    Register(g_userSettings.game.rupeeSlideRupeeOffsetY);
+    Register(g_userSettings.game.rupeeSlideRupeeOffsetZ);
+    Register(g_userSettings.game.rupeeSlideRupeeRotationX);
+    Register(g_userSettings.game.rupeeSlideRupeeRotationY);
+    Register(g_userSettings.game.rupeeSlideRupeeRotationZ);
+    Register(g_userSettings.game.rupeeSlideRupeeScale);
     Register(g_userSettings.game.rupeeSlideDriftHop);
     Register(g_userSettings.game.rupeeSlideVanillaAngleCorrection);
     Register(g_userSettings.game.showRupeeSlideDriftArrow);

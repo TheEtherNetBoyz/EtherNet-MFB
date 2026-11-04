@@ -65,6 +65,9 @@ void BaseStringButton::start_editing() {
                 {
                     event.StopImmediatePropagation();
                 }
+                if (mSetOnChange) {
+                    set_value(mInputElem->GetValue());
+                }
             }
         }));
     mInputListeners.emplace_back(std::make_unique<ScopedEventListener>(

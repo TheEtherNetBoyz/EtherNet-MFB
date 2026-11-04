@@ -28,6 +28,8 @@ enum class DocumentScope : u8 {
     Overlay,
     TouchControls,
     GraphicsTuner,
+    RupeeSlideAnimationTuner,
+    RupeeSlideRupeeTuner,
 };
 
 struct Toast {

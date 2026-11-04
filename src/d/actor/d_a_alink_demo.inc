@@ -2279,6 +2279,99 @@ static daAlink_c::daAlink_ANM duskRupeeSlidePickupAnimation() {
         return daAlink_c::ANM_GET_A_WAIT2;
     case dusk::RupeeSlidePickupAnimation::SixSeven:
         return daAlink_c::ANM_GET_A_WAIT;
+    case dusk::RupeeSlidePickupAnimation::AlternateIdle:
+        return daAlink_c::ANM_WAIT_B;
+    case dusk::RupeeSlidePickupAnimation::Tired:
+        return daAlink_c::ANM_WAIT_TIRED;
+    case dusk::RupeeSlidePickupAnimation::Crouch:
+        return daAlink_c::ANM_CROUCH;
+    case dusk::RupeeSlidePickupAnimation::GuardLeft:
+        return daAlink_c::ANM_GUARD_LEFT;
+    case dusk::RupeeSlidePickupAnimation::GuardRight:
+        return daAlink_c::ANM_GUARD_RIGHT;
+    case dusk::RupeeSlidePickupAnimation::SmallGuard:
+        return daAlink_c::ANM_SMALL_GUARD;
+    case dusk::RupeeSlidePickupAnimation::TiredGuard:
+        return daAlink_c::ANM_SMALL_GUARD_TIRED;
+    case dusk::RupeeSlidePickupAnimation::DefensiveCrouch:
+        return daAlink_c::ANM_CROUCH_DEF;
+    case dusk::RupeeSlidePickupAnimation::PushPullReady:
+        return daAlink_c::ANM_WAIT_PUSH_PULL;
+    case dusk::RupeeSlidePickupAnimation::Crawl:
+        return daAlink_c::ANM_CRAWL;
+    case dusk::RupeeSlidePickupAnimation::ServiceWait:
+        return daAlink_c::ANM_SERVICE_WAIT;
+    case dusk::RupeeSlidePickupAnimation::Carry:
+        return daAlink_c::ANM_CARRY;
+    case dusk::RupeeSlidePickupAnimation::Talk:
+        return daAlink_c::ANM_TALK;
+    case dusk::RupeeSlidePickupAnimation::Holdout:
+        return daAlink_c::ANM_GET_HOLDOUT;
+    case dusk::RupeeSlidePickupAnimation::Sit:
+        return daAlink_c::ANM_WAIT_SIT;
+    case dusk::RupeeSlidePickupAnimation::Walk: return daAlink_c::ANM_WALK;
+    case dusk::RupeeSlidePickupAnimation::Run: return daAlink_c::ANM_RUN;
+    case dusk::RupeeSlidePickupAnimation::StepTurn: return daAlink_c::ANM_STEP_TURN;
+    case dusk::RupeeSlidePickupAnimation::FrontRoll: return daAlink_c::ANM_FRONT_ROLL;
+    case dusk::RupeeSlidePickupAnimation::Backflip: return daAlink_c::ANM_BACKFLIP;
+    case dusk::RupeeSlidePickupAnimation::Jump: return daAlink_c::ANM_JUMP;
+    case dusk::RupeeSlidePickupAnimation::JumpLand: return daAlink_c::ANM_JUMP_LAND;
+    case dusk::RupeeSlidePickupAnimation::ShieldAttack: return daAlink_c::ANM_SHIELD_ATTACK;
+    case dusk::RupeeSlidePickupAnimation::GuardBreak: return daAlink_c::ANM_GUARD_BREAK;
+    case dusk::RupeeSlidePickupAnimation::Push: return daAlink_c::ANM_PUSH;
+    case dusk::RupeeSlidePickupAnimation::Pull: return daAlink_c::ANM_PULL;
+    case dusk::RupeeSlidePickupAnimation::Throw: return daAlink_c::ANM_THROW;
+    case dusk::RupeeSlidePickupAnimation::HeavyThrow: return daAlink_c::ANM_THROW_HEAVY;
+    case dusk::RupeeSlidePickupAnimation::LargePickup: return daAlink_c::ANM_PICK_UP_LARGE;
+    case dusk::RupeeSlidePickupAnimation::BoomerangCatch:
+        return daAlink_c::ANM_BOOMERANG_CATCH;
+    case dusk::RupeeSlidePickupAnimation::SlideForward: return daAlink_c::ANM_SLIDE_FORWARD;
+    case dusk::RupeeSlidePickupAnimation::SlideBackward: return daAlink_c::ANM_SLIDE_BACKWARD;
+    case dusk::RupeeSlidePickupAnimation::GetItemStart: return daAlink_c::ANM_GET_A;
+    case dusk::RupeeSlidePickupAnimation::TurnBack: return daAlink_c::ANM_TURN_BACK;
+    case dusk::RupeeSlidePickupAnimation::PickUp: return daAlink_c::ANM_PICK_UP;
+    case dusk::RupeeSlidePickupAnimation::RollJump: return daAlink_c::ANM_ROLL_JUMP;
+    case dusk::RupeeSlidePickupAnimation::WaitWind: return daAlink_c::ANM_WAIT_WIND;
+    case dusk::RupeeSlidePickupAnimation::BottleDrink: return daAlink_c::ANM_BOTTLE_DRINK;
+    case dusk::RupeeSlidePickupAnimation::BottlePour: return daAlink_c::ANM_BOTTLE_POUR;
+    case dusk::RupeeSlidePickupAnimation::GrassWhistle:
+        return daAlink_c::ANM_GRASS_WHISTLE_PLAY;
+    case dusk::RupeeSlidePickupAnimation::HawkWait: return daAlink_c::ANM_HAWK_WAIT;
+    case dusk::RupeeSlidePickupAnimation::CowStroke: return daAlink_c::ANM_COW_STROKE;
+    case dusk::RupeeSlidePickupAnimation::Fall: return daAlink_c::ANM_FALL;
+    case dusk::RupeeSlidePickupAnimation::HeavyBoots: return daAlink_c::ANM_HVY_BOOTS_PUT_ON;
+    case dusk::RupeeSlidePickupAnimation::SumoWait: return daAlink_c::ANM_SUMOU_FIGHT_WAIT;
+    case dusk::RupeeSlidePickupAnimation::SumoWin: return daAlink_c::ANM_SUMOU_WIN;
+    case dusk::RupeeSlidePickupAnimation::SumoShiko: return daAlink_c::ANM_SUMOU_SHIKO;
+    case dusk::RupeeSlidePickupAnimation::IronBallWait: return daAlink_c::ANM_IRONBALL_WAIT;
+    case dusk::RupeeSlidePickupAnimation::CopyRodSwing: return daAlink_c::ANM_COPYROD_SWING;
+    case dusk::RupeeSlidePickupAnimation::AlternateWait: return daAlink_c::ANM_WAIT_F;
+    case dusk::RupeeSlidePickupAnimation::GroundStun: return daAlink_c::ANM_ELEC_STUN_GND;
+    case dusk::RupeeSlidePickupAnimation::KeyCatch: return daAlink_c::ANM_KEY_CATCH;
+    case dusk::RupeeSlidePickupAnimation::InsectWait: return daAlink_c::ANM_WAIT_INSECT;
+    case dusk::RupeeSlidePickupAnimation::TradeItemWait: return daAlink_c::ANM_TRADE_ITEM_WAIT;
+    case dusk::RupeeSlidePickupAnimation::DemoKamae: return daAlink_c::ANM_DEMO_KAMAE;
+    case dusk::RupeeSlidePickupAnimation::Dive: return daAlink_c::ANM_DIVE;
+    case dusk::RupeeSlidePickupAnimation::Surprised: return daAlink_c::ANM_ODOROKU;
+    case dusk::RupeeSlidePickupAnimation::LookDown: return daAlink_c::ANM_ASHIMOTO;
+    case dusk::RupeeSlidePickupAnimation::SwimWait: return daAlink_c::ANM_SWIM_WAIT;
+    case dusk::RupeeSlidePickupAnimation::SideJumpLeft: return daAlink_c::ANM_SIDE_JUMP_LEFT;
+    case dusk::RupeeSlidePickupAnimation::SideJumpRight: return daAlink_c::ANM_SIDE_JUMP_RIGHT;
+    case dusk::RupeeSlidePickupAnimation::BackJump: return daAlink_c::ANM_BACK_JUMP;
+    case dusk::RupeeSlidePickupAnimation::RollCrash: return daAlink_c::ANM_ROLL_CRASH;
+    case dusk::RupeeSlidePickupAnimation::CrouchStart: return daAlink_c::ANM_CROUCH_START;
+    case dusk::RupeeSlidePickupAnimation::JumpStart: return daAlink_c::ANM_JUMP_START;
+    case dusk::RupeeSlidePickupAnimation::CrawlStart: return daAlink_c::ANM_CRAWL_START;
+    case dusk::RupeeSlidePickupAnimation::PushLight: return daAlink_c::ANM_PUSH_LIGHT;
+    case dusk::RupeeSlidePickupAnimation::PullLight: return daAlink_c::ANM_PULL_LIGHT;
+    case dusk::RupeeSlidePickupAnimation::SideRollLeft: return daAlink_c::ANM_SIDE_ROLL_LEFT;
+    case dusk::RupeeSlidePickupAnimation::SideRollRight: return daAlink_c::ANM_SIDE_ROLL_RIGHT;
+    case dusk::RupeeSlidePickupAnimation::BottleOpen: return daAlink_c::ANM_BOTTLE_OPEN;
+    case dusk::RupeeSlidePickupAnimation::LanternSwing: return daAlink_c::ANM_LANTERN_SWING;
+    case dusk::RupeeSlidePickupAnimation::GrassWhistleStart: return daAlink_c::ANM_GRASS_WHISTLE_START;
+    case dusk::RupeeSlidePickupAnimation::HawkCatch: return daAlink_c::ANM_HAWK_CATCH;
+    case dusk::RupeeSlidePickupAnimation::Entrance: return daAlink_c::ANM_ENTRANCE;
+    case dusk::RupeeSlidePickupAnimation::Appearance: return daAlink_c::ANM_APPEARANCE;
     case dusk::RupeeSlidePickupAnimation::Vanilla:
         return daAlink_c::ANM_GET_A_WAIT;
     }

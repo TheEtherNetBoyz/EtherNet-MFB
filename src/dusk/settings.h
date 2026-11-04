@@ -149,6 +149,90 @@ enum class RupeeSlidePickupAnimation : u8 {
     AttentionRight = 3,
     AlternateGetItem = 4,
     SixSeven = 5,
+    AlternateIdle = 6,
+    Tired = 7,
+    Crouch = 8,
+    GuardLeft = 9,
+    GuardRight = 10,
+    SmallGuard = 11,
+    TiredGuard = 12,
+    DefensiveCrouch = 13,
+    PushPullReady = 14,
+    Crawl = 15,
+    ServiceWait = 16,
+    Carry = 17,
+    Talk = 18,
+    Holdout = 19,
+    Sit = 20,
+    Walk = 21,
+    Run = 22,
+    StepTurn = 23,
+    FrontRoll = 24,
+    Backflip = 25,
+    Jump = 26,
+    JumpLand = 27,
+    ShieldAttack = 28,
+    GuardBreak = 29,
+    Push = 30,
+    Pull = 31,
+    Throw = 32,
+    HeavyThrow = 33,
+    LargePickup = 34,
+    BoomerangCatch = 35,
+    SlideForward = 36,
+    SlideBackward = 37,
+    GetItemStart = 38,
+    TurnBack = 39,
+    PickUp = 40,
+    RollJump = 41,
+    WaitWind = 42,
+    BottleDrink = 43,
+    BottlePour = 44,
+    GrassWhistle = 45,
+    HawkWait = 46,
+    CowStroke = 47,
+    Fall = 48,
+    HeavyBoots = 49,
+    SumoWait = 50,
+    SumoWin = 51,
+    SumoShiko = 52,
+    IronBallWait = 53,
+    CopyRodSwing = 54,
+    AlternateWait = 55,
+    GroundStun = 56,
+    KeyCatch = 57,
+    InsectWait = 58,
+    TradeItemWait = 59,
+    DemoKamae = 60,
+    Dive = 61,
+    Surprised = 62,
+    LookDown = 63,
+    SwimWait = 64,
+    SideJumpLeft = 65,
+    SideJumpRight = 66,
+    BackJump = 67,
+    RollCrash = 68,
+    CrouchStart = 69,
+    JumpStart = 70,
+    CrawlStart = 71,
+    PushLight = 72,
+    PullLight = 73,
+    SideRollLeft = 74,
+    SideRollRight = 75,
+    BottleOpen = 76,
+    LanternSwing = 77,
+    GrassWhistleStart = 78,
+    HawkCatch = 79,
+    Entrance = 80,
+    Appearance = 81,
+};
+
+enum class RupeeSlideRupeeAttachment : u8 {
+    Vanilla = 0,
+    LeftHand = 1,
+    RightHand = 2,
+    Head = 3,
+    World = 4,
 };
 
 enum class AudioOutputMode : u8 {
@@ -264,7 +348,13 @@ struct ConfigEnumRange<RupeeSlideDriftDistance> {
 template <>
 struct ConfigEnumRange<RupeeSlidePickupAnimation> {
     static constexpr auto min = RupeeSlidePickupAnimation::Vanilla;
-    static constexpr auto max = RupeeSlidePickupAnimation::SixSeven;
+    static constexpr auto max = RupeeSlidePickupAnimation::Appearance;
+};
+
+template <>
+struct ConfigEnumRange<RupeeSlideRupeeAttachment> {
+    static constexpr auto min = RupeeSlideRupeeAttachment::Vanilla;
+    static constexpr auto max = RupeeSlideRupeeAttachment::World;
 };
 
 template <>
@@ -495,6 +585,15 @@ struct UserSettings {
         ConfigVar<RupeeSlideDriftDistance> rupeeSlideDriftDistance;
         ConfigVar<RupeeSlidePickupAnimation> rupeeSlidePickupAnimation;
         ConfigVar<int> rupeeSlideSixSevenSpeed;
+        ConfigVar<bool> rupeeSlideRupeeTransformEnabled;
+        ConfigVar<RupeeSlideRupeeAttachment> rupeeSlideRupeeAttachment;
+        ConfigVar<int> rupeeSlideRupeeOffsetX;
+        ConfigVar<int> rupeeSlideRupeeOffsetY;
+        ConfigVar<int> rupeeSlideRupeeOffsetZ;
+        ConfigVar<int> rupeeSlideRupeeRotationX;
+        ConfigVar<int> rupeeSlideRupeeRotationY;
+        ConfigVar<int> rupeeSlideRupeeRotationZ;
+        ConfigVar<int> rupeeSlideRupeeScale;
         ConfigVar<bool> rupeeSlideDriftHop;
         ConfigVar<bool> rupeeSlideVanillaAngleCorrection;
         ConfigVar<bool> showRupeeSlideDriftArrow;

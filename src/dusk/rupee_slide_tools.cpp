@@ -1,6 +1,7 @@
 #include "f_op/f_op_actor_mng.h"
 #include "f_op/f_op_camera_mng.h"
 #include "SSystem/SComponent/c_xyz.h"
+#include "SSystem/SComponent/c_phase.h"
 #include "d/actor/d_a_alink.h"
 #include "d/d_bg_s.h"
 #include "d/d_bg_w.h"
@@ -106,12 +107,18 @@ namespace dusk {
         DriftOverrideState s_driftOverride;
 
         struct PickupAnimationSwapState {
-            int anchorFrames = 0;
-            cXyz position;
-            cXyz velocity;
+            bool wasPickupActive = false;
         };
 
         PickupAnimationSwapState s_pickupAnimationSwap;
+        request_of_phase_process_class s_sumouAnimationPhase{};
+        bool s_sumouAnimationsReady = false;
+
+        bool isSumouPickupAnimation(RupeeSlidePickupAnimation animation) {
+            return animation == RupeeSlidePickupAnimation::SumoWait ||
+                   animation == RupeeSlidePickupAnimation::SumoWin ||
+                   animation == RupeeSlidePickupAnimation::SumoShiko;
+        }
 
         daAlink_c::daAlink_ANM getRupeeSlidePickupAnimation(
             RupeeSlidePickupAnimation animation) {
@@ -126,6 +133,105 @@ namespace dusk {
                 return daAlink_c::ANM_GET_A_WAIT2;
             case RupeeSlidePickupAnimation::SixSeven:
                 return daAlink_c::ANM_GET_A_WAIT;
+            case RupeeSlidePickupAnimation::AlternateIdle:
+                return daAlink_c::ANM_WAIT_B;
+            case RupeeSlidePickupAnimation::Tired:
+                return daAlink_c::ANM_WAIT_TIRED;
+            case RupeeSlidePickupAnimation::Crouch:
+                return daAlink_c::ANM_CROUCH;
+            case RupeeSlidePickupAnimation::GuardLeft:
+                return daAlink_c::ANM_GUARD_LEFT;
+            case RupeeSlidePickupAnimation::GuardRight:
+                return daAlink_c::ANM_GUARD_RIGHT;
+            case RupeeSlidePickupAnimation::SmallGuard:
+                return daAlink_c::ANM_SMALL_GUARD;
+            case RupeeSlidePickupAnimation::TiredGuard:
+                return daAlink_c::ANM_SMALL_GUARD_TIRED;
+            case RupeeSlidePickupAnimation::DefensiveCrouch:
+                return daAlink_c::ANM_CROUCH_DEF;
+            case RupeeSlidePickupAnimation::PushPullReady:
+                return daAlink_c::ANM_WAIT_PUSH_PULL;
+            case RupeeSlidePickupAnimation::Crawl:
+                return daAlink_c::ANM_CRAWL;
+            case RupeeSlidePickupAnimation::ServiceWait:
+                return daAlink_c::ANM_SERVICE_WAIT;
+            case RupeeSlidePickupAnimation::Carry:
+                return daAlink_c::ANM_CARRY;
+            case RupeeSlidePickupAnimation::Talk:
+                return daAlink_c::ANM_TALK;
+            case RupeeSlidePickupAnimation::Holdout:
+                return daAlink_c::ANM_GET_HOLDOUT;
+            case RupeeSlidePickupAnimation::Sit:
+                return daAlink_c::ANM_WAIT_SIT;
+            case RupeeSlidePickupAnimation::Walk: return daAlink_c::ANM_WALK;
+            case RupeeSlidePickupAnimation::Run: return daAlink_c::ANM_RUN;
+            case RupeeSlidePickupAnimation::StepTurn: return daAlink_c::ANM_STEP_TURN;
+            case RupeeSlidePickupAnimation::FrontRoll: return daAlink_c::ANM_FRONT_ROLL;
+            case RupeeSlidePickupAnimation::Backflip: return daAlink_c::ANM_BACKFLIP;
+            case RupeeSlidePickupAnimation::Jump: return daAlink_c::ANM_JUMP;
+            case RupeeSlidePickupAnimation::JumpLand: return daAlink_c::ANM_JUMP_LAND;
+            case RupeeSlidePickupAnimation::ShieldAttack: return daAlink_c::ANM_SHIELD_ATTACK;
+            case RupeeSlidePickupAnimation::GuardBreak: return daAlink_c::ANM_GUARD_BREAK;
+            case RupeeSlidePickupAnimation::Push: return daAlink_c::ANM_PUSH;
+            case RupeeSlidePickupAnimation::Pull: return daAlink_c::ANM_PULL;
+            case RupeeSlidePickupAnimation::Throw: return daAlink_c::ANM_THROW;
+            case RupeeSlidePickupAnimation::HeavyThrow: return daAlink_c::ANM_THROW_HEAVY;
+            case RupeeSlidePickupAnimation::LargePickup:
+                return daAlink_c::ANM_PICK_UP_LARGE;
+            case RupeeSlidePickupAnimation::BoomerangCatch:
+                return daAlink_c::ANM_BOOMERANG_CATCH;
+            case RupeeSlidePickupAnimation::SlideForward:
+                return daAlink_c::ANM_SLIDE_FORWARD;
+            case RupeeSlidePickupAnimation::SlideBackward:
+                return daAlink_c::ANM_SLIDE_BACKWARD;
+            case RupeeSlidePickupAnimation::GetItemStart: return daAlink_c::ANM_GET_A;
+            case RupeeSlidePickupAnimation::TurnBack: return daAlink_c::ANM_TURN_BACK;
+            case RupeeSlidePickupAnimation::PickUp: return daAlink_c::ANM_PICK_UP;
+            case RupeeSlidePickupAnimation::RollJump: return daAlink_c::ANM_ROLL_JUMP;
+            case RupeeSlidePickupAnimation::WaitWind: return daAlink_c::ANM_WAIT_WIND;
+            case RupeeSlidePickupAnimation::BottleDrink: return daAlink_c::ANM_BOTTLE_DRINK;
+            case RupeeSlidePickupAnimation::BottlePour: return daAlink_c::ANM_BOTTLE_POUR;
+            case RupeeSlidePickupAnimation::GrassWhistle:
+                return daAlink_c::ANM_GRASS_WHISTLE_PLAY;
+            case RupeeSlidePickupAnimation::HawkWait: return daAlink_c::ANM_HAWK_WAIT;
+            case RupeeSlidePickupAnimation::CowStroke: return daAlink_c::ANM_COW_STROKE;
+            case RupeeSlidePickupAnimation::Fall: return daAlink_c::ANM_FALL;
+            case RupeeSlidePickupAnimation::HeavyBoots:
+                return daAlink_c::ANM_HVY_BOOTS_PUT_ON;
+            case RupeeSlidePickupAnimation::SumoWait:
+                return daAlink_c::ANM_SUMOU_FIGHT_WAIT;
+            case RupeeSlidePickupAnimation::SumoWin: return daAlink_c::ANM_SUMOU_WIN;
+            case RupeeSlidePickupAnimation::SumoShiko: return daAlink_c::ANM_SUMOU_SHIKO;
+            case RupeeSlidePickupAnimation::IronBallWait: return daAlink_c::ANM_IRONBALL_WAIT;
+            case RupeeSlidePickupAnimation::CopyRodSwing: return daAlink_c::ANM_COPYROD_SWING;
+            case RupeeSlidePickupAnimation::AlternateWait: return daAlink_c::ANM_WAIT_F;
+            case RupeeSlidePickupAnimation::GroundStun: return daAlink_c::ANM_ELEC_STUN_GND;
+            case RupeeSlidePickupAnimation::KeyCatch: return daAlink_c::ANM_KEY_CATCH;
+            case RupeeSlidePickupAnimation::InsectWait: return daAlink_c::ANM_WAIT_INSECT;
+            case RupeeSlidePickupAnimation::TradeItemWait:
+                return daAlink_c::ANM_TRADE_ITEM_WAIT;
+            case RupeeSlidePickupAnimation::DemoKamae: return daAlink_c::ANM_DEMO_KAMAE;
+            case RupeeSlidePickupAnimation::Dive: return daAlink_c::ANM_DIVE;
+            case RupeeSlidePickupAnimation::Surprised: return daAlink_c::ANM_ODOROKU;
+            case RupeeSlidePickupAnimation::LookDown: return daAlink_c::ANM_ASHIMOTO;
+            case RupeeSlidePickupAnimation::SwimWait: return daAlink_c::ANM_SWIM_WAIT;
+            case RupeeSlidePickupAnimation::SideJumpLeft: return daAlink_c::ANM_SIDE_JUMP_LEFT;
+            case RupeeSlidePickupAnimation::SideJumpRight: return daAlink_c::ANM_SIDE_JUMP_RIGHT;
+            case RupeeSlidePickupAnimation::BackJump: return daAlink_c::ANM_BACK_JUMP;
+            case RupeeSlidePickupAnimation::RollCrash: return daAlink_c::ANM_ROLL_CRASH;
+            case RupeeSlidePickupAnimation::CrouchStart: return daAlink_c::ANM_CROUCH_START;
+            case RupeeSlidePickupAnimation::JumpStart: return daAlink_c::ANM_JUMP_START;
+            case RupeeSlidePickupAnimation::CrawlStart: return daAlink_c::ANM_CRAWL_START;
+            case RupeeSlidePickupAnimation::PushLight: return daAlink_c::ANM_PUSH_LIGHT;
+            case RupeeSlidePickupAnimation::PullLight: return daAlink_c::ANM_PULL_LIGHT;
+            case RupeeSlidePickupAnimation::SideRollLeft: return daAlink_c::ANM_SIDE_ROLL_LEFT;
+            case RupeeSlidePickupAnimation::SideRollRight: return daAlink_c::ANM_SIDE_ROLL_RIGHT;
+            case RupeeSlidePickupAnimation::BottleOpen: return daAlink_c::ANM_BOTTLE_OPEN;
+            case RupeeSlidePickupAnimation::LanternSwing: return daAlink_c::ANM_LANTERN_SWING;
+            case RupeeSlidePickupAnimation::GrassWhistleStart: return daAlink_c::ANM_GRASS_WHISTLE_START;
+            case RupeeSlidePickupAnimation::HawkCatch: return daAlink_c::ANM_HAWK_CATCH;
+            case RupeeSlidePickupAnimation::Entrance: return daAlink_c::ANM_ENTRANCE;
+            case RupeeSlidePickupAnimation::Appearance: return daAlink_c::ANM_APPEARANCE;
             case RupeeSlidePickupAnimation::Vanilla:
                 return daAlink_c::ANM_GET_A_WAIT;
             }
@@ -136,67 +242,65 @@ namespace dusk {
             static bool initialized = false;
             static RupeeSlidePickupAnimation previous = RupeeSlidePickupAnimation::Vanilla;
             const auto selected = getSettings().game.rupeeSlidePickupAnimation.getValue();
+            bool sumouArchiveBecameReady = false;
+            if (isSumouPickupAnimation(selected) && !s_sumouAnimationsReady) {
+                const cPhs_Step phase = dComIfG_resLoad(&s_sumouAnimationPhase, "alSumou");
+                if (phase == cPhs_COMPLEATE_e) {
+                    s_sumouAnimationsReady = true;
+                    sumouArchiveBecameReady = true;
+                }
+            }
+            const bool pickupActive = player != nullptr && dComIfGp_event_runCheck() &&
+                                      player->checkGetItemMode() && !player->checkWolf();
             if (!initialized) {
                 previous = selected;
                 initialized = true;
-                return;
             }
-            if (s_pickupAnimationSwap.anchorFrames > 0 && player != nullptr) {
-                // The newly selected animation applies its root transform on the simulation ticks
-                // after setSingleAnimeBase(). Hold Link at the pre-swap coordinates through that
-                // handoff, then release him before normal drift resumes.
-                player->current.pos = s_pickupAnimationSwap.position;
-                player->old.pos = s_pickupAnimationSwap.position;
-                player->speed = s_pickupAnimationSwap.velocity;
-                --s_pickupAnimationSwap.anchorFrames;
+
+            const bool enteredPickup = pickupActive && !s_pickupAnimationSwap.wasPickupActive;
+            const bool selectionChanged = selected != previous;
+            if (player != nullptr && pickupActive &&
+                (enteredPickup || selectionChanged || sumouArchiveBecameReady) &&
+                selected != RupeeSlidePickupAnimation::Vanilla &&
+                (!isSumouPickupAnimation(selected) || s_sumouAnimationsReady))
+            {
+                const cXyz currentPosition = player->current.pos;
+                if ((selectionChanged && !enteredPickup) || sumouArchiveBecameReady) {
+                    const cXyz velocity = player->speed;
+                    player->setSingleAnimeBase(getRupeeSlidePickupAnimation(selected));
+                    player->current.pos = currentPosition;
+                    player->old.pos = currentPosition;
+                    player->speed = velocity;
+                }
                 s_driftOverride = {};
             }
 
-            if (selected == previous) {
-                return;
-            }
             previous = selected;
 
-            if (player == nullptr || !dComIfGp_event_runCheck() ||
-                !player->checkGetItemMode() || player->checkWolf()) {
-                return;
+            if (player != nullptr && pickupActive &&
+                selected != RupeeSlidePickupAnimation::Vanilla)
+            {
+                // Link's player update exposes the exact world-space displacement contributed by
+                // the animation root in these fields. Remove only that contribution every frame.
+                // The slide's own movement, drift override, velocity, and collision displacement
+                // remain untouched, so motion continues normally while the pose stays anchored.
+                player->current.pos.x -= player->field_0x3464;
+                player->current.pos.z -= player->field_0x3468;
             }
-
-            const cXyz currentPosition = player->current.pos;
-            const cXyz velocity = player->speed;
-            player->setSingleAnimeBase(getRupeeSlidePickupAnimation(selected));
-            // Some Link animations carry a different root transform. A live pose swap should
-            // change only the rendered pose, never relocate Link or disturb the active slide.
-            player->current.pos = currentPosition;
-            player->old.pos = currentPosition;
-            player->speed = velocity;
-            s_pickupAnimationSwap.anchorFrames = 2;
-            s_pickupAnimationSwap.position = currentPosition;
-            s_pickupAnimationSwap.velocity = velocity;
-            // A pose swap restarts the animation frame controller. Do not treat that restart as a
-            // completed drift cycle or include a partial old-pose cycle in the next measurement.
-            s_driftOverride = {};
+            s_pickupAnimationSwap.wasPickupActive = pickupActive;
         }
 
         bool isRupeeSlideHoldAnimationActive(const daAlink_c* player) {
             if (player == nullptr) {
                 return false;
             }
-            switch (getSettings().game.rupeeSlidePickupAnimation.getValue()) {
-            case RupeeSlidePickupAnimation::Idle:
-                return player->checkUnderMove0BckNoArc(daAlink_c::ANM_WAIT);
-            case RupeeSlidePickupAnimation::AttentionLeft:
-                return player->checkUnderMove0BckNoArc(daAlink_c::ANM_ATN_WAIT_LEFT);
-            case RupeeSlidePickupAnimation::AttentionRight:
-                return player->checkUnderMove0BckNoArc(daAlink_c::ANM_ATN_WAIT_RIGHT);
-            case RupeeSlidePickupAnimation::AlternateGetItem:
-                return player->checkUnderMove0BckNoArc(daAlink_c::ANM_GET_A_WAIT2);
-            case RupeeSlidePickupAnimation::SixSeven:
-                return player->checkAnyUnderAnime(dRes_ID_ALANM_BCK_GETAWAIT_e);
-            case RupeeSlidePickupAnimation::Vanilla:
+            const auto selected = getSettings().game.rupeeSlidePickupAnimation.getValue();
+            if (selected == RupeeSlidePickupAnimation::Vanilla ||
+                selected == RupeeSlidePickupAnimation::SixSeven)
+            {
                 return player->checkAnyUnderAnime(dRes_ID_ALANM_BCK_GETAWAIT_e);
             }
-            return false;
+            return player->checkUnderMove0BckNoArc(getRupeeSlidePickupAnimation(selected));
         }
 
         float customDriftDistance(RupeeSlideDriftDistance distance) {

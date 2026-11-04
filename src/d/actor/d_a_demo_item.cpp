@@ -21,6 +21,49 @@ static cXyz l_wolf_offset = cXyz(13.0f, 135.0f, 57.0f);
 
 static cXyz l_horse_offset = cXyz(0.0f, 20.0f, 54.0f);
 
+#if TARGET_PC
+namespace {
+daDitem_c* s_worldRupeeActor = nullptr;
+dusk::RupeeSlideRupeeAttachment s_worldRupeeMode = dusk::RupeeSlideRupeeAttachment::Vanilla;
+cXyz s_worldRupeeAnchor;
+void applyCustomRupeePosition(daDitem_c* item, daPy_py_c* player) {
+    auto& settings = dusk::getSettings().game;
+    if (!settings.rupeeSlideRupeeTransformEnabled.getValue()) return;
+
+    const auto attachment = settings.rupeeSlideRupeeAttachment.getValue();
+    switch (attachment) {
+    case dusk::RupeeSlideRupeeAttachment::LeftHand:
+        item->current.pos = player->getLeftHandPos();
+        break;
+    case dusk::RupeeSlideRupeeAttachment::RightHand:
+        item->current.pos = player->getRightHandPos();
+        break;
+    case dusk::RupeeSlideRupeeAttachment::Head:
+        item->current.pos = player->getHeadTopPos();
+        break;
+    case dusk::RupeeSlideRupeeAttachment::World:
+        if (s_worldRupeeActor != item || s_worldRupeeMode != attachment) {
+            s_worldRupeeAnchor = item->current.pos;
+        }
+        item->current.pos = s_worldRupeeAnchor;
+        break;
+    case dusk::RupeeSlideRupeeAttachment::Vanilla:
+        break;
+    }
+    s_worldRupeeActor = item;
+    s_worldRupeeMode = attachment;
+    item->current.pos.x += settings.rupeeSlideRupeeOffsetX.getValue();
+    item->current.pos.y += settings.rupeeSlideRupeeOffsetY.getValue();
+    item->current.pos.z += settings.rupeeSlideRupeeOffsetZ.getValue();
+}
+
+s16 degreesToAngle(int degrees) {
+    return static_cast<s16>((degrees % 360) * (65536.0f / 360.0f));
+}
+
+}
+#endif
+
 #if DEBUG
 
 class DitemHIO_c 
@@ -356,6 +399,9 @@ void daDitem_c::set_pos() {
 
     if (chkArgFlag(0x8)) {
         current.pos = mOffsetPos;
+#if TARGET_PC
+        applyCustomRupeePosition(this, player);
+#endif
         return;
     } else if (chkArgFlag(0x2)) {
         offset = offset_tbl[1];
@@ -379,6 +425,10 @@ void daDitem_c::set_pos() {
 
     cLib_offsetPos(&pos, &sp38, player->shape_angle.y, &offset);
     current.pos = pos;
+
+#if TARGET_PC
+    applyCustomRupeePosition(this, player);
+#endif
 }
 
 void daDitem_c::anim_control() {
@@ -401,7 +451,15 @@ void daDitem_c::settingEffectLight() {
 }
 
 void daDitem_c::set_mtx() {
-    mpModel->setBaseScale(scale);
+    cXyz modelScale = scale;
+#if TARGET_PC
+    const auto& settings = dusk::getSettings().game;
+    const bool customize = settings.rupeeSlideRupeeTransformEnabled.getValue();
+    if (customize) {
+        modelScale *= settings.rupeeSlideRupeeScale.getValue() / 100.0f;
+    }
+#endif
+    mpModel->setBaseScale(modelScale);
 
     if (m_itemNo != dItemNo_DUNGEON_EXIT_e && m_itemNo != dItemNo_DUNGEON_BACK_e && m_itemNo != dItemNo_LV7_DUNGEON_EXIT_e && m_itemNo != dItemNo_DUNGEON_EXIT_2_e) {
         s16 var_r28 = 0xFFFF / 250;
@@ -409,7 +467,18 @@ void daDitem_c::set_mtx() {
     }
 
     mDoMtx_stack_c::transS(current.pos.x, current.pos.y, current.pos.z);
+#if TARGET_PC
+    if (customize) {
+        mDoMtx_stack_c::XrotM(degreesToAngle(settings.rupeeSlideRupeeRotationX.getValue()));
+    }
+#endif
     mDoMtx_stack_c::YrotM(current.angle.y);
+#if TARGET_PC
+    if (customize) {
+        mDoMtx_stack_c::YrotM(degreesToAngle(settings.rupeeSlideRupeeRotationY.getValue()));
+        mDoMtx_stack_c::ZrotM(degreesToAngle(settings.rupeeSlideRupeeRotationZ.getValue()));
+    }
+#endif
     mpModel->setBaseTRMtx(mDoMtx_stack_c::get());
 }
 
