@@ -30,6 +30,7 @@ enum class DocumentScope : u8 {
     GraphicsTuner,
     RupeeSlideAnimationTuner,
     RupeeSlideRupeeTuner,
+    RupeeSlideRupeeSettings,
 };
 
 struct Toast {

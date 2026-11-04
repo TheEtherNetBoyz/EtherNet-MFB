@@ -1313,7 +1313,7 @@ Rml::String rupee_slide_rupee_value(RupeeSlideRupeeOption option) {
 }
 
 template <typename T>
-void rupee_slide_rupee_tuner_control(Window& window, Pane& leftPane, Pane& rightPane,
+void rupee_slide_rupee_tuner_control(Document& window, Pane& leftPane, Pane& rightPane,
     ConfigVar<T>& var, RupeeSlideRupeeOption option, const char* key, const char* helpText,
     bool duplicateOffset = false) {
     auto disabled = [duplicateOffset] {
@@ -1328,6 +1328,7 @@ void rupee_slide_rupee_tuner_control(Window& window, Pane& leftPane, Pane& right
         .isModified = [&var] { return var.getValue() != var.getDefaultValue(); },
         .submit = false,
     });
+    button.root()->SetClass("compact", true);
     leftPane.register_control(
         button.on_nav_command([&window, option, disabled](Rml::Event&, NavCommand cmd) {
             if ((cmd == NavCommand::Confirm || cmd == NavCommand::Left ||
@@ -1344,66 +1345,259 @@ void rupee_slide_rupee_tuner_control(Window& window, Pane& leftPane, Pane& right
         });
 }
 
+const Rml::String kRupeeSlideRupeeSettingsDocumentSource = R"RML(
+<rml>
+<head>
+    <link type="text/rcss" href="res/rml/theme.rcss" />
+    <link type="text/rcss" href="res/rml/tuner.rcss" />
+</head>
+<body>
+    <tuner-root id="root">
+        <graphics-tuner>
+            <tuner-header>
+                <tuner-title id="title" />
+            </tuner-header>
+            <tuner-settings-list id="settings-list">
+                <pane id="controls" />
+            </tuner-settings-list>
+            <tuner-description id="description">
+                <pane id="details" />
+            </tuner-description>
+            <tuner-divider />
+            <tuner-footer id="footer" />
+        </graphics-tuner>
+    </tuner-root>
+</body>
+</rml>
+)RML";
+
+class RupeeSlideRupeeSettingsWindow final : public Document {
+public:
+    enum class Group {
+        Original,
+        Duplicate,
+    };
+
+    explicit RupeeSlideRupeeSettingsWindow(Group group)
+        : Document(kRupeeSlideRupeeSettingsDocumentSource, false,
+              DocumentScope::RupeeSlideRupeeSettings),
+          mGroup(group) {
+        if (mDocument == nullptr) {
+            return;
+        }
+
+        mRoot = mDocument->GetElementById("root");
+        if (auto* title = mDocument->GetElementById("title")) {
+            append_text(title, group == Group::Original ? "Pickup Rupee Settings"
+                                                          : "Duplicate Rupee Settings");
+        }
+
+        if (auto* controls = mDocument->GetElementById("controls")) {
+            mControls = &add_component<Pane>(controls, Pane::Type::Controlled);
+        }
+        if (auto* details = mDocument->GetElementById("details")) {
+            mDetails = &add_component<Pane>(details, Pane::Type::Uncontrolled);
+        }
+        if (mControls != nullptr && mDetails != nullptr) {
+            build_controls();
+        }
+
+        if (auto* footer = mDocument->GetElementById("footer")) {
+            auto& returnButton = add_component<Button>(footer, "\xE2\x86\x90 Return",
+                                           "footer-button")
+                                     .on_pressed([this] { pop(); });
+            returnButton.root()->SetClass("return", true);
+            auto& resetButton =
+                add_component<Button>(footer, "Reset to default", "footer-button")
+                    .on_pressed([this] { reset_group(); });
+            resetButton.root()->SetClass("reset", true);
+        }
+
+        listen(mRoot, Rml::EventId::Transitionend, [this](Rml::Event& event) {
+            if (event.GetTargetElement() == mRoot && !mRoot->HasAttribute("open") &&
+                Document::visible()) {
+                Document::hide(mPendingClose);
+            }
+        });
+    }
+
+    void show() override {
+        Document::show();
+        if (mRoot != nullptr) {
+            mRoot->SetAttribute("open", "");
+        }
+        mDoAud_seStartMenu(kSoundWindowOpen);
+    }
+
+    void hide(bool close) override {
+        config::save();
+        if (mRoot != nullptr) {
+            mRoot->RemoveAttribute("open");
+        }
+        if (close) {
+            mPendingClose = true;
+            mDoAud_seStartMenu(kSoundWindowClose);
+        }
+    }
+
+    void update() override {
+        for (const auto& component : mComponents) {
+            component->update();
+        }
+        Document::update();
+    }
+
+    bool focus() override {
+        return mControls != nullptr && mControls->focus();
+    }
+
+    bool visible() const override {
+        return mRoot != nullptr && mRoot->HasAttribute("open");
+    }
+
+protected:
+    bool handle_nav_command(Rml::Event& event, NavCommand cmd) override {
+        if (cmd == NavCommand::Cancel) {
+            pop();
+            return true;
+        }
+        return Document::handle_nav_command(event, cmd);
+    }
+
+private:
+    template <typename T, typename... Args>
+    requires std::is_base_of_v<Component, T> T& add_component(Args&&... args) {
+        auto child = std::make_unique<T>(std::forward<Args>(args)...);
+        T& ref = *child;
+        mComponents.emplace_back(std::move(child));
+        return ref;
+    }
+
+    void build_controls() {
+        if (mGroup == Group::Original) {
+            rupee_slide_rupee_tuner_control(*this, *mControls, *mDetails,
+                getSettings().game.rupeeSlideRupeeModel, RupeeSlideRupeeOption::Model,
+                "Rupee Model", "Selects the original pickup color or a native rupee model.");
+            rupee_slide_rupee_tuner_control(*this, *mControls, *mDetails,
+                getSettings().game.rupeeSlideRupeeAttachment, RupeeSlideRupeeOption::Attachment,
+                "Rupee Attachment", "Chooses the rupee's anchor point.");
+            rupee_slide_rupee_tuner_control(*this, *mControls, *mDetails,
+                getSettings().game.rupeeSlideRupeeOffsetX, RupeeSlideRupeeOption::OffsetX,
+                "Rupee X Offset", "Moves the pickup rupee on the world X axis.");
+            rupee_slide_rupee_tuner_control(*this, *mControls, *mDetails,
+                getSettings().game.rupeeSlideRupeeOffsetY, RupeeSlideRupeeOption::OffsetY,
+                "Rupee Y Offset", "Moves the pickup rupee vertically.");
+            rupee_slide_rupee_tuner_control(*this, *mControls, *mDetails,
+                getSettings().game.rupeeSlideRupeeOffsetZ, RupeeSlideRupeeOption::OffsetZ,
+                "Rupee Z Offset", "Moves the pickup rupee on the world Z axis.");
+            rupee_slide_rupee_tuner_control(*this, *mControls, *mDetails,
+                getSettings().game.rupeeSlideRupeeRotationX, RupeeSlideRupeeOption::RotationX,
+                "Rupee X Rotation", "Adds rotation around the rupee's X axis.");
+            rupee_slide_rupee_tuner_control(*this, *mControls, *mDetails,
+                getSettings().game.rupeeSlideRupeeRotationY, RupeeSlideRupeeOption::RotationY,
+                "Rupee Y Rotation", "Adds rotation around the rupee's spinning Y axis.");
+            rupee_slide_rupee_tuner_control(*this, *mControls, *mDetails,
+                getSettings().game.rupeeSlideRupeeRotationZ, RupeeSlideRupeeOption::RotationZ,
+                "Rupee Z Rotation", "Adds rotation around the rupee's Z axis.");
+            rupee_slide_rupee_tuner_control(*this, *mControls, *mDetails,
+                getSettings().game.rupeeSlideRupeeScale, RupeeSlideRupeeOption::Scale,
+                "Rupee Scale", "Scales the pickup rupee without changing Link or displacement.");
+            return;
+        }
+
+        rupee_slide_rupee_tuner_control(*this, *mControls, *mDetails,
+            getSettings().game.rupeeSlideRupeeDuplicateModel,
+            RupeeSlideRupeeOption::DuplicateModel, "Duplicate Rupee Model",
+            "Selects the duplicate's native rupee color independently.", true);
+        rupee_slide_rupee_tuner_control(*this, *mControls, *mDetails,
+            getSettings().game.rupeeSlideRupeeDuplicateAttachment,
+            RupeeSlideRupeeOption::DuplicateAttachment, "Duplicate Rupee Attachment",
+            "Chooses the duplicate's anchor independently.", true);
+        rupee_slide_rupee_tuner_control(*this, *mControls, *mDetails,
+            getSettings().game.rupeeSlideRupeeDuplicateOffsetX,
+            RupeeSlideRupeeOption::DuplicateOffsetX, "Duplicate Rupee X Offset",
+            "Moves the visual duplicate on the world X axis.", true);
+        rupee_slide_rupee_tuner_control(*this, *mControls, *mDetails,
+            getSettings().game.rupeeSlideRupeeDuplicateOffsetY,
+            RupeeSlideRupeeOption::DuplicateOffsetY, "Duplicate Rupee Y Offset",
+            "Moves the visual duplicate vertically.", true);
+        rupee_slide_rupee_tuner_control(*this, *mControls, *mDetails,
+            getSettings().game.rupeeSlideRupeeDuplicateOffsetZ,
+            RupeeSlideRupeeOption::DuplicateOffsetZ, "Duplicate Rupee Z Offset",
+            "Moves the visual duplicate on the world Z axis.", true);
+    }
+
+    void reset_group() {
+        mDoAud_seStartMenu(kSoundItemChange);
+        if (mGroup == Group::Original) {
+            getSettings().game.rupeeSlideRupeeModel.setValue(
+                getSettings().game.rupeeSlideRupeeModel.getDefaultValue());
+            getSettings().game.rupeeSlideRupeeAttachment.setValue(
+                getSettings().game.rupeeSlideRupeeAttachment.getDefaultValue());
+            getSettings().game.rupeeSlideRupeeOffsetX.setValue(
+                getSettings().game.rupeeSlideRupeeOffsetX.getDefaultValue());
+            getSettings().game.rupeeSlideRupeeOffsetY.setValue(
+                getSettings().game.rupeeSlideRupeeOffsetY.getDefaultValue());
+            getSettings().game.rupeeSlideRupeeOffsetZ.setValue(
+                getSettings().game.rupeeSlideRupeeOffsetZ.getDefaultValue());
+            getSettings().game.rupeeSlideRupeeRotationX.setValue(
+                getSettings().game.rupeeSlideRupeeRotationX.getDefaultValue());
+            getSettings().game.rupeeSlideRupeeRotationY.setValue(
+                getSettings().game.rupeeSlideRupeeRotationY.getDefaultValue());
+            getSettings().game.rupeeSlideRupeeRotationZ.setValue(
+                getSettings().game.rupeeSlideRupeeRotationZ.getDefaultValue());
+            getSettings().game.rupeeSlideRupeeScale.setValue(
+                getSettings().game.rupeeSlideRupeeScale.getDefaultValue());
+        } else {
+            getSettings().game.rupeeSlideRupeeDuplicateModel.setValue(
+                getSettings().game.rupeeSlideRupeeDuplicateModel.getDefaultValue());
+            getSettings().game.rupeeSlideRupeeDuplicateAttachment.setValue(
+                getSettings().game.rupeeSlideRupeeDuplicateAttachment.getDefaultValue());
+            getSettings().game.rupeeSlideRupeeDuplicateOffsetX.setValue(
+                getSettings().game.rupeeSlideRupeeDuplicateOffsetX.getDefaultValue());
+            getSettings().game.rupeeSlideRupeeDuplicateOffsetY.setValue(
+                getSettings().game.rupeeSlideRupeeDuplicateOffsetY.getDefaultValue());
+            getSettings().game.rupeeSlideRupeeDuplicateOffsetZ.setValue(
+                getSettings().game.rupeeSlideRupeeDuplicateOffsetZ.getDefaultValue());
+        }
+    }
+
+    Group mGroup;
+    Rml::Element* mRoot = nullptr;
+    Pane* mControls = nullptr;
+    Pane* mDetails = nullptr;
+    std::vector<std::unique_ptr<Component>> mComponents;
+};
+
 void rupee_slide_rupee_controls(Window& window, Pane& leftPane, Pane& rightPane) {
     add_speedrun_disabled_option(leftPane, rightPane,
         getSettings().game.rupeeSlideRupeeTransformEnabled, "Enable Rupee Transform",
         "Enables custom placement, rotation, and scale for the pickup rupee only. Off restores "
         "the original game behavior.");
-    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
-        getSettings().game.rupeeSlideRupeeModel, RupeeSlideRupeeOption::Model,
-        "Rupee Model",
-        "Selects the original pickup color or a native green, blue, yellow, red, purple, "
-        "orange, or silver rupee model.");
-    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
-        getSettings().game.rupeeSlideRupeeAttachment, RupeeSlideRupeeOption::Attachment,
-        "Rupee Attachment",
-        "Chooses the rupee's anchor. Fixed world position captures its current location when "
-        "selected. Vanilla preserves the original pickup placement.");
-    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
-        getSettings().game.rupeeSlideRupeeOffsetX, RupeeSlideRupeeOption::OffsetX,
-        "Rupee X Offset", "Moves the pickup rupee on the world X axis.");
-    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
-        getSettings().game.rupeeSlideRupeeOffsetY, RupeeSlideRupeeOption::OffsetY,
-        "Rupee Y Offset", "Moves the pickup rupee vertically.");
-    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
-        getSettings().game.rupeeSlideRupeeOffsetZ, RupeeSlideRupeeOption::OffsetZ,
-        "Rupee Z Offset", "Moves the pickup rupee on the world Z axis.");
-    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
-        getSettings().game.rupeeSlideRupeeRotationX, RupeeSlideRupeeOption::RotationX,
-        "Rupee X Rotation", "Adds rotation around the rupee's X axis.");
-    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
-        getSettings().game.rupeeSlideRupeeRotationY, RupeeSlideRupeeOption::RotationY,
-        "Rupee Y Rotation", "Adds rotation around the rupee's spinning Y axis.");
-    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
-        getSettings().game.rupeeSlideRupeeRotationZ, RupeeSlideRupeeOption::RotationZ,
-        "Rupee Z Rotation", "Adds rotation around the rupee's Z axis.");
-    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
-        getSettings().game.rupeeSlideRupeeScale, RupeeSlideRupeeOption::Scale,
-        "Rupee Scale", "Scales the pickup rupee without changing Link or slide displacement.");
+    leftPane.register_control(
+        leftPane.add_group_button({.text = "Pickup Rupee Settings"})
+            .on_pressed([&window] {
+                window.push(std::make_unique<RupeeSlideRupeeSettingsWindow>(
+                    RupeeSlideRupeeSettingsWindow::Group::Original));
+            }),
+        rightPane, [](Pane& pane) {
+            pane.clear();
+            pane.add_text("Open the pickup rupee model, attachment, offset, rotation, and "
+                          "scale controls.");
+        });
     add_speedrun_disabled_option(leftPane, rightPane,
         getSettings().game.rupeeSlideRupeeDuplicateEnabled, "Duplicate Pickup Rupee",
         "Shows a second visual-only rupee during pickup slides. It cannot be collected and does not affect Link or slide displacement.");
-    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
-        getSettings().game.rupeeSlideRupeeDuplicateModel,
-        RupeeSlideRupeeOption::DuplicateModel, "Duplicate Rupee Model",
-        "Selects the duplicate's native rupee color independently of the original.", true);
-    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
-        getSettings().game.rupeeSlideRupeeDuplicateAttachment,
-        RupeeSlideRupeeOption::DuplicateAttachment, "Duplicate Rupee Attachment",
-        "Chooses the duplicate's anchor independently. Fixed world position captures its "
-        "current location; Vanilla follows the unmodified pickup position.", true);
-    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
-        getSettings().game.rupeeSlideRupeeDuplicateOffsetX,
-        RupeeSlideRupeeOption::DuplicateOffsetX, "Duplicate Rupee X Offset",
-        "Moves the visual duplicate on the world X axis.", true);
-    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
-        getSettings().game.rupeeSlideRupeeDuplicateOffsetY,
-        RupeeSlideRupeeOption::DuplicateOffsetY, "Duplicate Rupee Y Offset",
-        "Moves the visual duplicate vertically.", true);
-    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
-        getSettings().game.rupeeSlideRupeeDuplicateOffsetZ,
-        RupeeSlideRupeeOption::DuplicateOffsetZ, "Duplicate Rupee Z Offset",
-        "Moves the visual duplicate on the world Z axis.", true);
+    leftPane.register_control(
+        leftPane.add_group_button({.text = "Duplicate Rupee Settings"})
+            .on_pressed([&window] {
+                window.push(std::make_unique<RupeeSlideRupeeSettingsWindow>(
+                    RupeeSlideRupeeSettingsWindow::Group::Duplicate));
+            }),
+        rightPane, [](Pane& pane) {
+            pane.clear();
+            pane.add_text("Open the duplicate rupee model, attachment, and offset controls.");
+        });
 
 }
 
