@@ -154,6 +154,17 @@ constexpr std::array kRupeeSlideRupeeAttachmentModes = {
     "Fixed world position",
 };
 
+constexpr std::array kRupeeSlideRupeeModelModes = {
+    "Original pickup color",
+    "Green rupee",
+    "Blue rupee",
+    "Yellow rupee",
+    "Red rupee",
+    "Purple rupee",
+    "Orange rupee",
+    "Silver rupee",
+};
+
 constexpr std::array kRupeeSlidePickupAnimationModes = {
     "Vanilla rupee hold",
     "Idle",
@@ -1260,6 +1271,10 @@ void rupee_slide_animation_tuner_control(Window& window, Pane& leftPane, Pane& r
 
 Rml::String rupee_slide_rupee_value(RupeeSlideRupeeOption option) {
     switch (option) {
+    case RupeeSlideRupeeOption::Model: {
+        const auto value = getSettings().game.rupeeSlideRupeeModel.getValue();
+        return kRupeeSlideRupeeModelModes[static_cast<int>(value)];
+    }
     case RupeeSlideRupeeOption::Attachment: {
         const auto value = getSettings().game.rupeeSlideRupeeAttachment.getValue();
         return kRupeeSlideRupeeAttachmentModes[static_cast<int>(value)];
@@ -1278,6 +1293,10 @@ Rml::String rupee_slide_rupee_value(RupeeSlideRupeeOption option) {
         return fmt::format("{}°", getSettings().game.rupeeSlideRupeeRotationZ.getValue());
     case RupeeSlideRupeeOption::Scale:
         return fmt::format("{}%", getSettings().game.rupeeSlideRupeeScale.getValue());
+    case RupeeSlideRupeeOption::DuplicateModel: {
+        const auto value = getSettings().game.rupeeSlideRupeeDuplicateModel.getValue();
+        return kRupeeSlideRupeeModelModes[static_cast<int>(value)];
+    }
     case RupeeSlideRupeeOption::DuplicateAttachment: {
         const auto value = getSettings().game.rupeeSlideRupeeDuplicateAttachment.getValue();
         return kRupeeSlideRupeeAttachmentModes[static_cast<int>(value)];
@@ -1331,6 +1350,11 @@ void rupee_slide_rupee_controls(Window& window, Pane& leftPane, Pane& rightPane)
         "Enables custom placement, rotation, and scale for the pickup rupee only. Off restores "
         "the original game behavior.");
     rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
+        getSettings().game.rupeeSlideRupeeModel, RupeeSlideRupeeOption::Model,
+        "Rupee Model",
+        "Selects the original pickup color or a native green, blue, yellow, red, purple, "
+        "orange, or silver rupee model.");
+    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
         getSettings().game.rupeeSlideRupeeAttachment, RupeeSlideRupeeOption::Attachment,
         "Rupee Attachment",
         "Chooses the rupee's anchor. Fixed world position captures its current location when "
@@ -1359,6 +1383,10 @@ void rupee_slide_rupee_controls(Window& window, Pane& leftPane, Pane& rightPane)
     add_speedrun_disabled_option(leftPane, rightPane,
         getSettings().game.rupeeSlideRupeeDuplicateEnabled, "Duplicate Pickup Rupee",
         "Shows a second visual-only rupee during pickup slides. It cannot be collected and does not affect Link or slide displacement.");
+    rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
+        getSettings().game.rupeeSlideRupeeDuplicateModel,
+        RupeeSlideRupeeOption::DuplicateModel, "Duplicate Rupee Model",
+        "Selects the duplicate's native rupee color independently of the original.", true);
     rupee_slide_rupee_tuner_control(window, leftPane, rightPane,
         getSettings().game.rupeeSlideRupeeDuplicateAttachment,
         RupeeSlideRupeeOption::DuplicateAttachment, "Duplicate Rupee Attachment",

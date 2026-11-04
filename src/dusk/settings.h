@@ -235,6 +235,17 @@ enum class RupeeSlideRupeeAttachment : u8 {
     World = 4,
 };
 
+enum class RupeeSlideRupeeModel : u8 {
+    Original = 0,
+    Green = 1,
+    Blue = 2,
+    Yellow = 3,
+    Red = 4,
+    Purple = 5,
+    Orange = 6,
+    Silver = 7,
+};
+
 enum class AudioOutputMode : u8 {
     StereoSpeakers = 0,
     StereoHeadphones = 1,   // spatial audio
@@ -586,6 +597,7 @@ struct UserSettings {
         ConfigVar<RupeeSlidePickupAnimation> rupeeSlidePickupAnimation;
         ConfigVar<int> rupeeSlideSixSevenSpeed;
         ConfigVar<bool> rupeeSlideRupeeTransformEnabled;
+        ConfigVar<RupeeSlideRupeeModel> rupeeSlideRupeeModel;
         ConfigVar<RupeeSlideRupeeAttachment> rupeeSlideRupeeAttachment;
         ConfigVar<int> rupeeSlideRupeeOffsetX;
         ConfigVar<int> rupeeSlideRupeeOffsetY;
@@ -595,6 +607,7 @@ struct UserSettings {
         ConfigVar<int> rupeeSlideRupeeRotationZ;
         ConfigVar<int> rupeeSlideRupeeScale;
         ConfigVar<bool> rupeeSlideRupeeDuplicateEnabled;
+        ConfigVar<RupeeSlideRupeeModel> rupeeSlideRupeeDuplicateModel;
         ConfigVar<RupeeSlideRupeeAttachment> rupeeSlideRupeeDuplicateAttachment;
         ConfigVar<int> rupeeSlideRupeeDuplicateOffsetX;
         ConfigVar<int> rupeeSlideRupeeDuplicateOffsetY;

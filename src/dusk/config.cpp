@@ -322,6 +322,7 @@ template class ConfigImpl<RupeeSlideDriftOverride>;
 template class ConfigImpl<RupeeSlideDriftDistance>;
 template class ConfigImpl<RupeeSlidePickupAnimation>;
 template class ConfigImpl<RupeeSlideRupeeAttachment>;
+template class ConfigImpl<RupeeSlideRupeeModel>;
 template class ConfigImpl<AudioOutputMode>;
 template class ConfigImpl<LetterboxMode>;
 

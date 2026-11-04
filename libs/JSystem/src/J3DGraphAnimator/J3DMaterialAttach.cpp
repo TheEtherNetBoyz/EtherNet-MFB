@@ -302,3 +302,38 @@ int J3DMaterialTable::entryTevRegAnimator(J3DAnmTevRegKey* pAnmTevRegKey) {
 
     return rv;
 }
+
+int J3DMaterialTable::entryTevRegAnimatorForce(J3DAnmTevRegKey* pAnmTevRegKey) {
+    J3D_ASSERT_NULLPTR(650, pAnmTevRegKey != NULL);
+    int rv = 0;
+
+    const u16 cRegNum = pAnmTevRegKey->getCRegUpdateMaterialNum();
+    const u16 kRegNum = pAnmTevRegKey->getKRegUpdateMaterialNum();
+    for (u16 i = 0; i < cRegNum; i++) {
+        if (pAnmTevRegKey->isValidCRegUpdateMaterialID(i)) {
+            const u16 matNo = pAnmTevRegKey->getCRegUpdateMaterialID(i);
+            J3DMaterialAnm* materialAnm = getMaterialNodePointer(matNo)->getMaterialAnm();
+            const J3DAnmCRegKeyTable* table = pAnmTevRegKey->getAnmCRegKeyTable();
+            if (materialAnm == NULL) {
+                rv = 1;
+            } else {
+                J3DTevColorAnm tevColorAnm(i, pAnmTevRegKey);
+                materialAnm->setTevColorAnm(table[i].mColorId, &tevColorAnm);
+            }
+        }
+    }
+    for (u16 i = 0; i < kRegNum; i++) {
+        if (pAnmTevRegKey->isValidKRegUpdateMaterialID(i)) {
+            const u16 matNo = pAnmTevRegKey->getKRegUpdateMaterialID(i);
+            J3DMaterialAnm* materialAnm = getMaterialNodePointer(matNo)->getMaterialAnm();
+            const J3DAnmKRegKeyTable* table = pAnmTevRegKey->getAnmKRegKeyTable();
+            if (materialAnm == NULL) {
+                rv = 1;
+            } else {
+                J3DTevKColorAnm tevKColorAnm(i, pAnmTevRegKey);
+                materialAnm->setTevKColorAnm(table[i].mColorId, &tevKColorAnm);
+            }
+        }
+    }
+    return rv;
+}

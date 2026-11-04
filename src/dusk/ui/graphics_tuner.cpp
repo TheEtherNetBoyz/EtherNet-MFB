@@ -180,6 +180,20 @@ Rml::String format_rupee_slide_attachment(int value) {
     }
 }
 
+Rml::String format_rupee_slide_model(int value) {
+    switch (static_cast<RupeeSlideRupeeModel>(value)) {
+    case RupeeSlideRupeeModel::Original: return "Original pickup color";
+    case RupeeSlideRupeeModel::Green: return "Green rupee";
+    case RupeeSlideRupeeModel::Blue: return "Blue rupee";
+    case RupeeSlideRupeeModel::Yellow: return "Yellow rupee";
+    case RupeeSlideRupeeModel::Red: return "Red rupee";
+    case RupeeSlideRupeeModel::Purple: return "Purple rupee";
+    case RupeeSlideRupeeModel::Orange: return "Orange rupee";
+    case RupeeSlideRupeeModel::Silver: return "Silver rupee";
+    default: return "Unknown";
+    }
+}
+
 Rml::String format_rupee_slide_units(int value) { return fmt::format("{} units", value); }
 
 Rml::String format_rupee_slide_degrees(int value) { return fmt::format("{}°", value); }
@@ -188,6 +202,7 @@ Rml::String format_rupee_slide_scale(int value) { return fmt::format("{}%", valu
 
 const char* rupee_slide_rupee_title(RupeeSlideRupeeOption option) {
     switch (option) {
+    case RupeeSlideRupeeOption::Model: return "Rupee Model";
     case RupeeSlideRupeeOption::Attachment: return "Rupee Attachment";
     case RupeeSlideRupeeOption::OffsetX: return "Rupee X Offset";
     case RupeeSlideRupeeOption::OffsetY: return "Rupee Y Offset";
@@ -196,6 +211,7 @@ const char* rupee_slide_rupee_title(RupeeSlideRupeeOption option) {
     case RupeeSlideRupeeOption::RotationY: return "Rupee Y Rotation";
     case RupeeSlideRupeeOption::RotationZ: return "Rupee Z Rotation";
     case RupeeSlideRupeeOption::Scale: return "Rupee Scale";
+    case RupeeSlideRupeeOption::DuplicateModel: return "Duplicate Rupee Model";
     case RupeeSlideRupeeOption::DuplicateAttachment: return "Duplicate Rupee Attachment";
     case RupeeSlideRupeeOption::DuplicateOffsetX: return "Duplicate Rupee X Offset";
     case RupeeSlideRupeeOption::DuplicateOffsetY: return "Duplicate Rupee Y Offset";
@@ -206,6 +222,8 @@ const char* rupee_slide_rupee_title(RupeeSlideRupeeOption option) {
 
 const char* rupee_slide_rupee_help(RupeeSlideRupeeOption option) {
     switch (option) {
+    case RupeeSlideRupeeOption::Model:
+        return "Selects the original rupee or one of the game's native color variants.";
     case RupeeSlideRupeeOption::Attachment:
         return "Chooses the pickup rupee's anchor. Vanilla preserves the original game position.";
     case RupeeSlideRupeeOption::OffsetX:
@@ -222,6 +240,8 @@ const char* rupee_slide_rupee_help(RupeeSlideRupeeOption option) {
         return "Adds rotation around the pickup rupee's Z axis.";
     case RupeeSlideRupeeOption::Scale:
         return "Scales the pickup rupee without changing Link or slide displacement.";
+    case RupeeSlideRupeeOption::DuplicateModel:
+        return "Selects the duplicate's color independently of the original rupee.";
     case RupeeSlideRupeeOption::DuplicateAttachment:
         return "Chooses an anchor for the duplicate independently of the original rupee.";
     case RupeeSlideRupeeOption::DuplicateOffsetX:
@@ -237,6 +257,28 @@ const char* rupee_slide_rupee_help(RupeeSlideRupeeOption option) {
 
 GraphicsSetting rupee_slide_rupee_setting(RupeeSlideRupeeOption option) {
     switch (option) {
+    case RupeeSlideRupeeOption::Model:
+        return GraphicsSetting{
+            .min = static_cast<int>(RupeeSlideRupeeModel::Original),
+            .max = static_cast<int>(RupeeSlideRupeeModel::Silver),
+            .defaultValue = static_cast<int>(RupeeSlideRupeeModel::Original),
+            .step = 1,
+            .read = []() -> int {
+                return static_cast<int>(getSettings().game.rupeeSlideRupeeModel.getValue());
+            },
+            .write = [](int value) {
+                getSettings().game.rupeeSlideRupeeModel.setValue(
+                    static_cast<RupeeSlideRupeeModel>(value));
+            },
+            .label = format_rupee_slide_model,
+            .cvarName = []() -> const char* {
+                return getSettings().game.rupeeSlideRupeeModel.getName();
+            },
+            .isModified = []() -> bool {
+                const auto& setting = getSettings().game.rupeeSlideRupeeModel;
+                return setting.getValue() != setting.getDefaultValue();
+            },
+        };
     case RupeeSlideRupeeOption::Attachment:
         return GraphicsSetting{
             .min = static_cast<int>(RupeeSlideRupeeAttachment::Vanilla),
@@ -381,6 +423,29 @@ GraphicsSetting rupee_slide_rupee_setting(RupeeSlideRupeeOption option) {
             },
             .isModified = []() -> bool {
                 const auto& setting = getSettings().game.rupeeSlideRupeeScale;
+                return setting.getValue() != setting.getDefaultValue();
+            },
+        };
+    case RupeeSlideRupeeOption::DuplicateModel:
+        return GraphicsSetting{
+            .min = static_cast<int>(RupeeSlideRupeeModel::Original),
+            .max = static_cast<int>(RupeeSlideRupeeModel::Silver),
+            .defaultValue = static_cast<int>(RupeeSlideRupeeModel::Original),
+            .step = 1,
+            .read = []() -> int {
+                return static_cast<int>(
+                    getSettings().game.rupeeSlideRupeeDuplicateModel.getValue());
+            },
+            .write = [](int value) {
+                getSettings().game.rupeeSlideRupeeDuplicateModel.setValue(
+                    static_cast<RupeeSlideRupeeModel>(value));
+            },
+            .label = format_rupee_slide_model,
+            .cvarName = []() -> const char* {
+                return getSettings().game.rupeeSlideRupeeDuplicateModel.getName();
+            },
+            .isModified = []() -> bool {
+                const auto& setting = getSettings().game.rupeeSlideRupeeDuplicateModel;
                 return setting.getValue() != setting.getDefaultValue();
             },
         };

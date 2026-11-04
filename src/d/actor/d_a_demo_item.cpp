@@ -11,6 +11,7 @@
 #include "d/d_item_data.h"
 #include "d/d_a_itembase_static.h"
 #include "d/actor/d_a_player.h"
+#include "dusk/interp/material.h"
 #include "JSystem/J3DGraphBase/J3DMaterial.h"
 #include "Z2AudioLib/Z2Instances.h"
 #include <cstring>
@@ -81,6 +82,35 @@ void applyCustomRupeePosition(daDitem_c* item, daPy_py_c* player) {
 
 s16 degreesToAngle(int degrees) {
     return static_cast<s16>((degrees % 360) * (65536.0f / 360.0f));
+}
+
+bool isRupeeModel(u8 itemNo) {
+    // Actor 539 can display the rupee get-item model through non-rupee item
+    // slots (notably the default slot 0 used by the actor spawner). Detect the
+    // resource that is actually loaded instead of requiring item IDs 1-7.
+    const char* archive = dItem_data::getArcName(itemNo);
+    return archive != nullptr && std::strcmp(archive, "F_gD_rupy") == 0 &&
+           dItem_data::getBmdName(itemNo) == 0x0004 &&
+           dItem_data::getBrkName(itemNo) == 0x0007;
+}
+
+s8 getRupeeModelFrame(dusk::RupeeSlideRupeeModel model, u8 originalItemNo) {
+    if (model == dusk::RupeeSlideRupeeModel::Original) {
+        return dItem_data::getTevFrm(originalItemNo);
+    }
+    return static_cast<s8>(static_cast<int>(model) - 1);
+}
+
+void applyRupeeModelFrame(mDoExt_brkAnm* brkAnm, J3DModelData* modelData, f32 frame) {
+    auto* animation = brkAnm->getBrkAnm();
+    animation->setFrame(frame);
+    // This is a manually selected static BRK frame, not the frame controller's
+    // animated value. A stale interpolation binding would replace this frame
+    // during material sampling (usually with the original green frame).
+    dusk::interp::material::reset(animation);
+    // The material table is already locked by the normal actor setup. This
+    // targeted entry path updates only the rupee's TEV animation binding.
+    modelData->entryTevRegAnimatorForce(animation);
 }
 
 }
@@ -671,9 +701,27 @@ int daDitem_c::draw() {
         break;
     }
 
-    DrawBase();
 #if TARGET_PC
     const auto& settings = dusk::getSettings().game;
+    const u8 displayItemNo = getDisplayItemNo();
+    const bool canSelectRupeeModel = isRupeeModel(displayItemNo) && mpBrkAnm != nullptr;
+    const auto originalModel = settings.rupeeSlideRupeeTransformEnabled.getValue()
+        ? settings.rupeeSlideRupeeModel.getValue()
+        : dusk::RupeeSlideRupeeModel::Original;
+
+    if (canSelectRupeeModel && settings.rupeeSlideRupeeTransformEnabled.getValue()) {
+        setTevStr();
+        const f32 frame = getRupeeModelFrame(originalModel, displayItemNo);
+        applyRupeeModelFrame(mpBrkAnm, mpModel->getModelData(), frame);
+        setListStart();
+        settingBeforeDraw();
+        mDoExt_modelUpdateDL(mpModel);
+        setListEnd();
+        setShadow();
+    } else {
+        DrawBase();
+    }
+
     if (mpDuplicateModel != nullptr && settings.rupeeSlideRupeeDuplicateEnabled.getValue()) {
         daPy_py_c* player = static_cast<daPy_py_c*>(dComIfGp_getPlayer(0));
         cXyz duplicatePosition = getRupeeAttachmentPosition(
@@ -687,11 +735,18 @@ int daDitem_c::draw() {
 
         g_env_light.settingTevStruct(14, &duplicatePosition, &tevStr);
         g_env_light.setLightTevColorType_MAJI(mpDuplicateModel, &tevStr);
+        if (canSelectRupeeModel) {
+            const f32 frame = getRupeeModelFrame(
+                settings.rupeeSlideRupeeDuplicateModel.getValue(), displayItemNo);
+            applyRupeeModelFrame(mpBrkAnm, mpDuplicateModel->getModelData(), frame);
+        }
         setListStart();
         set_mtx_at(mpDuplicateModel, duplicatePosition);
         mDoExt_modelUpdateDL(mpDuplicateModel);
         setListEnd();
     }
+#else
+    DrawBase();
 #endif
     return 1;
 }

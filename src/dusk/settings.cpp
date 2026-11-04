@@ -223,6 +223,7 @@ UserSettings g_userSettings = {
         .rupeeSlidePickupAnimation {"game.rupeeSlidePickupAnimation", RupeeSlidePickupAnimation::Vanilla},
         .rupeeSlideSixSevenSpeed {"game.rupeeSlideSixSevenSpeed", 100},
         .rupeeSlideRupeeTransformEnabled {"game.rupeeSlideRupeeTransformEnabled", false},
+        .rupeeSlideRupeeModel {"game.rupeeSlideRupeeModel", RupeeSlideRupeeModel::Original},
         .rupeeSlideRupeeAttachment {"game.rupeeSlideRupeeAttachment", RupeeSlideRupeeAttachment::Vanilla},
         .rupeeSlideRupeeOffsetX {"game.rupeeSlideRupeeOffsetX", 0},
         .rupeeSlideRupeeOffsetY {"game.rupeeSlideRupeeOffsetY", 0},
@@ -232,6 +233,7 @@ UserSettings g_userSettings = {
         .rupeeSlideRupeeRotationZ {"game.rupeeSlideRupeeRotationZ", 0},
         .rupeeSlideRupeeScale {"game.rupeeSlideRupeeScale", 100},
         .rupeeSlideRupeeDuplicateEnabled {"game.rupeeSlideRupeeDuplicateEnabled", false},
+        .rupeeSlideRupeeDuplicateModel {"game.rupeeSlideRupeeDuplicateModel", RupeeSlideRupeeModel::Original},
         .rupeeSlideRupeeDuplicateAttachment {"game.rupeeSlideRupeeDuplicateAttachment", RupeeSlideRupeeAttachment::Vanilla},
         .rupeeSlideRupeeDuplicateOffsetX {"game.rupeeSlideRupeeDuplicateOffsetX", 100},
         .rupeeSlideRupeeDuplicateOffsetY {"game.rupeeSlideRupeeDuplicateOffsetY", 0},
@@ -576,6 +578,7 @@ void registerSettings() {
     Register(g_userSettings.game.rupeeSlidePickupAnimation);
     Register(g_userSettings.game.rupeeSlideSixSevenSpeed);
     Register(g_userSettings.game.rupeeSlideRupeeTransformEnabled);
+    Register(g_userSettings.game.rupeeSlideRupeeModel);
     Register(g_userSettings.game.rupeeSlideRupeeAttachment);
     Register(g_userSettings.game.rupeeSlideRupeeOffsetX);
     Register(g_userSettings.game.rupeeSlideRupeeOffsetY);
@@ -585,6 +588,7 @@ void registerSettings() {
     Register(g_userSettings.game.rupeeSlideRupeeRotationZ);
     Register(g_userSettings.game.rupeeSlideRupeeScale);
     Register(g_userSettings.game.rupeeSlideRupeeDuplicateEnabled);
+    Register(g_userSettings.game.rupeeSlideRupeeDuplicateModel);
     Register(g_userSettings.game.rupeeSlideRupeeDuplicateAttachment);
     Register(g_userSettings.game.rupeeSlideRupeeDuplicateOffsetX);
     Register(g_userSettings.game.rupeeSlideRupeeDuplicateOffsetY);

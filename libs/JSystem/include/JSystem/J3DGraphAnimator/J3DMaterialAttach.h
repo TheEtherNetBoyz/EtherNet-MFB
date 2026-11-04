@@ -28,6 +28,7 @@ public:
     int entryTexNoAnimator(J3DAnmTexPattern*);
     int entryTexMtxAnimator(J3DAnmTextureSRTKey*);
     int entryTevRegAnimator(J3DAnmTevRegKey*);
+    int entryTevRegAnimatorForce(J3DAnmTevRegKey*);
 
     virtual ~J3DMaterialTable();
 

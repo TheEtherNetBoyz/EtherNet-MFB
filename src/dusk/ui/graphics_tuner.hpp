@@ -116,6 +116,7 @@ public:
 };
 
 enum class RupeeSlideRupeeOption {
+    Model,
     Attachment,
     OffsetX,
     OffsetY,
@@ -124,6 +125,7 @@ enum class RupeeSlideRupeeOption {
     RotationY,
     RotationZ,
     Scale,
+    DuplicateModel,
     DuplicateAttachment,
     DuplicateOffsetX,
     DuplicateOffsetY,

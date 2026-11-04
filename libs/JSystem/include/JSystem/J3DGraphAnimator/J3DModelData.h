@@ -78,6 +78,9 @@ public:
     bool isLocked() { return mMaterialTable.isLocked(); }
     void entryTexMtxAnimator(J3DAnmTextureSRTKey* anm) { mMaterialTable.entryTexMtxAnimator(anm); }
     int entryTevRegAnimator(J3DAnmTevRegKey* anm) { return mMaterialTable.entryTevRegAnimator(anm); }
+    int entryTevRegAnimatorForce(J3DAnmTevRegKey* anm) {
+        return mMaterialTable.entryTevRegAnimatorForce(anm);
+    }
     void entryTexNoAnimator(J3DAnmTexPattern* anm) { mMaterialTable.entryTexNoAnimator(anm); }
     int removeTexNoAnimator(J3DAnmTexPattern* anm) {
         return mMaterialTable.removeTexNoAnimator(anm);
